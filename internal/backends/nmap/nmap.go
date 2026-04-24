@@ -67,10 +67,11 @@ func Discover(ctx context.Context, cidr string) (*models.CheckResult, error) {
 	// Check that nmap is installed
 	nmapPath, err := exec.LookPath("nmap")
 	if err != nil {
+		installErr := CheckAvailable()
 		result.Status = models.StatusError
 		result.Summary = "nmap is not installed or not in PATH"
 		result.Finish()
-		return result, fmt.Errorf("nmap not found: %w", err)
+		return result, installErr
 	}
 
 	// Run: nmap -sn <cidr>

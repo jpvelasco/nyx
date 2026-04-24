@@ -3,11 +3,19 @@ package audit
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/velasco-jp/netaudit/internal/backends/nmap"
 	"github.com/velasco-jp/netaudit/internal/backends/system"
 	"github.com/velasco-jp/netaudit/internal/intent"
 	"github.com/velasco-jp/netaudit/internal/models"
+)
+
+const (
+	// assertionTimeoutDiscovery is the per-assertion timeout for nmap subnet scans.
+	assertionTimeoutDiscovery = 90 * time.Second
+	// assertionTimeoutDefault is the per-assertion timeout for all other checks.
+	assertionTimeoutDefault = 30 * time.Second
 )
 
 // Engine runs audit assertions
@@ -27,8 +35,16 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 	for _, assertion := range e.Spec.Assertions {
 		result, err := e.runAssertion(ctx, assertion)
 		if err != nil {
-			// Create an error result rather than aborting the whole audit
-			errResult := models.NewCheckResult("audit", assertion.Type, "local", "")
+			// Carry the best available target label into the error result
+			// so the report shows which assertion failed.
+			target := assertion.Target
+			if target == "" {
+				target = assertion.Network
+			}
+			if target == "" {
+				target = assertion.From
+			}
+			errResult := models.NewCheckResult("audit", assertion.Type, "local", target)
 			errResult.Status = models.StatusError
 			errResult.Summary = fmt.Sprintf("error running assertion: %v", err)
 			errResult.Finish()
@@ -48,15 +64,24 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 }
 
 func (e *Engine) runAssertion(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
+	// Give each assertion its own deadline so a single slow check
+	// (e.g. a large nmap sweep) cannot starve the rest of the audit.
+	timeout := assertionTimeoutDefault
+	if a.Type == "subnet_discovery" {
+		timeout = assertionTimeoutDiscovery
+	}
+	assertCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	switch a.Type {
 	case "subnet_discovery":
-		return e.runDiscovery(ctx, a)
+		return e.runDiscovery(assertCtx, a)
 	case "isolation":
-		return e.runIsolation(ctx, a)
+		return e.runIsolation(assertCtx, a)
 	case "vpn_route":
-		return e.runVPNRoute(ctx, a)
+		return e.runVPNRoute(assertCtx, a)
 	case "route_check":
-		return e.runRouteCheck(ctx, a)
+		return e.runRouteCheck(assertCtx, a)
 	default:
 		return nil, fmt.Errorf("unknown assertion type: %s", a.Type)
 	}
@@ -125,6 +150,7 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 
 	// For each target network, ping the gateway to check reachability
 	allBlocked := true
+	anyTested := false
 	for _, targetNet := range toNets {
 		if targetNet.Gateway == "" {
 			continue
@@ -134,6 +160,7 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 			result.Evidence = append(result.Evidence, fmt.Sprintf("ping to %s failed: %v", targetNet.Gateway, err))
 			continue
 		}
+		anyTested = true
 		if pingResult.Reachable {
 			allBlocked = false
 			result.Evidence = append(result.Evidence, fmt.Sprintf("gateway %s is reachable", targetNet.Gateway))
@@ -144,7 +171,15 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 
 	expectDeny := a.ExpectDeny == "deny"
 	if expectDeny {
-		if allBlocked {
+		if !anyTested {
+			// Could not reach any gateway — but that may just mean the target
+			// zone has no route from this machine, not that isolation is working.
+			result.Status = models.StatusWarn
+			result.Summary = fmt.Sprintf(
+				"isolation unverifiable: %s → %s (target zone not routable from this host; run from a host inside the %s zone for accurate results)",
+				a.From, a.To, a.From,
+			)
+		} else if allBlocked {
 			result.Status = models.StatusPass
 			result.Summary = fmt.Sprintf("isolation confirmed: %s cannot reach %s", a.From, a.To)
 		} else {
@@ -153,7 +188,13 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 			result.Violations = append(result.Violations, "expected deny but traffic is reachable")
 		}
 	} else {
-		if !allBlocked {
+		if !anyTested {
+			result.Status = models.StatusWarn
+			result.Summary = fmt.Sprintf(
+				"connectivity unverifiable: %s → %s (target zone not routable from this host)",
+				a.From, a.To,
+			)
+		} else if !allBlocked {
 			result.Status = models.StatusPass
 			result.Summary = fmt.Sprintf("connectivity confirmed: %s can reach %s", a.From, a.To)
 		} else {

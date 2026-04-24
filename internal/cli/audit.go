@@ -30,7 +30,7 @@ var auditCmd = &cobra.Command{
 
 		dur, parseErr := time.ParseDuration(timeout)
 		if parseErr != nil {
-			dur = 120 * time.Second
+			dur = 300 * time.Second
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), dur)
 		defer cancel()

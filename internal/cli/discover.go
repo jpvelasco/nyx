@@ -26,6 +26,10 @@ var discoverCmd = &cobra.Command{
 			return fmt.Errorf("--subnet is required")
 		}
 
+		if err := nmap.CheckAvailable(); err != nil {
+			return err
+		}
+
 		dur, err := time.ParseDuration(timeout)
 		if err != nil {
 			dur = 60 * time.Second
