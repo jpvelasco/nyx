@@ -1,0 +1,5 @@
+version: 99
+site: bad
+networks:
+  - name: bad
+    cidr: not-a-cidr

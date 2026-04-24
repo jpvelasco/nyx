@@ -1,0 +1,21 @@
+# Binaries
+netaudit
+netaudit-*
+*.exe
+
+# Go
+vendor/
+
+# npm
+npm/node_modules/
+npm/bin/netaudit-*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,34 @@
+version: 1
+site: test-lab
+networks:
+  - name: mgmt
+    cidr: 10.0.10.0/24
+    gateway: 10.0.10.1
+    zone: management
+  - name: clients
+    cidr: 10.0.20.0/24
+    gateway: 10.0.20.1
+    zone: clients
+vpn:
+  - name: test-wg
+    type: wireguard
+    expected_routes:
+      - 10.0.0.0/16
+    mode: split-tunnel
+policies:
+  - name: test-policy
+    from: clients
+    to: management
+    action: deny
+assertions:
+  - type: subnet_discovery
+    network: mgmt
+    expect_hosts_max: 30
+  - type: isolation
+    from: clients
+    to: management
+    expect: deny
+  - type: vpn_route
+    vpn: test-wg
+    target: 10.0.20.15
+    expect_tunnel: true
