@@ -1,5 +1,6 @@
-version: 99
-site: bad
+version: 1
+site: bad-lab
 networks:
   - name: bad
     cidr: not-a-cidr
+    zone: test

@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -13,16 +12,15 @@ import (
 )
 
 var (
-	vpnTarget  string
-	vpnProfile string
-	vpnExpect  string
+	vpnTarget string
+	vpnExpect string
 )
 
 var checkVPNCmd = &cobra.Command{
 	Use:   "check-vpn",
 	Short: "Verify VPN status and routing",
 	Example: `  netaudit check-vpn --target 10.0.20.15
-  netaudit check-vpn --target 10.0.20.15 --profile home-wg --json`,
+  netaudit check-vpn --target 10.0.20.15 --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if vpnTarget == "" {
 			return fmt.Errorf("--target is required")
@@ -65,8 +63,11 @@ var checkVPNCmd = &cobra.Command{
 			result.Finish()
 		}
 
-		w := getWriter()
-		if w != os.Stdout {
+		w, err := getWriter()
+		if err != nil {
+			return err
+		}
+		if outputPath != "" {
 			defer w.Close()
 		}
 
@@ -80,6 +81,5 @@ var checkVPNCmd = &cobra.Command{
 
 func init() {
 	checkVPNCmd.Flags().StringVar(&vpnTarget, "target", "", "Target IP to check VPN routing for")
-	checkVPNCmd.Flags().StringVar(&vpnProfile, "profile", "", "VPN profile name from spec")
 	checkVPNCmd.Flags().StringVar(&vpnExpect, "expect", "", "Expected tunnel mode (split-tunnel or full-tunnel)")
 }

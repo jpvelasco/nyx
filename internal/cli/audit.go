@@ -30,7 +30,7 @@ var auditCmd = &cobra.Command{
 
 		dur, parseErr := time.ParseDuration(timeout)
 		if parseErr != nil {
-			dur = 120 * time.Second
+			dur = 300 * time.Second
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), dur)
 		defer cancel()
@@ -41,8 +41,11 @@ var auditCmd = &cobra.Command{
 			return fmt.Errorf("audit failed: %w", err)
 		}
 
-		w := getWriter()
-		if w != os.Stdout {
+		w, err := getWriter()
+		if err != nil {
+			return err
+		}
+		if outputPath != "" {
 			defer w.Close()
 		}
 

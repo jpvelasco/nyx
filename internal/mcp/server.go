@@ -335,15 +335,7 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		if to == "" {
 			return "to parameter is required", true
 		}
-		specFile, _ := args["spec_file"].(string)
-		result := map[string]interface{}{
-			"from":      from,
-			"to":        to,
-			"spec_file": specFile,
-			"status":    "not_implemented",
-			"summary":   "isolation verification requires spec-driven runner",
-		}
-		return toJSON(result), false
+		return "verify_isolation is not yet implemented in the MCP server; use the run_audit tool with a spec file that includes isolation assertions instead", true
 
 	case "run_audit":
 		specFile, _ := args["spec_file"].(string)

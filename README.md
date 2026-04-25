@@ -130,9 +130,9 @@ See `examples/homelab.yaml` for a full example.
 | Code | Meaning |
 |------|---------|
 | 0 | All checks passed |
-| 1 | Completed but one or more assertions failed |
+| 1 | One or more assertions failed |
 | 2 | Execution error or invalid configuration |
-| 3 | Partial run (backend unavailable) |
+| 3 | One or more assertions returned a warning |
 
 ## MCP Server
 

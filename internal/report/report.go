@@ -28,6 +28,9 @@ func RenderHuman(w io.Writer, report *models.AuditReport) {
 		for _, v := range f.Violations {
 			fmt.Fprintf(w, "       ↳ %s\n", v)
 		}
+		for _, e := range f.Evidence {
+			printEvidence(w, e)
+		}
 	}
 
 	fmt.Fprintf(w, "\nSummary: %d passed, %d failed, %d warnings, %d errors, %d skipped\n",
@@ -50,7 +53,20 @@ func RenderResultHuman(w io.Writer, result *models.CheckResult) {
 		fmt.Fprintf(w, "       ↳ %s\n", v)
 	}
 	for _, e := range result.Evidence {
-		fmt.Fprintf(w, "       • %s\n", e)
+		printEvidence(w, e)
+	}
+}
+
+// printEvidence prints an evidence string, splitting multi-line blobs into
+// individual indented lines so raw nmap output and route tables are readable.
+func printEvidence(w io.Writer, e string) {
+	lines := strings.Split(strings.ReplaceAll(e, "\r\n", "\n"), "\n")
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		fmt.Fprintf(w, "       • %s\n", line)
 	}
 }
 

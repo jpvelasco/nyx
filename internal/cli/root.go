@@ -44,16 +44,15 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
-func getWriter() *os.File {
+func getWriter() (*os.File, error) {
 	if outputPath != "" {
 		f, err := os.Create(outputPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error opening output file: %v\n", err)
-			return os.Stdout
+			return nil, fmt.Errorf("opening output file %q: %w", outputPath, err)
 		}
-		return f
+		return f, nil
 	}
-	return os.Stdout
+	return os.Stdout, nil
 }
 
 var versionCmd = &cobra.Command{

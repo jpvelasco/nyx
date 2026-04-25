@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -12,7 +11,9 @@ import (
 )
 
 var (
-	discoverSubnet string
+	discoverSubnet  string
+	discoverTiming  int
+	discoverMinRate int
 )
 
 var discoverCmd = &cobra.Command{
@@ -20,26 +21,38 @@ var discoverCmd = &cobra.Command{
 	Short: "Discover hosts and services in a subnet",
 	Long:  "Discover active hosts in a subnet using nmap ping sweep.",
 	Example: `  netaudit discover --subnet 10.0.20.0/24
-  netaudit discover --subnet 10.0.20.0/24 --json`,
+  netaudit discover --subnet 10.0.20.0/24 --json
+  netaudit discover --subnet 10.0.20.0/24 --timing 3 --min-rate 200`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if discoverSubnet == "" {
 			return fmt.Errorf("--subnet is required")
 		}
 
+		if err := nmap.CheckAvailable(); err != nil {
+			return err
+		}
+
 		dur, err := time.ParseDuration(timeout)
 		if err != nil {
-			dur = 60 * time.Second
+			dur = 90 * time.Second
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), dur)
 		defer cancel()
 
-		result, err := nmap.Discover(ctx, discoverSubnet)
+		opts := nmap.ScanOptions{
+			TimingTemplate: discoverTiming,
+			MinRate:        discoverMinRate,
+		}
+		result, err := nmap.DiscoverWithOptions(ctx, discoverSubnet, opts)
 		if err != nil {
 			return fmt.Errorf("discovery failed: %w", err)
 		}
 
-		w := getWriter()
-		if w != os.Stdout {
+		w, err := getWriter()
+		if err != nil {
+			return err
+		}
+		if outputPath != "" {
 			defer w.Close()
 		}
 
@@ -53,4 +66,6 @@ var discoverCmd = &cobra.Command{
 
 func init() {
 	discoverCmd.Flags().StringVar(&discoverSubnet, "subnet", "", "CIDR subnet to scan (e.g. 10.0.20.0/24)")
+	discoverCmd.Flags().IntVar(&discoverTiming, "timing", nmap.DefaultScanOptions.TimingTemplate, "nmap timing template (0-5, higher = faster)")
+	discoverCmd.Flags().IntVar(&discoverMinRate, "min-rate", nmap.DefaultScanOptions.MinRate, "nmap minimum packet rate (packets/sec)")
 }
