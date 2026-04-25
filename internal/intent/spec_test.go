@@ -5,44 +5,8 @@ import (
 )
 
 func TestParseValidSpec(t *testing.T) {
-	yaml := []byte(`
-version: 1
-site: test-lab
-networks:
-  - name: mgmt
-    cidr: 10.0.10.0/24
-    gateway: 10.0.10.1
-    zone: management
-  - name: clients
-    cidr: 10.0.20.0/24
-    gateway: 10.0.20.1
-    zone: clients
-vpn:
-  - name: test-wg
-    type: wireguard
-    expected_routes:
-      - 10.0.0.0/16
-    mode: split-tunnel
-policies:
-  - name: iot-isolation
-    from: iot
-    to: management
-    action: deny
-assertions:
-  - type: subnet_discovery
-    network: mgmt
-    expect_hosts_max: 30
-  - type: isolation
-    from: clients
-    to: iot
-    expect: deny
-  - type: vpn_route
-    vpn: test-wg
-    target: 10.0.20.15
-    expect_tunnel: true
-`)
-
-	spec, err := ParseSpec(yaml)
+	// Uses testdata/valid_spec.yaml — exercises LoadSpec + ParseSpec together
+	spec, err := LoadSpec("../../testdata/valid_spec.yaml")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -60,6 +24,14 @@ assertions:
 	}
 	if len(spec.Assertions) != 3 {
 		t.Errorf("expected 3 assertions, got %d", len(spec.Assertions))
+	}
+}
+
+func TestLoadSpecInvalidFile(t *testing.T) {
+	// Uses testdata/invalid_spec.yaml — bad CIDR triggers validation error
+	_, err := LoadSpec("../../testdata/invalid_spec.yaml")
+	if err == nil {
+		t.Fatal("expected error loading invalid spec file")
 	}
 }
 

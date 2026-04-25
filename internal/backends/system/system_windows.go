@@ -40,7 +40,6 @@ func parseRoutePrint(output string) []Route {
 			}
 			continue
 		}
-		// Skip column header
 		if strings.HasPrefix(trimmed, "Network Destination") {
 			continue
 		}
@@ -63,7 +62,6 @@ func parseRoutePrint(output string) []Route {
 			metric = m
 		}
 
-		// Convert netmask to prefix length
 		prefix := netmaskToPrefix(mask)
 		if dest == "0.0.0.0" && mask == "0.0.0.0" {
 			dest = "default"
@@ -81,7 +79,6 @@ func parseRoutePrint(output string) []Route {
 	return routes
 }
 
-// netmaskToPrefix converts dotted netmask to prefix length.
 func netmaskToPrefix(mask string) int {
 	ip := net.ParseIP(mask)
 	if ip == nil {
@@ -110,7 +107,6 @@ func GetRouteToTarget(ctx context.Context, target string) (*Route, error) {
 		return nil, fmt.Errorf("invalid target IP: %s", target)
 	}
 
-	// Find best matching route (longest prefix match)
 	var bestRoute *Route
 	bestPrefix := -1
 
@@ -126,10 +122,8 @@ func GetRouteToTarget(ctx context.Context, target string) (*Route, error) {
 			continue
 		}
 
-		// Parse as CIDR
 		_, network, err := net.ParseCIDR(dest)
 		if err != nil {
-			// Try as plain IP
 			network = &net.IPNet{
 				IP:   net.ParseIP(dest),
 				Mask: net.CIDRMask(32, 32),
@@ -166,7 +160,6 @@ var (
 )
 
 func Ping(ctx context.Context, target string) (*PingResult, error) {
-	// Windows: -n for count, -w for timeout in milliseconds
 	out, err := runCmd(ctx, "ping", "-n", "3", "-w", "2000", target)
 	if err != nil && ctx.Err() != nil {
 		return nil, fmt.Errorf("ping cancelled: %w", ctx.Err())
@@ -193,7 +186,6 @@ func Ping(ctx context.Context, target string) (*PingResult, error) {
 // -----------------------------------------------------------------------
 
 func Traceroute(ctx context.Context, target string) ([]TracerouteHop, error) {
-	// Windows uses tracert, -d = no DNS, -h = max hops, -w = timeout ms
 	out, err := runCmd(ctx, "tracert", "-d", "-h", "15", "-w", "2000", target)
 	if err != nil && ctx.Err() != nil {
 		return nil, fmt.Errorf("tracert cancelled: %w", ctx.Err())
@@ -227,7 +219,6 @@ func parseTracertLine(line string) *TracerouteHop {
 
 	hop := &TracerouteHop{Number: num}
 
-	// Last field is typically the IP address
 	lastField := fields[len(fields)-1]
 	if net.ParseIP(lastField) != nil {
 		hop.Address = lastField
@@ -239,7 +230,6 @@ func parseTracertLine(line string) *TracerouteHop {
 		return hop
 	}
 
-	// Find first non-star RTT value
 	for i := 1; i < len(fields)-1; i++ {
 		f := strings.TrimSuffix(fields[i], "ms")
 		if f == "*" || f == "" {
@@ -259,7 +249,7 @@ func parseTracertLine(line string) *TracerouteHop {
 }
 
 // -----------------------------------------------------------------------
-// GetInterfaces — uses Go's net package for portability
+// GetInterfaces
 // -----------------------------------------------------------------------
 
 func GetInterfaces(ctx context.Context) ([]Interface, error) {

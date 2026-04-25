@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/velasco-jp/netaudit/internal/backends/nmap"
@@ -28,31 +29,40 @@ func NewEngine(spec *intent.Spec) *Engine {
 	return &Engine{Spec: spec}
 }
 
-// Run executes all assertions and returns a report
+// Run executes all assertions concurrently and returns a report.
+// Results are returned in the same order as the assertions in the spec.
 func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
-	var findings []models.CheckResult
+	assertions := e.Spec.Assertions
+	findings := make([]models.CheckResult, len(assertions))
 
-	for _, assertion := range e.Spec.Assertions {
-		result, err := e.runAssertion(ctx, assertion)
-		if err != nil {
-			// Carry the best available target label into the error result
-			// so the report shows which assertion failed.
-			target := assertion.Target
-			if target == "" {
-				target = assertion.Network
+	var wg sync.WaitGroup
+	wg.Add(len(assertions))
+
+	for i, assertion := range assertions {
+		i, assertion := i, assertion // capture loop vars
+		go func() {
+			defer wg.Done()
+			result, err := e.runAssertion(ctx, assertion)
+			if err != nil {
+				target := assertion.Target
+				if target == "" {
+					target = assertion.Network
+				}
+				if target == "" {
+					target = assertion.From
+				}
+				errResult := models.NewCheckResult("audit", assertion.Type, "local", target)
+				errResult.Status = models.StatusError
+				errResult.Summary = fmt.Sprintf("error running assertion: %v", err)
+				errResult.Finish()
+				findings[i] = *errResult
+				return
 			}
-			if target == "" {
-				target = assertion.From
-			}
-			errResult := models.NewCheckResult("audit", assertion.Type, "local", target)
-			errResult.Status = models.StatusError
-			errResult.Summary = fmt.Sprintf("error running assertion: %v", err)
-			errResult.Finish()
-			findings = append(findings, *errResult)
-			continue
-		}
-		findings = append(findings, *result)
+			findings[i] = *result
+		}()
 	}
+
+	wg.Wait()
 
 	report := &models.AuditReport{
 		Audit:    e.Spec.Site,
@@ -103,11 +113,9 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 	// "total" is the host count (JSON number → float64 after marshal/unmarshal).
 	hostCount := 0
 	if v, ok := result.Observed["total"]; ok {
-		switch n := v.(type) {
-		case float64:
+		// JSON unmarshal always produces float64 for numbers
+		if n, ok := v.(float64); ok {
 			hostCount = int(n)
-		case int:
-			hostCount = n
 		}
 	}
 

@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -42,8 +41,11 @@ var discoverCmd = &cobra.Command{
 			return fmt.Errorf("discovery failed: %w", err)
 		}
 
-		w := getWriter()
-		if w != os.Stdout {
+		w, err := getWriter()
+		if err != nil {
+			return err
+		}
+		if outputPath != "" {
 			defer w.Close()
 		}
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -59,8 +58,11 @@ var checkRoutesCmd = &cobra.Command{
 			}
 		}
 
-		w := getWriter()
-		if w != os.Stdout {
+		w, err := getWriter()
+		if err != nil {
+			return err
+		}
+		if outputPath != "" {
 			defer w.Close()
 		}
 

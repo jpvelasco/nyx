@@ -3,6 +3,9 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/velasco-jp/netaudit/internal/mcp"
@@ -29,8 +32,11 @@ read-only tools for AI agents. Default transport is stdio.`,
 			return fmt.Errorf("only stdio transport is supported in v1")
 		}
 
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+
 		server := mcp.NewServer()
-		return server.Serve(context.Background())
+		return server.Serve(ctx)
 	},
 }
 
