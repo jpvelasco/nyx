@@ -20,21 +20,12 @@ type ImportResult struct {
 
 // ImportSpec connects to the controller, fetches all relevant configuration,
 // and produces an intent.Spec that reflects the observed design.
-//
-// The generated spec encodes:
-//   - One network entry per configured LAN/VLAN
-//   - One policy entry per enabled ACL rule (accept or deny)
-//   - subnet_discovery assertions for each network
-//   - route_check assertions for each gateway
-//   - isolation assertions derived from deny ACL rules
-//
-// Credentials are accepted as parameters and are not retained after the call.
-func ImportSpec(ctx context.Context, host, username, password, siteName string) (*ImportResult, error) {
-	// Connect and authenticate
+func ImportSpec(ctx context.Context, host, username, password, siteName string, debug bool) (*ImportResult, error) {
 	client, err := NewClient(ctx, host)
 	if err != nil {
 		return nil, err
 	}
+	client.Debug = debug
 	defer client.Logout(ctx) //nolint:errcheck
 
 	if err := client.Login(ctx, username, password); err != nil {
@@ -61,20 +52,19 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string) 
 	// Fetch networks, ACLs, clients in parallel would be nice but keep it
 	// simple and sequential for now — this is an interactive command, not
 	// a hot path.
-	omadaNets, err := client.GetNetworks(ctx, site.ID)
+	omadaNets, err := client.GetNetworks(ctx, site.EffectiveID())
 	if err != nil {
 		return nil, fmt.Errorf("fetching networks: %w", err)
 	}
 	result.NetworkCount = len(omadaNets)
 
-	aclRules, err := client.GetACLRules(ctx, site.ID)
+	aclRules, err := client.GetACLRules(ctx, site.EffectiveID())
 	if err != nil {
-		// Non-fatal — some controller configs don't expose this
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("could not fetch ACL rules: %v", err))
 	}
 
-	gwRules, err := client.GetGatewayACLRules(ctx, site.ID)
+	gwRules, err := client.GetGatewayACLRules(ctx, site.EffectiveID())
 	if err != nil {
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("could not fetch gateway ACL rules: %v", err))
@@ -82,7 +72,7 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string) 
 	allRules := append(aclRules, gwRules...)
 	result.ACLRuleCount = len(allRules)
 
-	clients, err := client.GetClients(ctx, site.ID)
+	clients, err := client.GetClients(ctx, site.EffectiveID())
 	if err != nil {
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("could not fetch connected clients: %v", err))

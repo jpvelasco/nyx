@@ -17,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"os"
 	"strings"
 	"time"
 )
@@ -52,11 +53,13 @@ type apiResponse struct {
 // concurrent use without external locking — callers should serialise requests
 // or create separate clients per goroutine.
 type Client struct {
-	host      string // e.g. "192.168.0.253"
-	omadaCID  string // obtained from /api/info
-	token     string // Csrf-Token header value after login
+	host       string
+	omadaCID   string
+	token      string
 	httpClient *http.Client
-	info      *ControllerInfo
+	info       *ControllerInfo
+	lastRaw    map[string]json.RawMessage
+	Debug      bool // when true, raw API responses are printed to stderr
 }
 
 // NewClient creates an Omada client for the given controller host.
@@ -124,7 +127,7 @@ func (c *Client) Login(ctx context.Context, username, password string) error {
 	var result struct {
 		Token string `json:"token"`
 	}
-	if err := c.post(ctx, "users/login", body, &result); err != nil {
+	if err := c.post(ctx, "login", body, &result); err != nil {
 		return fmt.Errorf("login failed: %w", err)
 	}
 	c.token = result.Token
@@ -136,7 +139,7 @@ func (c *Client) Logout(ctx context.Context) error {
 	if c.token == "" {
 		return nil
 	}
-	_ = c.post(ctx, "users/logout", nil, nil)
+	_ = c.post(ctx, "logout", nil, nil)
 	c.token = ""
 	return nil
 }
@@ -200,11 +203,8 @@ func (c *Client) post(ctx context.Context, path string, body interface{}, dest i
 		bodyReader = bytes.NewReader(data)
 	}
 
+	// All paths including login use the omadaCID-prefixed base URL on 6.x.
 	url := fmt.Sprintf("%s/%s", c.baseURL(), path)
-	// Login uses the non-omadaCID prefixed URL
-	if path == "users/login" || path == "users/logout" {
-		url = fmt.Sprintf("https://%s/%s/%s", c.host, apiV2, path)
-	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bodyReader)
 	if err != nil {
@@ -234,8 +234,18 @@ func (c *Client) doRequest(req *http.Request, dest interface{}) error {
 		return fmt.Errorf("not authenticated — call Login first")
 	}
 
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("reading response body: %w", err)
+	}
+
+	if c.Debug {
+		fmt.Fprintf(os.Stderr, "[omada debug] %s %s -> %d\n%s\n",
+			req.Method, req.URL.String(), resp.StatusCode, string(rawBody))
+	}
+
 	var env apiResponse
-	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+	if err := json.Unmarshal(rawBody, &env); err != nil {
 		return fmt.Errorf("decoding response from %s: %w", req.URL.Path, err)
 	}
 

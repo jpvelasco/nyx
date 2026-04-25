@@ -19,6 +19,7 @@ var (
 	omadaPassword   string
 	omadaSite       string
 	omadaOutFile    string
+	omadaDebug      bool
 )
 
 var omadaCmd = &cobra.Command{
@@ -58,7 +59,7 @@ Credentials can be supplied via flags or environment variables:
 
 		fmt.Fprintf(os.Stderr, "Connecting to Omada controller at %s...\n", host)
 
-		result, err := omada.ImportSpec(ctx, host, user, pass, omadaSite)
+		result, err := omada.ImportSpec(ctx, host, user, pass, omadaSite, omadaDebug)
 		if err != nil {
 			return fmt.Errorf("import failed: %w", err)
 		}
@@ -127,7 +128,7 @@ Credentials via flags or env vars (OMADA_USERNAME, OMADA_PASSWORD, OMADA_HOST).`
 
 		fmt.Fprintf(os.Stderr, "Connecting to Omada controller at %s...\n", host)
 
-		result, err := omada.ImportSpec(ctx, host, user, pass, omadaSite)
+		result, err := omada.ImportSpec(ctx, host, user, pass, omadaSite, omadaDebug)
 		if err != nil {
 			return fmt.Errorf("import failed: %w", err)
 		}
@@ -240,6 +241,7 @@ func init() {
 	for _, cmd := range []*cobra.Command{omadaImportCmd, omadaCheckCmd} {
 		cmd.Flags().StringVar(&omadaUsername, "username", "", "Controller admin username (or set OMADA_USERNAME)")
 		cmd.Flags().StringVar(&omadaPassword, "password", "", "Controller admin password (or set OMADA_PASSWORD)")
+		cmd.Flags().BoolVar(&omadaDebug, "debug", false, "Print raw API responses to stderr for troubleshooting")
 	}
 	omadaImportCmd.Flags().StringVar(&omadaOutFile, "out", "", "Write spec YAML to this file (default: stdout)")
 
