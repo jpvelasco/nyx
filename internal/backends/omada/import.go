@@ -88,16 +88,17 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string, 
 	// Map Omada networks → intent.Network
 	netsByID := make(map[string]intent.Network)
 	for _, n := range omadaNets {
-		if n.Subnet == "" {
+		cidr := n.CIDR()
+		if cidr == "" {
 			result.Warnings = append(result.Warnings,
-				fmt.Sprintf("network %q has no subnet configured, skipping", n.Name))
+				fmt.Sprintf("network %q has no subnet configured (gatewaySubnet=%q), skipping", n.Name, n.GatewaySubnet))
 			continue
 		}
 		zone := inferZone(n)
 		in := intent.Network{
 			Name:    sanitizeName(n.Name),
-			CIDR:    n.Subnet,
-			Gateway: n.Gateway,
+			CIDR:    cidr,
+			Gateway: n.Gateway(),
 			Zone:    zone,
 			VLAN:    n.VLANID,
 		}
@@ -125,33 +126,41 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string, 
 	}
 
 	// Generate assertions
-	spec.Assertions = buildAssertions(spec.Networks, clients, allRules, netsByID)
+	spec.Assertions = buildAssertions(spec.Networks, omadaNets, clients, allRules, netsByID)
 
 	result.Spec = spec
 	return result, nil
 }
 
 // buildAssertions generates a useful set of assertions from the imported data.
-func buildAssertions(networks []intent.Network, clients []ConnectedClient, rules []ACLRule, netsByID map[string]intent.Network) []intent.Assertion {
+func buildAssertions(networks []intent.Network, omadaNets []Network, clients []ConnectedClient, rules []ACLRule, netsByID map[string]intent.Network) []intent.Assertion {
 	var assertions []intent.Assertion
 
-	// Count clients per network to set reasonable discovery bounds
+	// Count clients per network using the raw Omada network name
+	// (before sanitization) since that's what clients report
 	clientsPerNet := make(map[string]int)
 	for _, c := range clients {
 		if c.NetworkName != "" {
 			clientsPerNet[c.NetworkName]++
+		} else if c.SSID != "" {
+			clientsPerNet[c.SSID]++
 		}
+	}
+
+	// Build a map from sanitized name → original Omada name for lookup
+	origName := make(map[string]string)
+	for _, n := range omadaNets {
+		origName[sanitizeName(n.Name)] = n.Name
 	}
 
 	// subnet_discovery + route_check per network
 	for _, n := range networks {
-		// Discovery assertion — bounds based on observed client count
-		observed := clientsPerNet[n.Name]
-		minHosts := 1 // at least the gateway
-		maxHosts := max(observed*3, 20) // generous upper bound
+		// Look up observed client count using original Omada name
+		orig := origName[n.Name]
+		observed := clientsPerNet[orig]
+		minVal := 1
+		maxVal := max(observed*3, 20)
 
-		minVal := minHosts
-		maxVal := maxHosts
 		assertions = append(assertions, intent.Assertion{
 			Type:           "subnet_discovery",
 			Network:        n.Name,
