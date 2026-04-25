@@ -10,12 +10,13 @@ import (
 
 // ImportResult holds the generated spec and a summary of what was found.
 type ImportResult struct {
-	Spec          *intent.Spec
-	Site          Site
-	NetworkCount  int
-	ACLRuleCount  int
-	ClientCount   int
-	Warnings      []string
+	Spec              *intent.Spec
+	Site              Site
+	ControllerVersion string
+	NetworkCount      int
+	ACLRuleCount      int
+	ClientCount       int
+	Warnings          []string
 }
 
 // ImportSpec connects to the controller, fetches all relevant configuration,
@@ -47,7 +48,10 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string, 
 		return nil, err
 	}
 
-	result := &ImportResult{Site: site}
+	result := &ImportResult{
+		Site:              site,
+		ControllerVersion: client.Info().ControllerVer,
+	}
 
 	// Fetch networks, ACLs, clients in parallel would be nice but keep it
 	// simple and sequential for now — this is an interactive command, not
@@ -155,10 +159,11 @@ func buildAssertions(networks []intent.Network, omadaNets []Network, clients []C
 
 	// subnet_discovery + route_check per network
 	for _, n := range networks {
-		// Look up observed client count using original Omada name
 		orig := origName[n.Name]
 		observed := clientsPerNet[orig]
-		minVal := 1
+		// Min is 0 — many devices (IoT, mobile) block ICMP so nmap won't see them
+		// Max is generous: observed client count × 3, at least 20
+		minVal := 0
 		maxVal := max(observed*3, 20)
 
 		assertions = append(assertions, intent.Assertion{
@@ -249,12 +254,16 @@ func resolveRuleEndpoint(epType, name, id string, netsByID map[string]intent.Net
 }
 
 // sanitizeName converts an Omada display name to a lowercase slug safe for
-// use as a YAML key.
+// use as a YAML key. Strips parenthetical suffixes like "(Default)".
 func sanitizeName(s string) string {
+	// Strip parenthetical suffixes e.g. "Nightfall(Default)" → "Nightfall"
+	if i := strings.Index(s, "("); i > 0 {
+		s = s[:i]
+	}
+	s = strings.TrimSpace(s)
 	s = strings.ToLower(s)
 	s = strings.ReplaceAll(s, " ", "-")
 	s = strings.ReplaceAll(s, "_", "-")
-	// Remove any characters that aren't alphanumeric or hyphen
 	var out strings.Builder
 	for _, r := range s {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {

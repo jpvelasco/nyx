@@ -4,9 +4,86 @@
 
 version: 1
 site: Home
-networks: []
+networks:
+    - name: nightfalldefault
+      cidr: 192.168.0.0/24
+      gateway: 192.168.0.254
+      zone: trusted
+      vlan: 1
+    - name: opus
+      cidr: 192.168.10.0/24
+      gateway: 192.168.10.1
+      zone: management
+      vlan: 10
+    - name: pinball
+      cidr: 192.168.60.0/24
+      gateway: 192.168.60.1
+      zone: iot
+      vlan: 60
+    - name: cinema
+      cidr: 192.168.50.0/24
+      gateway: 192.168.50.1
+      zone: media
+      vlan: 50
+    - name: arcade
+      cidr: 192.168.30.0/24
+      gateway: 192.168.30.1
+      zone: gaming
+      vlan: 30
+    - name: valhalla
+      cidr: 192.168.20.0/24
+      gateway: 192.168.20.1
+      zone: mobile
+      vlan: 20
+    - name: papyrus
+      cidr: 172.16.40.0/24
+      gateway: 172.16.40.1
+      zone: servers
+      vlan: 40
 vpn: []
 policies: []
 assertions:
+    - type: subnet_discovery
+      network: nightfalldefault
+      expect_hosts_min: 1
+      expect_hosts_max: 20
+    - type: route_check
+      target: 192.168.0.254
+    - type: subnet_discovery
+      network: opus
+      expect_hosts_min: 1
+      expect_hosts_max: 20
+    - type: route_check
+      target: 192.168.10.1
+    - type: subnet_discovery
+      network: pinball
+      expect_hosts_min: 1
+      expect_hosts_max: 102
+    - type: route_check
+      target: 192.168.60.1
+    - type: subnet_discovery
+      network: cinema
+      expect_hosts_min: 1
+      expect_hosts_max: 20
+    - type: route_check
+      target: 192.168.50.1
+    - type: subnet_discovery
+      network: arcade
+      expect_hosts_min: 1
+      expect_hosts_max: 20
+    - type: route_check
+      target: 192.168.30.1
+    - type: subnet_discovery
+      network: valhalla
+      expect_hosts_min: 1
+      expect_hosts_max: 24
+    - type: route_check
+      target: 192.168.20.1
+    - type: subnet_discovery
+      network: papyrus
+      expect_hosts_min: 1
+      expect_hosts_max: 20
+    - type: route_check
+      target: 172.16.40.1
     - type: route_check
       target: 8.8.8.8
