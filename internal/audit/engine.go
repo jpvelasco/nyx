@@ -103,7 +103,16 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 		return nil, fmt.Errorf("network %q not found in spec", a.Network)
 	}
 
-	result, err := nmap.Discover(ctx, net.CIDR)
+	// Build scan options — use assertion overrides if set, otherwise defaults.
+	opts := nmap.DefaultScanOptions
+	if a.ScanTiming > 0 {
+		opts.TimingTemplate = a.ScanTiming
+	}
+	if a.ScanMinRate > 0 {
+		opts.MinRate = a.ScanMinRate
+	}
+
+	result, err := nmap.DiscoverWithOptions(ctx, net.CIDR, opts)
 	if err != nil {
 		return nil, fmt.Errorf("nmap discovery failed: %w", err)
 	}

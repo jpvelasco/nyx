@@ -65,6 +65,12 @@ type Assertion struct {
 	ExpectDeny     string `yaml:"expect,omitempty" json:"expect,omitempty"`
 	ExpectTunnel   *bool  `yaml:"expect_tunnel,omitempty" json:"expect_tunnel,omitempty"`
 	Ports          []int  `yaml:"ports,omitempty" json:"ports,omitempty"`
+	// ScanTiming sets the nmap -T flag for subnet_discovery assertions (0-5).
+	// Defaults to 4 if unset.
+	ScanTiming int `yaml:"scan_timing,omitempty" json:"scan_timing,omitempty"`
+	// ScanMinRate sets --min-rate for subnet_discovery assertions.
+	// Defaults to 500 if unset.
+	ScanMinRate int `yaml:"scan_min_rate,omitempty" json:"scan_min_rate,omitempty"`
 }
 
 // LoadSpec reads and parses a YAML spec file
