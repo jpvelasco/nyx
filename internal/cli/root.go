@@ -37,6 +37,7 @@ func init() {
 	rootCmd.AddCommand(verifyIsolationCmd)
 	rootCmd.AddCommand(auditCmd)
 	rootCmd.AddCommand(mcpCmd)
+	rootCmd.AddCommand(omadaCmd)
 	rootCmd.AddCommand(versionCmd)
 }
 
