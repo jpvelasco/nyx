@@ -117,6 +117,14 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 		return nil, fmt.Errorf("nmap discovery failed: %w", err)
 	}
 
+	// Populate expected bounds in result metadata before evaluating
+	if a.ExpectHostsMin != nil {
+		result.Expected["expect_hosts_min"] = *a.ExpectHostsMin
+	}
+	if a.ExpectHostsMax != nil {
+		result.Expected["expect_hosts_max"] = *a.ExpectHostsMax
+	}
+
 	// Evaluate host count assertions.
 	// The nmap backend serializes DiscoveryResult into Observed, where
 	// "total" is the host count (JSON number → float64 after marshal/unmarshal).
@@ -139,7 +147,9 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 			fmt.Sprintf("found %d hosts, expected min %d", hostCount, *a.ExpectHostsMin))
 	}
 
-	if result.Status == "" || (len(result.Violations) == 0 && result.Status != models.StatusError) {
+	if result.Status == "" || (len(result.Violations) == 0 &&
+		result.Status != models.StatusError &&
+		result.Status != models.StatusWarn) {
 		result.Status = models.StatusPass
 	}
 	result.Summary = fmt.Sprintf("%d hosts discovered in %s", hostCount, net.CIDR)
