@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/velasco-jp/nyx/internal/logger"
+	"github.com/velasco-jp/nyx/internal/version"
 )
 
 var (
@@ -13,12 +15,13 @@ var (
 	specFile   string
 	verbose    bool
 	timeout    string
+	log        *logger.Logger
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "netaudit",
+	Use:   "nyx",
 	Short: "Validate private network behavior against intended state",
-	Long: `netaudit is an open-source CLI for validating private internal networks
+	Long: `nyx is an open-source CLI for validating private internal networks
 against intended behavior. It combines live checks, declared intent via YAML
 specs, and agent-friendly output for homelabs and developer environments.`,
 	SilenceUsage: true,
@@ -37,11 +40,17 @@ func init() {
 	rootCmd.AddCommand(verifyIsolationCmd)
 	rootCmd.AddCommand(auditCmd)
 	rootCmd.AddCommand(mcpCmd)
-	rootCmd.AddCommand(omadaCmd)
+	rootCmd.AddCommand(providerCmd)
 	rootCmd.AddCommand(versionCmd)
+
+	// Logger is best-effort — if it fails, we continue without logging.
+	if l, err := logger.New(logger.DefaultPath(), 5*1024*1024, 3); err == nil {
+		log = l
+	}
 }
 
 func Execute() error {
+	BuildProviderSubcommands(rootCmd)
 	return rootCmd.Execute()
 }
 
@@ -60,6 +69,6 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("netaudit v0.1.0")
+		fmt.Printf("nyx v%s\n", version.Version)
 	},
 }

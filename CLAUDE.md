@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test
 
 ```bash
-make build        # go build -o netaudit ./cmd/netaudit/
+make build        # go build -o nyx ./cmd/nyx/
 make test         # go test ./...
 make vet          # go vet ./...
 make clean        # remove built binaries
@@ -13,17 +13,18 @@ make release      # cross-compile for linux/darwin/windows (amd64+arm64)
 
 # Run a single test package
 go test ./internal/intent/...
-go test ./internal/models/...
+go test ./internal/audit/...
 
 # Run a specific test
 go test -run TestParseSpec ./internal/intent/...
+go test -run TestDiscoveryWarnPreserved ./internal/audit/...
 ```
 
 CI runs `go vet ./...` → `go test ./...` → `go build` on every push to main and all PRs.
 
 ## Architecture
 
-netaudit is a CLI tool that validates live network behavior against a declared YAML intent model. The primary flow for the `audit` command:
+nyx is a CLI tool that validates live network behavior against a declared YAML intent model. Primary flow for the `audit` command:
 
 ```
 YAML spec → intent.LoadSpec → audit.Engine.Run → []CheckResult → report.Render
@@ -31,35 +32,47 @@ YAML spec → intent.LoadSpec → audit.Engine.Run → []CheckResult → report.
 
 **Key packages:**
 
-- `internal/intent` — YAML spec types (`Spec`, `Network`, `VPNConfig`, `Policy`, `Assertion`) and validation. `LoadSpec`/`ParseSpec`/`ValidateSpec` are the entry points. Networks can be looked up by name or zone.
+- `internal/intent` — YAML spec types and validation. `LoadSpec`/`ParseSpec`/`ValidateSpec` are the entry points. Per-type required field validation is enforced at load time.
 
-- `internal/models` — The `CheckResult` envelope used by every backend and assertion. All checks produce a `CheckResult` with `Status`, `Summary`, `Observed`, `Expected`, `Violations`, and `Evidence`. `AuditReport` aggregates them. `ComputeOverallStatus` returns the worst status across all findings.
+- `internal/models` — The `CheckResult` envelope used by every backend and assertion. All checks produce a `CheckResult` with `Status`, `Summary`, `Observed`, `Expected`, `Violations`, and `Evidence`. `AuditReport` aggregates them.
 
-- `internal/audit` — The assertion engine. `Engine.Run` executes all assertions concurrently (one goroutine each) with per-assertion timeouts (30s default, 90s for `subnet_discovery`). Results are written back to a pre-allocated slice by index to preserve spec order.
+- `internal/audit` — Assertion engine. `Engine.Run` executes all assertions concurrently with per-assertion timeouts (30s default, 90s for `subnet_discovery`). Results preserve spec order.
 
-- `internal/backends/nmap` — Wraps `nmap -sn` subprocess. Parses stdout with regex to extract host/IP/MAC. `DiscoverWithOptions` accepts `ScanOptions` (timing template, min-rate); defaults are `-T4 --min-rate 500`.
+- `internal/backends/nmap` — Wraps `nmap -sn` subprocess. `DiscoverWithOptions` accepts `ScanOptions`. Upstream `StatusWarn` (e.g. 0 hosts) is preserved — the engine does not overwrite it to pass.
 
-- `internal/backends/system` — Platform-specific implementations of `ip route`, `ping`, `traceroute`, and interface enumeration. Each OS has its own file (`system_linux.go`, `system_darwin.go`, `system_windows.go`) selected via Go build tags.
+- `internal/backends/system` — Platform-specific implementations (`system_linux.go`, `system_darwin.go`, `system_windows.go`) selected via Go build tags.
 
-- `internal/backends/omada` — Read-only REST client for Omada SDN controller 6.x. `NewClient` fetches `/api/info` (unauthenticated) to get `omadaCID` and validate the version. All authenticated calls use `/{omadaCID}/api/v2/...` with a `Csrf-Token` header. TLS verification is intentionally skipped (self-signed controller cert). Not safe for concurrent use per client instance.
+- `internal/backends/omada` — Read-only REST client for Omada SDN 6.x. `NewClient` calls `/api/info` unauthenticated. All authenticated calls use `/{omadaCID}/api/v2/...` with `Csrf-Token`. TLS verification intentionally skipped (self-signed cert). Not concurrency-safe.
 
-- `internal/recommendations` — Analyzes `[]CheckResult` failures and produces prioritized `Recommendation` structs with remediations and optional `SpecPatch` descriptors. Called by `audit` only for human-readable output (not JSON mode).
+- `internal/providers` — Provider interface (`Provider`) and registry (`Register`/`Get`/`List`/`Reset`). Providers self-register via `init()` blank imports in `cmd/nyx/main.go`. CLI vendor subcommands (`nyx omada ...`) are built dynamically in `Execute()` via `BuildProviderSubcommands`.
 
-- `internal/mcp` — MCP stdio server exposing all check commands as tools for AI agent integration.
+- `internal/providers/omada` — OmadaProvider wrapping `backends/omada`. Supports info, import, check.
 
-- `internal/report` — `RenderJSON` and `RenderHuman` output renderers.
+- `internal/providers/opnsense` — OPNsenseProvider stub. Supports info only (calls `/api/core/firmware/running` with Basic Auth).
 
-- `internal/cli` — Cobra command definitions. Global flags (`--json`, `--output`, `--spec`, `--verbose`, `--timeout`) are defined in `root.go` as package-level vars shared across commands.
+- `internal/recommendations` — Analyzes `[]CheckResult` failures and produces prioritized `Recommendation` structs. Called by `audit` in human mode only (not JSON).
+
+- `internal/logger` — JSON-lines append logger with file rotation. Writes to `~/.nyx/nyx.log`. 5MB max size, 3 rotated files. Best-effort — never fails a command.
+
+- `internal/mcp` — MCP stdio server. All tools return `CheckResult`-shaped JSON consistent with CLI `--json` output.
+
+- `internal/report` — `RenderJSON`, `RenderHuman`, `RenderRecommendations` output renderers.
+
+- `internal/version` — Single-source version constant. Read by `nyx version` and MCP `serverInfo.Version`.
+
+- `internal/cli` — Cobra command definitions. Global flags (`--json`, `--output`, `--spec`, `--verbose`, `--timeout`) in `root.go`. `Execute()` calls `BuildProviderSubcommands(rootCmd)` before dispatch.
 
 ## Spec Format
 
-The intent spec (version 1) declares `networks`, `vpn`, `policies`, and `assertions`. Four assertion types are implemented: `subnet_discovery`, `isolation`, `vpn_route`, `route_check`. The `isolation` assertion resolves `from`/`to` as zone names first, falling back to network names, then pings each network's gateway.
+Version 1 intent spec: `networks`, `vpn`, `policies`, `assertions`. Four assertion types: `subnet_discovery`, `isolation`, `vpn_route`, `route_check`. `ValidateSpec` enforces required fields per type. See `examples/homelab.yaml` and `testdata/valid_spec.yaml`.
 
-See `examples/homelab.yaml` for a full working example and `testdata/valid_spec.yaml` / `testdata/invalid_spec.yaml` for test fixtures.
+## Provider System
+
+Vendors register as providers via `init()` blank imports in `cmd/nyx/main.go`. The CLI builds `nyx omada` / `nyx opnsense` subcommands dynamically from the registry. Missing providers produce a clear error. `nyx provider list` shows all registered providers and capabilities.
 
 ## Omada Backend
 
-Omada credentials can be passed via flags (`--controller`, `--username`, `--password`) or env vars (`OMADA_HOST`, `OMADA_USERNAME`, `OMADA_PASSWORD`). The `omada import` command generates a spec YAML from live controller data; `omada check` imports and immediately audits; `omada info` needs no credentials.
+Pass credentials via flags (`--host`, `--username`, `--password`) or env vars (`OMADA_HOST`, `OMADA_USERNAME`, `OMADA_PASSWORD`). `nyx omada import` generates a spec YAML; `nyx omada check` imports and audits; `nyx omada info` needs no credentials.
 
 ## Exit Codes
 
@@ -73,6 +86,7 @@ Omada credentials can be passed via flags (`--controller`, `--username`, `--pass
 ## What's Stubbed
 
 - `internal/backends/batfish` — returns `ErrNotImplemented`, planned for v2
+- `internal/providers/opnsense` — Info only; ImportSpec/Check return `ErrCapabilityUnsupported`
 - Remote runners (`runner: ssh`) — field is parsed but only `local` is wired
 - Port/service scanning — nmap backend is ping-sweep only (`-sn`)
 - HTTP MCP transport — only stdio is implemented

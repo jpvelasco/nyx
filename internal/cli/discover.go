@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/velasco-jp/netaudit/internal/backends/nmap"
-	"github.com/velasco-jp/netaudit/internal/report"
+	"github.com/velasco-jp/nyx/internal/backends/nmap"
+	"github.com/velasco-jp/nyx/internal/report"
 )
 
 var (
@@ -20,9 +20,9 @@ var discoverCmd = &cobra.Command{
 	Use:   "discover",
 	Short: "Discover hosts and services in a subnet",
 	Long:  "Discover active hosts in a subnet using nmap ping sweep.",
-	Example: `  netaudit discover --subnet 10.0.20.0/24
-  netaudit discover --subnet 10.0.20.0/24 --json
-  netaudit discover --subnet 10.0.20.0/24 --timing 3 --min-rate 200`,
+	Example: `  nyx discover --subnet 10.0.20.0/24
+  nyx discover --subnet 10.0.20.0/24 --json
+  nyx discover --subnet 10.0.20.0/24 --timing 3 --min-rate 200`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if discoverSubnet == "" {
 			return fmt.Errorf("--subnet is required")

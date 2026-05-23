@@ -158,7 +158,7 @@ assertions:
   # --- Isolation: verify VLANs cannot reach each other when they shouldn't ---
   # NOTE: These checks run from this machine (Nightfall/trusted VLAN).
   # For accurate isolation verification of IoT and guest VLANs, run
-  # netaudit from a host inside each source VLAN.
+  # nyx from a host inside each source VLAN.
 
   # IoT (Pinball) gateway should NOT be reachable from trusted
   # If it IS reachable, Omada ACLs between trusted->iot may be too permissive

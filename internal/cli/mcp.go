@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"github.com/velasco-jp/netaudit/internal/mcp"
+	"github.com/velasco-jp/nyx/internal/mcp"
 )
 
 var (
@@ -23,10 +23,10 @@ var mcpCmd = &cobra.Command{
 var mcpServeCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start MCP server for AI agent integration",
-	Long: `Start a Model Context Protocol server that exposes netaudit's
+	Long: `Start a Model Context Protocol server that exposes nyx's
 read-only tools for AI agents. Default transport is stdio.`,
-	Example: `  netaudit mcp serve
-  netaudit mcp serve --stdio`,
+	Example: `  nyx mcp serve
+  nyx mcp serve --stdio`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if mcpTransport != "stdio" {
 			return fmt.Errorf("only stdio transport is supported in v1")

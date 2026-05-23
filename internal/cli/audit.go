@@ -7,17 +7,18 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/velasco-jp/netaudit/internal/audit"
-	"github.com/velasco-jp/netaudit/internal/intent"
-	"github.com/velasco-jp/netaudit/internal/models"
-	"github.com/velasco-jp/netaudit/internal/report"
+	"github.com/velasco-jp/nyx/internal/audit"
+	"github.com/velasco-jp/nyx/internal/intent"
+	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/velasco-jp/nyx/internal/recommendations"
+	"github.com/velasco-jp/nyx/internal/report"
 )
 
 var auditCmd = &cobra.Command{
 	Use:   "audit",
 	Short: "Run a full audit from a YAML spec",
-	Example: `  netaudit audit --spec homelab.yaml
-  netaudit audit --spec homelab.yaml --json`,
+	Example: `  nyx audit --spec homelab.yaml
+  nyx audit --spec homelab.yaml --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if specFile == "" {
 			return fmt.Errorf("--spec is required")
@@ -41,6 +42,17 @@ var auditCmd = &cobra.Command{
 			return fmt.Errorf("audit failed: %w", err)
 		}
 
+		if log != nil {
+			log.Info("audit", map[string]interface{}{
+				"status":          string(auditReport.Status),
+				"assertion_count": len(auditReport.Findings),
+				"pass":            auditReport.Summary.Pass,
+				"fail":            auditReport.Summary.Fail,
+				"warn":            auditReport.Summary.Warn,
+				"error":           auditReport.Summary.Error,
+			})
+		}
+
 		w, err := getWriter()
 		if err != nil {
 			return err
@@ -53,6 +65,25 @@ var auditCmd = &cobra.Command{
 			return report.RenderJSON(w, auditReport)
 		}
 		report.RenderHuman(w, auditReport)
+
+		// Generate and render recommendations for non-pass, non-error states
+		if auditReport.Status != models.StatusPass && auditReport.Status != models.StatusError {
+			var failures []models.CheckResult
+			for _, f := range auditReport.Findings {
+				if f.Status != models.StatusPass && f.Status != models.StatusSkip {
+					failures = append(failures, f)
+				}
+			}
+			networks := make(map[string]*intent.Network)
+			for i := range spec.Networks {
+				n := &spec.Networks[i]
+				networks[n.Name] = n
+			}
+			recs, recErr := recommendations.GenerateRecommendations(failures, networks)
+			if recErr == nil && len(recs) > 0 {
+				report.RenderRecommendations(w, recs)
+			}
+		}
 
 		// Set exit code based on audit status
 		switch auditReport.Status {

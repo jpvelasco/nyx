@@ -8,10 +8,13 @@ import (
 	"io"
 	"os"
 
-	"github.com/velasco-jp/netaudit/internal/audit"
-	"github.com/velasco-jp/netaudit/internal/backends/nmap"
-	"github.com/velasco-jp/netaudit/internal/backends/system"
-	"github.com/velasco-jp/netaudit/internal/intent"
+	"github.com/velasco-jp/nyx/internal/audit"
+	"github.com/velasco-jp/nyx/internal/backends/nmap"
+	"github.com/velasco-jp/nyx/internal/backends/system"
+	"github.com/velasco-jp/nyx/internal/intent"
+	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/velasco-jp/nyx/internal/providers"
+	"github.com/velasco-jp/nyx/internal/version"
 )
 
 // JSON-RPC types
@@ -157,8 +160,8 @@ func (s *Server) handleInitialize(req *jsonRPCRequest) *jsonRPCResponse {
 				"tools": map[string]interface{}{},
 			},
 			ServerInfo: serverInfo{
-				Name:    "netaudit",
-				Version: "0.1.0",
+				Name:    "nyx",
+				Version: version.Version,
 			},
 		},
 	}
@@ -172,7 +175,9 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]propSchema{
-					"subnet": {Type: "string", Description: "CIDR notation subnet to scan, e.g. 10.0.20.0/24"},
+					"subnet":        {Type: "string", Description: "CIDR notation subnet to scan, e.g. 192.168.1.0/24"},
+					"scan_timing":   {Type: "number", Description: "nmap -T timing template (0-5, default 4)"},
+					"scan_min_rate": {Type: "number", Description: "nmap --min-rate packets/sec (default 500)"},
 				},
 				Required: []string{"subnet"},
 			},
@@ -254,6 +259,24 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				Required: []string{"target"},
 			},
 		},
+		{
+			Name:        "run_doctor",
+			Description: "Check nyx environment health. Optionally validate a spec file.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]propSchema{
+					"spec_file": {Type: "string", Description: "Optional path to a YAML spec file to validate"},
+				},
+			},
+		},
+		{
+			Name:        "provider_list",
+			Description: "List all registered providers and their capabilities.",
+			InputSchema: inputSchema{
+				Type:       "object",
+				Properties: map[string]propSchema{},
+			},
+		},
 	}
 
 	return &jsonRPCResponse{
@@ -291,7 +314,14 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		if subnet == "" {
 			return "subnet parameter is required", true
 		}
-		result, err := nmap.Discover(ctx, subnet)
+		opts := nmap.DefaultScanOptions
+		if t, ok := args["scan_timing"].(float64); ok && t > 0 {
+			opts.TimingTemplate = int(t)
+		}
+		if r, ok := args["scan_min_rate"].(float64); ok && r > 0 {
+			opts.MinRate = int(r)
+		}
+		result, err := nmap.DiscoverWithOptions(ctx, subnet, opts)
 		if err != nil {
 			return fmt.Sprintf("discovery failed: %v", err), true
 		}
@@ -302,28 +332,46 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		if target == "" {
 			return "target parameter is required", true
 		}
+		result := models.NewCheckResult("system", "route_check", "local", target)
 		route, err := system.GetRouteToTarget(ctx, target)
 		if err != nil {
-			return fmt.Sprintf("route check failed: %v", err), true
+			result.Status = models.StatusError
+			result.Summary = fmt.Sprintf("failed to get route to %s: %v", target, err)
+			result.Finish()
+			return toJSON(result), true
 		}
-		return toJSON(route), false
+		result.Observed["gateway"] = route.Gateway
+		result.Observed["device"] = route.Device
+		result.Status = models.StatusPass
+		result.Summary = fmt.Sprintf("route to %s via %s dev %s", target, route.Gateway, route.Device)
+		result.Finish()
+		return toJSON(result), false
 
 	case "check_vpn":
 		target, _ := args["target"].(string)
 		if target == "" {
 			return "target parameter is required", true
 		}
+		result := models.NewCheckResult("system", "vpn_route", "local", target)
 		route, err := system.GetRouteToTarget(ctx, target)
 		if err != nil {
-			return fmt.Sprintf("vpn check failed: %v", err), true
+			result.Status = models.StatusError
+			result.Summary = fmt.Sprintf("failed to get route to %s: %v", target, err)
+			result.Finish()
+			return toJSON(result), true
 		}
+		result.Observed["device"] = route.Device
+		result.Observed["gateway"] = route.Gateway
 		isVPN, _ := system.CheckVPNInterface(ctx, route.Device)
-		result := map[string]interface{}{
-			"target":     target,
-			"device":     route.Device,
-			"gateway":    route.Gateway,
-			"via_tunnel": isVPN,
+		result.Observed["via_tunnel"] = isVPN
+		if isVPN {
+			result.Status = models.StatusPass
+			result.Summary = fmt.Sprintf("%s routes via tunnel (%s)", target, route.Device)
+		} else {
+			result.Status = models.StatusWarn
+			result.Summary = fmt.Sprintf("%s routes via %s (not a tunnel interface)", target, route.Device)
 		}
+		result.Finish()
 		return toJSON(result), false
 
 	case "verify_isolation":
@@ -335,7 +383,55 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		if to == "" {
 			return "to parameter is required", true
 		}
-		return "verify_isolation is not yet implemented in the MCP server; use the run_audit tool with a spec file that includes isolation assertions instead", true
+		specFile, _ := args["spec_file"].(string)
+
+		if specFile != "" {
+			spec, err := intent.LoadSpec(specFile)
+			if err != nil {
+				return fmt.Sprintf("failed to load spec: %v", err), true
+			}
+			expectDeny := "deny"
+			miniSpec := &intent.Spec{
+				Version:  spec.Version,
+				Site:     spec.Site,
+				Networks: spec.Networks,
+				Assertions: []intent.Assertion{{
+					Type:       "isolation",
+					From:       from,
+					To:         to,
+					ExpectDeny: expectDeny,
+				}},
+			}
+			eng := audit.NewEngine(miniSpec)
+			report, err := eng.Run(ctx)
+			if err != nil {
+				return fmt.Sprintf("isolation check failed: %v", err), true
+			}
+			if len(report.Findings) == 0 {
+				return "no findings returned", true
+			}
+			return toJSON(report.Findings[0]), false
+		}
+
+		// No spec: ping `to` directly as a bare IP/hostname
+		result := models.NewCheckResult("system", "isolation", "local", fmt.Sprintf("%s -> %s", from, to))
+		pingResult, err := system.Ping(ctx, to)
+		if err != nil {
+			result.Status = models.StatusWarn
+			result.Summary = fmt.Sprintf("could not determine isolation: %v", err)
+		} else {
+			result.Observed["reachable"] = pingResult.Reachable
+			if pingResult.Reachable {
+				result.Status = models.StatusFail
+				result.Summary = fmt.Sprintf("isolation violated: %s can reach %s", from, to)
+				result.Violations = append(result.Violations, "target is reachable when isolation is expected")
+			} else {
+				result.Status = models.StatusPass
+				result.Summary = fmt.Sprintf("isolation confirmed: %s cannot reach %s", from, to)
+			}
+		}
+		result.Finish()
+		return toJSON(result), false
 
 	case "run_audit":
 		specFile, _ := args["spec_file"].(string)
@@ -382,9 +478,77 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		}
 		return toJSON(pingResult), false
 
+	case "run_doctor":
+		specPath, _ := args["spec_file"].(string)
+		var findings []models.CheckResult
+
+		nmapResult := models.NewCheckResult("doctor", "nmap_installed", "local", "nmap")
+		if nmap.Available() {
+			nmapResult.Status = models.StatusPass
+			nmapResult.Summary = "nmap is available"
+		} else {
+			nmapResult.Status = models.StatusFail
+			nmapResult.Summary = "nmap is not installed or not in PATH"
+		}
+		nmapResult.Finish()
+		findings = append(findings, *nmapResult)
+
+		if specPath != "" {
+			data, err := os.ReadFile(specPath)
+			if err != nil {
+				fileCheck := models.NewCheckResult("doctor", "spec_file", "local", specPath)
+				fileCheck.Status = models.StatusFail
+				fileCheck.Summary = fmt.Sprintf("cannot read spec file: %v", err)
+				fileCheck.Finish()
+				findings = append(findings, *fileCheck)
+			} else {
+				fileCheck := models.NewCheckResult("doctor", "spec_file", "local", specPath)
+				fileCheck.Status = models.StatusPass
+				fileCheck.Summary = fmt.Sprintf("spec file readable (%d bytes)", len(data))
+				fileCheck.Finish()
+				findings = append(findings, *fileCheck)
+
+				validCheck := models.NewCheckResult("doctor", "spec_valid", "local", specPath)
+				if _, err := intent.ParseSpec(data); err != nil {
+					validCheck.Status = models.StatusFail
+					validCheck.Summary = fmt.Sprintf("spec invalid: %v", err)
+				} else {
+					validCheck.Status = models.StatusPass
+					validCheck.Summary = "spec is valid"
+				}
+				validCheck.Finish()
+				findings = append(findings, *validCheck)
+			}
+		}
+
+		doctorReport := &models.AuditReport{
+			Audit:    "doctor",
+			Status:   models.ComputeOverallStatus(findings),
+			Summary:  models.Tally(findings),
+			Findings: findings,
+		}
+		return toJSON(doctorReport), false
+
+	case "provider_list":
+		list := providers.List()
+		type entry struct {
+			Name         string   `json:"name"`
+			Capabilities []string `json:"capabilities"`
+		}
+		out := make([]entry, len(list))
+		for i, p := range list {
+			out[i] = entry{Name: p.Name(), Capabilities: p.Capabilities()}
+		}
+		return toJSON(out), false
+
 	default:
 		return fmt.Sprintf("unknown tool: %s", name), true
 	}
+}
+
+// DispatchToolForTest exposes dispatchTool for testing.
+func (s *Server) DispatchToolForTest(ctx context.Context, name string, args map[string]interface{}) (string, bool) {
+	return s.dispatchTool(ctx, name, args)
 }
 
 func toJSON(v interface{}) string {
