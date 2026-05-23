@@ -1,6 +1,7 @@
 package intent
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -152,5 +153,75 @@ func TestNetworkByZone(t *testing.T) {
 	nets := spec.NetworkByZone("management")
 	if len(nets) != 2 {
 		t.Errorf("expected 2 networks in zone management, got %d", len(nets))
+	}
+}
+
+func TestValidateAssertionRequiredFields(t *testing.T) {
+	base := func() *Spec {
+		return &Spec{Version: 1, Site: "test"}
+	}
+
+	cases := []struct {
+		name      string
+		assertion Assertion
+		wantErr   string
+	}{
+		{
+			name:      "subnet_discovery missing network",
+			assertion: Assertion{Type: "subnet_discovery"},
+			wantErr:   "network is required",
+		},
+		{
+			name:      "isolation missing from",
+			assertion: Assertion{Type: "isolation", To: "iot", ExpectDeny: "deny"},
+			wantErr:   "from is required",
+		},
+		{
+			name:      "isolation missing to",
+			assertion: Assertion{Type: "isolation", From: "clients", ExpectDeny: "deny"},
+			wantErr:   "to is required",
+		},
+		{
+			name:      "isolation missing expect",
+			assertion: Assertion{Type: "isolation", From: "clients", To: "iot"},
+			wantErr:   "expect is required",
+		},
+		{
+			name:      "vpn_route missing vpn",
+			assertion: Assertion{Type: "vpn_route", Target: "10.0.0.1"},
+			wantErr:   "vpn is required",
+		},
+		{
+			name:      "vpn_route missing target",
+			assertion: Assertion{Type: "vpn_route", VPN: "home-wg"},
+			wantErr:   "target is required",
+		},
+		{
+			name:      "route_check missing target",
+			assertion: Assertion{Type: "route_check"},
+			wantErr:   "target is required",
+		},
+		{
+			name: "subnet_discovery min > max",
+			assertion: func() Assertion {
+				min, max := 10, 5
+				return Assertion{Type: "subnet_discovery", Network: "net", ExpectHostsMin: &min, ExpectHostsMax: &max}
+			}(),
+			wantErr: "expect_hosts_min must not exceed expect_hosts_max",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := base()
+			s.Assertions = []Assertion{tc.assertion}
+			err := ValidateSpec(s)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("expected error containing %q, got %q", tc.wantErr, err.Error())
+			}
+		})
 	}
 }

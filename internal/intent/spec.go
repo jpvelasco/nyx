@@ -148,6 +148,36 @@ func ValidateSpec(spec *Spec) error {
 		if !validTypes[a.Type] {
 			return fmt.Errorf("assertion[%d]: unknown type %q", i, a.Type)
 		}
+		switch a.Type {
+		case "subnet_discovery":
+			if a.Network == "" {
+				return fmt.Errorf("assertion[%d] (subnet_discovery): network is required", i)
+			}
+			if a.ExpectHostsMin != nil && a.ExpectHostsMax != nil && *a.ExpectHostsMin > *a.ExpectHostsMax {
+				return fmt.Errorf("assertion[%d] (subnet_discovery): expect_hosts_min must not exceed expect_hosts_max", i)
+			}
+		case "isolation":
+			if a.From == "" {
+				return fmt.Errorf("assertion[%d] (isolation): from is required", i)
+			}
+			if a.To == "" {
+				return fmt.Errorf("assertion[%d] (isolation): to is required", i)
+			}
+			if a.ExpectDeny == "" {
+				return fmt.Errorf("assertion[%d] (isolation): expect is required (use 'deny' or 'allow')", i)
+			}
+		case "vpn_route":
+			if a.VPN == "" {
+				return fmt.Errorf("assertion[%d] (vpn_route): vpn is required", i)
+			}
+			if a.Target == "" {
+				return fmt.Errorf("assertion[%d] (vpn_route): target is required", i)
+			}
+		case "route_check":
+			if a.Target == "" {
+				return fmt.Errorf("assertion[%d] (route_check): target is required", i)
+			}
+		}
 	}
 	return nil
 }
