@@ -42,6 +42,17 @@ var auditCmd = &cobra.Command{
 			return fmt.Errorf("audit failed: %w", err)
 		}
 
+		if log != nil {
+			log.Info("audit", map[string]interface{}{
+				"status":          string(auditReport.Status),
+				"assertion_count": len(auditReport.Findings),
+				"pass":            auditReport.Summary.Pass,
+				"fail":            auditReport.Summary.Fail,
+				"warn":            auditReport.Summary.Warn,
+				"error":           auditReport.Summary.Error,
+			})
+		}
+
 		w, err := getWriter()
 		if err != nil {
 			return err

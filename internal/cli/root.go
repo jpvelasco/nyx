@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/velasco-jp/nyx/internal/logger"
 	"github.com/velasco-jp/nyx/internal/version"
 )
 
@@ -14,6 +15,7 @@ var (
 	specFile   string
 	verbose    bool
 	timeout    string
+	log        *logger.Logger
 )
 
 var rootCmd = &cobra.Command{
@@ -40,6 +42,11 @@ func init() {
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(providerCmd)
 	rootCmd.AddCommand(versionCmd)
+
+	// Logger is best-effort — if it fails, we continue without logging.
+	if l, err := logger.New(logger.DefaultPath(), 5*1024*1024, 3); err == nil {
+		log = l
+	}
 }
 
 func Execute() error {
