@@ -1,0 +1,3 @@
+# test log
+open ../../testdata/valid_spec.yaml
+open ../../testdata/invalid_spec.yaml

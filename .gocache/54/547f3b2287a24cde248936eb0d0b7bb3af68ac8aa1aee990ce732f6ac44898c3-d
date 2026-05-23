@@ -1,0 +1,8 @@
+./audit.go
+./check_routes.go
+./check_vpn.go
+./discover.go
+./mcp.go
+./omada.go
+./root.go
+./verify_isolation.go
