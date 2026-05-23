@@ -1,6 +1,9 @@
 package nmap
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestPoliteScanOptionsDefaults(t *testing.T) {
 	opts := PoliteScanOptions
@@ -28,5 +31,20 @@ func TestScanOptionsForMode(t *testing.T) {
 	aggressive := ScanOptionsForMode("aggressive")
 	if aggressive.TimingTemplate != 5 {
 		t.Errorf("aggressive should be T5, got T%d", aggressive.TimingTemplate)
+	}
+}
+
+func TestPortScanResultShape(t *testing.T) {
+	// Uses an RFC5737 non-routable address to get a quick "filtered" result
+	// without actually scanning anything live. Just verifies result shape.
+	result, err := PortScan(context.Background(), "192.0.2.1", []int{80, 443}, "tcp", PoliteScanOptions)
+	if err != nil {
+		t.Fatalf("PortScan returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.CheckType != "port_check" {
+		t.Errorf("expected check_type 'port_check', got %q", result.CheckType)
 	}
 }

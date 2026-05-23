@@ -253,3 +253,107 @@ func ScanOptionsForMode(mode ScanMode) ScanOptions {
 		return PoliteScanOptions
 	}
 }
+
+// PortState holds the observed state of a single port.
+type PortState struct {
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol"`
+	State    string `json:"state"` // "open", "closed", "filtered"
+}
+
+// PortScanResult holds per-port scan results.
+type PortScanResult struct {
+	Ports []PortState `json:"ports"`
+}
+
+// rePortLine matches nmap port lines like "80/tcp   open  http"
+var rePortLine = regexp.MustCompile(`^(\d+)/(tcp|udp)\s+(\S+)`)
+
+// PortScan scans specific ports on a target using nmap.
+// protocol must be "tcp" or "udp".
+func PortScan(ctx context.Context, target string, ports []int, protocol string, opts ScanOptions) (*models.CheckResult, error) {
+	result := models.NewCheckResult("nmap", "port_check", "nmap", target)
+
+	nmapPath, err := exec.LookPath("nmap")
+	if err != nil {
+		result.Status = models.StatusError
+		result.Summary = "nmap is not installed or not in PATH"
+		result.Finish()
+		return result, CheckAvailable()
+	}
+
+	if len(ports) == 0 {
+		result.Status = models.StatusError
+		result.Summary = "no ports specified"
+		result.Finish()
+		return result, fmt.Errorf("ports list is empty")
+	}
+
+	portList := make([]string, len(ports))
+	for i, p := range ports {
+		portList[i] = fmt.Sprintf("%d", p)
+	}
+
+	args := []string{"-sV", "--open"}
+	if protocol == "udp" {
+		args = append(args, "-sU")
+	} else {
+		args = append(args, "-sT")
+	}
+	if opts.TimingTemplate > 0 {
+		args = append(args, fmt.Sprintf("-T%d", opts.TimingTemplate))
+	}
+	if opts.MinRate > 0 {
+		args = append(args, "--min-rate", fmt.Sprintf("%d", opts.MinRate))
+	}
+	if opts.MaxRate > 0 {
+		args = append(args, "--max-rate", fmt.Sprintf("%d", opts.MaxRate))
+	}
+	args = append(args, "-p", strings.Join(portList, ","), target)
+
+	cmd := exec.CommandContext(ctx, nmapPath, args...)
+	out, err := cmd.Output()
+	if err != nil && ctx.Err() != nil {
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("nmap timed out: %v", ctx.Err())
+		result.Finish()
+		return result, ctx.Err()
+	}
+
+	portStates := parsePortScanOutput(string(out), ports, protocol)
+
+	psJSON, _ := json.Marshal(PortScanResult{Ports: portStates})
+	var psMap map[string]interface{}
+	_ = json.Unmarshal(psJSON, &psMap)
+	result.Observed = psMap
+	result.Evidence = append(result.Evidence, strings.TrimSpace(string(out)))
+	result.Status = models.StatusPass
+	result.Summary = fmt.Sprintf("port scan of %s: %d ports checked", target, len(ports))
+	result.Finish()
+	return result, nil
+}
+
+// parsePortScanOutput parses nmap port scan output into PortState slice.
+// Ports not found in output are reported as "filtered".
+func parsePortScanOutput(output string, requested []int, protocol string) []PortState {
+	found := make(map[int]string)
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		m := rePortLine.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		port := 0
+		fmt.Sscanf(m[1], "%d", &port)
+		found[port] = m[3]
+	}
+	states := make([]PortState, len(requested))
+	for i, p := range requested {
+		state := "filtered"
+		if s, ok := found[p]; ok {
+			state = s
+		}
+		states[i] = PortState{Port: p, Protocol: protocol, State: state}
+	}
+	return states
+}
