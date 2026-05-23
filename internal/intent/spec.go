@@ -14,6 +14,7 @@ type Spec struct {
 	Site       string       `yaml:"site" json:"site"`
 	Networks   []Network    `yaml:"networks" json:"networks"`
 	VPN        []VPNConfig  `yaml:"vpn" json:"vpn"`
+	Probes     []Probe      `yaml:"probes,omitempty" json:"probes,omitempty"`
 	Policies   []Policy     `yaml:"policies" json:"policies"`
 	Assertions []Assertion  `yaml:"assertions" json:"assertions"`
 }
@@ -36,6 +37,15 @@ type VPNConfig struct {
 	Mode           string   `yaml:"mode" json:"mode"` // split-tunnel or full-tunnel
 }
 
+// Probe declares an SSH node that can run checks from a different VLAN.
+type Probe struct {
+	Name string `yaml:"name" json:"name"`
+	Host string `yaml:"host" json:"host"`
+	User string `yaml:"user" json:"user"`
+	Key  string `yaml:"key,omitempty" json:"key,omitempty"`
+	VLAN string `yaml:"vlan,omitempty" json:"vlan,omitempty"`
+}
+
 // Policy defines network access rules
 type Policy struct {
 	Name   string            `yaml:"name" json:"name"`
@@ -54,23 +64,31 @@ type PolicyException struct {
 
 // Assertion defines a check to evaluate
 type Assertion struct {
-	Type           string `yaml:"type" json:"type"`
-	Network        string `yaml:"network,omitempty" json:"network,omitempty"`
-	From           string `yaml:"from,omitempty" json:"from,omitempty"`
-	To             string `yaml:"to,omitempty" json:"to,omitempty"`
-	VPN            string `yaml:"vpn,omitempty" json:"vpn,omitempty"`
-	Target         string `yaml:"target,omitempty" json:"target,omitempty"`
-	ExpectHostsMin *int   `yaml:"expect_hosts_min,omitempty" json:"expect_hosts_min,omitempty"`
-	ExpectHostsMax *int   `yaml:"expect_hosts_max,omitempty" json:"expect_hosts_max,omitempty"`
-	ExpectDeny     string `yaml:"expect,omitempty" json:"expect,omitempty"`
-	ExpectTunnel   *bool  `yaml:"expect_tunnel,omitempty" json:"expect_tunnel,omitempty"`
-	Ports          []int  `yaml:"ports,omitempty" json:"ports,omitempty"`
-	// ScanTiming sets the nmap -T flag for subnet_discovery assertions (0-5).
-	// Defaults to 4 if unset.
-	ScanTiming int `yaml:"scan_timing,omitempty" json:"scan_timing,omitempty"`
-	// ScanMinRate sets --min-rate for subnet_discovery assertions.
-	// Defaults to 500 if unset.
-	ScanMinRate int `yaml:"scan_min_rate,omitempty" json:"scan_min_rate,omitempty"`
+	Type            string  `yaml:"type" json:"type"`
+	Network         string  `yaml:"network,omitempty" json:"network,omitempty"`
+	From            string  `yaml:"from,omitempty" json:"from,omitempty"`
+	To              string  `yaml:"to,omitempty" json:"to,omitempty"`
+	VPN             string  `yaml:"vpn,omitempty" json:"vpn,omitempty"`
+	Target          string  `yaml:"target,omitempty" json:"target,omitempty"`
+	ExpectHostsMin  *int    `yaml:"expect_hosts_min,omitempty" json:"expect_hosts_min,omitempty"`
+	ExpectHostsMax  *int    `yaml:"expect_hosts_max,omitempty" json:"expect_hosts_max,omitempty"`
+	ExpectDeny      string  `yaml:"expect,omitempty" json:"expect,omitempty"`
+	ExpectTunnel    *bool   `yaml:"expect_tunnel,omitempty" json:"expect_tunnel,omitempty"`
+	Ports           []int   `yaml:"ports,omitempty" json:"ports,omitempty"`
+	Protocol        string  `yaml:"protocol,omitempty" json:"protocol,omitempty"`
+	ScanMode        string  `yaml:"scan_mode,omitempty" json:"scan_mode,omitempty"`
+	ScanTiming      int     `yaml:"scan_timing,omitempty" json:"scan_timing,omitempty"`
+	ScanMinRate     int     `yaml:"scan_min_rate,omitempty" json:"scan_min_rate,omitempty"`
+	Query           string  `yaml:"query,omitempty" json:"query,omitempty"`
+	ExpectIP        string  `yaml:"expect_ip,omitempty" json:"expect_ip,omitempty"`
+	Server          string  `yaml:"server,omitempty" json:"server,omitempty"`
+	DNSSEC          bool    `yaml:"dnssec,omitempty" json:"dnssec,omitempty"`
+	ExpectLatencyMs float64 `yaml:"expect_latency_ms,omitempty" json:"expect_latency_ms,omitempty"`
+	ExpectLossPct   float64 `yaml:"expect_loss_pct,omitempty" json:"expect_loss_pct,omitempty"`
+	ExpectMTU       int     `yaml:"expect_mtu,omitempty" json:"expect_mtu,omitempty"`
+	Provider        string  `yaml:"provider,omitempty" json:"provider,omitempty"`
+	Policy          string  `yaml:"policy,omitempty" json:"policy,omitempty"`
+	Runner          string  `yaml:"runner,omitempty" json:"runner,omitempty"`
 }
 
 // LoadSpec reads and parses a YAML spec file
@@ -128,6 +146,25 @@ func ValidateSpec(spec *Spec) error {
 			return fmt.Errorf("vpn %q: type is required", v.Name)
 		}
 	}
+	// Validate probes
+	probeNames := make(map[string]bool)
+	for i, p := range spec.Probes {
+		if p.Name == "" {
+			return fmt.Errorf("probe[%d]: 'name' is required", i)
+		}
+		if p.Host == "" {
+			return fmt.Errorf("probe[%d]: 'host' is required", i)
+		}
+		if p.User == "" {
+			return fmt.Errorf("probe[%d]: 'user' is required", i)
+		}
+		if p.Name != "" {
+			if probeNames[p.Name] {
+				return fmt.Errorf("probe[%d]: duplicate probe name %q", i, p.Name)
+			}
+			probeNames[p.Name] = true
+		}
+	}
 	// Validate policies
 	for i, p := range spec.Policies {
 		if p.Name == "" {
@@ -143,6 +180,10 @@ func ValidateSpec(spec *Spec) error {
 		"isolation":        true,
 		"vpn_route":        true,
 		"route_check":      true,
+		"port_check":       true,
+		"dns_check":        true,
+		"network_health":   true,
+		"acl_check":        true,
 	}
 	for i, a := range spec.Assertions {
 		if !validTypes[a.Type] {
@@ -176,6 +217,40 @@ func ValidateSpec(spec *Spec) error {
 		case "route_check":
 			if a.Target == "" {
 				return fmt.Errorf("assertion[%d] (route_check): target is required", i)
+			}
+		case "port_check":
+			if a.Target == "" {
+				return fmt.Errorf("assertion[%d]: port_check requires 'target'", i)
+			}
+			if len(a.Ports) == 0 {
+				return fmt.Errorf("assertion[%d]: port_check requires 'ports'", i)
+			}
+			if a.ExpectDeny == "" {
+				return fmt.Errorf("assertion[%d]: port_check requires 'expect' (open or closed)", i)
+			}
+		case "dns_check":
+			if a.Query == "" {
+				return fmt.Errorf("assertion[%d]: dns_check requires 'query'", i)
+			}
+		case "network_health":
+			if a.Target == "" {
+				return fmt.Errorf("assertion[%d]: network_health requires 'target'", i)
+			}
+		case "acl_check":
+			if a.Provider == "" {
+				return fmt.Errorf("assertion[%d]: acl_check requires 'provider'", i)
+			}
+			if a.Policy == "" {
+				return fmt.Errorf("assertion[%d]: acl_check requires 'policy'", i)
+			}
+			if a.ExpectDeny == "" {
+				return fmt.Errorf("assertion[%d]: acl_check requires 'expect' (enforced or not_enforced)", i)
+			}
+		}
+		// Validate runner references a declared probe
+		if a.Runner != "" && a.Runner != "local" {
+			if !probeNames[a.Runner] {
+				return fmt.Errorf("assertion[%d]: runner %q is not declared in probes", i, a.Runner)
 			}
 		}
 	}
@@ -211,4 +286,14 @@ func (s *Spec) NetworkByZone(zone string) []Network {
 		}
 	}
 	return result
+}
+
+// ProbeByName finds a declared probe by name, or returns nil.
+func (s *Spec) ProbeByName(name string) *Probe {
+	for i := range s.Probes {
+		if s.Probes[i].Name == name {
+			return &s.Probes[i]
+		}
+	}
+	return nil
 }

@@ -225,3 +225,90 @@ func TestValidateAssertionRequiredFields(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateSpecPortCheck(t *testing.T) {
+	spec := &Spec{
+		Version: 1,
+		Site:    "test",
+		Assertions: []Assertion{
+			{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}, ExpectDeny: "open"},
+		},
+	}
+	if err := ValidateSpec(spec); err != nil {
+		t.Errorf("expected valid port_check, got: %v", err)
+	}
+}
+
+func TestValidateSpecPortCheckMissingFields(t *testing.T) {
+	cases := []struct {
+		name string
+		a    Assertion
+		want string
+	}{
+		{"no target", Assertion{Type: "port_check", Ports: []int{80}, ExpectDeny: "open"}, "requires 'target'"},
+		{"no ports", Assertion{Type: "port_check", Target: "10.0.0.1", ExpectDeny: "open"}, "requires 'ports'"},
+		{"no expect", Assertion{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}}, "requires 'expect'"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := &Spec{Version: 1, Site: "test", Assertions: []Assertion{tc.a}}
+			err := ValidateSpec(spec)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("expected error containing %q, got: %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestValidateSpecDNSCheck(t *testing.T) {
+	spec := &Spec{
+		Version: 1,
+		Site:    "test",
+		Assertions: []Assertion{
+			{Type: "dns_check", Query: "nas.home.lan"},
+		},
+	}
+	if err := ValidateSpec(spec); err != nil {
+		t.Errorf("expected valid dns_check, got: %v", err)
+	}
+	// missing query
+	spec2 := &Spec{Version: 1, Site: "test", Assertions: []Assertion{{Type: "dns_check"}}}
+	if err := ValidateSpec(spec2); err == nil {
+		t.Error("expected error for dns_check missing query")
+	}
+}
+
+func TestValidateSpecProbes(t *testing.T) {
+	spec := &Spec{
+		Version: 1,
+		Site:    "test",
+		Probes:  []Probe{{Name: "laptop", Host: "192.168.1.5", User: "jp"}},
+	}
+	if err := ValidateSpec(spec); err != nil {
+		t.Errorf("expected valid probes, got: %v", err)
+	}
+}
+
+func TestValidateSpecProbesMissingFields(t *testing.T) {
+	spec := &Spec{
+		Version: 1,
+		Site:    "test",
+		Probes:  []Probe{{Name: "", Host: "192.168.1.5", User: "jp"}},
+	}
+	if err := ValidateSpec(spec); err == nil {
+		t.Error("expected error for probe missing name")
+	}
+}
+
+func TestValidateSpecRunnerUndeclared(t *testing.T) {
+	spec := &Spec{
+		Version: 1,
+		Site:    "test",
+		Assertions: []Assertion{
+			{Type: "network_health", Target: "10.0.0.1", Runner: "nonexistent"},
+		},
+	}
+	if err := ValidateSpec(spec); err == nil || !strings.Contains(err.Error(), "not declared in probes") {
+		t.Errorf("expected error about undeclared runner, got: %v", err)
+	}
+}
