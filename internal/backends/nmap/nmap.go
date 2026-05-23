@@ -8,6 +8,7 @@ import (
 	"net"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -313,11 +314,19 @@ func PortScan(ctx context.Context, target string, ports []int, protocol string, 
 
 	cmd := exec.CommandContext(ctx, nmapPath, args...)
 	out, err := cmd.Output()
-	if err != nil && ctx.Err() != nil {
-		result.Status = models.StatusError
-		result.Summary = fmt.Sprintf("nmap timed out: %v", ctx.Err())
-		result.Finish()
-		return result, ctx.Err()
+	if err != nil {
+		if ctx.Err() != nil {
+			result.Status = models.StatusError
+			result.Summary = fmt.Sprintf("nmap timed out: %v", ctx.Err())
+			result.Finish()
+			return result, ctx.Err()
+		}
+		if len(out) == 0 {
+			result.Status = models.StatusError
+			result.Summary = fmt.Sprintf("nmap exited with error: %v", err)
+			result.Finish()
+			return result, fmt.Errorf("nmap error: %w", err)
+		}
 	}
 
 	portStates := parsePortScanOutput(string(out), ports, protocol)
@@ -343,9 +352,11 @@ func parsePortScanOutput(output string, requested []int, protocol string) []Port
 		if m == nil {
 			continue
 		}
-		port := 0
-		fmt.Sscanf(m[1], "%d", &port)
-		found[port] = m[3]
+		port64, err := strconv.ParseInt(m[1], 10, 32)
+		if err != nil {
+			continue
+		}
+		found[int(port64)] = m[3]
 	}
 	states := make([]PortState, len(requested))
 	for i, p := range requested {
