@@ -38,11 +38,12 @@ func init() {
 	rootCmd.AddCommand(verifyIsolationCmd)
 	rootCmd.AddCommand(auditCmd)
 	rootCmd.AddCommand(mcpCmd)
-	rootCmd.AddCommand(omadaCmd)
+	rootCmd.AddCommand(providerCmd)
 	rootCmd.AddCommand(versionCmd)
 }
 
 func Execute() error {
+	BuildProviderSubcommands(rootCmd)
 	return rootCmd.Execute()
 }
 

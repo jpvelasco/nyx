@@ -4,6 +4,8 @@ import (
 	"os"
 
 	"github.com/velasco-jp/nyx/internal/cli"
+	_ "github.com/velasco-jp/nyx/internal/providers/omada"
+	_ "github.com/velasco-jp/nyx/internal/providers/opnsense"
 )
 
 func main() {
