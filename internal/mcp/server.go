@@ -12,6 +12,7 @@ import (
 	"github.com/velasco-jp/nyx/internal/backends/nmap"
 	"github.com/velasco-jp/nyx/internal/backends/system"
 	"github.com/velasco-jp/nyx/internal/intent"
+	"github.com/velasco-jp/nyx/internal/models"
 	"github.com/velasco-jp/nyx/internal/version"
 )
 
@@ -336,7 +337,55 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		if to == "" {
 			return "to parameter is required", true
 		}
-		return "verify_isolation is not yet implemented in the MCP server; use the run_audit tool with a spec file that includes isolation assertions instead", true
+		specFile, _ := args["spec_file"].(string)
+
+		if specFile != "" {
+			spec, err := intent.LoadSpec(specFile)
+			if err != nil {
+				return fmt.Sprintf("failed to load spec: %v", err), true
+			}
+			expectDeny := "deny"
+			miniSpec := &intent.Spec{
+				Version:  spec.Version,
+				Site:     spec.Site,
+				Networks: spec.Networks,
+				Assertions: []intent.Assertion{{
+					Type:       "isolation",
+					From:       from,
+					To:         to,
+					ExpectDeny: expectDeny,
+				}},
+			}
+			eng := audit.NewEngine(miniSpec)
+			report, err := eng.Run(ctx)
+			if err != nil {
+				return fmt.Sprintf("isolation check failed: %v", err), true
+			}
+			if len(report.Findings) == 0 {
+				return "no findings returned", true
+			}
+			return toJSON(report.Findings[0]), false
+		}
+
+		// No spec: ping `to` directly as a bare IP/hostname
+		result := models.NewCheckResult("system", "isolation", "local", fmt.Sprintf("%s -> %s", from, to))
+		pingResult, err := system.Ping(ctx, to)
+		if err != nil {
+			result.Status = models.StatusWarn
+			result.Summary = fmt.Sprintf("could not determine isolation: %v", err)
+		} else {
+			result.Observed["reachable"] = pingResult.Reachable
+			if pingResult.Reachable {
+				result.Status = models.StatusFail
+				result.Summary = fmt.Sprintf("isolation violated: %s can reach %s", from, to)
+				result.Violations = append(result.Violations, "target is reachable when isolation is expected")
+			} else {
+				result.Status = models.StatusPass
+				result.Summary = fmt.Sprintf("isolation confirmed: %s cannot reach %s", from, to)
+			}
+		}
+		result.Finish()
+		return toJSON(result), false
 
 	case "run_audit":
 		specFile, _ := args["spec_file"].(string)
@@ -386,6 +435,11 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 	default:
 		return fmt.Sprintf("unknown tool: %s", name), true
 	}
+}
+
+// DispatchToolForTest exposes dispatchTool for testing.
+func (s *Server) DispatchToolForTest(ctx context.Context, name string, args map[string]interface{}) (string, bool) {
+	return s.dispatchTool(ctx, name, args)
 }
 
 func toJSON(v interface{}) string {
