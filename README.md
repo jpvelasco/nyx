@@ -1,40 +1,57 @@
-# netaudit
+# nyx
 
-Validate private network behavior against intended state. Built for homelabs, labs, and developer-operated environments.
+Network intent validation tool for homelabs. Validate your network behavior against a declared YAML intent model using live network checks (nmap, ping, traceroute, route inspection).
 
-netaudit combines live network checks (nmap, ping, traceroute, route inspection) with a YAML-based intent model to verify VLAN isolation, VPN routing, subnet discovery, and topology drift. Every command produces structured JSON for automation and AI agent consumption.
+nyx verifies VLAN isolation, VPN routing, subnet discovery, and topology correctness. Every command produces structured JSON for automation and AI agent consumption.
+
+## Prerequisites
+
+- **Go 1.22+** — to build from source
+- **nmap** — required for `discover` and `subnet_discovery` assertions
+
+  nyx does not bundle nmap. Install it for your platform:
+
+  | Platform | Command |
+  |----------|---------|
+  | Ubuntu/Debian | `sudo apt install nmap` |
+  | Fedora/RHEL | `sudo dnf install nmap` |
+  | Arch Linux | `sudo pacman -S nmap` |
+  | macOS | `brew install nmap` |
+  | Windows | `winget install nmap` |
+
+  If nmap is missing, `nyx doctor` will show the exact install command for your system.
+
+- Root/sudo — required for nmap subnet scans on some platforms
 
 ## Quick Start
 
 ```bash
 # Build from source (requires Go 1.22+)
-git clone https://github.com/velasco-jp/netaudit.git
-cd netaudit
+git clone https://github.com/velasco-jp/nyx.git
+cd nyx
 make build
 
 # Discover hosts on a subnet (requires nmap)
-sudo netaudit discover --subnet 10.0.20.0/24 --json
+sudo nyx discover --subnet 10.0.20.0/24 --json
 
 # Check route to a target
-netaudit check-routes --target 10.0.30.10
+nyx check-routes --target 10.0.30.10
 
 # Check VPN routing
-netaudit check-vpn --target 10.0.20.15
+nyx check-vpn --target 10.0.20.15
 
 # Verify isolation
-netaudit verify-isolation --from zone:clients --to 10.0.30.1
+nyx verify-isolation --from zone:clients --to 10.0.30.1
 
 # Run a full audit from a spec file
-sudo netaudit audit --spec examples/homelab.yaml --json
+sudo nyx audit --spec examples/homelab.yaml --json
+
+# Check environment health
+nyx doctor
+
+# List registered providers
+nyx provider list
 ```
-
-## Requirements
-
-- **Go 1.22+** — to build from source
-- **Linux** — primary target platform; uses `ip`, `ping`, `traceroute`
-- **nmap** — required for `discover` and spec-based discovery assertions
-  - Install: `sudo apt install nmap` / `sudo dnf install nmap`
-- Root/sudo — required for nmap subnet scans and some route operations
 
 ## Commands
 
@@ -45,6 +62,10 @@ sudo netaudit audit --spec examples/homelab.yaml --json
 | `check-vpn` | Verify traffic routes through a VPN tunnel | system (ip route) |
 | `verify-isolation` | Check that a target is unreachable (isolation) | system (ping) |
 | `audit` | Run all assertions from a YAML spec file | nmap + system |
+| `doctor` | Check environment health and optional spec validation | all |
+| `provider` | Provider management (`list` subcommand) | all |
+| `omada` | Omada SDN vendor commands (`info`, `import`, `check`) | omada backend |
+| `opnsense` | OPNsense vendor commands (`info`) | opnsense backend |
 | `mcp serve` | Start MCP server for AI agent integration | all |
 | `version` | Print version | — |
 
@@ -60,7 +81,7 @@ sudo netaudit audit --spec examples/homelab.yaml --json
 
 ## YAML Spec Format
 
-netaudit validates your network against a declared intent model:
+nyx validates your network against a declared intent model:
 
 ```yaml
 version: 1
@@ -132,14 +153,14 @@ See `examples/homelab.yaml` for a full example.
 | 0 | All checks passed |
 | 1 | One or more assertions failed |
 | 2 | Execution error or invalid configuration |
-| 3 | One or more assertions returned a warning |
+| 3 | One or more warnings |
 
 ## MCP Server
 
-netaudit includes a Model Context Protocol server for AI agent integration:
+nyx includes a Model Context Protocol server for AI agent integration:
 
 ```bash
-netaudit mcp serve --transport stdio
+nyx mcp serve --transport stdio
 ```
 
 ### Claude Code Integration
@@ -149,8 +170,8 @@ Add to your MCP config:
 ```json
 {
   "mcpServers": {
-    "netaudit": {
-      "command": "/path/to/netaudit",
+    "nyx": {
+      "command": "/path/to/nyx",
       "args": ["mcp", "serve"]
     }
   }
@@ -161,43 +182,79 @@ Add to your MCP config:
 
 | Tool | Description |
 |------|-------------|
-| `discover_subnet` | Discover hosts in a subnet |
-| `check_routes` | Check route to a target |
-| `check_vpn` | Check VPN tunnel routing |
+| `discover_subnet` | Discover hosts in a subnet (supports `scan_timing`, `scan_min_rate`) |
+| `check_routes` | Check route to a target — returns CheckResult |
+| `check_vpn` | Check VPN tunnel routing — returns CheckResult |
 | `verify_isolation` | Verify network isolation |
 | `run_audit` | Run full audit from spec |
 | `load_spec` | Load and validate a spec file |
 | `get_interfaces` | List network interfaces |
 | `ping_target` | Ping a target |
+| `run_doctor` | Check environment health + optional spec validation |
+| `provider_list` | List registered providers |
 
-## npm Distribution
+## Providers
+
+nyx supports multiple network backends via a provider system. Vendors register at startup and expose vendor-specific commands.
+
+### List Providers
 
 ```bash
-npm install -g @netaudit/cli
+nyx provider list
 ```
 
-The npm package is a thin wrapper that downloads the prebuilt Go binary for your platform. For v0.1.0, build from source instead (binaries not yet published to GitHub Releases).
+### Omada SDN
+
+Omada provider supports Omada SDN controller 6.x:
+
+```bash
+# Get info (no auth required)
+nyx omada info --host 10.0.10.20
+
+# Generate spec from controller
+nyx omada import --host 10.0.10.20 --username admin --password password
+
+# Import and audit in one step
+nyx omada check --host 10.0.10.20 --username admin --password password --spec examples/homelab.yaml
+```
+
+Credentials can be passed via flags or env vars: `OMADA_HOST`, `OMADA_USERNAME`, `OMADA_PASSWORD`.
+
+### OPNsense
+
+OPNsense provider (info only):
+
+```bash
+# Get info
+nyx opnsense info --host 10.0.10.1 --username admin --password password
+```
 
 ## Project Structure
 
 ```
-netaudit/
-  cmd/netaudit/           # CLI entry point
+nyx/
+  cmd/nyx/              # CLI entry point
   internal/
-    cli/                  # Cobra command definitions
-    models/               # Result envelope, report types
-    intent/               # YAML spec loader and validation
-    audit/                # Audit engine (orchestration, assertion evaluation)
+    cli/                # Cobra command definitions
+    models/             # Result envelope, report types
+    intent/             # YAML spec loader and validation
+    audit/              # Audit engine
     backends/
-      nmap/               # Nmap subprocess wrapper and output parser
-      system/             # Linux system commands (ip, ping, traceroute)
-      batfish/            # Stub for v2 Batfish integration
-    mcp/                  # MCP stdio server
-    report/               # Human and JSON output renderers
-  examples/               # Example YAML specs
-  npm/                    # npm distribution scaffold
-  testdata/               # Test fixtures
-  .github/workflows/      # CI/CD
+      nmap/             # Nmap subprocess wrapper
+      system/           # Platform-specific system commands
+      omada/            # Omada SDN client (low-level)
+      batfish/          # Stub, planned for v2
+    providers/          # Provider interface + registry
+      omada/            # Omada provider (wraps backends/omada)
+      opnsense/         # OPNsense provider stub (Info only)
+    mcp/                # MCP stdio server
+    report/             # Output renderers
+    recommendations/    # Failure analysis and remediation hints
+    logger/             # JSON-lines rotating logger (~/.nyx/nyx.log)
+    version/            # Single-source version constant
+  examples/             # Example YAML specs
+  testdata/             # Test fixtures
+  .github/workflows/    # CI/CD
 ```
 
 ## Development
@@ -210,36 +267,7 @@ make clean    # Remove built binaries
 make release  # Cross-compile for all platforms
 ```
 
-## v0.1.0 Status
-
-### Implemented and Working
-
-- All 6 CLI commands with `--json` support
-- Nmap backend: `nmap -sn` ping sweep with output parsing
-- System backend: `ip route`, `ip route get`, `ping`, `traceroute`, interface detection
-- WireGuard/VPN interface detection
-- YAML spec loading with validation (version, CIDR, gateway, policy, assertion types)
-- Audit engine: runs all assertions, aggregates results, correct exit codes
-- MCP stdio server with 8 read-only tools
-- Result envelope normalization
-- Human and JSON report rendering
-- Unit tests for spec parsing (9 tests) and result normalization (4 tests)
-- npm distribution scaffold
-- CI workflow for GitHub Actions
-- Example homelab.yaml
-
-### Stubbed / Not Yet Implemented
-
-- **Batfish backend** — stubbed, returns `ErrNotImplemented`. Planned for v2.
-- **Remote runners** — SSH-based remote execution not yet wired. Engine supports `runner` field but only `local` works.
-- **Service/port scanning** — nmap backend only does `-sn` ping sweep. Port and service scanning deferred to v1.1.
-- **HTTP MCP transport** — only stdio is implemented. HTTP listener deferred to v1.1.
-- **`explain` command** — mentioned in spec, deferred to v1.1.
-- **Snapshot/history** — no persistence of past audit results yet.
-- **NetBox integration** — deferred to v2.
-- **Device API backends** (OPNsense, UniFi, Omada) — deferred to v2.
-
-### Platform Support
+## Platform Support
 
 | Platform | Status | Commands Used |
 |----------|--------|---------------|
@@ -247,7 +275,15 @@ make release  # Cross-compile for all platforms
 | macOS | Full support | `netstat -rn`, `route -n get`, `ifconfig`, `ping -c -t`, `traceroute -n` |
 | Windows | Full support | `route print`, `ping -n -w`, `tracert -d`, Go `net.Interfaces()` |
 
-All three platforms cross-compile from any OS. Platform-specific code is in `system_linux.go`, `system_darwin.go`, and `system_windows.go` using Go build tags. The nmap backend, spec loader, audit engine, MCP server, and CLI are fully portable.
+All three platforms cross-compile from any OS. Platform-specific code uses Go build tags.
+
+## npm Distribution
+
+```bash
+npm install -g @nyx/cli
+```
+
+The npm package is a thin wrapper that downloads the prebuilt Go binary for your platform. For v0.1.0, build from source instead (binaries not yet published to GitHub Releases).
 
 ## License
 
