@@ -37,7 +37,7 @@ var (
 	rePktLossLinux  = regexp.MustCompile(`(\d+(?:\.\d+)?)% packet loss`)
 	reAvgRTTLinux   = regexp.MustCompile(`rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)/`)
 	rePktLossWindows = regexp.MustCompile(`\((\d+)% loss\)`)
-	reAvgRTTWindows = regexp.MustCompile(`Average = (\d+)ms`)
+	reAvgRTTWindows = regexp.MustCompile(`Average = ([\d.]+)ms`)
 	reMinMaxWindows = regexp.MustCompile(`Minimum = (\d+)ms, Maximum = (\d+)ms`)
 	reRTTDarwin     = regexp.MustCompile(`min/avg/max/stddev = ([\d.]+)/([\d.]+)/([\d.]+)/`)
 	rePktLossDarwin = regexp.MustCompile(`(\d+(?:\.\d+)?)% packet loss`)
