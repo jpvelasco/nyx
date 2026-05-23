@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/velasco-jp/nyx/internal/recommendations"
 )
 
 // RenderJSON writes the report as JSON
@@ -67,6 +68,23 @@ func printEvidence(w io.Writer, e string) {
 			continue
 		}
 		fmt.Fprintf(w, "       • %s\n", line)
+	}
+}
+
+// RenderRecommendations writes the recommendations block to w
+func RenderRecommendations(w io.Writer, recs []recommendations.Recommendation) {
+	if len(recs) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "\n--- Recommendations ---")
+	for _, r := range recs {
+		fmt.Fprintf(w, "[%d] %s (%s)\n", r.Priority, r.Title, r.Category)
+		fmt.Fprintf(w, "   %s\n", r.Description)
+		fmt.Fprintf(w, "   REMEDIATION: %s\n", r.Remediation)
+		if len(r.Affected) > 0 {
+			fmt.Fprintf(w, "   AFFECTED: %s\n", r.Affected[0])
+		}
+		fmt.Fprintln(w)
 	}
 }
 

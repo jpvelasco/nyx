@@ -10,6 +10,7 @@ import (
 	"github.com/velasco-jp/nyx/internal/audit"
 	"github.com/velasco-jp/nyx/internal/intent"
 	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/velasco-jp/nyx/internal/recommendations"
 	"github.com/velasco-jp/nyx/internal/report"
 )
 
@@ -53,6 +54,25 @@ var auditCmd = &cobra.Command{
 			return report.RenderJSON(w, auditReport)
 		}
 		report.RenderHuman(w, auditReport)
+
+		// Generate and render recommendations for non-pass, non-error states
+		if auditReport.Status != models.StatusPass && auditReport.Status != models.StatusError {
+			var failures []models.CheckResult
+			for _, f := range auditReport.Findings {
+				if f.Status != models.StatusPass && f.Status != models.StatusSkip {
+					failures = append(failures, f)
+				}
+			}
+			networks := make(map[string]*intent.Network)
+			for i := range spec.Networks {
+				n := &spec.Networks[i]
+				networks[n.Name] = n
+			}
+			recs, recErr := recommendations.GenerateRecommendations(failures, networks)
+			if recErr == nil && len(recs) > 0 {
+				report.RenderRecommendations(w, recs)
+			}
+		}
 
 		// Set exit code based on audit status
 		switch auditReport.Status {
