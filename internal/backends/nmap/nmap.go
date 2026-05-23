@@ -50,6 +50,16 @@ type ScanOptions struct {
 	// MinRate sets --min-rate (packets/sec). 0 means use nmap default.
 	// 500 is a good balance between speed and IDS friendliness.
 	MinRate int
+	// MaxRate sets --max-rate (packets/sec). 0 means no limit.
+	MaxRate int
+}
+
+// PoliteScanOptions is safe for use on SDN controllers with flood detection.
+// Equivalent to nmap -T2 --min-rate 50 --max-rate 100.
+var PoliteScanOptions = ScanOptions{
+	TimingTemplate: 2,
+	MinRate:        50,
+	MaxRate:        100,
 }
 
 // DefaultScanOptions returns sensible defaults: -T4 --min-rate 500.
@@ -96,13 +106,16 @@ func DiscoverWithOptions(ctx context.Context, cidr string, opts ScanOptions) (*m
 		return result, installErr
 	}
 
-	// Build args: nmap -sn [-Tn] [--min-rate N] <cidr>
+	// Build args: nmap -sn [-Tn] [--min-rate N] [--max-rate N] <cidr>
 	args := []string{"-sn"}
 	if opts.TimingTemplate > 0 {
 		args = append(args, fmt.Sprintf("-T%d", opts.TimingTemplate))
 	}
 	if opts.MinRate > 0 {
 		args = append(args, "--min-rate", fmt.Sprintf("%d", opts.MinRate))
+	}
+	if opts.MaxRate > 0 {
+		args = append(args, "--max-rate", fmt.Sprintf("%d", opts.MaxRate))
 	}
 	args = append(args, cidr)
 	cmd := exec.CommandContext(ctx, nmapPath, args...)
@@ -217,4 +230,26 @@ func DiscoverWithTimeout(parent context.Context, cidr string, timeout time.Durat
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	return Discover(ctx, cidr)
+}
+
+// ScanMode is a named preset for scan aggressiveness.
+type ScanMode string
+
+const (
+	ScanModePolite     ScanMode = "polite"
+	ScanModeNormal     ScanMode = "normal"
+	ScanModeAggressive ScanMode = "aggressive"
+)
+
+// ScanOptionsForMode returns the ScanOptions preset for a named mode.
+// Unknown modes default to polite.
+func ScanOptionsForMode(mode ScanMode) ScanOptions {
+	switch mode {
+	case ScanModeNormal:
+		return DefaultScanOptions
+	case ScanModeAggressive:
+		return ScanOptions{TimingTemplate: 5}
+	default:
+		return PoliteScanOptions
+	}
 }
