@@ -7,17 +7,17 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/velasco-jp/netaudit/internal/audit"
-	"github.com/velasco-jp/netaudit/internal/intent"
-	"github.com/velasco-jp/netaudit/internal/models"
-	"github.com/velasco-jp/netaudit/internal/report"
+	"github.com/velasco-jp/nyx/internal/audit"
+	"github.com/velasco-jp/nyx/internal/intent"
+	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/velasco-jp/nyx/internal/report"
 )
 
 var auditCmd = &cobra.Command{
 	Use:   "audit",
 	Short: "Run a full audit from a YAML spec",
-	Example: `  netaudit audit --spec homelab.yaml
-  netaudit audit --spec homelab.yaml --json`,
+	Example: `  nyx audit --spec homelab.yaml
+  nyx audit --spec homelab.yaml --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if specFile == "" {
 			return fmt.Errorf("--spec is required")

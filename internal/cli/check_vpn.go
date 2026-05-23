@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/velasco-jp/netaudit/internal/backends/system"
-	"github.com/velasco-jp/netaudit/internal/models"
-	"github.com/velasco-jp/netaudit/internal/report"
+	"github.com/velasco-jp/nyx/internal/backends/system"
+	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/velasco-jp/nyx/internal/report"
 )
 
 var (
@@ -19,8 +19,8 @@ var (
 var checkVPNCmd = &cobra.Command{
 	Use:   "check-vpn",
 	Short: "Verify VPN status and routing",
-	Example: `  netaudit check-vpn --target 10.0.20.15
-  netaudit check-vpn --target 10.0.20.15 --json`,
+	Example: `  nyx check-vpn --target 10.0.20.15
+  nyx check-vpn --target 10.0.20.15 --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if vpnTarget == "" {
 			return fmt.Errorf("--target is required")

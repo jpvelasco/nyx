@@ -16,9 +16,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "netaudit",
+	Use:   "nyx",
 	Short: "Validate private network behavior against intended state",
-	Long: `netaudit is an open-source CLI for validating private internal networks
+	Long: `nyx is an open-source CLI for validating private internal networks
 against intended behavior. It combines live checks, declared intent via YAML
 specs, and agent-friendly output for homelabs and developer environments.`,
 	SilenceUsage: true,
@@ -60,6 +60,6 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("netaudit v0.1.0")
+		fmt.Println("nyx v0.1.0")
 	},
 }

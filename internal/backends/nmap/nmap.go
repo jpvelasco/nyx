@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/velasco-jp/netaudit/internal/models"
+	"github.com/velasco-jp/nyx/internal/models"
 )
 
 // Host represents a discovered network host.

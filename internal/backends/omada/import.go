@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/velasco-jp/netaudit/internal/intent"
+	"github.com/velasco-jp/nyx/internal/intent"
 )
 
 // ImportResult holds the generated spec and a summary of what was found.

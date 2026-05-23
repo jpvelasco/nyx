@@ -1,5 +1,5 @@
 // Package batfish is a stub for future Batfish network-analysis integration.
-// Full support is planned for v2 of netaudit.
+// Full support is planned for v2 of nyx.
 package batfish
 
 import "errors"

@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/velasco-jp/netaudit/internal/backends/nmap"
-	"github.com/velasco-jp/netaudit/internal/backends/system"
-	"github.com/velasco-jp/netaudit/internal/intent"
-	"github.com/velasco-jp/netaudit/internal/models"
+	"github.com/velasco-jp/nyx/internal/backends/nmap"
+	"github.com/velasco-jp/nyx/internal/backends/system"
+	"github.com/velasco-jp/nyx/internal/intent"
+	"github.com/velasco-jp/nyx/internal/models"
 )
 
 const (

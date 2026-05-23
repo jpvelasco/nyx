@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/velasco-jp/netaudit/internal/backends/system"
-	"github.com/velasco-jp/netaudit/internal/models"
-	"github.com/velasco-jp/netaudit/internal/report"
+	"github.com/velasco-jp/nyx/internal/backends/system"
+	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/velasco-jp/nyx/internal/report"
 )
 
 var (
@@ -19,8 +19,8 @@ var (
 var checkRoutesCmd = &cobra.Command{
 	Use:   "check-routes",
 	Short: "Validate routes and gateways for targets",
-	Example: `  netaudit check-routes --target 10.0.30.10
-  netaudit check-routes --target 1.1.1.1 --json`,
+	Example: `  nyx check-routes --target 10.0.30.10
+  nyx check-routes --target 1.1.1.1 --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if routeTarget == "" {
 			return fmt.Errorf("--target is required")

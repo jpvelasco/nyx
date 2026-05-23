@@ -8,10 +8,10 @@ import (
 	"io"
 	"os"
 
-	"github.com/velasco-jp/netaudit/internal/audit"
-	"github.com/velasco-jp/netaudit/internal/backends/nmap"
-	"github.com/velasco-jp/netaudit/internal/backends/system"
-	"github.com/velasco-jp/netaudit/internal/intent"
+	"github.com/velasco-jp/nyx/internal/audit"
+	"github.com/velasco-jp/nyx/internal/backends/nmap"
+	"github.com/velasco-jp/nyx/internal/backends/system"
+	"github.com/velasco-jp/nyx/internal/intent"
 )
 
 // JSON-RPC types
@@ -157,7 +157,7 @@ func (s *Server) handleInitialize(req *jsonRPCRequest) *jsonRPCResponse {
 				"tools": map[string]interface{}{},
 			},
 			ServerInfo: serverInfo{
-				Name:    "netaudit",
+				Name:    "nyx",
 				Version: "0.1.0",
 			},
 		},

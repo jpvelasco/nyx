@@ -1,4 +1,4 @@
-module github.com/velasco-jp/netaudit
+module github.com/velasco-jp/nyx
 
 go 1.25.0
 

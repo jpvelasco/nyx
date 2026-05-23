@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/velasco-jp/netaudit/internal/backends/system"
-	"github.com/velasco-jp/netaudit/internal/models"
-	"github.com/velasco-jp/netaudit/internal/report"
+	"github.com/velasco-jp/nyx/internal/backends/system"
+	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/velasco-jp/nyx/internal/report"
 )
 
 var (
@@ -19,8 +19,8 @@ var (
 var verifyIsolationCmd = &cobra.Command{
 	Use:   "verify-isolation",
 	Short: "Verify network isolation between zones",
-	Example: `  netaudit verify-isolation --from zone:clients --to 10.0.30.0/24
-  netaudit verify-isolation --from zone:clients --to zone:iot --json`,
+	Example: `  nyx verify-isolation --from zone:clients --to 10.0.30.0/24
+  nyx verify-isolation --from zone:clients --to zone:iot --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if isolationTo == "" {
 			return fmt.Errorf("--to is required")

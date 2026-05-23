@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/velasco-jp/netaudit/internal/models"
+	"github.com/velasco-jp/nyx/internal/models"
 )
 
 // RenderJSON writes the report as JSON
