@@ -5,9 +5,20 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/velasco-jp/nyx/internal/models"
+)
+
+// reDigStatus matches the dig response status line: ";; ->>HEADER<<- ... status: SERVFAIL"
+var (
+	reDigBogus    = regexp.MustCompile(`(?m);\s+status:\s+BOGUS`)
+	reDigServFail = regexp.MustCompile(`(?m);\s+status:\s+SERVFAIL`)
+	reDigNoError  = regexp.MustCompile(`(?m);\s+status:\s+NOERROR`)
+	reDigValidated = regexp.MustCompile(`(?m);\s+status:\s+VALIDATED`)
+	// RRSIG records appear on their own line: "example.com. 300 IN RRSIG A ..."
+	reRRSIG       = regexp.MustCompile(`(?m)^\S+\s+\d+\s+IN\s+RRSIG\s`)
 )
 
 // resolve is the internal implementation, does not call Finish.
@@ -31,8 +42,13 @@ func resolve(ctx context.Context, query, server string) (*models.CheckResult, []
 		resolver := &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				// Wrap IPv6 addresses in brackets for host:port format
+				serverAddr := server
+				if strings.Contains(server, ":") && !strings.HasPrefix(server, "[") {
+					serverAddr = "[" + server + "]"
+				}
 				d := net.Dialer{}
-				return d.DialContext(ctx, "udp", server+":53")
+				return d.DialContext(ctx, "udp", serverAddr+":53")
 			},
 		}
 		addrs, err := resolver.LookupHost(ctx, query)
@@ -138,12 +154,13 @@ func CheckDNSSEC(ctx context.Context, query, server string) (*models.CheckResult
 	output, _ := cmd.CombinedOutput()
 	outputStr := string(output)
 
-	// Parse output for DNSSEC validation indicators
-	isValidated := strings.Contains(outputStr, "VALIDATED")
-	isNoError := strings.Contains(outputStr, "NOERROR")
-	hasRRSIG := strings.Contains(outputStr, "RRSIG")
-	isBogus := strings.Contains(outputStr, "BOGUS")
-	isServFail := strings.Contains(outputStr, "SERVFAIL")
+	// Parse output for DNSSEC validation indicators using header-anchored patterns
+	// to avoid false matches on domain names or record content.
+	isValidated := reDigValidated.MatchString(outputStr)
+	isNoError := reDigNoError.MatchString(outputStr)
+	hasRRSIG := reRRSIG.MatchString(outputStr)
+	isBogus := reDigBogus.MatchString(outputStr)
+	isServFail := reDigServFail.MatchString(outputStr)
 
 	// Determine result status
 	if isBogus || isServFail {
