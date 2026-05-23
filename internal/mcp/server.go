@@ -12,6 +12,7 @@ import (
 	"github.com/velasco-jp/nyx/internal/backends/nmap"
 	"github.com/velasco-jp/nyx/internal/backends/system"
 	"github.com/velasco-jp/nyx/internal/intent"
+	"github.com/velasco-jp/nyx/internal/version"
 )
 
 // JSON-RPC types
@@ -158,7 +159,7 @@ func (s *Server) handleInitialize(req *jsonRPCRequest) *jsonRPCResponse {
 			},
 			ServerInfo: serverInfo{
 				Name:    "nyx",
-				Version: "0.1.0",
+				Version: version.Version,
 			},
 		},
 	}

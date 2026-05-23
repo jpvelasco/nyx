@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/velasco-jp/nyx/internal/version"
 )
 
 var (
@@ -60,6 +61,6 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("nyx v0.1.0")
+		fmt.Printf("nyx v%s\n", version.Version)
 	},
 }
