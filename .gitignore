@@ -1,6 +1,8 @@
 # Binaries
 netaudit
 netaudit-*
+nyx
+nyx-*
 *.exe
 
 # Go
