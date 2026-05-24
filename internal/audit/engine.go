@@ -123,8 +123,11 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 		return nil, fmt.Errorf("network %q not found in spec", a.Network)
 	}
 
-	// Build scan options — use assertion overrides if set, otherwise defaults.
-	opts := nmap.DefaultScanOptions
+	// Build scan options — default to polite scan mode, use assertion overrides if set.
+	opts := nmap.ScanOptionsForMode(nmap.ScanModePolite)
+	if a.ScanMode != "" {
+		opts = nmap.ScanOptionsForMode(nmap.ScanMode(a.ScanMode))
+	}
 	if a.ScanTiming > 0 {
 		opts.TimingTemplate = a.ScanTiming
 	}
