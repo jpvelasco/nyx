@@ -35,6 +35,9 @@ func TestScanOptionsForMode(t *testing.T) {
 }
 
 func TestPortScanResultShape(t *testing.T) {
+	if !Available() {
+		t.Skip("nmap not available")
+	}
 	// Uses an RFC5737 non-routable address to get a quick "filtered" result
 	// without actually scanning anything live. Just verifies result shape.
 	result, err := PortScan(context.Background(), "192.0.2.1", []int{80, 443}, "tcp", PoliteScanOptions)

@@ -6,11 +6,15 @@ import (
 	"time"
 
 	"github.com/velasco-jp/nyx/internal/audit"
+	"github.com/velasco-jp/nyx/internal/backends/nmap"
 	"github.com/velasco-jp/nyx/internal/intent"
 	"github.com/velasco-jp/nyx/internal/models"
 )
 
 func TestDiscoveryWarnPreservedWhenZeroHostsWithinBounds(t *testing.T) {
+	if !nmap.Available() {
+		t.Skip("nmap not available")
+	}
 	minVal := 0
 	maxVal := 10
 	spec := &intent.Spec{
@@ -49,6 +53,9 @@ func TestDiscoveryWarnPreservedWhenZeroHostsWithinBounds(t *testing.T) {
 }
 
 func TestDiscoveryExpectedBoundsInResult(t *testing.T) {
+	if !nmap.Available() {
+		t.Skip("nmap not available")
+	}
 	minVal := 2
 	maxVal := 20
 	spec := &intent.Spec{
@@ -89,6 +96,9 @@ func TestDiscoveryExpectedBoundsInResult(t *testing.T) {
 }
 
 func TestRunPortCheckLocalhost(t *testing.T) {
+	if !nmap.Available() {
+		t.Skip("nmap not available")
+	}
 	spec := &intent.Spec{
 		Version: 1,
 		Site:    "test",
