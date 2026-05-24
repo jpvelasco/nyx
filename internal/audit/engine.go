@@ -2,14 +2,21 @@ package audit
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/velasco-jp/nyx/internal/backends/dns"
+	"github.com/velasco-jp/nyx/internal/backends/health"
 	"github.com/velasco-jp/nyx/internal/backends/nmap"
+	"github.com/velasco-jp/nyx/internal/backends/omada"
 	"github.com/velasco-jp/nyx/internal/backends/system"
 	"github.com/velasco-jp/nyx/internal/intent"
 	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/velasco-jp/nyx/internal/probe"
 )
 
 const (
@@ -74,6 +81,11 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 }
 
 func (e *Engine) runAssertion(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
+	// Dispatch to probe if runner is set
+	if a.Runner != "" && a.Runner != "local" {
+		return e.runViaProbe(ctx, a)
+	}
+
 	// Give each assertion its own deadline so a single slow check
 	// (e.g. a large nmap sweep) cannot starve the rest of the audit.
 	timeout := assertionTimeoutDefault
@@ -92,6 +104,14 @@ func (e *Engine) runAssertion(ctx context.Context, a intent.Assertion) (*models.
 		return e.runVPNRoute(assertCtx, a)
 	case "route_check":
 		return e.runRouteCheck(assertCtx, a)
+	case "port_check":
+		return e.runPortCheck(assertCtx, a)
+	case "dns_check":
+		return e.runDNSCheck(assertCtx, a)
+	case "network_health":
+		return e.runNetworkHealth(assertCtx, a)
+	case "acl_check":
+		return e.runACLCheck(assertCtx, a)
 	default:
 		return nil, fmt.Errorf("unknown assertion type: %s", a.Type)
 	}
@@ -311,4 +331,352 @@ func (e *Engine) runRouteCheck(ctx context.Context, a intent.Assertion) (*models
 	result.Summary = fmt.Sprintf("route to %s via %s dev %s", a.Target, route.Gateway, route.Device)
 	result.Finish()
 	return result, nil
+}
+
+func (e *Engine) runPortCheck(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
+	protocol := a.Protocol
+	if protocol == "" {
+		protocol = "tcp"
+	}
+	scanMode := nmap.ScanMode(a.ScanMode)
+	if a.ScanMode == "" {
+		scanMode = nmap.ScanModePolite
+	}
+	opts := nmap.ScanOptionsForMode(scanMode)
+
+	result, err := nmap.PortScan(ctx, a.Target, a.Ports, protocol, opts)
+	if err != nil {
+		return nil, fmt.Errorf("port scan failed: %w", err)
+	}
+
+	// Evaluate pass/fail: all ports must match expect
+	expect := a.ExpectDeny // "open" or "closed"
+	var violations []string
+	if portData, ok := result.Observed["ports"]; ok {
+		if ports, ok := portData.([]interface{}); ok {
+			for _, p := range ports {
+				if pm, ok := p.(map[string]interface{}); ok {
+					state, _ := pm["state"].(string)
+					port, _ := pm["port"].(float64)
+					if state != expect {
+						violations = append(violations, fmt.Sprintf("port %.0f: expected %s, got %s", port, expect, state))
+					}
+				}
+			}
+		}
+	}
+	if len(violations) > 0 {
+		result.Status = models.StatusFail
+		result.Violations = violations
+		result.Summary = fmt.Sprintf("port check failed on %s: %s", a.Target, strings.Join(violations, "; "))
+	}
+	result.Expected["expect"] = expect
+	return result, nil
+}
+
+func (e *Engine) runDNSCheck(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
+	var result *models.CheckResult
+	var err error
+
+	if a.ExpectIP != "" {
+		result, err = dns.ResolveExpect(ctx, a.Query, a.Server, a.ExpectIP)
+	} else {
+		result, err = dns.Resolve(ctx, a.Query, a.Server)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("dns check failed: %w", err)
+	}
+
+	if a.DNSSEC {
+		dnssecResult, dnssecErr := dns.CheckDNSSEC(ctx, a.Query, a.Server)
+		if dnssecErr != nil {
+			result.Evidence = append(result.Evidence, fmt.Sprintf("DNSSEC check error: %v", dnssecErr))
+		} else {
+			result.Evidence = append(result.Evidence, dnssecResult.Evidence...)
+			if dnssecResult.Status == models.StatusFail && result.Status == models.StatusPass {
+				result.Status = models.StatusFail
+				result.Violations = append(result.Violations, dnssecResult.Summary)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+func (e *Engine) runNetworkHealth(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
+	var result *models.CheckResult
+	var err error
+
+	if a.ExpectLatencyMs > 0 || a.ExpectLossPct > 0 {
+		result, err = health.CheckLatencyAndLoss(ctx, a.Target, a.ExpectLatencyMs, a.ExpectLossPct)
+	} else {
+		result, _, err = health.PingCheck(ctx, a.Target, 10)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("network health check failed: %w", err)
+	}
+
+	if a.ExpectMTU > 0 {
+		mtuResult, mtuErr := health.ProbeMTU(ctx, a.Target, a.ExpectMTU)
+		if mtuErr != nil {
+			result.Evidence = append(result.Evidence, fmt.Sprintf("MTU probe error: %v", mtuErr))
+		} else {
+			result.Evidence = append(result.Evidence, mtuResult.Evidence...)
+			if mtuResult.Status == models.StatusFail && result.Status == models.StatusPass {
+				result.Status = models.StatusFail
+				result.Violations = append(result.Violations, mtuResult.Summary)
+			} else if mtuResult.Status == models.StatusWarn && result.Status == models.StatusPass {
+				result.Status = models.StatusWarn
+			}
+			if mtu, ok := mtuResult.Observed["mtu"]; ok {
+				result.Observed["mtu"] = mtu
+			}
+		}
+	}
+
+	return result, nil
+}
+
+func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
+	result := models.NewCheckResult("omada", "acl_check", "omada", a.Policy)
+
+	// Get Omada credentials from environment
+	host := os.Getenv("OMADA_HOST")
+	username := os.Getenv("OMADA_USERNAME")
+	password := os.Getenv("OMADA_PASSWORD")
+	siteID := os.Getenv("OMADA_SITE")
+	if host == "" || username == "" || password == "" {
+		result.Status = models.StatusError
+		result.Summary = "acl_check requires OMADA_HOST, OMADA_USERNAME, OMADA_PASSWORD environment variables"
+		result.Finish()
+		return result, nil
+	}
+
+	client, err := omada.NewClient(ctx, host)
+	if err != nil {
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("failed to connect to Omada: %v", err)
+		result.Finish()
+		return result, nil
+	}
+	if err := client.Login(ctx, username, password); err != nil {
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("Omada login failed: %v", err)
+		result.Finish()
+		return result, nil
+	}
+	defer client.Logout(ctx)
+
+	rules, err := client.GetACLRules(ctx, siteID)
+	if err != nil {
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("failed to fetch ACL rules: %v", err)
+		result.Finish()
+		return result, nil
+	}
+	gwRules, _ := client.GetGatewayACLRules(ctx, siteID)
+	allRules := append(rules, gwRules...)
+
+	// Find the declared policy
+	var policy *intent.Policy
+	for i := range e.Spec.Policies {
+		if e.Spec.Policies[i].Name == a.Policy {
+			policy = &e.Spec.Policies[i]
+			break
+		}
+	}
+	if policy == nil {
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("policy %q not found in spec", a.Policy)
+		result.Finish()
+		return result, nil
+	}
+
+	// Check if a matching ACL rule exists
+	found := false
+	for _, rule := range allRules {
+		if !rule.Status {
+			continue // skip disabled rules
+		}
+		fromMatch := rule.SourceName == policy.From || strings.EqualFold(rule.SourceName, policy.From)
+		toMatch := rule.DestName == policy.To || strings.EqualFold(rule.DestName, policy.To)
+		actionMatch := (policy.Action == "deny" && rule.Policy == "drop") ||
+			(policy.Action == "allow" && rule.Policy == "accept")
+		if fromMatch && toMatch && actionMatch {
+			found = true
+			break
+		}
+	}
+
+	expect := a.ExpectDeny // "enforced" or "not_enforced"
+	wantEnforced := expect == "enforced"
+
+	// Serialize rules as evidence
+	rulesJSON, _ := json.Marshal(allRules)
+	result.Evidence = append(result.Evidence, string(rulesJSON))
+	result.Observed["rule_count"] = len(allRules)
+	result.Expected["policy"] = a.Policy
+	result.Expected["expect"] = expect
+
+	if wantEnforced && found {
+		result.Status = models.StatusPass
+		result.Summary = fmt.Sprintf("ACL policy %q is enforced in Omada", a.Policy)
+	} else if wantEnforced && !found {
+		result.Status = models.StatusFail
+		result.Summary = fmt.Sprintf("ACL policy %q is NOT enforced in Omada", a.Policy)
+		result.Violations = append(result.Violations,
+			fmt.Sprintf("no matching ACL rule found for policy %q (%s → %s %s)", a.Policy, policy.From, policy.To, policy.Action))
+	} else if !wantEnforced && !found {
+		result.Status = models.StatusPass
+		result.Summary = fmt.Sprintf("ACL policy %q is correctly not enforced", a.Policy)
+	} else {
+		result.Status = models.StatusFail
+		result.Summary = fmt.Sprintf("ACL policy %q is enforced but expected not_enforced", a.Policy)
+	}
+
+	result.Finish()
+	return result, nil
+}
+
+func (e *Engine) runViaProbe(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
+	p := e.Spec.ProbeByName(a.Runner)
+	if p == nil {
+		return nil, fmt.Errorf("probe %q not found in spec", a.Runner)
+	}
+
+	probeP := probe.Probe{
+		Name: p.Name,
+		Host: p.Host,
+		User: p.User,
+		Key:  p.Key,
+		VLAN: p.VLAN,
+	}
+
+	cmd := probeCommandFor(a)
+	if cmd == nil {
+		return nil, fmt.Errorf("assertion type %q does not support remote probe execution", a.Type)
+	}
+
+	output, err := probe.Run(ctx, probeP, cmd)
+	result := models.NewCheckResult("probe", a.Type, a.Runner, probeTarget(a))
+	result.Evidence = append(result.Evidence, fmt.Sprintf("probe: %s@%s", p.User, p.Host))
+	result.Evidence = append(result.Evidence, fmt.Sprintf("command: %s", strings.Join(cmd, " ")))
+	result.Evidence = append(result.Evidence, output)
+
+	if err != nil {
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("probe %q: command failed: %v", a.Runner, err)
+		result.Finish()
+		return result, nil
+	}
+
+	return parseProbeOutput(result, a, output), nil
+}
+
+// probeCommandFor returns the shell command to run on a remote probe for the assertion.
+// Returns nil if the assertion type doesn't support remote execution.
+func probeCommandFor(a intent.Assertion) []string {
+	switch a.Type {
+	case "isolation", "network_health":
+		// ping -c 3 <target>
+		target := a.Target
+		if target == "" {
+			// For isolation, we probe the destination gateway
+			target = a.To
+		}
+		return []string{"ping", "-c", "3", "-W", "3", target}
+	case "port_check":
+		// Use nc -z (netcat) to check port openness
+		if len(a.Ports) == 0 {
+			return nil
+		}
+		port := fmt.Sprintf("%d", a.Ports[0])
+		return []string{"nc", "-z", "-w", "3", a.Target, port}
+	case "dns_check":
+		args := []string{"nslookup", a.Query}
+		if a.Server != "" {
+			args = append(args, a.Server)
+		}
+		return args
+	default:
+		return nil
+	}
+}
+
+// probeTarget returns a human-readable target string for the assertion.
+func probeTarget(a intent.Assertion) string {
+	if a.Target != "" {
+		return a.Target
+	}
+	if a.Query != "" {
+		return a.Query
+	}
+	return fmt.Sprintf("%s→%s", a.From, a.To)
+}
+
+// parseProbeOutput interprets raw probe command output and updates result status.
+func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output string) *models.CheckResult {
+	switch a.Type {
+	case "isolation":
+		// ping output — if contains "0 received" or "100% packet loss" → isolated (pass for deny)
+		isBlocked := strings.Contains(output, "100% packet loss") ||
+			strings.Contains(output, "0 received") ||
+			strings.Contains(output, "100.0% packet loss")
+		expectDeny := a.ExpectDeny == "deny"
+		if expectDeny && isBlocked {
+			result.Status = models.StatusPass
+			result.Summary = fmt.Sprintf("isolation confirmed from probe %q: %s cannot reach %s", a.Runner, a.From, a.To)
+		} else if expectDeny && !isBlocked {
+			result.Status = models.StatusFail
+			result.Summary = fmt.Sprintf("isolation violation from probe %q: %s can reach %s", a.Runner, a.From, a.To)
+			result.Violations = append(result.Violations, "expected deny but traffic is reachable from probe VLAN")
+		} else if !expectDeny && !isBlocked {
+			result.Status = models.StatusPass
+			result.Summary = fmt.Sprintf("connectivity confirmed from probe %q: %s can reach %s", a.Runner, a.From, a.To)
+		} else {
+			result.Status = models.StatusFail
+			result.Summary = fmt.Sprintf("connectivity failure from probe %q: %s cannot reach %s", a.Runner, a.From, a.To)
+		}
+	case "port_check":
+		// nc -z exits 0 if open, non-zero if closed/filtered
+		// Since probe.Run returns err on non-zero exit, we handle this differently:
+		// If we got here (no error), port is open
+		expect := a.ExpectDeny
+		if expect == "open" {
+			result.Status = models.StatusPass
+			result.Summary = fmt.Sprintf("port %d is open on %s (from probe %q)", a.Ports[0], a.Target, a.Runner)
+		} else {
+			result.Status = models.StatusFail
+			result.Summary = fmt.Sprintf("port %d is open on %s but expected closed (from probe %q)", a.Ports[0], a.Target, a.Runner)
+			result.Violations = append(result.Violations, fmt.Sprintf("expected closed but port %d is open", a.Ports[0]))
+		}
+	case "network_health":
+		// ping output — parse loss
+		isBlocked := strings.Contains(output, "100% packet loss") ||
+			strings.Contains(output, "0 received") ||
+			strings.Contains(output, "100.0% packet loss")
+		if isBlocked {
+			result.Status = models.StatusFail
+			result.Summary = fmt.Sprintf("100%% packet loss to %s from probe %q", a.Target, a.Runner)
+			result.Violations = append(result.Violations, "100% packet loss")
+		} else {
+			result.Status = models.StatusPass
+			result.Summary = fmt.Sprintf("host %s is reachable from probe %q", a.Target, a.Runner)
+		}
+	case "dns_check":
+		// nslookup output — check for expected IP
+		if a.ExpectIP != "" && !strings.Contains(output, a.ExpectIP) {
+			result.Status = models.StatusFail
+			result.Summary = fmt.Sprintf("dns_check from probe %q: %s not resolved to %s", a.Runner, a.Query, a.ExpectIP)
+			result.Violations = append(result.Violations, fmt.Sprintf("expected IP %s not in probe DNS response", a.ExpectIP))
+		} else {
+			result.Status = models.StatusPass
+			result.Summary = fmt.Sprintf("dns_check from probe %q: resolved %s", a.Runner, a.Query)
+		}
+	default:
+		result.Status = models.StatusWarn
+		result.Summary = fmt.Sprintf("probe output not parsed for type %q", a.Type)
+	}
+	result.Finish()
+	return result
 }
