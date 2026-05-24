@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"runtime"
@@ -201,6 +202,30 @@ func runSpecChecks(path string) []models.CheckResult {
 	}
 	refCheck.Finish()
 	checks = append(checks, *refCheck)
+
+	// Probe reachability checks
+	if len(spec.Probes) > 0 {
+		for _, p := range spec.Probes {
+			probeCheck := models.NewCheckResult("doctor", "probe_reachable", "local", p.Name)
+			probeCheck.Expected["host"] = p.Host
+			probeCheck.Expected["port"] = 22
+			addr := net.JoinHostPort(p.Host, "22")
+			conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+			if err != nil {
+				probeCheck.Status = models.StatusFail
+				probeCheck.Summary = fmt.Sprintf("probe %q unreachable at %s:22", p.Name, p.Host)
+				probeCheck.Violations = append(probeCheck.Violations,
+					fmt.Sprintf("cannot connect to %s: %v", addr, err))
+			} else {
+				conn.Close()
+				probeCheck.Status = models.StatusPass
+				probeCheck.Summary = fmt.Sprintf("probe %q reachable at %s:22", p.Name, p.Host)
+				probeCheck.Observed["reachable"] = true
+			}
+			probeCheck.Finish()
+			checks = append(checks, *probeCheck)
+		}
+	}
 
 	return checks
 }
