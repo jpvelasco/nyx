@@ -67,6 +67,9 @@ func TestDiscoveryExpectedBoundsInResult(t *testing.T) {
 		},
 	}
 
+	// Use normal scan mode so the test completes in reasonable time.
+	spec.Assertions[0].ScanMode = "normal"
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
