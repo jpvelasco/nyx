@@ -43,6 +43,12 @@ vpn:
       - 10.0.0.0/16
     mode: split-tunnel
 
+probes:
+  - name: laptop
+    host: 192.168.30.45
+    user: jp
+    vlan: iot
+
 policies:
   - name: iot-isolation
     from: iot
@@ -101,3 +107,35 @@ assertions:
   # Route: verify default gateway for management
   - type: route_check
     target: 10.0.10.1
+
+  # Port check: verify Jellyfin server ports are accessible
+  - type: port_check
+    target: 10.0.40.5
+    ports: [8096, 8920]
+    expect: open
+    scan_mode: polite
+
+  # DNS check: verify internal hostname resolves correctly
+  - type: dns_check
+    query: nas.home.lan
+    expect_ip: 10.0.40.5
+    server: 10.0.10.1
+
+  # Network health: verify gateway latency and packet loss
+  - type: network_health
+    target: 10.0.10.1
+    expect_latency_ms: 10
+    expect_loss_pct: 0
+
+  # ACL check: verify IoT VLAN is isolated via controller policy
+  - type: acl_check
+    provider: omada
+    policy: iot-isolation
+    expect: enforced
+
+  # Isolation from IoT VLAN (runs via SSH probe on laptop)
+  - type: isolation
+    from: iot
+    to: home
+    expect: deny
+    runner: laptop

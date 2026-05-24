@@ -64,7 +64,7 @@ YAML spec → intent.LoadSpec → audit.Engine.Run → []CheckResult → report.
 
 ## Spec Format
 
-Version 1 intent spec: `networks`, `vpn`, `policies`, `assertions`. Four assertion types: `subnet_discovery`, `isolation`, `vpn_route`, `route_check`. `ValidateSpec` enforces required fields per type. See `examples/homelab.yaml` and `testdata/valid_spec.yaml`.
+Version 1 intent spec: `networks`, `vpn`, `probes`, `policies`, `assertions`. Eight assertion types: `subnet_discovery`, `isolation`, `vpn_route`, `route_check`, `port_check`, `dns_check`, `network_health`, `acl_check`. `ValidateSpec` enforces required fields per type. Probes declare SSH nodes for remote checks. See `examples/homelab.yaml` and `testdata/valid_spec.yaml`. Assertions can use `runner: <probe-name>` to execute checks remotely via SSH from a different VLAN.
 
 ## Provider System
 
@@ -87,6 +87,4 @@ Pass credentials via flags (`--host`, `--username`, `--password`) or env vars (`
 
 - `internal/backends/batfish` — returns `ErrNotImplemented`, planned for v2
 - `internal/providers/opnsense` — Info only; ImportSpec/Check return `ErrCapabilityUnsupported`
-- Remote runners (`runner: ssh`) — field is parsed but only `local` is wired
-- Port/service scanning — nmap backend is ping-sweep only (`-sn`)
 - HTTP MCP transport — only stdio is implemented
