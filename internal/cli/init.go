@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/velasco-jp/nyx/internal/backends/nmap"
+	"github.com/velasco-jp/nyx/internal/backends/system"
 	"gopkg.in/yaml.v3"
 )
 
@@ -113,11 +114,29 @@ type localCIDR struct {
 	localIP string
 }
 
-// detectLocalCIDRs finds RFC1918 subnets the local machine has addresses in.
+// detectLocalCIDRs finds RFC1918 subnets the local machine has addresses in,
+// using the routing table to find real gateways instead of guessing .1.
 func detectLocalCIDRs() ([]localCIDR, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil, err
+	}
+
+	// Build a map of subnet CIDR → gateway from the routing table.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	routeGateways := map[string]string{}
+	defaultGW := ""
+	if routes, err := system.GetRoutes(ctx); err == nil {
+		for _, r := range routes {
+			if r.Destination == "default" && r.Gateway != "" && r.Gateway != "0.0.0.0" && r.Gateway != "On-link" {
+				defaultGW = r.Gateway
+				continue
+			}
+			if r.Gateway != "" && r.Gateway != "0.0.0.0" && r.Gateway != "On-link" {
+				routeGateways[r.Destination] = r.Gateway
+			}
+		}
 	}
 
 	seen := map[string]bool{}
@@ -140,7 +159,6 @@ func detectLocalCIDRs() ([]localCIDR, error) {
 			if ip == nil || !isRFC1918(ip) {
 				continue
 			}
-			// Mask to network address for the CIDR key
 			maskedIP := ip.Mask(ipNet.Mask)
 			network := &net.IPNet{IP: maskedIP, Mask: ipNet.Mask}
 			cidrStr := network.String()
@@ -149,8 +167,20 @@ func detectLocalCIDRs() ([]localCIDR, error) {
 			}
 			seen[cidrStr] = true
 
-			// Guess gateway as .1 in the subnet
-			gw := guessGateway(maskedIP)
+			// Use routing table gateway if known. For directly-connected subnets
+			// the route table shows "On-link" as gateway, so check if the default
+			// gateway falls within this subnet before falling back to .1.
+			gw := routeGateways[cidrStr]
+			if gw == "" && defaultGW != "" {
+				if _, subnet, err := net.ParseCIDR(cidrStr); err == nil {
+					if subnet.Contains(net.ParseIP(defaultGW)) {
+						gw = defaultGW
+					}
+				}
+			}
+			if gw == "" {
+				gw = guessGateway(maskedIP)
+			}
 			results = append(results, localCIDR{
 				cidr:    cidrStr,
 				gateway: gw,

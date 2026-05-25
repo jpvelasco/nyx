@@ -20,6 +20,7 @@ npm/bin/netaudit-*
 
 # Local scratch specs
 testrun.yaml
+generated.yaml
 
 # OS
 .DS_Store
