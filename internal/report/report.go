@@ -21,7 +21,17 @@ func RenderJSON(w io.Writer, report *models.AuditReport) error {
 func RenderHuman(w io.Writer, report *models.AuditReport) {
 	statusLabel := strings.ToUpper(string(report.Status))
 	fmt.Fprintf(w, "Audit: %s\n", report.Audit)
-	fmt.Fprintf(w, "Status: %s\n\n", statusLabel)
+	fmt.Fprintf(w, "Status: %s\n", statusLabel)
+	if len(report.Runner.LocalIPs) > 0 {
+		fmt.Fprintf(w, "Runner: %s", strings.Join(report.Runner.LocalIPs, ", "))
+		if len(report.Runner.Networks) > 0 {
+			fmt.Fprintf(w, " (in spec networks: %s)", strings.Join(report.Runner.Networks, ", "))
+		} else {
+			fmt.Fprintf(w, " (not in any spec network)")
+		}
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintln(w)
 
 	for _, f := range report.Findings {
 		tag := statusTag(f.Status)
