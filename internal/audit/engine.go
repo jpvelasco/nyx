@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -75,9 +76,63 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 		Audit:    e.Spec.Site,
 		Status:   models.ComputeOverallStatus(findings),
 		Summary:  models.Tally(findings),
+		Runner:   localRunnerContext(e.Spec),
 		Findings: findings,
 	}
 	return report, nil
+}
+
+// localRunnerContext detects which of the spec networks this machine is inside.
+func localRunnerContext(spec *intent.Spec) models.RunnerContext {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return models.RunnerContext{}
+	}
+
+	var localIPs []net.IP
+	var localIPStrs []string
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			var ip net.IP
+			switch v := a.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.IsLoopback() || ip.To4() == nil {
+				continue
+			}
+			localIPs = append(localIPs, ip)
+			localIPStrs = append(localIPStrs, ip.String())
+		}
+	}
+
+	var matchedNetworks []string
+	for _, n := range spec.Networks {
+		_, cidr, err := net.ParseCIDR(n.CIDR)
+		if err != nil {
+			continue
+		}
+		for _, ip := range localIPs {
+			if cidr.Contains(ip) {
+				matchedNetworks = append(matchedNetworks, n.Name)
+				break
+			}
+		}
+	}
+
+	return models.RunnerContext{
+		LocalIPs: localIPStrs,
+		Networks: matchedNetworks,
+	}
 }
 
 func (e *Engine) runAssertion(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
@@ -219,14 +274,31 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 		}
 	}
 
+	// Check if nyx is running from within the source zone. Isolation checks are
+	// only definitive when the runner is actually in the "from" network.
+	runnerCtx := localRunnerContext(e.Spec)
+	runnerInFromZone := false
+	for _, netName := range runnerCtx.Networks {
+		n := e.Spec.NetworkByName(netName)
+		if n != nil && (n.Zone == a.From || n.Name == a.From) {
+			runnerInFromZone = true
+			break
+		}
+	}
+
 	expectDeny := a.ExpectDeny == "deny"
 	if expectDeny {
 		if !anyTested {
-			// Could not reach any gateway — but that may just mean the target
-			// zone has no route from this machine, not that isolation is working.
 			result.Status = models.StatusWarn
 			result.Summary = fmt.Sprintf(
-				"isolation unverifiable: %s → %s (target zone not routable from this host; run from a host inside the %s zone for accurate results)",
+				"isolation unverifiable: %s → %s (target zone not routable from this host; use runner: <probe> from inside the %s zone)",
+				a.From, a.To, a.From,
+			)
+		} else if allBlocked && !runnerInFromZone {
+			// Unreachable could mean isolation OR just no route from this host.
+			result.Status = models.StatusWarn
+			result.Summary = fmt.Sprintf(
+				"isolation unconfirmed: %s → %s gateways unreachable, but nyx is not running from inside the %s zone — use runner: <probe> for a definitive check",
 				a.From, a.To, a.From,
 			)
 		} else if allBlocked {

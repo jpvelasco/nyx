@@ -30,11 +30,18 @@ type CheckResult struct {
 	DurationMs int64                  `json:"duration_ms"`
 }
 
+// RunnerContext captures where nyx is running relative to the spec networks.
+type RunnerContext struct {
+	LocalIPs []string `json:"local_ips"`
+	Networks []string `json:"networks"` // spec network names this host is inside
+}
+
 // AuditReport is the top-level report for a full audit run
 type AuditReport struct {
-	Audit    string        `json:"audit"`
-	Status   Status        `json:"status"`
-	Summary  ReportSummary `json:"summary"`
+	Audit   string        `json:"audit"`
+	Status  Status        `json:"status"`
+	Summary ReportSummary `json:"summary"`
+	Runner  RunnerContext  `json:"runner"`
 	Findings []CheckResult `json:"findings"`
 }
 

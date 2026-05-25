@@ -136,6 +136,6 @@ assertions:
   # Isolation from IoT VLAN (runs via SSH probe on laptop)
   - type: isolation
     from: iot
-    to: home
+    to: management
     expect: deny
     runner: laptop
