@@ -72,10 +72,11 @@ then write a nyx.yaml spec you can customize.`,
 			}
 
 			nets = append(nets, initNet{
-				cidr:    c.cidr,
-				gateway: c.gateway,
-				localIP: c.localIP,
-				hosts:   hostCount,
+				cidr:      c.cidr,
+				gateway:   c.gateway,
+				localIP:   c.localIP,
+				hosts:     hostCount,
+				ifaceName: c.ifaceName,
 			})
 			fmt.Fprintf(os.Stderr, "  → %d host(s) up\n", hostCount)
 		}
@@ -102,16 +103,18 @@ then write a nyx.yaml spec you can customize.`,
 }
 
 type initNet struct {
-	cidr    string
-	gateway string
-	localIP string
-	hosts   int
+	cidr      string
+	gateway   string
+	localIP   string
+	hosts     int
+	ifaceName string
 }
 
 type localCIDR struct {
-	cidr    string
-	gateway string
-	localIP string
+	cidr      string
+	gateway   string
+	localIP   string
+	ifaceName string
 }
 
 // detectLocalCIDRs finds RFC1918 subnets the local machine has addresses in,
@@ -182,13 +185,33 @@ func detectLocalCIDRs() ([]localCIDR, error) {
 				gw = guessGateway(maskedIP)
 			}
 			results = append(results, localCIDR{
-				cidr:    cidrStr,
-				gateway: gw,
-				localIP: ip.String(),
+				cidr:      cidrStr,
+				gateway:   gw,
+				localIP:   ip.String(),
+				ifaceName: iface.Name,
 			})
 		}
 	}
 	return results, nil
+}
+
+// isVirtualIface returns true for host-only/NAT virtual adapters that have no
+// real DNS server — VMware, VirtualBox, Hyper-V, WSL2, OpenVPN TAP/TUN.
+func isVirtualIface(name string) bool {
+	lower := strings.ToLower(name)
+	// Linux-style prefixes
+	for _, p := range []string{"vmnet", "vboxnet", "veth", "docker", "br-", "virbr"} {
+		if strings.HasPrefix(lower, p) {
+			return true
+		}
+	}
+	// Windows adapter name substrings
+	for _, s := range []string{"vmware", "virtualbox", "hyper-v", "wsl", "vethernet", "tap adapter", "tun driver", "openvpn"} {
+		if strings.Contains(lower, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func isRFC1918(ip net.IP) bool {
@@ -291,11 +314,13 @@ func buildInitSpec(nets []initNet) initSpec {
 			ExpectLoss:    0,
 		})
 
-		assertions = append(assertions, initSpecAssertion{
-			Type:   "dns_check",
-			Query:  "google.com",
-			Server: n.gateway,
-		})
+		if !isVirtualIface(n.ifaceName) {
+			assertions = append(assertions, initSpecAssertion{
+				Type:   "dns_check",
+				Query:  "google.com",
+				Server: n.gateway,
+			})
+		}
 	}
 
 	siteName := "my-network"
