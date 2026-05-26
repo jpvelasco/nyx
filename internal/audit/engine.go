@@ -29,7 +29,8 @@ const (
 
 // Engine runs audit assertions
 type Engine struct {
-	Spec *intent.Spec
+	Spec      *intent.Spec
+	runnerCtx models.RunnerContext // populated once at Run() time
 }
 
 // NewEngine creates an audit engine for a spec
@@ -40,6 +41,8 @@ func NewEngine(spec *intent.Spec) *Engine {
 // Run executes all assertions concurrently and returns a report.
 // Results are returned in the same order as the assertions in the spec.
 func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
+	e.runnerCtx = localRunnerContext(e.Spec)
+
 	assertions := e.Spec.Assertions
 	findings := make([]models.CheckResult, len(assertions))
 
@@ -76,7 +79,7 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 		Audit:    e.Spec.Site,
 		Status:   models.ComputeOverallStatus(findings),
 		Summary:  models.Tally(findings),
-		Runner:   localRunnerContext(e.Spec),
+		Runner:   e.runnerCtx,
 		Findings: findings,
 	}
 	return report, nil
@@ -276,9 +279,8 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 
 	// Check if nyx is running from within the source zone. Isolation checks are
 	// only definitive when the runner is actually in the "from" network.
-	runnerCtx := localRunnerContext(e.Spec)
 	runnerInFromZone := false
-	for _, netName := range runnerCtx.Networks {
+	for _, netName := range e.runnerCtx.Networks {
 		n := e.Spec.NetworkByName(netName)
 		if n != nil && (n.Zone == a.From || n.Name == a.From) {
 			runnerInFromZone = true
