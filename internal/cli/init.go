@@ -60,7 +60,9 @@ then write a nyx.yaml spec you can customize.`,
 			cancel()
 
 			hostCount := 0
-			if err == nil {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  warning: scan failed: %v (continuing with 0 hosts)\n", err)
+			} else if result != nil {
 				if v, ok := result.Observed["hosts_up"]; ok {
 					switch n := v.(type) {
 					case int:
@@ -130,15 +132,23 @@ func detectLocalCIDRs() ([]localCIDR, error) {
 	defer cancel()
 	routeGateways := map[string]string{}
 	defaultGW := ""
-	if routes, err := system.GetRoutes(ctx); err == nil {
+	defaultGWMetric := -1
+	if routes, err := system.GetRoutes(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not read routing table: %v (gateway detection will use defaults)\n", err)
+	} else {
 		for _, r := range routes {
-			if r.Destination == "default" && r.Gateway != "" && r.Gateway != "0.0.0.0" && r.Gateway != "On-link" {
-				defaultGW = r.Gateway
+			if isInvalidGW(r.Gateway) {
 				continue
 			}
-			if r.Gateway != "" && r.Gateway != "0.0.0.0" && r.Gateway != "On-link" {
-				routeGateways[r.Destination] = r.Gateway
+			if r.Destination == "default" {
+				// Keep the lowest-metric default route as the primary gateway.
+				if defaultGWMetric < 0 || r.Metric < defaultGWMetric {
+					defaultGW = r.Gateway
+					defaultGWMetric = r.Metric
+				}
+				continue
 			}
+			routeGateways[r.Destination] = r.Gateway
 		}
 	}
 
@@ -151,6 +161,7 @@ func detectLocalCIDRs() ([]localCIDR, error) {
 		}
 		addrs, err := iface.Addrs()
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not read addresses for %s: %v (skipping)\n", iface.Name, err)
 			continue
 		}
 		for _, a := range addrs {
@@ -175,9 +186,11 @@ func detectLocalCIDRs() ([]localCIDR, error) {
 			// gateway falls within this subnet before falling back to .1.
 			gw := routeGateways[cidrStr]
 			if gw == "" && defaultGW != "" {
-				if _, subnet, err := net.ParseCIDR(cidrStr); err == nil {
-					if subnet.Contains(net.ParseIP(defaultGW)) {
-						gw = defaultGW
+				if parsedGW := net.ParseIP(defaultGW); parsedGW != nil {
+					if _, subnet, err := net.ParseCIDR(cidrStr); err == nil {
+						if subnet.Contains(parsedGW) {
+							gw = defaultGW
+						}
 					}
 				}
 			}
@@ -212,6 +225,10 @@ func isVirtualIface(name string) bool {
 		}
 	}
 	return false
+}
+
+func isInvalidGW(gw string) bool {
+	return gw == "" || gw == "0.0.0.0" || gw == "On-link"
 }
 
 func isRFC1918(ip net.IP) bool {
