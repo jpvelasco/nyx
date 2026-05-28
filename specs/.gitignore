@@ -1,0 +1,4 @@
+# Ignore all generated specs in this directory except this file.
+*
+!.gitignore
+!.gitkeep

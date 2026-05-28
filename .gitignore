@@ -18,7 +18,7 @@ npm/bin/netaudit-*
 *.swp
 *.swo
 
-# Local scratch specs
+# Local scratch specs — put generated/custom specs in specs/ (ignored via specs/.gitignore)
 testrun.yaml
 generated.yaml
 mynet.yaml
