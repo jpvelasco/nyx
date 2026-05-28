@@ -21,6 +21,7 @@ npm/bin/netaudit-*
 # Local scratch specs
 testrun.yaml
 generated.yaml
+mynet.yaml
 
 # OS
 .DS_Store
