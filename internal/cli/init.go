@@ -231,7 +231,10 @@ func isVirtualIface(name string) bool {
 }
 
 func isInvalidGW(gw string) bool {
-	return gw == "" || gw == "0.0.0.0" || gw == "On-link"
+	if gw == "" || gw == "0.0.0.0" || gw == "On-link" {
+		return true
+	}
+	return net.ParseIP(gw) == nil
 }
 
 func isRFC1918(ip net.IP) bool {

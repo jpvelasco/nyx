@@ -89,6 +89,7 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 func localRunnerContext(spec *intent.Spec) models.RunnerContext {
 	ifaces, err := net.Interfaces()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not enumerate network interfaces: %v\n", err)
 		return models.RunnerContext{}
 	}
 

@@ -65,7 +65,7 @@ func parseRoutePrint(output string) []Route {
 		prefix := netmaskToPrefix(mask)
 		if dest == "0.0.0.0" && mask == "0.0.0.0" {
 			dest = "default"
-		} else if prefix > 0 && prefix < 32 {
+		} else if prefix > 0 {
 			dest = fmt.Sprintf("%s/%d", dest, prefix)
 		}
 
