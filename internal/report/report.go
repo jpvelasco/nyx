@@ -20,18 +20,21 @@ func RenderJSON(w io.Writer, report *models.AuditReport) error {
 // RenderHuman writes a human-friendly summary
 func RenderHuman(w io.Writer, report *models.AuditReport) {
 	statusLabel := strings.ToUpper(string(report.Status))
-	fmt.Fprintf(w, "Audit: %s\n", report.Audit)
+	fmt.Fprintf(w, "Site: %s\n", report.Audit)
 	fmt.Fprintf(w, "Status: %s\n", statusLabel)
+
+	// First Contact: orient the user before showing results
 	if len(report.Runner.LocalIPs) > 0 {
-		fmt.Fprintf(w, "Runner: %s", strings.Join(report.Runner.LocalIPs, ", "))
+		fmt.Fprintf(w, "Running from: %s", strings.Join(report.Runner.LocalIPs, ", "))
 		if len(report.Runner.Networks) > 0 {
-			fmt.Fprintf(w, " (in spec networks: %s)", strings.Join(report.Runner.Networks, ", "))
+			fmt.Fprintf(w, " (inside: %s)", strings.Join(report.Runner.Networks, ", "))
 		} else {
-			fmt.Fprintf(w, " (not in any spec network)")
+			fmt.Fprintf(w, " (outside any spec network — checks may be from the wrong vantage point)")
 		}
 		fmt.Fprintln(w)
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "--- %d assertions, evaluated from this vantage point ---\n", len(report.Findings))
 	}
-	fmt.Fprintln(w)
 
 	for _, f := range report.Findings {
 		tag := statusTag(f.Status)
@@ -86,14 +89,34 @@ func RenderRecommendations(w io.Writer, recs []recommendations.Recommendation) {
 	if len(recs) == 0 {
 		return
 	}
-	fmt.Fprintln(w, "\n--- Recommendations ---")
+	fmt.Fprintln(w, "\n--- What I Think Is Going On ---")
 	for _, r := range recs {
-		fmt.Fprintf(w, "[%d] %s (%s)\n", r.Priority, r.Title, r.Category)
-		fmt.Fprintf(w, "   %s\n", r.Description)
-		fmt.Fprintf(w, "   REMEDIATION: %s\n", r.Remediation)
+		fmt.Fprintf(w, "  [%d] %s (%s)\n", r.Priority, r.Title, r.Category)
+		fmt.Fprintf(w, "      %s\n", r.Description)
+		fmt.Fprintf(w, "      Fix: %s\n", r.Remediation)
+
 		if len(r.Affected) > 0 {
-			fmt.Fprintf(w, "   AFFECTED: %s\n", r.Affected[0])
+			if len(r.Affected) == 1 {
+				fmt.Fprintf(w, "      Affected: %s\n", r.Affected[0])
+			} else if len(r.Affected) <= 4 {
+				fmt.Fprintf(w, "      Affected (%d): %s\n", len(r.Affected), strings.Join(r.Affected, ", "))
+			} else {
+				fmt.Fprintf(w, "      Affected (%d checks):\n", len(r.Affected))
+				for _, a := range r.Affected {
+					fmt.Fprintf(w, "        • %s\n", a)
+				}
+			}
 		}
+
+		if r.SpecPatch != "" {
+			fmt.Fprintln(w, "      Suggested spec addition:")
+			for _, line := range strings.Split(r.SpecPatch, "\n") {
+				if line != "" {
+					fmt.Fprintf(w, "        %s\n", line)
+				}
+			}
+		}
+
 		fmt.Fprintln(w)
 	}
 }
