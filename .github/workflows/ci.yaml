@@ -14,6 +14,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+      # nmap is required for many integration-style tests (subnet_discovery, etc.)
+      # Without it, tests either skip or fail depending on how the backend is exercised.
+      - name: Install nmap
+        run: sudo apt-get update && sudo apt-get install -y nmap
       - run: go vet ./...
       - run: go test ./...
       - run: go build -o nyx ./cmd/nyx/
