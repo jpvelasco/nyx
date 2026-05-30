@@ -1,0 +1,148 @@
+Site: jp-homelab
+Status: ERROR
+Running from: 192.168.0.112 (inside: nightfall)
+
+--- 13 assertions, evaluated from this vantage point ---
+[PASS] subnet_discovery: 6 hosts discovered in 192.168.20.0/24
+       ΓÇó Starting Nmap 7.80 ( https://nmap.org ) at 2026-05-30 10:27 Pacific Daylight Time
+       ΓÇó Nmap scan report for 192.168.20.1
+       ΓÇó Host is up (0.00s latency).
+       ΓÇó Nmap scan report for 192.168.20.87
+       ΓÇó Host is up (0.0080s latency).
+       ΓÇó Nmap scan report for 192.168.20.93
+       ΓÇó Host is up (0.36s latency).
+       ΓÇó Nmap scan report for 192.168.20.104
+       ΓÇó Host is up (0.0070s latency).
+       ΓÇó Nmap scan report for 192.168.20.105
+       ΓÇó Host is up (0.071s latency).
+       ΓÇó Nmap scan report for 192.168.20.107
+       ΓÇó Host is up (0.70s latency).
+       ΓÇó Nmap done: 256 IP addresses (6 hosts up) scanned in 59.56 seconds
+[ERR ] subnet_discovery: subnet_discovery timed out
+       Γå│ This check took too long and was cancelled.
+       Γå│ Most likely causes:
+       Γå│   - The target network isn't reachable from your current adapter (or runner).
+       Γå│   - The subnet is large and the scan is slow.
+       Γå│   - Hosts are filtering or rate-limiting discovery traffic.
+       Γå│   - You're on the wrong VLAN for this check.
+       Γå│ Try: --interface <name> to force a specific adapter, or add a probe inside the target segment.
+[PASS] subnet_discovery: 16 hosts discovered in 192.168.0.0/24
+       ΓÇó Starting Nmap 7.80 ( https://nmap.org ) at 2026-05-30 10:27 Pacific Daylight Time
+       ΓÇó Nmap scan report for 192.168.0.50
+       ΓÇó Host is up (0.0050s latency).
+       ΓÇó MAC Address: 58:9C:FC:10:FF:85 (FreeBSD Foundation)
+       ΓÇó Nmap scan report for 192.168.0.100
+       ΓÇó Host is up (0.0010s latency).
+       ΓÇó MAC Address: 00:01:C0:2B:5F:04 (CompuLab)
+       ΓÇó Nmap scan report for 192.168.0.101
+       ΓÇó Host is up (0.46s latency).
+       ΓÇó MAC Address: E8:48:B8:6A:5A:46 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.102
+       ΓÇó Host is up (0.0050s latency).
+       ΓÇó MAC Address: 00:5F:67:72:17:CE (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.103
+       ΓÇó Host is up (0.0040s latency).
+       ΓÇó MAC Address: 00:5F:67:72:19:32 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.104
+       ΓÇó Host is up (0.021s latency).
+       ΓÇó MAC Address: 34:60:F9:BB:B5:06 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.105
+       ΓÇó Host is up (0.025s latency).
+       ΓÇó MAC Address: 00:5F:67:ED:CF:98 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.106
+       ΓÇó Host is up (0.019s latency).
+       ΓÇó MAC Address: C0:C9:E3:4C:6C:44 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.107
+       ΓÇó Host is up (0.016s latency).
+       ΓÇó MAC Address: C0:C9:E3:4C:76:F8 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.108
+       ΓÇó Host is up (0.015s latency).
+       ΓÇó MAC Address: 34:60:F9:BB:8F:2E (Unknown)
+       ΓÇó Nmap scan report for host.docker.internal (192.168.0.109)
+       ΓÇó Host is up (0.0010s latency).
+       ΓÇó MAC Address: 3C:84:6A:8E:85:1C (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.110
+       ΓÇó Host is up (0.00s latency).
+       ΓÇó MAC Address: D0:D2:B0:7B:ED:79 (Apple)
+       ΓÇó Nmap scan report for 192.168.0.131
+       ΓÇó Host is up (0.00s latency).
+       ΓÇó MAC Address: BC:FC:E7:E7:B1:A5 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.253
+       ΓÇó Host is up (0.00s latency).
+       ΓÇó MAC Address: 00:5F:67:59:E0:89 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.254
+       ΓÇó Host is up (0.00011s latency).
+       ΓÇó MAC Address: 50:91:E3:80:59:C0 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.112
+       ΓÇó Host is up.
+       ΓÇó Nmap done: 256 IP addresses (16 hosts up) scanned in 12.61 seconds
+[FAIL] isolation: isolation violation: valhalla can reach arcade
+       Γå│ expected deny but traffic is reachable
+       ΓÇó gateway 192.168.30.1 is reachable
+[FAIL] isolation: isolation violation: valhalla can reach pinball
+       Γå│ expected deny but traffic is reachable
+       ΓÇó gateway 192.168.60.1 is reachable
+[FAIL] isolation: isolation violation: arcade can reach valhalla
+       Γå│ expected deny but traffic is reachable
+       ΓÇó gateway 192.168.20.1 is reachable
+[FAIL] isolation: isolation violation: valhalla can reach nightfall
+       Γå│ expected deny but traffic is reachable
+       ΓÇó gateway 192.168.0.254 is reachable
+[FAIL] vpn_route: 192.168.20.50 routed via 192.168.0.112 (not tunnel)
+       Γå│ expected tunnel route, got device 192.168.0.112
+[PASS] route_check: route to 192.168.0.254 via On-link dev 192.168.0.112
+[FAIL] port_check: port check failed on 192.168.50.10: port 8096: expected open, got filtered
+       Γå│ port 8096: expected open, got filtered
+       ΓÇó Starting Nmap 7.80 ( https://nmap.org ) at 2026-05-30 10:27 Pacific Daylight Time
+       ΓÇó Note: Host seems down. If it is really up, but blocking our ping probes, try -Pn
+       ΓÇó Nmap done: 1 IP address (0 hosts up) scanned in 7.28 seconds
+[ERR ] dns_check: failed to resolve nas.home.lan (using 192.168.0.254): lookup nas.home.lan on 192.168.0.254:53: no such host
+[PASS] network_health: ping 192.168.0.254: 10 sent, 10 received (0.0% loss), avg 3.00ms
+       ΓÇó Pinging 192.168.0.254 with 32 bytes of data:
+       ΓÇó Reply from 192.168.0.254: bytes=32 time=1ms TTL=64
+       ΓÇó Reply from 192.168.0.254: bytes=32 time<1ms TTL=64
+       ΓÇó Reply from 192.168.0.254: bytes=32 time=1ms TTL=64
+       ΓÇó Reply from 192.168.0.254: bytes=32 time=30ms TTL=64
+       ΓÇó Reply from 192.168.0.254: bytes=32 time<1ms TTL=64
+       ΓÇó Reply from 192.168.0.254: bytes=32 time<1ms TTL=64
+       ΓÇó Reply from 192.168.0.254: bytes=32 time<1ms TTL=64
+       ΓÇó Reply from 192.168.0.254: bytes=32 time=1ms TTL=64
+       ΓÇó Reply from 192.168.0.254: bytes=32 time<1ms TTL=64
+       ΓÇó Reply from 192.168.0.254: bytes=32 time=5ms TTL=64
+       ΓÇó Ping statistics for 192.168.0.254:
+       ΓÇó     Packets: Sent = 10, Received = 10, Lost = 0 (0% loss),
+       ΓÇó Approximate round trip times in milli-seconds:
+       ΓÇó     Minimum = 0ms, Maximum = 30ms, Average = 3ms
+[ERR ] acl_check: acl_check requires OMADA_HOST, OMADA_USERNAME, OMADA_PASSWORD environment variables
+
+Summary: 4 passed, 6 failed, 0 warnings, 3 errors, 0 skipped
+
+--- What I Think Is Going On ---
+  [1] Checks ran from the wrong vantage point (vantage_point)
+      You're running from nightfall, but these isolation checks need to run from inside the valhalla, arcade zone(s).
+      Fix: Add probes inside each source zone and re-run the assertions with runner: <probe-name>.
+      Affected (4 checks): valhalla -> arcade; valhalla -> pinball; arcade -> valhalla; valhalla -> nightfall
+      Suggested spec addition:
+        # Add probes to run isolation checks from inside the source zones:
+        probes:
+          - name: arcade-probe
+            host: 192.168.30.1
+            user: <your-user>
+            vlan: arcade
+        probes:
+          - name: valhalla-probe
+            host: 192.168.20.1
+            user: <your-user>
+            vlan: valhalla
+        # Then add 'runner: <probe-name>' to the failing assertions
+
+  [2] Traffic not routing through expected VPN tunnel (vpn_misconfigured)
+      Traffic is not routing through the expected VPN tunnel: 192.168.20.50.
+      Fix: Check that the primary-vpn VPN is active and its interface (wg0) exists on this machine. Verify that expected routes are pushed by the VPN server and that policy routing / split-tunnel config is correct.
+      Affected: 192.168.20.50
+
+  [3] Target not responding (host_down_or_filtered)
+      These targets are not responding from nightfall: 192.168.50.10.
+      Fix: The host may be down, or a firewall is blocking the check. Verify the target IP is correct and that the service is running. If the target is on a different VLAN, use --interface or add a probe in that network.
+      Affected: 192.168.50.10
+
