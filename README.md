@@ -1,8 +1,40 @@
 # nyx
 
-Network intent validation tool for homelabs. Validate your network behavior against a declared YAML intent model using live network checks (nmap, ping, traceroute, route inspection).
+Your homelab should be doing what you think it's doing. **nyx** proves it.
 
-nyx verifies VLAN isolation, VPN routing, subnet discovery, and topology correctness. Every command produces structured JSON for automation and AI agent consumption.
+Validate your network behavior against a declared YAML intent model — VLAN isolation, VPN routing, host counts, route correctness — all verified with live network checks. When something drifts, nyx tells you exactly what changed and how to fix it.
+
+Every command produces structured JSON for automation and AI agent consumption.
+
+## Quick Start
+
+```bash
+# Build from source (requires Go 1.22+)
+git clone https://github.com/velasco-jp/nyx.git && cd nyx && make build
+
+# Discover hosts on a subnet
+sudo nyx discover --subnet 10.0.20.0/24
+
+# Run a full audit from a spec file
+sudo nyx audit --spec examples/homelab.yaml
+
+# Check environment health
+nyx doctor
+```
+
+### Longer-Term Confidence
+
+Once you've verified your network is behaving correctly, lock in that baseline and track drift over time:
+
+```bash
+# After a clean audit, save the baseline
+nyx snapshot baseline
+
+# Days or weeks later, re-audit and check drift
+sudo nyx audit --spec examples/homelab.yaml && nyx drift status
+```
+
+The drift report tells you exactly what's new, what's fixed, and what's degraded — so you always know if your segmentation is still holding.
 
 ## Prerequisites
 
@@ -23,36 +55,6 @@ nyx verifies VLAN isolation, VPN routing, subnet discovery, and topology correct
 
 - Root/sudo — required for nmap subnet scans on some platforms
 
-## Quick Start
-
-```bash
-# Build from source (requires Go 1.22+)
-git clone https://github.com/velasco-jp/nyx.git
-cd nyx
-make build
-
-# Discover hosts on a subnet (requires nmap)
-sudo nyx discover --subnet 10.0.20.0/24 --json
-
-# Check route to a target
-nyx check-routes --target 10.0.30.10
-
-# Check VPN routing
-nyx check-vpn --target 10.0.20.15
-
-# Verify isolation
-nyx verify-isolation --from zone:clients --to 10.0.30.1
-
-# Run a full audit from a spec file
-sudo nyx audit --spec examples/homelab.yaml --json
-
-# Check environment health
-nyx doctor
-
-# List registered providers
-nyx provider list
-```
-
 ## Commands
 
 | Command | Description | Backends Used |
@@ -65,7 +67,9 @@ nyx provider list
 | `doctor` | Check environment health and optional spec validation | all |
 | `provider` | Provider management (`list` subcommand) | all |
 | `omada` | Omada SDN vendor commands (`info`, `import`, `check`) | omada backend |
-| `opnsense` | OPNsense vendor commands (`info`) | opnsense backend |
+| `opnsense` | OPNsense vendor commands (`info`, `import`, `check`) | opnsense backend |
+| `snapshot` | Manage audit history (`baseline`, `list`, `delete`, `clear-baseline`) | — |
+| `drift` | Detect drift in audit results (`status`, `compare`) | — |
 | `mcp serve` | Start MCP server for AI agent integration | all |
 | `version` | Print version | — |
 
@@ -145,6 +149,10 @@ See `examples/homelab.yaml` for a full example.
 | `isolation` | Verify zone-to-zone unreachability | `from`, `to`, `expect: deny` |
 | `vpn_route` | Check traffic routes through VPN | `vpn`, `target`, `expect_tunnel` |
 | `route_check` | Verify route exists to target | `target` |
+| `port_check` | Verify TCP ports are open | `target`, `ports`, `expect: open` |
+| `dns_check` | Verify DNS resolution | `query`, `expect_ip`, `server` |
+| `network_health` | Verify latency and packet loss | `target`, `expect_latency_ms`, `expect_loss_pct` |
+| `acl_check` | Verify controller policy enforcement | `provider`, `policy`, `expect: enforced` |
 
 ## Exit Codes
 
@@ -154,6 +162,40 @@ See `examples/homelab.yaml` for a full example.
 | 1 | One or more assertions failed |
 | 2 | Execution error or invalid configuration |
 | 3 | One or more warnings |
+
+## Snapshot & Drift Detection
+
+After a clean audit, save the result as a baseline:
+
+```bash
+nyx snapshot baseline
+```
+
+Later, after re-running an audit, check what changed:
+
+```bash
+nyx drift status
+```
+
+The drift report shows new failures, degradations, fixes, and improvements with a clear net change summary. You can also restore a previous baseline from a saved snapshot:
+
+```bash
+nyx snapshot baseline ~/.nyx/snapshots/snapshot-20250601-140000.json
+```
+
+### Snapshot Commands
+
+| Command | Description |
+|---------|-------------|
+| `nyx snapshot baseline` | Set current audit as baseline |
+| `nyx snapshot baseline <file>` | Restore baseline from saved snapshot |
+| `nyx snapshot list` | List all saved snapshots |
+| `nyx snapshot delete [name]` | Delete a snapshot (or all if no name given) |
+| `nyx snapshot clear-baseline` | Remove the current baseline |
+| `nyx drift status` | Compare latest audit against baseline |
+| `nyx drift compare <snap1> <snap2>` | Compare any two snapshots |
+
+Snapshots are stored in `~/.nyx/snapshots/` with automatic rotation at 50 snapshots.
 
 ## MCP Server
 
@@ -222,11 +264,17 @@ Credentials can be passed via flags or env vars: `OMADA_HOST`, `OMADA_USERNAME`,
 
 ### OPNsense
 
-OPNsense provider (info only):
+OPNsense provider supports info, import, and check:
 
 ```bash
 # Get info
-nyx opnsense info --host 10.0.10.1 --username admin --password password
+nyx opnsense info --host 10.0.10.1 --api-key <key> --api-secret <secret>
+
+# Generate spec from OPNsense
+nyx opnsense import --host 10.0.10.1 --api-key <key> --api-secret <secret>
+
+# Import and audit in one step
+nyx opnsense check --host 10.0.10.1 --api-key <key> --api-secret <secret> --spec examples/homelab.yaml
 ```
 
 ## Project Structure
@@ -246,10 +294,11 @@ nyx/
       batfish/          # Stub, planned for v2
     providers/          # Provider interface + registry
       omada/            # Omada provider (wraps backends/omada)
-      opnsense/         # OPNsense provider stub (Info only)
+      opnsense/         # OPNsense provider
     mcp/                # MCP stdio server
     report/             # Output renderers
     recommendations/    # Failure analysis and remediation hints
+    snapshot/           # Audit history and drift detection
     logger/             # JSON-lines rotating logger (~/.nyx/nyx.log)
     version/            # Single-source version constant
   examples/             # Example YAML specs
