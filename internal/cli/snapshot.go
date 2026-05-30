@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/velasco-jp/nyx/internal/models"
 	"github.com/velasco-jp/nyx/internal/snapshot"
 )
 
@@ -16,7 +17,7 @@ var snapshotCmd = &cobra.Command{
 }
 
 var snapshotBaselineCmd = &cobra.Command{
-	Use:   "baseline",
+	Use:   "baseline [snapshot-file]",
 	Short: "Set the current audit result as the baseline for long-term confidence",
 	Long: `Capture the current audit as your "known good" baseline.
 
@@ -24,32 +25,76 @@ This is the foundation for sleeping well at night: future runs with 'nyx drift s
 will clearly show what has changed — new failures, degradations, or fixes — so you
 always know if your segmentation and policies are still behaving as intended.
 
-Run this right after a clean 'nyx audit --spec <your-spec>' when everything looks good.`,
+Run this right after a clean 'nyx audit --spec <your-spec>' when everything looks good.
+
+You can also point it at a previously saved snapshot file to restore an older baseline:
+  nyx snapshot baseline ~/.nyx/snapshots/snapshot-20250601-140000.json`,
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if lastAuditReport == nil {
-			return fmt.Errorf("no recent audit result — run 'nyx audit --spec <file>' first, then 'nyx snapshot baseline'")
-		}
-		if specFile == "" {
-			return fmt.Errorf("no spec provided — use 'nyx audit --spec <file>' first")
-		}
+		var (
+			specPath    string
+			auditTime   time.Time
+			status      models.Status
+			passed      int
+			failed      int
+			warned      int
+			errored     int
+		)
 
-		if err := snapshot.SetBaseline(specFile, lastAuditReport); err != nil {
-			return fmt.Errorf("setting baseline: %w", err)
-		}
+		if len(args) == 1 {
+			// Restore baseline from a saved snapshot file
+			snap, err := snapshot.LoadSnapshot(args[0])
+			if err != nil {
+				return fmt.Errorf("loading snapshot %s: %w", args[0], err)
+			}
+			if err := snapshot.SetBaseline(snap.SpecPath, &models.AuditReport{
+				Runner:          snap.Runner,
+				Summary:         snap.Summary,
+				Status:          snap.Status,
+				Findings:        snap.Findings,
+				Recommendations: snap.Recommendations,
+			}); err != nil {
+				return fmt.Errorf("setting baseline: %w", err)
+			}
+			specPath = snap.SpecPath
+			auditTime = snap.RunAt
+			status = snap.Status
+			passed = snap.Summary.Pass
+			failed = snap.Summary.Fail
+			warned = snap.Summary.Warn
+			errored = snap.Summary.Error
+		} else {
+			if lastAuditReport == nil {
+				return fmt.Errorf("no recent audit result — run 'nyx audit --spec <file>' first, then 'nyx snapshot baseline'")
+			}
+			if specFile == "" {
+				return fmt.Errorf("no spec provided — use 'nyx audit --spec <file>' first")
+			}
 
-		// Safely extract a timestamp (avoid panic if Findings is unexpectedly empty)
-		auditTime := time.Now()
-		if len(lastAuditReport.Findings) > 0 {
-			auditTime = lastAuditReport.Findings[0].StartedAt
+			if err := snapshot.SetBaseline(specFile, lastAuditReport); err != nil {
+				return fmt.Errorf("setting baseline: %w", err)
+			}
+
+			specPath = specFile
+			auditTime = time.Now()
+			if len(lastAuditReport.Findings) > 0 {
+				auditTime = lastAuditReport.Findings[0].StartedAt
+			}
+			status = lastAuditReport.Status
+			passed = lastAuditReport.Summary.Pass
+			failed = lastAuditReport.Summary.Fail
+			warned = lastAuditReport.Summary.Warn
+			errored = lastAuditReport.Summary.Error
 		}
 
 		fmt.Println("Baseline captured. Future drift checks will now show exactly what has changed.")
+		fmt.Printf("  Spec:     %s\n", specPath)
 		fmt.Printf("  Time:     %s\n", auditTime.Format(time.DateTime))
-		fmt.Printf("  Status:   %s\n", lastAuditReport.Status)
-		fmt.Printf("  Passed:   %d\n", lastAuditReport.Summary.Pass)
-		fmt.Printf("  Failed:   %d\n", lastAuditReport.Summary.Fail)
-		fmt.Printf("  Warnings: %d\n", lastAuditReport.Summary.Warn)
-		fmt.Printf("  Errors:   %d\n", lastAuditReport.Summary.Error)
+		fmt.Printf("  Status:   %s\n", status)
+		fmt.Printf("  Passed:   %d\n", passed)
+		fmt.Printf("  Failed:   %d\n", failed)
+		fmt.Printf("  Warnings: %d\n", warned)
+		fmt.Printf("  Errors:   %d\n", errored)
 		fmt.Println("\nNext: run 'nyx audit' again later, then 'nyx drift status' to see what moved.")
 		return nil
 	},

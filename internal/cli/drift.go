@@ -25,18 +25,37 @@ This is the tool that lets you sleep at night: it surfaces new failures, degrada
 fixes, and warnings in clear language so you know immediately if your network intent
 is still holding or if something needs attention.
 
-Run after any 'nyx audit' (especially from different VLANs or after changes).`,
+Run after any 'nyx audit' (especially from different VLANs or after changes). If no
+fresh audit is available, falls back to the most recent saved snapshot.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if lastAuditReport == nil {
-			return fmt.Errorf("no recent audit result — run 'nyx audit --spec <file>' first")
-		}
-
 		baseline, err := snapshot.LoadBaseline()
 		if err != nil {
 			return err
 		}
 
-		current := snapshot.NewSnapshot(specFile, lastAuditReport)
+		var current *snapshot.Snapshot
+		if lastAuditReport != nil {
+			current = snapshot.NewSnapshot(specFile, lastAuditReport)
+		} else {
+			// Fallback: load the most recent saved snapshot
+			var snaps []string
+			snaps, err = snapshot.ListSnapshots()
+			if err != nil {
+				return fmt.Errorf("listing snapshots: %w", err)
+			}
+			if len(snaps) == 0 {
+				return fmt.Errorf("no recent audit result and no saved snapshots — run 'nyx audit --spec <file>' first")
+			}
+			dir, err := snapshot.SnapshotDir()
+			if err != nil {
+				return err
+			}
+			current, err = snapshot.LoadSnapshot(filepath.Join(dir, snaps[len(snaps)-1]))
+			if err != nil {
+				return fmt.Errorf("loading most recent snapshot: %w", err)
+			}
+		}
+
 		drift := snapshot.ComputeDrift(baseline, current)
 
 		renderDrift(drift)
@@ -94,49 +113,58 @@ func renderDrift(drift *snapshot.DriftResult) {
 	fmt.Printf("  Net:      %s\n", drift.Summary.NetChange)
 	fmt.Println()
 
-	// New failures
+	// New failures — these are the things that should keep you up at night
 	if len(drift.NewFailures) > 0 {
-		fmt.Printf("New failures (%d):\n", len(drift.NewFailures))
+		fmt.Printf("New failures (%d) — attention needed:\n", len(drift.NewFailures))
 		for _, f := range drift.NewFailures {
 			fmt.Printf("  %s %s: %s\n", statusTag(f.Status), f.CheckType, f.Summary)
 		}
 		fmt.Println()
 	}
 
-	// Degraded
+	// Degraded — things that were worse before but got worse again
 	if len(drift.Degraded) > 0 {
-		fmt.Printf("Degraded (%d):\n", len(drift.Degraded))
+		fmt.Printf("Degraded (%d) — was okay, now worse:\n", len(drift.Degraded))
 		for _, f := range drift.Degraded {
 			fmt.Printf("  %s %s: %s\n", statusTag(f.Status), f.CheckType, f.Summary)
 		}
 		fmt.Println()
 	}
 
-	// Fixed failures
+	// Fixed failures — good news
 	if len(drift.FixedFailures) > 0 {
-		fmt.Printf("Fixed (%d):\n", len(drift.FixedFailures))
+		fmt.Printf("Fixed (%d) — good news:\n", len(drift.FixedFailures))
 		for _, f := range drift.FixedFailures {
 			fmt.Printf("  %s %s: %s\n", statusTag(f.Status), f.CheckType, f.Summary)
 		}
 		fmt.Println()
 	}
 
-	// New warnings
+	// Improved — also good news
+	if len(drift.Improved) > 0 {
+		fmt.Printf("Improved (%d) — getting better:\n", len(drift.Improved))
+		for _, f := range drift.Improved {
+			fmt.Printf("  %s %s: %s\n", statusTag(f.Status), f.CheckType, f.Summary)
+		}
+		fmt.Println()
+	}
+
+	// New warnings — worth watching but not urgent
 	if len(drift.NewWarnings) > 0 {
-		fmt.Printf("New warnings (%d):\n", len(drift.NewWarnings))
+		fmt.Printf("New warnings (%d) — worth watching:\n", len(drift.NewWarnings))
 		for _, f := range drift.NewWarnings {
 			fmt.Printf("  %s %s: %s\n", statusTag(f.Status), f.CheckType, f.Summary)
 		}
 		fmt.Println()
 	}
 
-	// No drift
+	// No drift — the best outcome
 	if len(drift.NewFailures) == 0 && len(drift.Degraded) == 0 &&
 		len(drift.FixedFailures) == 0 && len(drift.NewWarnings) == 0 {
-		fmt.Println("No significant drift detected. Your network is behaving as expected since the baseline.")
+		fmt.Println("All good — no drift since the baseline. Your network is behaving as intended.")
 		fmt.Println("Run 'nyx snapshot baseline' again after intentional changes to update your reference point.")
 	} else {
-		fmt.Println("Next step: Investigate the changed checks above. Re-audit from other interfaces or VLANs with --interface if the vantage point matters.")
+		fmt.Println("Next: investigate the checks that changed. Re-audit from other VLANs with --interface if the vantage point matters.")
 	}
 }
 

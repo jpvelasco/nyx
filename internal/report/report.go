@@ -89,7 +89,7 @@ func RenderRecommendations(w io.Writer, recs []recommendations.Recommendation) {
 	if len(recs) == 0 {
 		return
 	}
-	fmt.Fprintln(w, "\n--- What I Think Is Going On ---")
+	fmt.Fprintln(w, "\n--- What's Likely Going Wrong ---")
 	for _, r := range recs {
 		fmt.Fprintf(w, "  [%d] %s (%s)\n", r.Priority, r.Title, r.Category)
 		fmt.Fprintf(w, "      %s\n", r.Description)
