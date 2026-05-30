@@ -1,0 +1,22 @@
+[ OK ] nmap found: Nmap version 7.80 ( https://nmap.org )
+Platform: i686-pc-wi
+[ OK ] platform: windows/amd64
+[ OK ] log directory C:\Users\jpvel\.nyx is writable
+[ OK ] You're multi-homed with 5 active interfaces (vEthernet (Default Switch), Ethernet, Npcap Loopback Adapter, VMware Network Adapter VMnet1, VMware Network Adapter VMnet8). I couldn't confidently match you to any networks in the spec.
+[ OK ] internet route: via 192.168.0.254 dev 192.168.0.112
+[ OK ] spec file readable: examples/homelab.yaml (4206 bytes)
+[ OK ] spec valid: version 1, site "jp-homelab", 7 networks, 13 assertions
+[ OK ] all assertion references resolve
+
+=== Environment Briefing ===
+You're multi-homed with 5 active interfaces (vEthernet (Default Switch), Ethernet, Npcap Loopback Adapter, VMware Network Adapter VMnet1, VMware Network Adapter VMnet8). I couldn't confidently match you to any networks in the spec.
+
+Active interfaces: vEthernet (Default Switch), Ethernet, Npcap Loopback Adapter, VMware Network Adapter VMnet1, VMware Network Adapter VMnet8
+Your current IPs: 172.17.144.1, 192.168.0.112, 169.254.181.131, 192.168.174.1, 192.168.83.1
+
+Suggestions:
+  ΓÇó Use --interface to lock to one adapter for cleaner results (run 'nyx interfaces' to list them).
+
+
+
+nyx environment looks healthy.

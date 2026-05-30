@@ -1,0 +1,45 @@
+Audit: home-lab
+Status: ERROR
+Runner: 172.17.144.1, 192.168.0.112, 169.254.181.131, 192.168.174.1, 192.168.83.1, 192.168.20.105 (not in any spec network)
+
+[WARN] subnet_discovery: 0 hosts discovered in 10.0.10.0/24
+       ΓÇó Starting Nmap 7.80 ( https://nmap.org ) at 2026-05-29 09:57 Pacific Daylight Time
+       ΓÇó Nmap done: 256 IP addresses (0 hosts up) scanned in 44.50 seconds
+[FAIL] subnet_discovery: 0 hosts discovered in 10.0.20.0/24
+       Γå│ found 0 hosts, expected min 1
+       ΓÇó Starting Nmap 7.80 ( https://nmap.org ) at 2026-05-29 09:57 Pacific Daylight Time
+       ΓÇó Nmap done: 256 IP addresses (0 hosts up) scanned in 44.62 seconds
+[WARN] isolation: isolation unconfirmed: iot ΓåÆ management gateways unreachable, but nyx is not running from inside the iot zone ΓÇö use runner: <probe> for a definitive check
+       ΓÇó gateway 10.0.10.1 is not reachable
+[WARN] isolation: isolation unconfirmed: guest ΓåÆ servers gateways unreachable, but nyx is not running from inside the guest zone ΓÇö use runner: <probe> for a definitive check
+       ΓÇó gateway 10.0.40.1 is not reachable
+[FAIL] vpn_route: 10.0.20.15 routed via 192.168.0.112 (not tunnel)
+       Γå│ expected tunnel route, got device 192.168.0.112
+[PASS] route_check: route to 10.0.10.1 via 192.168.0.254 dev 192.168.0.112
+[FAIL] port_check: port check failed on 10.0.40.5: port 8096: expected open, got filtered; port 8920: expected open, got filtered
+       Γå│ port 8096: expected open, got filtered
+       Γå│ port 8920: expected open, got filtered
+       ΓÇó Starting Nmap 7.80 ( https://nmap.org ) at 2026-05-29 09:57 Pacific Daylight Time
+       ΓÇó Note: Host seems down. If it is really up, but blocking our ping probes, try -Pn
+       ΓÇó Nmap done: 1 IP address (0 hosts up) scanned in 8.70 seconds
+[ERR ] dns_check: failed to resolve nas.home.lan (using 10.0.10.1): lookup nas.home.lan on 192.168.20.1:53: dial udp 10.0.10.1:53: i/o timeout
+[ERR ] network_health: ping error: exit status 1
+       ΓÇó Pinging 10.0.10.1 with 32 bytes of data:
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Ping statistics for 10.0.10.1:
+       ΓÇó     Packets: Sent = 10, Received = 0, Lost = 10 (100% loss),
+[ERR ] acl_check: acl_check requires OMADA_HOST, OMADA_USERNAME, OMADA_PASSWORD environment variables
+[ERR ] isolation: probe "laptop": command failed: probe "laptop" unreachable at 192.168.30.45:22 ΓÇö is the host on VLAN iot and SSH running?
+       ΓÇó probe: jp@192.168.30.45
+       ΓÇó command: ping -c 3 -W 3 management
+
+Summary: 1 passed, 3 failed, 3 warnings, 4 errors, 0 skipped

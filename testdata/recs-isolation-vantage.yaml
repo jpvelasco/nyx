@@ -1,0 +1,22 @@
+version: 1
+site: recs-isolation-vantage-test
+
+networks:
+  - name: clients
+    cidr: 10.0.20.0/24
+    gateway: 10.0.20.1
+    zone: clients
+  - name: iot
+    cidr: 10.0.30.0/24
+    gateway: 10.0.30.1
+    zone: iot
+
+assertions:
+  - type: isolation
+    from: iot
+    to: clients
+    expect: deny
+  - type: isolation
+    from: clients
+    to: iot
+    expect: deny

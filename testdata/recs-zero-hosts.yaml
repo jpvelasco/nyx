@@ -1,0 +1,17 @@
+version: 1
+site: recs-test-zero-hosts
+
+networks:
+  - name: lab
+    cidr: 10.99.99.0/24
+    gateway: 10.99.99.1
+    zone: lab
+
+assertions:
+  - type: subnet_discovery
+    network: lab
+    expect_hosts_max: 20
+  - type: isolation
+    from: lab
+    to: clients
+    expect: deny

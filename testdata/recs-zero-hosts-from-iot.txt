@@ -1,0 +1,8 @@
+Audit: recs-test-zero-hosts
+Status: ERROR
+Runner: 172.27.32.1, 169.254.181.131, 192.168.174.1, 192.168.83.1, 192.168.60.137 (not in any spec network)
+
+[ERR ] subnet_discovery: error running assertion: nmap discovery failed: context deadline exceeded
+[ERR ] isolation: could not resolve target "clients" to any network
+
+Summary: 0 passed, 0 failed, 0 warnings, 2 errors, 0 skipped

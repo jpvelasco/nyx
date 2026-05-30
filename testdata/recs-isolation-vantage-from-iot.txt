@@ -1,0 +1,22 @@
+Audit: recs-isolation-vantage-test
+Status: WARN
+Runner: 172.27.32.1, 169.254.181.131, 192.168.174.1, 192.168.83.1, 192.168.60.137 (not in any spec network)
+
+[WARN] isolation: isolation unconfirmed: iot ΓåÆ clients gateways unreachable, but nyx is not running from inside the iot zone ΓÇö use runner: <probe> for a definitive check
+       ΓÇó gateway 10.0.20.1 is not reachable
+[WARN] isolation: isolation unconfirmed: clients ΓåÆ iot gateways unreachable, but nyx is not running from inside the clients zone ΓÇö use runner: <probe> for a definitive check
+       ΓÇó gateway 10.0.30.1 is not reachable
+
+Summary: 0 passed, 0 failed, 2 warnings, 0 errors, 0 skipped
+
+--- Recommendations ---
+[1] Isolation result has limited confidence (isolation)
+   The isolation check for iot -> clients produced a weak signal.
+   REMEDIATION: Run this check using a probe located inside the source zone (the 'from' network) for a definitive result. Add or use a probe in that VLAN and set runner: <probe-name> on the assertion.
+   AFFECTED: iot -> clients
+
+[2] Isolation result has limited confidence (isolation)
+   The isolation check for clients -> iot produced a weak signal.
+   REMEDIATION: Run this check using a probe located inside the source zone (the 'from' network) for a definitive result. Add or use a probe in that VLAN and set runner: <probe-name> on the assertion.
+   AFFECTED: clients -> iot
+

@@ -1,0 +1,88 @@
+# Baseline test spec based on actual homelab VLAN topology
+# This is a starting point for realistic testing. Customize as needed.
+
+version: 1
+site: homelab
+
+networks:
+  - name: nightfall
+    cidr: 192.168.0.0/24
+    gateway: 192.168.0.254
+    zone: management
+
+  - name: opus
+    cidr: 192.168.10.0/24
+    gateway: 192.168.10.1
+    zone: opus
+
+  - name: valhalla
+    cidr: 192.168.20.0/24
+    gateway: 192.168.20.1
+    zone: personal
+
+  - name: arcade
+    cidr: 192.168.30.0/24
+    gateway: 192.168.30.1
+    zone: games
+
+  - name: papyrus
+    cidr: 172.16.40.0/24
+    gateway: 172.16.40.1
+    zone: papyrus
+
+  - name: cinema
+    cidr: 192.168.50.0/24
+    gateway: 192.168.50.1
+    zone: cinema
+
+  - name: pinball
+    cidr: 192.168.60.0/24
+    gateway: 192.168.60.1
+    zone: games
+
+assertions:
+  # Basic discovery checks for each major segment
+  - type: subnet_discovery
+    network: valhalla
+    expect_hosts_min: 1
+    expect_hosts_max: 50
+
+  - type: subnet_discovery
+    network: arcade
+    expect_hosts_min: 1
+    expect_hosts_max: 30
+
+  - type: subnet_discovery
+    network: nightfall
+    expect_hosts_min: 5
+    expect_hosts_max: 30
+
+  # Isolation examples (adjust based on actual policy)
+  - type: isolation
+    from: valhalla
+    to: arcade
+    expect: deny
+
+  - type: isolation
+    from: arcade
+    to: valhalla
+    expect: deny
+
+  - type: isolation
+    from: pinball
+    to: valhalla
+    expect: deny
+
+  # VPN example (update with real VPN details if applicable)
+  - type: vpn_route
+    vpn: primary-vpn
+    target: 10.0.20.15
+    expect_tunnel: true
+
+vpn:
+  - name: primary-vpn
+    type: wireguard
+    interface: wg0
+    expected_routes:
+      - 10.0.0.0/16
+    mode: split-tunnel

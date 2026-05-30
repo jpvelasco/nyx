@@ -1,0 +1,14 @@
+[ OK ] nmap found: Nmap version 7.80 ( https://nmap.org )
+Platform: i686-pc-wi
+[ OK ] platform: windows/amd64
+[ OK ] log directory C:\Users\jpvel\.nyx is writable
+[ OK ] Detected 6 active interface(s)
+[ OK ] internet route: via 192.168.0.254 dev 192.168.0.112
+[ OK ] spec file readable: examples/homelab.yaml (4385 bytes)
+[ OK ] spec valid: version 1, site "jp-homelab", 7 networks, 15 assertions
+[FAIL] 1 unresolved references in spec
+       ΓåÆ assertion[8]: vpn "home-wg" not declared ΓÇö add it to the vpn section
+[FAIL] probe "laptop" unreachable at 192.168.30.45:22
+       ΓåÆ cannot connect to 192.168.30.45:22: dial tcp 192.168.30.45:22: i/o timeout
+
+nyx environment has issues. See above for details.

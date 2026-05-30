@@ -1,0 +1,99 @@
+Audit: jp-homelab
+Status: ERROR
+Runner: 192.168.0.112 (in spec networks: nightfall)
+
+[ERR ] subnet_discovery: error running assertion: nmap discovery failed: context deadline exceeded
+[ERR ] subnet_discovery: error running assertion: nmap discovery failed: context deadline exceeded
+[PASS] subnet_discovery: 16 hosts discovered in 192.168.0.0/24
+       ΓÇó Starting Nmap 7.80 ( https://nmap.org ) at 2026-05-29 18:03 Pacific Daylight Time
+       ΓÇó Nmap scan report for 192.168.0.50
+       ΓÇó Host is up (0.0060s latency).
+       ΓÇó MAC Address: 58:9C:FC:10:FF:85 (FreeBSD Foundation)
+       ΓÇó Nmap scan report for 192.168.0.100
+       ΓÇó Host is up (0.0010s latency).
+       ΓÇó MAC Address: 00:01:C0:2B:5F:04 (CompuLab)
+       ΓÇó Nmap scan report for 192.168.0.101
+       ΓÇó Host is up (0.17s latency).
+       ΓÇó MAC Address: E8:48:B8:6A:5A:46 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.102
+       ΓÇó Host is up (0.0010s latency).
+       ΓÇó MAC Address: 00:5F:67:72:17:CE (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.103
+       ΓÇó Host is up (0.0010s latency).
+       ΓÇó MAC Address: 00:5F:67:72:19:32 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.104
+       ΓÇó Host is up (0.0070s latency).
+       ΓÇó MAC Address: 34:60:F9:BB:B5:06 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.105
+       ΓÇó Host is up (0.0090s latency).
+       ΓÇó MAC Address: 00:5F:67:ED:CF:98 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.106
+       ΓÇó Host is up (0.0060s latency).
+       ΓÇó MAC Address: C0:C9:E3:4C:6C:44 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.107
+       ΓÇó Host is up (0.0060s latency).
+       ΓÇó MAC Address: C0:C9:E3:4C:76:F8 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.108
+       ΓÇó Host is up (0.010s latency).
+       ΓÇó MAC Address: 34:60:F9:BB:8F:2E (Unknown)
+       ΓÇó Nmap scan report for host.docker.internal (192.168.0.109)
+       ΓÇó Host is up (0.0073s latency).
+       ΓÇó MAC Address: 3C:84:6A:8E:85:1C (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.110
+       ΓÇó Host is up (0.0010s latency).
+       ΓÇó MAC Address: D0:D2:B0:7B:ED:79 (Apple)
+       ΓÇó Nmap scan report for 192.168.0.131
+       ΓÇó Host is up (0.00s latency).
+       ΓÇó MAC Address: BC:FC:E7:E7:B1:A5 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.253
+       ΓÇó Host is up (0.00s latency).
+       ΓÇó MAC Address: 00:5F:67:59:E0:89 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.254
+       ΓÇó Host is up (0.0096s latency).
+       ΓÇó MAC Address: 50:91:E3:80:59:C0 (Unknown)
+       ΓÇó Nmap scan report for 192.168.0.112
+       ΓÇó Host is up.
+       ΓÇó Nmap done: 256 IP addresses (16 hosts up) scanned in 13.02 seconds
+[FAIL] isolation: isolation violation: valhalla can reach arcade
+       Γå│ expected deny but traffic is reachable
+       ΓÇó gateway 192.168.30.1 is reachable
+[FAIL] isolation: isolation violation: valhalla can reach pinball
+       Γå│ expected deny but traffic is reachable
+       ΓÇó gateway 192.168.60.1 is reachable
+[FAIL] isolation: isolation violation: arcade can reach valhalla
+       Γå│ expected deny but traffic is reachable
+       ΓÇó gateway 192.168.20.1 is reachable
+[FAIL] isolation: isolation violation: valhalla can reach nightfall
+       Γå│ expected deny but traffic is reachable
+       ΓÇó gateway 192.168.0.254 is reachable
+[FAIL] vpn_route: 10.0.20.15 routed via 192.168.0.112 (not tunnel)
+       Γå│ expected tunnel route, got device 192.168.0.112
+[ERR ] vpn_route: error running assertion: vpn "home-wg" not found in spec
+[PASS] route_check: route to 10.0.10.1 via 192.168.0.254 dev 192.168.0.112
+[FAIL] port_check: port check failed on 10.0.40.5: port 8096: expected open, got filtered; port 8920: expected open, got filtered
+       Γå│ port 8096: expected open, got filtered
+       Γå│ port 8920: expected open, got filtered
+       ΓÇó Starting Nmap 7.80 ( https://nmap.org ) at 2026-05-29 18:03 Pacific Daylight Time
+       ΓÇó Note: Host seems down. If it is really up, but blocking our ping probes, try -Pn
+       ΓÇó Nmap done: 1 IP address (0 hosts up) scanned in 8.05 seconds
+[ERR ] dns_check: failed to resolve nas.home.lan (using 10.0.10.1): lookup nas.home.lan on 192.168.0.254:53: read udp 192.168.0.112:65341->10.0.10.1:53: i/o timeout
+[ERR ] network_health: ping error: exit status 1
+       ΓÇó Pinging 10.0.10.1 with 32 bytes of data:
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Request timed out.
+       ΓÇó Ping statistics for 10.0.10.1:
+       ΓÇó     Packets: Sent = 10, Received = 0, Lost = 10 (100% loss),
+[ERR ] acl_check: acl_check requires OMADA_HOST, OMADA_USERNAME, OMADA_PASSWORD environment variables
+[ERR ] isolation: probe "laptop": command failed: probe "laptop" unreachable at 192.168.30.45:22 ΓÇö is the host on VLAN arcade and SSH running?
+       ΓÇó probe: jp@192.168.30.45
+       ΓÇó command: ping -c 3 -W 3 management
+
+Summary: 2 passed, 6 failed, 0 warnings, 7 errors, 0 skipped
