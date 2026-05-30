@@ -31,6 +31,10 @@ const (
 type Engine struct {
 	Spec      *intent.Spec
 	runnerCtx models.RunnerContext // populated once at Run() time
+
+	// Interface, if set, restricts local IP detection and some checks to this specific network interface.
+	// Empty means "use all active interfaces" (current default behavior).
+	Interface string
 }
 
 // NewEngine creates an audit engine for a spec
@@ -41,7 +45,14 @@ func NewEngine(spec *intent.Spec) *Engine {
 // Run executes all assertions concurrently and returns a report.
 // Results are returned in the same order as the assertions in the spec.
 func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
-	e.runnerCtx = localRunnerContext(e.Spec)
+	e.runnerCtx = localRunnerContext(e.Spec, e.Interface)
+
+	// Warn the user if we can't place them in any spec network (noob-friendly)
+	if e.Interface == "" && len(e.runnerCtx.Networks) == 0 && len(e.Spec.Networks) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: I couldn't place your current network inside any spec network.\n")
+		fmt.Fprintf(os.Stderr, "         You're likely multi-homed. Use --interface to pick which adapter to scan from.\n")
+		fmt.Fprintf(os.Stderr, "         (Run 'nyx interfaces' to see the list.)\n")
+	}
 
 	assertions := e.Spec.Assertions
 	findings := make([]models.CheckResult, len(assertions))
@@ -64,7 +75,14 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 				}
 				errResult := models.NewCheckResult("audit", assertion.Type, "local", target)
 				errResult.Status = models.StatusError
-				errResult.Summary = fmt.Sprintf("error running assertion: %v", err)
+
+				// Produce a clearer user-facing explanation instead of raw Go error
+				summary, details := explainAssertionError(assertion, err)
+				errResult.Summary = summary
+				for _, d := range details {
+					errResult.Violations = append(errResult.Violations, d)
+				}
+				errResult.Observed["raw_error"] = err.Error() // keep raw for advanced users / debugging
 				errResult.Finish()
 				findings[i] = *errResult
 				return
@@ -86,7 +104,8 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 }
 
 // localRunnerContext detects which of the spec networks this machine is inside.
-func localRunnerContext(spec *intent.Spec) models.RunnerContext {
+// If interfaceName is non-empty, only addresses on that specific interface are considered.
+func localRunnerContext(spec *intent.Spec, interfaceName string) models.RunnerContext {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not enumerate network interfaces: %v\n", err)
@@ -95,10 +114,15 @@ func localRunnerContext(spec *intent.Spec) models.RunnerContext {
 
 	var localIPs []net.IP
 	var localIPStrs []string
+
 	for _, iface := range ifaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
 		}
+		if interfaceName != "" && iface.Name != interfaceName {
+			continue // expert mode: only use the chosen interface
+		}
+
 		addrs, err := iface.Addrs()
 		if err != nil {
 			continue
@@ -133,10 +157,96 @@ func localRunnerContext(spec *intent.Spec) models.RunnerContext {
 		}
 	}
 
+	// Smart default for multi-homed machines (noob-friendly)
+	// When no interface was forced, try to pick the "best" one (the one that matches the most spec networks).
+	if interfaceName == "" && len(ifaces) > 1 && len(spec.Networks) > 0 {
+		bestIface := pickBestInterface(ifaces, spec)
+		if bestIface != "" {
+			// Recompute using only the best interface
+			return localRunnerContext(spec, bestIface)
+		}
+		// Still ambiguous → warn the user
+		fmt.Fprintf(os.Stderr, "warning: multiple network interfaces, no clear winner for your spec.\n")
+		fmt.Fprintf(os.Stderr, "         Use --interface to pick one. (Run 'nyx interfaces' to see the list.)\n")
+	}
+
 	return models.RunnerContext{
 		LocalIPs: localIPStrs,
 		Networks: matchedNetworks,
 	}
+}
+
+// pickBestInterface tries to find the interface that can reach the most networks in the spec.
+// Returns the interface name, or empty if there's no clear winner.
+func pickBestInterface(ifaces []net.Interface, spec *intent.Spec) string {
+	type score struct {
+		name  string
+		count int
+	}
+	var scores []score
+
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		var ifaceIPs []net.IP
+		for _, a := range addrs {
+			if ipnet, ok := a.(*net.IPNet); ok && ipnet.IP.To4() != nil {
+				ifaceIPs = append(ifaceIPs, ipnet.IP)
+			}
+		}
+
+		matches := 0
+		for _, n := range spec.Networks {
+			_, cidr, err := net.ParseCIDR(n.CIDR)
+			if err != nil {
+				continue
+			}
+			for _, ip := range ifaceIPs {
+				if cidr.Contains(ip) {
+					matches++
+					break
+				}
+			}
+		}
+
+		if matches > 0 {
+			scores = append(scores, score{name: iface.Name, count: matches})
+		}
+	}
+
+	if len(scores) == 0 {
+		return ""
+	}
+
+	// Find the highest score
+	max := 0
+	for _, s := range scores {
+		if s.count > max {
+			max = s.count
+		}
+	}
+
+	// Count how many have the max score
+	winners := 0
+	var winnerName string
+	for _, s := range scores {
+		if s.count == max {
+			winners++
+			winnerName = s.name
+		}
+	}
+
+	if winners == 1 {
+		return winnerName // clear winner
+	}
+	return "" // tie or ambiguous
 }
 
 func (e *Engine) runAssertion(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
@@ -757,4 +867,89 @@ func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output str
 	}
 	result.Finish()
 	return result
+}
+
+// explainAssertionError turns raw errors into clearer, actionable messages for users.
+// It returns a human-friendly Summary and a list of detail lines (each rendered as a ↳ bullet).
+func explainAssertionError(a intent.Assertion, err error) (summary string, details []string) {
+	errStr := err.Error()
+
+	// Common case: nmap / discovery timeout
+	if strings.Contains(errStr, "context deadline exceeded") || strings.Contains(errStr, "deadline exceeded") {
+		summary = fmt.Sprintf("%s timed out", a.Type)
+		details = []string{
+			"This check took too long and was cancelled.",
+			"Most likely causes:",
+			"  - The target network isn't reachable from your current adapter (or runner).",
+			"  - The subnet is large and the scan is slow.",
+			"  - Hosts are filtering or rate-limiting discovery traffic.",
+			"  - You're on the wrong VLAN for this check.",
+			"Try: --interface <name> to force a specific adapter, or add a probe inside the target segment.",
+		}
+		return summary, details
+	}
+
+	// Probe-related errors
+	if strings.Contains(errStr, "probe") && strings.Contains(errStr, "unreachable") {
+		summary = fmt.Sprintf("probe %q is unreachable", a.Runner)
+		details = []string{errStr}
+		return summary, details
+	}
+
+	// DNS resolution failure
+	if strings.Contains(errStr, "resolve") || strings.Contains(errStr, "no such host") {
+		summary = fmt.Sprintf("%s failed — DNS resolution failed", a.Type)
+		details = []string{
+			"The DNS server couldn't resolve the query.",
+			"Most likely causes:",
+			"  - The DNS server address in the spec is wrong.",
+			"  - The domain doesn't exist in DNS.",
+			"  - The DNS server isn't reachable from your adapter.",
+			"Try: verify the query and server in your spec, or use --interface to try from a different adapter.",
+		}
+		return summary, details
+	}
+
+	// Port scan failure
+	if strings.Contains(errStr, "port scan failed") {
+		summary = fmt.Sprintf("%s failed — port scan didn't complete", a.Type)
+		details = []string{
+			"The port scan couldn't reach the target.",
+			"Most likely causes:",
+			"  - The target host is down or unreachable from your adapter.",
+			"  - A firewall is blocking scan traffic.",
+			"  - The target IP in the spec is wrong.",
+			"Try: verify the target IP, or use --interface to try from a different adapter.",
+		}
+		return summary, details
+	}
+
+	// Network health failure
+	if strings.Contains(errStr, "network health check failed") {
+		summary = fmt.Sprintf("%s failed — ping didn't complete", a.Type)
+		details = []string{
+			"The health check (ping) couldn't reach the target.",
+			"Most likely causes:",
+			"  - The target host is down or unreachable from your adapter.",
+			"  - A firewall is blocking ICMP traffic.",
+			"  - The target IP in the spec is wrong.",
+			"Try: verify the target IP, or use --interface to try from a different adapter.",
+		}
+		return summary, details
+	}
+
+	// Network unreachable / connection refused
+	if strings.Contains(errStr, "network is unreachable") {
+		summary = fmt.Sprintf("%s failed — network unreachable", a.Type)
+		details = []string{
+			"The target network isn't reachable from where you're running.",
+			"Check your routing, or use --interface to try from a different adapter.",
+		}
+		return summary, details
+	}
+
+	// Generic fallback — still better than the old raw "error running assertion: ..."
+	summary = fmt.Sprintf("%s failed: %v", a.Type, err)
+	details = []string{"Raw error: " + errStr}
+	return summary, details
 }
