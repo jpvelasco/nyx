@@ -38,11 +38,23 @@ type RunnerContext struct {
 
 // AuditReport is the top-level report for a full audit run
 type AuditReport struct {
-	Audit   string        `json:"audit"`
-	Status  Status        `json:"status"`
-	Summary ReportSummary `json:"summary"`
-	Runner  RunnerContext  `json:"runner"`
-	Findings []CheckResult `json:"findings"`
+	Audit          string        `json:"audit"`
+	Status         Status        `json:"status"`
+	Summary        ReportSummary `json:"summary"`
+	Runner         RunnerContext  `json:"runner"`
+	Findings       []CheckResult `json:"findings"`
+	Recommendations []Recommendation `json:"recommendations,omitempty"`
+}
+
+// Recommendation is an actionable fix for one or more failures.
+type Recommendation struct {
+	Priority    int      `json:"priority"`
+	Category    string   `json:"category"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Remediation string   `json:"remediation"`
+	Affected    []string `json:"affected"`
+	SpecPatch   string   `json:"spec_patch,omitempty"`
 }
 
 // ReportSummary counts results by status
