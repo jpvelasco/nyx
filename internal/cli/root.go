@@ -6,16 +6,22 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/velasco-jp/nyx/internal/logger"
+	"github.com/velasco-jp/nyx/internal/models"
 	"github.com/velasco-jp/nyx/internal/version"
 )
 
 var (
-	jsonOutput bool
-	outputPath string
-	specFile   string
-	verbose    bool
-	timeout    string
-	log        *logger.Logger
+	jsonOutput   bool
+	outputPath   string
+	specFile     string
+	verbose      bool
+	timeout      string
+	interfaceOpt string
+	log          *logger.Logger
+
+	// lastAuditReport caches the most recent audit result so that
+	// `nyx snapshot baseline` and `nyx drift status` can work immediately after an audit.
+	lastAuditReport *models.AuditReport
 )
 
 var rootCmd = &cobra.Command{
@@ -33,6 +39,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&specFile, "spec", "", "Path to YAML spec file")
 	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "Enable verbose output")
 	rootCmd.PersistentFlags().StringVar(&timeout, "timeout", "60s", "Timeout for operations")
+	rootCmd.PersistentFlags().StringVar(&interfaceOpt, "interface", "", "Network interface to use for local checks (e.g. \"Ethernet\", \"Wi-Fi\"). Leave empty for automatic selection.")
 
 	rootCmd.AddCommand(discoverCmd)
 	rootCmd.AddCommand(checkRoutesCmd)
@@ -71,4 +78,10 @@ var versionCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("nyx v%s\n", version.Version)
 	},
+}
+
+// GetSelectedInterface returns the user-specified interface name (if any).
+// Empty string means "auto".
+func GetSelectedInterface() string {
+	return interfaceOpt
 }
