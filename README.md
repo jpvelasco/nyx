@@ -49,6 +49,24 @@ sudo nyx audit --spec examples/homelab.yaml --json
 # Check environment health
 nyx doctor
 
+## Long-term confidence (the real reason to use nyx)
+
+Once you have a working spec:
+
+1. Run a clean audit from your "normal" location:
+   nyx audit --spec examples/homelab.yaml
+
+2. Capture it as your baseline:
+   nyx snapshot baseline
+
+3. Later (after changes, from another VLAN, etc.):
+   nyx audit --spec examples/homelab.yaml
+   nyx drift status
+
+Drift shows exactly what has changed — new failures, degradations, or things that got better — so you can trust your segmentation over time instead of guessing.
+
+This is the "sleep at night" part.
+
 # List registered providers
 nyx provider list
 ```

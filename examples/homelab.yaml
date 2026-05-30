@@ -1,141 +1,183 @@
-# Netaudit spec for a typical homelab with VLANs, VPN, and isolation policies.
-# Adjust CIDRs, gateways, and VPN settings to match your environment.
+# nyx spec for JP's real homelab topology (as of May 2026)
+# Generated from Omada controller + manual review.
+# This is the new baseline for meaningful audits.
 
 version: 1
-site: home-lab
+site: jp-homelab
 
 networks:
-  - name: mgmt
-    cidr: 10.0.10.0/24
-    gateway: 10.0.10.1
+  - name: nightfall
+    cidr: 192.168.0.0/24
+    gateway: 192.168.0.254
     zone: management
+    vlan: 1
+    description: "Default / management network"
+
+  - name: opus
+    cidr: 192.168.10.0/24
+    gateway: 192.168.10.1
+    zone: opus
     vlan: 10
+    description: "Isolated network (Opus)"
 
-  - name: clients
-    cidr: 10.0.20.0/24
-    gateway: 10.0.20.1
-    zone: clients
+  - name: valhalla
+    cidr: 192.168.20.0/24
+    gateway: 192.168.20.1
+    zone: personal
     vlan: 20
+    description: "Personal devices VLAN (main daily driver)"
 
-  - name: iot
-    cidr: 10.0.30.0/24
-    gateway: 10.0.30.1
-    zone: iot
+  - name: arcade
+    cidr: 192.168.30.0/24
+    gateway: 192.168.30.1
+    zone: games
     vlan: 30
+    description: "Game network (Arcade / Pinball area)"
 
-  - name: servers
-    cidr: 10.0.40.0/24
-    gateway: 10.0.40.1
-    zone: servers
+  - name: papyrus
+    cidr: 172.16.40.0/24
+    gateway: 172.16.40.1
+    zone: papyrus
     vlan: 40
+    description: "Isolated network (Papyrus)"
 
-  - name: guest
-    cidr: 10.0.50.0/24
-    gateway: 10.0.50.1
-    zone: guest
+  - name: cinema
+    cidr: 192.168.50.0/24
+    gateway: 192.168.50.1
+    zone: cinema
     vlan: 50
+    description: "Isolated network (Cinema)"
 
+  - name: pinball
+    cidr: 192.168.60.0/24
+    gateway: 192.168.60.1
+    zone: games
+    vlan: 60
+    description: "Game network (Pinball)"
+
+# VPN configuration (update with real details when available)
 vpn:
-  - name: home-wg
+  - name: primary-vpn
     type: wireguard
     interface: wg0
     expected_routes:
-      - 10.0.0.0/16
+      - 10.0.0.0/8
+      - 172.16.0.0/12
     mode: split-tunnel
 
+# Known probes / jump hosts for remote execution (update with current real probes)
 probes:
-  - name: laptop
-    host: 192.168.30.45
-    user: jp
-    vlan: iot
+  # Add real probes here as needed, e.g.:
+  # - name: valhalla-jump
+  #   host: 192.168.20.50
+  #   user: jp
+  #   vlan: valhalla
 
+# Isolation policies (realistic starting point for this topology)
 policies:
-  - name: iot-isolation
-    from: iot
-    to: management
+  - name: personal-isolation
+    from: valhalla
+    to: arcade
+    action: deny
+
+  - name: game-isolation
+    from: arcade
+    to: valhalla
+    action: deny
+
+  - name: pinball-isolation
+    from: pinball
+    to: valhalla
+    action: deny
+
+  - name: cinema-isolation
+    from: cinema
+    to: valhalla
+    action: deny
+
+  - name: management-protection
+    from: valhalla
+    to: nightfall
     action: deny
     except:
       - protocol: tcp
         port: 443
-        target: 10.0.10.5
+        target: 192.168.0.254   # Allow management access from personal
 
-  - name: guest-isolation
-    from: guest
-    to: management
-    action: deny
-
-  - name: guest-server-isolation
-    from: guest
-    to: servers
-    action: deny
-
-  - name: iot-server-isolation
-    from: iot
-    to: servers
-    action: deny
-
+# Core assertions for this environment
 assertions:
-  # Discovery: make sure management network has a reasonable number of hosts
+  # Discovery — Valhalla (personal) should have a reasonable number of devices
   - type: subnet_discovery
-    network: mgmt
-    expect_hosts_max: 30
+    network: valhalla
+    expect_hosts_min: 5
+    expect_hosts_max: 40
 
-  # Discovery: clients subnet should have some hosts
+  # Discovery — Arcade / game network
   - type: subnet_discovery
-    network: clients
+    network: arcade
     expect_hosts_min: 1
-    expect_hosts_max: 50
+    expect_hosts_max: 25
 
-  # Isolation: IoT should not reach management
+  # Discovery — Nightfall (management) should be small and stable
+  - type: subnet_discovery
+    network: nightfall
+    expect_hosts_min: 3
+    expect_hosts_max: 20
+
+  # Strong isolation: Personal devices should not reach game networks
   - type: isolation
-    from: iot
-    to: management
+    from: valhalla
+    to: arcade
     expect: deny
 
-  # Isolation: guest should not reach servers
   - type: isolation
-    from: guest
-    to: servers
+    from: valhalla
+    to: pinball
     expect: deny
 
-  # VPN: traffic to internal hosts should go through WireGuard
+  # Game networks should not reach personal devices
+  - type: isolation
+    from: arcade
+    to: valhalla
+    expect: deny
+
+  # Management should be protected from most zones
+  - type: isolation
+    from: valhalla
+    to: nightfall
+    expect: deny
+
+  # VPN routing check (update target as needed)
   - type: vpn_route
-    vpn: home-wg
-    target: 10.0.20.15
+    vpn: primary-vpn
+    target: 192.168.20.50   # Example internal host in Valhalla
     expect_tunnel: true
 
-  # Route: verify default gateway for management
+  # Route: verify default gateway for management (Nightfall)
   - type: route_check
-    target: 10.0.10.1
+    target: 192.168.0.254
 
-  # Port check: verify Jellyfin server ports are accessible
+  # Port check example on a server in Cinema (update IP as needed)
   - type: port_check
-    target: 10.0.40.5
-    ports: [8096, 8920]
+    target: 192.168.50.10
+    ports: [8096]
     expect: open
     scan_mode: polite
 
-  # DNS check: verify internal hostname resolves correctly
+  # DNS check example against management DNS
   - type: dns_check
     query: nas.home.lan
-    expect_ip: 10.0.40.5
-    server: 10.0.10.1
+    expect_ip: 192.168.0.50
+    server: 192.168.0.254
 
-  # Network health: verify gateway latency and packet loss
+  # Network health check against management gateway
   - type: network_health
-    target: 10.0.10.1
-    expect_latency_ms: 10
+    target: 192.168.0.254
+    expect_latency_ms: 5
     expect_loss_pct: 0
 
-  # ACL check: verify IoT VLAN is isolated via controller policy
+  # ACL check against a real Omada policy (update name as needed)
   - type: acl_check
     provider: omada
-    policy: iot-isolation
+    policy: personal-isolation
     expect: enforced
-
-  # Isolation from IoT VLAN (runs via SSH probe on laptop)
-  - type: isolation
-    from: iot
-    to: management
-    expect: deny
-    runner: laptop
