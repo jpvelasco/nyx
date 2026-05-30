@@ -1,141 +1,230 @@
-# Netaudit spec for a typical homelab with VLANs, VPN, and isolation policies.
-# Adjust CIDRs, gateways, and VPN settings to match your environment.
+# Example nyx spec — realistic 7-VLAN homelab with WireGuard, IoT isolation, and
+# controller-backed ACL enforcement. Adjust CIDRs, gateways, and policies to match
+# your environment.
 
 version: 1
 site: home-lab
 
+# ============================================================
+# Networks — one entry per VLAN
+# ============================================================
 networks:
+  - name: main
+    cidr: 192.168.0.0/24
+    gateway: 192.168.0.254
+    zone: trusted
+    vlan: 1
+
   - name: mgmt
-    cidr: 10.0.10.0/24
-    gateway: 10.0.10.1
+    cidr: 192.168.10.0/24
+    gateway: 192.168.10.1
     zone: management
     vlan: 10
 
-  - name: clients
-    cidr: 10.0.20.0/24
-    gateway: 10.0.20.1
-    zone: clients
+  - name: mobile
+    cidr: 192.168.20.0/24
+    gateway: 192.168.20.1
+    zone: mobile
     vlan: 20
 
-  - name: iot
-    cidr: 10.0.30.0/24
-    gateway: 10.0.30.1
-    zone: iot
+  - name: gaming
+    cidr: 192.168.30.0/24
+    gateway: 192.168.30.1
+    zone: gaming
     vlan: 30
 
   - name: servers
-    cidr: 10.0.40.0/24
-    gateway: 10.0.40.1
+    cidr: 172.16.40.0/24
+    gateway: 172.16.40.1
     zone: servers
     vlan: 40
 
-  - name: guest
-    cidr: 10.0.50.0/24
-    gateway: 10.0.50.1
-    zone: guest
+  - name: media
+    cidr: 192.168.50.0/24
+    gateway: 192.168.50.1
+    zone: media
     vlan: 50
 
+  - name: iot
+    cidr: 192.168.60.0/24
+    gateway: 192.168.60.1
+    zone: iot
+    vlan: 60
+
+# ============================================================
+# VPN
+# ============================================================
 vpn:
   - name: home-wg
     type: wireguard
     interface: wg0
     expected_routes:
-      - 10.0.0.0/16
+      - 192.168.0.0/16
     mode: split-tunnel
 
+# ============================================================
+# Probes — remote SSH hosts for checks that can't run locally
+# ============================================================
 probes:
-  - name: laptop
-    host: 192.168.30.45
-    user: jp
+  - name: iot-laptop
+    host: 192.168.60.15
+    user: deploy
     vlan: iot
 
+# ============================================================
+# Policies — declared intent for inter-VLAN traffic
+# ============================================================
 policies:
-  - name: iot-isolation
+  # IoT — internet only, no internal access
+  - name: iot-to-trusted-deny
+    from: iot
+    to: trusted
+    action: deny
+
+  - name: iot-to-management-deny
     from: iot
     to: management
     action: deny
-    except:
-      - protocol: tcp
-        port: 443
-        target: 10.0.10.5
 
-  - name: guest-isolation
-    from: guest
-    to: management
-    action: deny
-
-  - name: guest-server-isolation
-    from: guest
-    to: servers
-    action: deny
-
-  - name: iot-server-isolation
+  - name: iot-to-servers-deny
     from: iot
     to: servers
     action: deny
 
+  - name: iot-to-media-deny
+    from: iot
+    to: media
+    action: deny
+
+  - name: iot-to-mobile-deny
+    from: iot
+    to: mobile
+    action: deny
+
+  # Management — locked down, only trusted can reach it
+  - name: mobile-to-management-deny
+    from: mobile
+    to: management
+    action: deny
+
+  - name: gaming-to-management-deny
+    from: gaming
+    to: management
+    action: deny
+
+  - name: media-to-management-deny
+    from: media
+    to: management
+    action: deny
+
+  # Mobile — can reach trusted LAN, not servers directly
+  - name: mobile-to-servers-deny
+    from: mobile
+    to: servers
+    action: deny
+
+  # Trusted — can reach servers for printing, file shares, etc.
+  - name: trusted-to-servers-allow
+    from: trusted
+    to: servers
+    action: allow
+
+# ============================================================
+# Assertions — what we actually verify with live checks
+# ============================================================
 assertions:
-  # Discovery: make sure management network has a reasonable number of hosts
+
+  # --- Host discovery: verify expected device counts per VLAN ---
+
   - type: subnet_discovery
-    network: mgmt
+    network: main
+    expect_hosts_min: 10
     expect_hosts_max: 30
 
-  # Discovery: clients subnet should have some hosts
   - type: subnet_discovery
-    network: clients
+    network: mobile
     expect_hosts_min: 1
-    expect_hosts_max: 50
+    expect_hosts_max: 10
 
-  # Isolation: IoT should not reach management
+  - type: subnet_discovery
+    network: servers
+    expect_hosts_min: 1
+    expect_hosts_max: 10
+
+  - type: subnet_discovery
+    network: media
+    expect_hosts_min: 1
+    expect_hosts_max: 10
+
+  # --- Route checks: verify critical paths exist ---
+
+  - type: route_check
+    target: 192.168.0.254
+
+  - type: route_check
+    target: 172.16.40.1
+
+  - type: route_check
+    target: 192.168.50.1
+
+  - type: route_check
+    target: 8.8.8.8
+
+  # --- VPN: traffic to internal hosts should use WireGuard ---
+
+  - type: vpn_route
+    vpn: home-wg
+    target: 192.168.20.15
+    expect_tunnel: true
+
+  # --- Isolation: verify VLANs cannot reach each other when they shouldn't ---
+  # NOTE: These checks run from this machine (main/trusted VLAN).
+  # For accurate isolation verification of IoT and guest VLANs, run
+  # nyx from a host inside each source VLAN.
+
   - type: isolation
-    from: iot
+    from: trusted
+    to: iot
+    expect: deny
+
+  - type: isolation
+    from: trusted
     to: management
     expect: deny
 
-  # Isolation: guest should not reach servers
-  - type: isolation
-    from: guest
-    to: servers
-    expect: deny
+  # --- Health: verify gateway latency and packet loss ---
 
-  # VPN: traffic to internal hosts should go through WireGuard
-  - type: vpn_route
-    vpn: home-wg
-    target: 10.0.20.15
-    expect_tunnel: true
+  - type: network_health
+    target: 192.168.0.254
+    expect_latency_ms: 10
+    expect_loss_pct: 0
 
-  # Route: verify default gateway for management
-  - type: route_check
-    target: 10.0.10.1
+  # --- Port check: verify media server ports are accessible ---
 
-  # Port check: verify Jellyfin server ports are accessible
   - type: port_check
-    target: 10.0.40.5
+    target: 192.168.50.5
     ports: [8096, 8920]
     expect: open
     scan_mode: polite
 
-  # DNS check: verify internal hostname resolves correctly
+  # --- DNS check: verify internal hostname resolves correctly ---
+
   - type: dns_check
     query: nas.home.lan
-    expect_ip: 10.0.40.5
-    server: 10.0.10.1
+    expect_ip: 192.168.50.5
+    server: 192.168.0.254
 
-  # Network health: verify gateway latency and packet loss
-  - type: network_health
-    target: 10.0.10.1
-    expect_latency_ms: 10
-    expect_loss_pct: 0
+  # --- ACL check: verify IoT VLAN is isolated via controller policy ---
 
-  # ACL check: verify IoT VLAN is isolated via controller policy
   - type: acl_check
     provider: omada
-    policy: iot-isolation
+    policy: iot-to-management-deny
     expect: enforced
 
-  # Isolation from IoT VLAN (runs via SSH probe on laptop)
+  # --- Remote probe: isolation from IoT VLAN (runs via SSH) ---
+
   - type: isolation
     from: iot
     to: management
     expect: deny
-    runner: laptop
+    runner: iot-laptop
