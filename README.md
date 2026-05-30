@@ -13,7 +13,7 @@ Every command produces structured JSON for automation and AI agent consumption.
 git clone https://github.com/velasco-jp/nyx.git && cd nyx && make build
 
 # Discover hosts on a subnet
-sudo nyx discover --subnet 10.0.20.0/24
+sudo nyx discover --subnet 192.168.0.0/24
 
 # Run a full audit from a spec file
 sudo nyx audit --spec examples/homelab.yaml
@@ -92,54 +92,50 @@ version: 1
 site: home-lab
 
 networks:
-  - name: mgmt
-    cidr: 10.0.10.0/24
-    gateway: 10.0.10.1
-    zone: management
-  - name: clients
-    cidr: 10.0.20.0/24
-    gateway: 10.0.20.1
-    zone: clients
+  - name: main
+    cidr: 192.168.0.0/24
+    gateway: 192.168.0.254
+    zone: trusted
+    vlan: 1
   - name: iot
-    cidr: 10.0.30.0/24
-    gateway: 10.0.30.1
+    cidr: 192.168.60.0/24
+    gateway: 192.168.60.1
     zone: iot
+    vlan: 60
+  # ... more VLANs
 
 vpn:
   - name: home-wg
     type: wireguard
     interface: wg0
     expected_routes:
-      - 10.0.0.0/16
+      - 192.168.0.0/16
     mode: split-tunnel
 
 policies:
-  - name: iot-isolation
+  - name: iot-to-trusted-deny
     from: iot
-    to: management
+    to: trusted
     action: deny
-    except:
-      - protocol: tcp
-        port: 443
-        target: 10.0.10.5
 
 assertions:
   - type: subnet_discovery
-    network: mgmt
+    network: main
+    expect_hosts_min: 10
     expect_hosts_max: 30
   - type: isolation
-    from: clients
-    to: iot
+    from: iot
+    to: trusted
     expect: deny
   - type: vpn_route
     vpn: home-wg
-    target: 10.0.20.15
+    target: 192.168.20.15
     expect_tunnel: true
   - type: route_check
-    target: 10.0.10.1
+    target: 192.168.0.254
 ```
 
-See `examples/homelab.yaml` for a full example.
+See `examples/homelab.yaml` for the full 7-VLAN example. See `docs/walkthrough.md` for a step-by-step walkthrough from zero to drift detection.
 
 ### Assertion Types
 
@@ -251,13 +247,13 @@ Omada provider supports Omada SDN controller 6.x:
 
 ```bash
 # Get info (no auth required)
-nyx omada info --host 10.0.10.20
+nyx omada info --host 192.168.10.20
 
 # Generate spec from controller
-nyx omada import --host 10.0.10.20 --username admin --password password
+nyx omada import --host 192.168.10.20 --username admin --password password
 
 # Import and audit in one step
-nyx omada check --host 10.0.10.20 --username admin --password password --spec examples/homelab.yaml
+nyx omada check --host 192.168.10.20 --username admin --password password --spec examples/homelab.yaml
 ```
 
 Credentials can be passed via flags or env vars: `OMADA_HOST`, `OMADA_USERNAME`, `OMADA_PASSWORD`.
@@ -268,13 +264,13 @@ OPNsense provider supports info, import, and check:
 
 ```bash
 # Get info
-nyx opnsense info --host 10.0.10.1 --api-key <key> --api-secret <secret>
+nyx opnsense info --host 192.168.10.1 --api-key <key> --api-secret <secret>
 
 # Generate spec from OPNsense
-nyx opnsense import --host 10.0.10.1 --api-key <key> --api-secret <secret>
+nyx opnsense import --host 192.168.10.1 --api-key <key> --api-secret <secret>
 
 # Import and audit in one step
-nyx opnsense check --host 10.0.10.1 --api-key <key> --api-secret <secret> --spec examples/homelab.yaml
+nyx opnsense check --host 192.168.10.1 --api-key <key> --api-secret <secret> --spec examples/homelab.yaml
 ```
 
 ## Project Structure
