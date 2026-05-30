@@ -28,12 +28,12 @@ var doctorCmd = &cobra.Command{
 		var checks []models.CheckResult
 		allPass := true
 
-		// 1. nmap installed
+		// 1. nmap installed — we need it for scans
 		nmapCheck := models.NewCheckResult("doctor", "nmap_installed", "local", "nmap")
 		if nmap.Available() {
 			path, _ := exec.LookPath("nmap")
 			out, err := exec.Command(path, "--version").Output()
-			ver := "unknown version"
+			ver := "found"
 			if err == nil && len(out) > 0 {
 				line := string(out)
 				if nl := len(line); nl > 60 {
@@ -42,10 +42,10 @@ var doctorCmd = &cobra.Command{
 				ver = line
 			}
 			nmapCheck.Status = models.StatusPass
-			nmapCheck.Summary = fmt.Sprintf("nmap found: %s", ver)
+			nmapCheck.Summary = fmt.Sprintf("nmap: %s", ver)
 		} else {
 			nmapCheck.Status = models.StatusFail
-			nmapCheck.Summary = "nmap is not installed or not in PATH"
+			nmapCheck.Summary = "nmap is missing — we can't scan without it"
 			nmapCheck.Violations = append(nmapCheck.Violations, nmapInstallHint())
 			allPass = false
 		}
@@ -55,7 +55,7 @@ var doctorCmd = &cobra.Command{
 		// 2. Platform detection
 		platCheck := models.NewCheckResult("doctor", "platform", "local", runtime.GOOS)
 		platCheck.Status = models.StatusPass
-		platCheck.Summary = fmt.Sprintf("platform: %s/%s", runtime.GOOS, runtime.GOARCH)
+		platCheck.Summary = fmt.Sprintf("running on %s/%s", runtime.GOOS, runtime.GOARCH)
 		platCheck.Observed["goos"] = runtime.GOOS
 		platCheck.Observed["goarch"] = runtime.GOARCH
 		platCheck.Finish()
@@ -67,34 +67,54 @@ var doctorCmd = &cobra.Command{
 		logDirCheck := models.NewCheckResult("doctor", "log_directory", "local", logDir)
 		if err := os.MkdirAll(logDir, 0750); err != nil {
 			logDirCheck.Status = models.StatusFail
-			logDirCheck.Summary = fmt.Sprintf("cannot create log directory %s: %v", logDir, err)
+			logDirCheck.Summary = fmt.Sprintf("can't create log directory %s: %v", logDir, err)
 			allPass = false
 		} else {
 			testFile := logDir + "/.nyx_write_test"
 			if f, err := os.Create(testFile); err != nil {
 				logDirCheck.Status = models.StatusFail
-				logDirCheck.Summary = fmt.Sprintf("log directory %s is not writable: %v", logDir, err)
+				logDirCheck.Summary = fmt.Sprintf("log directory %s isn't writable: %v", logDir, err)
 				allPass = false
 			} else {
 				f.Close()
 				os.Remove(testFile)
 				logDirCheck.Status = models.StatusPass
-				logDirCheck.Summary = fmt.Sprintf("log directory %s is writable", logDir)
+				logDirCheck.Summary = fmt.Sprintf("log directory: %s (writable)", logDir)
 			}
 		}
 		logDirCheck.Finish()
 		checks = append(checks, *logDirCheck)
 
-		// 4. Internet route (informational)
+		// 4. Current network environment briefing ("I just landed" experience)
+		// When --spec is provided, we load it first so the briefing can match networks.
+		var specForBriefing *intent.Spec
+		if specFile != "" {
+			spec, err := intent.LoadSpec(specFile)
+			if err == nil {
+				specForBriefing = spec
+			}
+		}
+		brief := GetEnvironmentBriefing(specForBriefing)
+		envCheck := models.NewCheckResult("doctor", "network_environment", "local", "current location")
+		envCheck.Status = models.StatusPass
+		envCheck.Summary = brief.Summary
+		envCheck.Observed["interfaces"] = brief.ActiveInterfaces
+		envCheck.Observed["current_ips"] = brief.CurrentIPs
+		envCheck.Observed["matched_networks"] = brief.MatchedNetworks
+		envCheck.Observed["multi_homed"] = brief.MultiHomed
+		envCheck.Finish()
+		checks = append(checks, *envCheck)
+
+		// 5. Internet route (informational)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		routeCheck := models.NewCheckResult("doctor", "internet_route", "local", "8.8.8.8")
 		if route, err := system.GetRouteToTarget(ctx, "8.8.8.8"); err != nil {
 			routeCheck.Status = models.StatusWarn
-			routeCheck.Summary = "no route to 8.8.8.8 — internet connectivity may be unavailable"
+			routeCheck.Summary = "no internet route detected — are you connected to a network with internet?"
 		} else {
 			routeCheck.Status = models.StatusPass
-			routeCheck.Summary = fmt.Sprintf("internet route: via %s dev %s", route.Gateway, route.Device)
+			routeCheck.Summary = fmt.Sprintf("internet route: via %s (dev %s)", route.Gateway, route.Device)
 		}
 		routeCheck.Finish()
 		checks = append(checks, *routeCheck)
@@ -136,10 +156,20 @@ var doctorCmd = &cobra.Command{
 			}
 		}
 
+		// First Contact: show the full environment briefing with detail
+		if brief.Summary != "" {
+			fmt.Fprintln(w, "\n"+RenderEnvironmentBriefing(brief))
+		}
+
 		if allPass {
-			fmt.Fprintln(w, "\nnyx environment looks healthy.")
+			if specFile != "" {
+				fmt.Fprintln(w, fmt.Sprintf("Everything checks out — ready to audit. Try: nyx audit --spec %s", specFile))
+				fmt.Fprintln(w, "For ongoing confidence: nyx snapshot baseline then nyx drift status after future changes.")
+			} else {
+				fmt.Fprintln(w, "Everything checks out — nyx is ready to go.")
+			}
 		} else {
-			fmt.Fprintln(w, "\nnyx environment has issues. See above for details.")
+			fmt.Fprintln(w, "\nThere are issues above. Fix them and try again.")
 			os.Exit(2)
 		}
 		return nil
