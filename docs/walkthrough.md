@@ -4,16 +4,16 @@ This is what nyx actually does, step by step, with a real topology.
 
 ## Step 1 — You Have a Network
 
-Seven VLANs behind an Omada controller and an OPNsense router:
+Seven VLANs behind an SDN controller and a router:
 
 ```
-VLAN 1   (192.168.0.0/24)   — trusted LAN: desktop, laptop, guests on Wi-Fi
-VLAN 10  (192.168.10.0/24)  — management: OPNsense, UniFi, controller
-VLAN 20  (192.168.20.0/24)  — mobile: phones, tablets
-VLAN 30  (192.168.30.0/24)  — gaming: console, handhelds
-VLAN 40  (172.16.40.0/24)   — servers: NAS, printer, file shares
-VLAN 50  (192.168.50.0/24)  — media: Jellyfin, Plex, streaming
-VLAN 60  (192.168.60.0/24)  — IoT: smart bulbs, doorbells, cameras
+VLAN 10  (10.0.10.0/24)  — trusted: desktops, laptops, main workstations
+VLAN 11  (10.0.11.0/24)  — management: controllers, switches, monitoring
+VLAN 20  (10.0.20.0/24)  — personal: phones, tablets, laptops
+VLAN 30  (10.0.30.0/24)  — gaming: consoles, handhelds, game PCs
+VLAN 40  (10.0.40.0/24)  — servers: NAS, file shares, printers
+VLAN 50  (10.0.50.0/24)  — media: Jellyfin, Plex, streaming devices
+VLAN 60  (10.0.60.0/24)  — IoT: smart bulbs, cameras, sensors
 ```
 
 You set up ACLs to isolate IoT from everything else. You wired up WireGuard for remote access. You told yourself "it should be working."
@@ -30,8 +30,8 @@ site: home-lab
 
 networks:
   - name: main
-    cidr: 192.168.0.0/24
-    gateway: 192.168.0.254
+    cidr: 10.0.10.0/24
+    gateway: 10.0.10.1
     zone: trusted
     vlan: 1
   # ... six more VLANs ...
@@ -60,7 +60,7 @@ assertions:
   # Traffic to internal hosts should go through WireGuard
   - type: vpn_route
     vpn: home-wg
-    target: 192.168.20.15
+    target: 10.0.20.50
     expect_tunnel: true
 
   # Verify controller says IoT ACL is enforced
@@ -85,18 +85,18 @@ The output looks like:
 ```
 Site: home-lab
 Status: PASS
-Running from: 192.168.0.42 (inside: main)
+Running from: 10.0.10.42 (inside: trusted)
 
 --- 14 assertions, evaluated from this vantage point ---
 
 [PASS] subnet_discovery: 18 hosts found on main (expected 10-30)
 [PASS] isolation: iot -> management is denied as expected
-[PASS] vpn_route: traffic to 192.168.20.15 uses wg0 as expected
-[PASS] route_check: route to 192.168.0.254 exists via 192.168.0.254
+[PASS] vpn_route: traffic to 10.0.20.50 uses wg0 as expected
+[PASS] route_check: route to 10.0.10.1 exists via 10.0.10.1
 [PASS] acl_check: policy iot-to-management-deny is enforced
-[PASS] network_health: 192.168.0.254 latency 2ms, 0% loss
-[PASS] dns_check: nas.home.lan resolves to 192.168.50.5 as expected
-[PASS] port_check: 192.168.50.5 ports 8096,8920 are open
+[PASS] network_health: 10.0.10.1 latency 2ms, 0% loss
+[PASS] dns_check: nas.home.example resolves to 10.0.50.5 as expected
+[PASS] port_check: 10.0.50.5 ports 8096,8920 are open
 [PASS] isolation: trusted -> iot is denied as expected
 [PASS] isolation: trusted -> management is denied as expected
 [PASS] isolation: iot -> management is denied (from iot-laptop probe)
@@ -140,7 +140,7 @@ Summary:
 
 New failures (2) — attention needed:
   [FAIL] isolation: iot -> management is reachable (was denied)
-  [FAIL] network_health: 192.168.0.254 latency 45ms, 3% loss (expected <10ms, 0%)
+  [FAIL] network_health: 10.0.10.1 latency 45ms, 3% loss (expected <10ms, 0%)
 
 Next: investigate the checks that changed. Re-audit from other VLANs with --interface if the vantage point matters.
 ```

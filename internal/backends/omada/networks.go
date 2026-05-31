@@ -31,13 +31,13 @@ type Network struct {
 	Name          string `json:"name"`
 	Purpose       string `json:"purpose"`
 	VLANID        int    `json:"vlan"`
-	GatewaySubnet string `json:"gatewaySubnet"` // e.g. "192.168.0.254/24"
+	GatewaySubnet string `json:"gatewaySubnet"` // e.g. "10.0.10.1/24"
 	Isolated      bool   `json:"isolation"`
 	DHCPEnabled   bool   `json:"dhcpEnabled"`
 }
 
 // CIDR derives the network CIDR from GatewaySubnet.
-// "192.168.0.254/24" → "192.168.0.0/24"
+// "10.0.10.1/24" → "10.0.10.0/24"
 func (n Network) CIDR() string {
 	if n.GatewaySubnet == "" {
 		return ""
@@ -51,7 +51,7 @@ func (n Network) CIDR() string {
 }
 
 // Gateway extracts the gateway IP from GatewaySubnet.
-// "192.168.0.254/24" → "192.168.0.254"
+// "10.0.10.1/24" → "10.0.10.1"
 func (n Network) Gateway() string {
 	if n.GatewaySubnet == "" {
 		return ""

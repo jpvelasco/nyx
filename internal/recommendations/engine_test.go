@@ -1,5 +1,9 @@
 package recommendations
 
+// NOTE: All network names, zones, CIDRs, and IPs used in this test file are
+// fictional/example data used only for testing the recommendations logic.
+// They do not represent any real network.
+
 import (
 	"strings"
 	"testing"
@@ -181,7 +185,7 @@ func TestGenerateRecommendations_ProbeAlreadyDeclared(t *testing.T) {
 	}
 
 	runner := models.RunnerContext{
-		Networks: []string{"nightfall"},
+		Networks: []string{"trusted"},
 	}
 
 	recs, err := GenerateRecommendations(failures, spec, runner)

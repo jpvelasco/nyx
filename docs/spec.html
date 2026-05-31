@@ -403,13 +403,13 @@ site: home-lab
 
 networks:
   - name: trusted
-    cidr: 192.168.0.0/24
-    gateway: 192.168.0.254
+    cidr: 10.0.10.0/24
+    gateway: 10.0.10.1
     zone: trusted
-    vlan: 1
+    vlan: 10
   - name: iot
-    cidr: 192.168.60.0/24
-    gateway: 192.168.60.1
+    cidr: 10.0.60.0/24
+    gateway: 10.0.60.1
     zone: iot
     vlan: 60
 

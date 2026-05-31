@@ -216,20 +216,20 @@ func buildAssertions(networks []intent.Network, omadaNets []Network, clients []C
 func inferZone(n Network) string {
 	lower := strings.ToLower(n.Name)
 	switch {
-	case strings.Contains(lower, "mgmt") || strings.Contains(lower, "manage") || strings.Contains(lower, "opus"):
+	case strings.Contains(lower, "mgmt") || strings.Contains(lower, "manage"):
 		return "management"
-	case strings.Contains(lower, "iot") || strings.Contains(lower, "pinball"):
+	case strings.Contains(lower, "iot"):
 		return "iot"
 	case strings.Contains(lower, "guest"):
 		return "guest"
-	case strings.Contains(lower, "server") || strings.Contains(lower, "papyrus"):
+	case strings.Contains(lower, "server"):
 		return "servers"
-	case strings.Contains(lower, "cinema") || strings.Contains(lower, "media"):
+	case strings.Contains(lower, "media") || strings.Contains(lower, "cinema"):
 		return "media"
-	case strings.Contains(lower, "arcade") || strings.Contains(lower, "gaming") || strings.Contains(lower, "game"):
+	case strings.Contains(lower, "game") || strings.Contains(lower, "gaming"):
 		return "gaming"
-	case strings.Contains(lower, "valhalla") || strings.Contains(lower, "mobile") || strings.Contains(lower, "wifi"):
-		return "mobile"
+	case strings.Contains(lower, "mobile") || strings.Contains(lower, "wifi"):
+		return "personal"
 	default:
 		if n.Isolated {
 			return "isolated"
