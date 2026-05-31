@@ -121,7 +121,7 @@ func classifyIsolation(f models.CheckResult, groups map[string]*failureGroup, sp
 	// Extract from/to from the target or summary
 	from, to := parseIsolationTarget(f.Target)
 	if from == "" {
-		// Try to extract from summary like "isolation violation: valhalla can reach arcade"
+		// Try to extract from summary like "isolation violation: personal can reach gaming"
 		from, to = parseIsolationFromSummary(summary)
 	}
 
@@ -1190,7 +1190,7 @@ func deduplicateStrings(in []string) []string {
 	return out
 }
 
-// parseIsolationTarget extracts from/to from an isolation check target like "valhalla -> arcade".
+// parseIsolationTarget extracts from/to from an isolation check target like "personal -> gaming".
 func parseIsolationTarget(target string) (from, to string) {
 	parts := strings.Split(target, " -> ")
 	if len(parts) == 2 {
@@ -1199,9 +1199,9 @@ func parseIsolationTarget(target string) (from, to string) {
 	return "", ""
 }
 
-// parseIsolationFromSummary extracts from/to from a summary like "isolation violation: valhalla can reach arcade".
+// parseIsolationFromSummary extracts from/to from a summary like "isolation violation: personal can reach gaming".
 func parseIsolationFromSummary(summary string) (from, to string) {
-	// Pattern: "... valhalla can reach arcade"
+	// Pattern: "... personal can reach gaming"
 	idx := strings.Index(summary, "can reach")
 	if idx < 0 {
 		idx = strings.Index(summary, "cannot reach")
