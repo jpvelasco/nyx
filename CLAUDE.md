@@ -48,7 +48,7 @@ YAML spec → intent.LoadSpec → audit.Engine.Run → []CheckResult → report.
 
 - `internal/providers/omada` — OmadaProvider wrapping `backends/omada`. Supports info, import, check.
 
-- `internal/providers/opnsense` — OPNsenseProvider stub. Supports info only (calls `/api/core/firmware/running` with Basic Auth).
+- `internal/providers/opnsense` — OPNsenseProvider fully implemented (Info + ImportSpec + Check). Uses API key/secret auth.
 
 - `internal/recommendations` — Analyzes `[]CheckResult` failures and produces prioritized `Recommendation` structs. Called by `audit` in human mode only (not JSON).
 
@@ -86,5 +86,12 @@ Pass credentials via flags (`--host`, `--username`, `--password`) or env vars (`
 ## What's Stubbed
 
 - `internal/backends/batfish` — returns `ErrNotImplemented`, planned for v2
-- `internal/providers/opnsense` — Info only; ImportSpec/Check return `ErrCapabilityUnsupported`
 - HTTP MCP transport — only stdio is implemented
+
+## Documentation
+
+- Primary spec reference: `docs/spec.html` (modern, with diagram and light/dark support)
+- Narrative walkthrough: `docs/walkthrough.md`
+- The old `docs/spec.md` has been removed.
+
+All personal/homelab-specific data has been removed from source, tests, docs, and examples for guest/viewer readiness. Personal specs belong in `specs/` (gitignored) or outside the repo.
