@@ -10,7 +10,7 @@ Every command produces structured JSON for automation and AI agent consumption.
 
 ```bash
 # Build from source (requires Go 1.22+)
-git clone https://github.com/velasco-jp/nyx.git && cd nyx && make build
+git clone https://github.com/jpvelasco/nyx.git && cd nyx && make build
 
 # Discover hosts on a subnet
 sudo nyx discover --subnet 192.168.0.0/24
