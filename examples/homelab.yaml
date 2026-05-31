@@ -1,30 +1,32 @@
-# Example nyx spec — realistic 7-VLAN homelab with WireGuard, IoT isolation, and
-# controller-backed ACL enforcement. Adjust CIDRs, gateways, and policies to match
-# your environment.
+# nyx Example Spec — Realistic 7-VLAN Homelab
+#
+# This is a realistic, generic example of a segmented homelab network.
+# It demonstrates all major features: networks, policies, probes, VPN,
+# and the full range of assertion types including remote checks via runners.
 
 version: 1
 site: home-lab
 
 # ============================================================
-# Networks — one entry per VLAN
+# Networks — one entry per VLAN / segment
 # ============================================================
 networks:
-  - name: main
+  - name: trusted
     cidr: 192.168.0.0/24
     gateway: 192.168.0.254
     zone: trusted
     vlan: 1
 
-  - name: mgmt
+  - name: management
     cidr: 192.168.10.0/24
     gateway: 192.168.10.1
     zone: management
     vlan: 10
 
-  - name: mobile
+  - name: personal
     cidr: 192.168.20.0/24
     gateway: 192.168.20.1
-    zone: mobile
+    zone: personal
     vlan: 20
 
   - name: gaming
@@ -63,19 +65,19 @@ vpn:
     mode: split-tunnel
 
 # ============================================================
-# Probes — remote SSH hosts for checks that can't run locally
+# Probes — remote SSH hosts for checks that must run from other VLANs
 # ============================================================
 probes:
-  - name: iot-laptop
+  - name: iot-probe
     host: 192.168.60.15
-    user: deploy
+    user: admin
     vlan: iot
 
 # ============================================================
-# Policies — declared intent for inter-VLAN traffic
+# Policies — declared intent for inter-zone traffic
 # ============================================================
 policies:
-  # IoT — internet only, no internal access
+  # IoT — internet only, no access to internal networks
   - name: iot-to-trusted-deny
     from: iot
     to: trusted
@@ -96,14 +98,14 @@ policies:
     to: media
     action: deny
 
-  - name: iot-to-mobile-deny
+  - name: iot-to-personal-deny
     from: iot
-    to: mobile
+    to: personal
     action: deny
 
-  # Management — locked down, only trusted can reach it
-  - name: mobile-to-management-deny
-    from: mobile
+  # Management — highly restricted
+  - name: personal-to-management-deny
+    from: personal
     to: management
     action: deny
 
@@ -117,32 +119,30 @@ policies:
     to: management
     action: deny
 
-  # Mobile — can reach trusted LAN, not servers directly
-  - name: mobile-to-servers-deny
-    from: mobile
+  # Personal devices — can reach trusted and media, but not servers directly
+  - name: personal-to-servers-deny
+    from: personal
     to: servers
     action: deny
 
-  # Trusted — can reach servers for printing, file shares, etc.
+  # Trusted can reach servers for management/printing
   - name: trusted-to-servers-allow
     from: trusted
     to: servers
     action: allow
 
 # ============================================================
-# Assertions — what we actually verify with live checks
+# Assertions — live checks that validate the declared intent
 # ============================================================
 assertions:
-
-  # --- Host discovery: verify expected device counts per VLAN ---
-
+  # --- Subnet discovery: verify expected number of devices per segment ---
   - type: subnet_discovery
-    network: main
+    network: trusted
     expect_hosts_min: 10
     expect_hosts_max: 30
 
   - type: subnet_discovery
-    network: mobile
+    network: personal
     expect_hosts_min: 1
     expect_hosts_max: 10
 
@@ -157,7 +157,6 @@ assertions:
     expect_hosts_max: 10
 
   # --- Route checks: verify critical paths exist ---
-
   - type: route_check
     target: 192.168.0.254
 
@@ -170,18 +169,13 @@ assertions:
   - type: route_check
     target: 8.8.8.8
 
-  # --- VPN: traffic to internal hosts should use WireGuard ---
-
+  # --- VPN routing ---
   - type: vpn_route
     vpn: home-wg
     target: 192.168.20.15
     expect_tunnel: true
 
-  # --- Isolation: verify VLANs cannot reach each other when they shouldn't ---
-  # NOTE: These checks run from this machine (main/trusted VLAN).
-  # For accurate isolation verification of IoT and guest VLANs, run
-  # nyx from a host inside each source VLAN.
-
+  # --- Isolation checks (run from trusted vantage by default) ---
   - type: isolation
     from: trusted
     to: iot
@@ -192,39 +186,39 @@ assertions:
     to: management
     expect: deny
 
-  # --- Health: verify gateway latency and packet loss ---
+  - type: isolation
+    from: personal
+    to: servers
+    expect: deny
 
+  # --- Network health ---
   - type: network_health
     target: 192.168.0.254
     expect_latency_ms: 10
     expect_loss_pct: 0
 
-  # --- Port check: verify media server ports are accessible ---
-
+  # --- Port checks ---
   - type: port_check
     target: 192.168.50.5
     ports: [8096, 8920]
     expect: open
     scan_mode: polite
 
-  # --- DNS check: verify internal hostname resolves correctly ---
-
+  # --- DNS resolution ---
   - type: dns_check
     query: nas.home.lan
     expect_ip: 192.168.50.5
     server: 192.168.0.254
 
-  # --- ACL check: verify IoT VLAN is isolated via controller policy ---
-
+  # --- Controller ACL enforcement (requires omada provider credentials) ---
   - type: acl_check
     provider: omada
     policy: iot-to-management-deny
     expect: enforced
 
-  # --- Remote probe: isolation from IoT VLAN (runs via SSH) ---
-
+  # --- Remote isolation check via probe (runs from inside IoT) ---
   - type: isolation
     from: iot
     to: management
     expect: deny
-    runner: iot-laptop
+    runner: iot-probe

@@ -64,7 +64,7 @@ YAML spec → intent.LoadSpec → audit.Engine.Run → []CheckResult → report.
 
 ## Spec Format
 
-Version 1 intent spec: `networks`, `vpn`, `probes`, `policies`, `assertions`. Eight assertion types: `subnet_discovery`, `isolation`, `vpn_route`, `route_check`, `port_check`, `dns_check`, `network_health`, `acl_check`. `ValidateSpec` enforces required fields per type. Probes declare SSH nodes for remote checks. See `examples/homelab.yaml` and `testdata/valid_spec.yaml`. Assertions can use `runner: <probe-name>` to execute checks remotely via SSH from a different VLAN.
+Version 1 intent spec: `networks`, `vpn`, `probes`, `policies`, `assertions`. Eight assertion types: `subnet_discovery`, `isolation`, `vpn_route`, `route_check`, `port_check`, `dns_check`, `network_health`, `acl_check`. `ValidateSpec` enforces required fields per type. Probes declare SSH nodes for remote checks. See `examples/homelab.yaml` (realistic 7-VLAN example) and `testdata/valid_spec.yaml`. The authoritative spec reference is now `docs/spec.html`. Assertions can use `runner: <probe-name>` to execute checks remotely via SSH from a different VLAN.
 
 ## Provider System
 

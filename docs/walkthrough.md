@@ -22,7 +22,7 @@ But should it be?
 
 ## Step 2 — Declare What You Intend
 
-Write a YAML spec that describes your network. Not the whole thing — just the parts that matter. See `examples/homelab.yaml` for the full file. Here's the idea:
+Write a YAML spec that describes your network. Not the whole thing — just the parts that matter. See `docs/spec.html` for the complete reference, and `examples/homelab.yaml` for a realistic working example. Here's the idea:
 
 ```yaml
 version: 1

@@ -135,7 +135,8 @@ assertions:
     target: 192.168.0.254
 ```
 
-See `examples/homelab.yaml` for the complete 7-VLAN homelab example used throughout this document.  
+See `examples/homelab.yaml` for the complete realistic 7-VLAN example used throughout this document.  
+See the [full structured spec reference](docs/spec.html) (modern HTML) or the [original Markdown version](docs/spec.md).  
 See `docs/walkthrough.md` for the full narrative — what it actually feels like to land on a complex network, hit real problems, get useful recommendations, and use drift to sleep better at night.
 
 ### Assertion Types
