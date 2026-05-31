@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nyx • Intent Spec Reference</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'media', // respects user's system (light/dark) preference automatically
+            theme: {
+                extend: {}
+            }
+        };
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600&amp;display=swap');
+        
+        :root {
+            --font-sans: 'Inter', system_ui, sans-serif;
+            --font-display: 'Space Grotesk', 'Inter', system_ui, sans-serif;
+
+            /* Light mode (default) */
+            --bg-body: #f8fafc;
+            --bg-card: #ffffff;
+            --bg-nav: #ffffff;
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --accent-cyan: #0e7490;
+            --accent-indigo: #4f46e5;
+            --code-bg: #f1f5f9;
+            --code-border: #e2e8f0;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                /* Dark mode - Cypherpunk bluish gaming theme */
+                --bg-body: #0a0c1a;
+                --bg-card: #111827;
+                --bg-nav: #0a0c1a;
+                --text-primary: #f1f5f9;
+                --text-secondary: #cbd5e1;
+                --text-muted: #94a3b8;
+                --border: #1e2937;
+                --accent-cyan: #67e8f9;
+                --accent-indigo: #818cf8;
+                --code-bg: #0f172a;
+                --code-border: #1e2937;
+            }
+        }
+        
+        body {
+            font-family: var(--font-sans);
+            background-color: var(--bg-body);
+            color: var(--text-primary);
+        }
+        
+        .font-display {
+            font-family: var(--font-display);
+        }
+
+        .section-header {
+            font-family: var(--font-display);
+            letter-spacing: -0.025em;
+        }
+
+        .spec-card {
+            background-color: var(--bg-card);
+            border-color: var(--border);
+            transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
+                       box-shadow 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+        }
+        
+        .spec-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 
+                       0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+
+        .yaml-block {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .nav-active {
+            color: var(--accent-cyan);
+            font-weight: 600;
+        }
+
+        .feature-badge {
+            font-size: 0.75rem;
+            padding: 1px 9px;
+            border-radius: 9999px;
+        }
+
+        .modern-table {
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+        
+        .modern-table th {
+            background: var(--bg-card);
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        .anchor-link {
+            opacity: 0;
+            transition: opacity 0.1s;
+        }
+        
+        h2:hover .anchor-link,
+        h3:hover .anchor-link {
+            opacity: 1;
+        }
+
+        .metric {
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Accents that adapt */
+        .accent-cyan { color: var(--accent-cyan); }
+        .accent-indigo { color: var(--accent-indigo); }
+        
+        .code-block {
+            background-color: var(--code-bg);
+            border: 1px solid var(--code-border);
+        }
+
+        /* Dark mode specific enhancements */
+        @media (prefers-color-scheme: dark) {
+            .spec-card:hover {
+                box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3), 
+                           0 4px 6px -4px rgb(0 0 0 / 0.3);
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 dark:bg-[#0a0c1a] dark:text-slate-100">
+    <!-- Top Nav -->
+    <nav class="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-[#0a0c1a] sticky top-0 z-50">
+        <div class="max-w-screen-xl mx-auto px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center gap-x-3">
+                    <div class="flex items-center gap-x-2">
+                        <div class="w-9 h-9 bg-gradient-to-br from-cyan-400 to-indigo-500 rounded-xl flex items-center justify-center">
+                            <span class="text-[#0a0c1a] font-bold text-xl tracking-tighter">n</span>
+                        </div>
+                        <div>
+                            <span class="font-semibold text-2xl tracking-tighter text-slate-900 dark:text-white">nyx</span>
+                        </div>
+                    </div>
+                    <div class="px-3 py-1 bg-slate-100 dark:bg-slate-800 text-cyan-700 dark:text-cyan-400 text-xs font-medium rounded-full border border-slate-200 dark:border-slate-700">v1</div>
+                </div>
+                
+                <div class="flex items-center gap-x-8 text-sm">
+                    <a href="#overview" class="text-slate-600 dark:text-slate-400 hover:text-cyan-700 dark:hover:text-cyan-400 transition-colors">Overview</a>
+                    <a href="#structure" class="text-slate-600 dark:text-slate-400 hover:text-cyan-700 dark:hover:text-cyan-400 transition-colors">Spec Structure</a>
+                    <a href="#assertions" class="text-slate-600 dark:text-slate-400 hover:text-cyan-700 dark:hover:text-cyan-400 transition-colors">Assertions</a>
+                    <a href="#advanced" class="text-slate-600 dark:text-slate-400 hover:text-cyan-700 dark:hover:text-cyan-400 transition-colors">Advanced</a>
+                    <a href="#features" class="text-slate-600 dark:text-slate-400 hover:text-cyan-700 dark:hover:text-cyan-400 transition-colors">Features</a>
+                </div>
+                
+                <div class="flex items-center gap-x-3">
+                    <a href="https://github.com/jpvelasco/nyx" 
+                       class="inline-flex items-center gap-x-2 px-4 py-2 text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 transition-colors">
+                        <i class="fab fa-github"></i>
+                        <span>GitHub</span>
+                    </a>
+                    <a href="../README.md" 
+                       class="inline-flex items-center gap-x-2 px-4 py-2 text-sm font-semibold bg-slate-900 dark:bg-white text-white dark:text-[#0a0c1a] rounded-xl hover:bg-slate-800 dark:hover:bg-cyan-400 transition-colors">
+                        <span>View README</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <div class="max-w-screen-xl mx-auto px-8 pt-16 pb-12">
+        <div class="max-w-2xl">
+            <div class="inline-flex items-center gap-x-2 px-4 h-8 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm font-medium mb-6 text-cyan-700 dark:text-cyan-400">
+                <div class="w-2 h-2 bg-cyan-600 dark:bg-cyan-400 rounded-full animate-pulse"></div>
+                <span>Version 1 • Stable</span>
+            </div>
+            
+            <h1 class="text-6xl font-semibold tracking-tighter section-header leading-none mb-4 text-slate-900 dark:text-white">
+                The nyx<br>Intent Spec
+            </h1>
+            <p class="text-2xl text-slate-600 dark:text-slate-400 tracking-tight">
+                A declarative YAML format for describing how your network <span class="font-medium text-slate-900 dark:text-white">should</span> behave.
+            </p>
+            
+            <div class="flex items-center gap-x-4 mt-8">
+                <a href="#structure" 
+                   class="inline-flex items-center justify-center h-12 px-8 rounded-2xl bg-cyan-700 dark:bg-cyan-400 text-white dark:text-[#0a0c1a] font-semibold hover:bg-cyan-800 dark:hover:bg-white transition-colors">
+                    Read the spec
+                </a>
+                <a href="../examples/homelab.yaml" download
+                   class="inline-flex items-center justify-center h-12 px-6 rounded-2xl border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-800 font-medium text-slate-700 dark:text-slate-300 transition-colors">
+                    <i class="fa-solid fa-download mr-2"></i>
+                    Download example
+                </a>
+            </div>
+            
+            <div class="mt-6 flex items-center gap-x-6 text-sm text-slate-500 dark:text-slate-400">
+                <div class="flex items-center gap-x-1.5">
+                    <i class="fa-solid fa-check text-cyan-600 dark:text-cyan-400"></i>
+                    <span>8 assertion types</span>
+                </div>
+                <div class="flex items-center gap-x-1.5">
+                    <i class="fa-solid fa-check text-cyan-600 dark:text-cyan-400"></i>
+                    <span>Remote execution via probes</span>
+                </div>
+                <div class="flex items-center gap-x-1.5">
+                    <i class="fa-solid fa-check text-cyan-600 dark:text-cyan-400"></i>
+                    <span>Controller integration</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="max-w-screen-xl mx-auto px-8">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+                <div class="text-sm text-slate-500 dark:text-slate-400">Core concept</div>
+                <div class="mt-1 text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">Declare → Verify</div>
+            </div>
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+                <div class="text-sm text-slate-500 dark:text-slate-400">Vantage awareness</div>
+                <div class="mt-1 text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">Built-in</div>
+                <div class="text-xs text-slate-500 dark:text-slate-500 mt-1">Knows which VLAN you're scanning from</div>
+            </div>
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+                <div class="text-sm text-slate-500 dark:text-slate-400">Long-term confidence</div>
+                <div class="mt-1 text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">Snapshot + Drift</div>
+            </div>
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+                <div class="text-sm text-slate-500 dark:text-slate-400">AI / Agent ready</div>
+                <div class="mt-1 text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">JSON + MCP</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Overview -->
+    <div id="overview" class="max-w-screen-xl mx-auto px-8 pt-16">
+        <div class="max-w-3xl">
+            <h2 class="text-4xl font-semibold tracking-tighter section-header mb-4 text-white">Why a spec?</h2>
+            <div class="prose prose-invert max-w-none text-[15px] leading-relaxed text-slate-300">
+                <p>Most homelab and lab networks are built with good intentions but rarely verified over time. 
+                nyx lets you write down exactly how you expect your network to behave — then continuously checks that reality matches your intent.</p>
+                
+                <p class="mt-3">The spec is the single source of truth. It is deliberately human-readable and version-controllable.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Core Structure -->
+    <div id="structure" class="max-w-screen-xl mx-auto px-8 pt-16">
+        <div class="flex items-end justify-between mb-6">
+            <div>
+                <span class="text-sm font-semibold tracking-[1px] text-cyan-400">THE MODEL</span>
+                <h2 class="text-4xl font-semibold tracking-tighter section-header text-white">Spec Structure</h2>
+            </div>
+        </div>
+
+        <div class="max-w-3xl mb-8">
+            <p class="text-slate-300 text-[15px]">
+                A nyx spec has two layers. The first layer describes <strong>how you intend your network to be structured and what should be allowed</strong>. 
+                The second layer — <strong>assertions</strong> — contains the actual checks nyx will run to verify that reality matches your intent.
+            </p>
+            <p class="text-slate-400 text-sm mt-3">
+                Most fields exist to give context and meaning to your assertions. The more accurately you model your network, the more useful the results become.
+            </p>
+        </div>
+
+        <!-- Visual Diagram: Two-Layer Mental Model -->
+        <div class="mb-10">
+            <div class="text-xs font-semibold tracking-[1px] text-cyan-400 mb-3">HOW A SPEC WORKS</div>
+            
+            <div class="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6">
+                <div class="grid gap-4">
+                    
+                    <!-- Layer 1: Network Model -->
+                    <div>
+                        <div class="flex items-center gap-2 mb-2">
+                            <div class="text-[10px] font-bold tracking-[1.5px] uppercase px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">Layer 1 — Network Model</div>
+                        </div>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            <div class="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3">
+                                <div class="font-mono text-xs text-cyan-600 dark:text-cyan-400">networks</div>
+                                <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Segments &amp; zones</div>
+                            </div>
+                            <div class="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3">
+                                <div class="font-mono text-xs text-cyan-600 dark:text-cyan-400">policies</div>
+                                <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Access intent</div>
+                            </div>
+                            <div class="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3">
+                                <div class="font-mono text-xs text-cyan-600 dark:text-cyan-400">vpn</div>
+                                <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Tunnel expectations</div>
+                            </div>
+                            <div class="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3">
+                                <div class="font-mono text-xs text-cyan-600 dark:text-cyan-400">probes</div>
+                                <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Remote vantage points</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Connection Arrow -->
+                    <div class="flex justify-center">
+                        <div class="flex items-center gap-2 text-xs text-cyan-600 dark:text-cyan-400">
+                            <div class="h-px w-8 bg-gradient-to-r from-transparent via-cyan-400 to-transparent"></div>
+                            <span class="font-medium tracking-wide">provides context for</span>
+                            <div class="h-px w-8 bg-gradient-to-r from-cyan-400 to-transparent"></div>
+                            <i class="fa-solid fa-arrow-down"></i>
+                        </div>
+                    </div>
+
+                    <!-- Layer 2: Executable Checks -->
+                    <div>
+                        <div class="flex items-center gap-2 mb-2">
+                            <div class="text-[10px] font-bold tracking-[1.5px] uppercase px-3 py-1 rounded-full bg-gradient-to-r from-cyan-400/10 to-indigo-400/10 text-cyan-600 dark:text-cyan-400 border border-cyan-400/30">Layer 2 — Executable Checks</div>
+                        </div>
+                        <div class="rounded-3xl border-2 border-cyan-400/40 bg-gradient-to-br from-cyan-400/5 to-transparent p-5">
+                            <div class="font-mono text-sm font-semibold text-cyan-700 dark:text-cyan-300">assertions</div>
+                            <div class="text-sm text-slate-600 dark:text-slate-300 mt-1">The concrete checks nyx actually runs against your live network.</div>
+                            <div class="text-xs text-slate-500 dark:text-slate-400 mt-2">This is what produces results, recommendations, and drift data.</div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+            
+            <div class="text-center mt-3 text-xs text-slate-500 dark:text-slate-400">
+                A good spec is mostly about writing clear <span class="font-medium text-slate-700 dark:text-slate-200">assertions</span> backed by an accurate model.
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            <!-- Top level fields -->
+            <div class="lg:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8">
+                <h3 class="font-semibold text-lg mb-4 text-slate-900 dark:text-white">Top-level fields</h3>
+
+                <div class="mb-6">
+                    <div class="text-xs uppercase tracking-widest text-cyan-400 mb-1">Identity</div>
+                    <div class="space-y-3 text-sm">
+                        <div class="flex gap-4">
+                            <div class="w-28 shrink-0 font-mono text-xs text-slate-500 dark:text-slate-300 pt-0.5">version</div>
+                            <div class="text-slate-600 dark:text-slate-100">Always <code class="bg-slate-100 dark:bg-slate-800 px-1 rounded">1</code></div>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="w-28 shrink-0 font-mono text-xs text-slate-500 dark:text-slate-300 pt-0.5">site</div>
+                            <div class="text-slate-600 dark:text-slate-100">Human-readable name for this environment</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <div class="text-xs uppercase tracking-widest text-cyan-400 mb-1">Network Model</div>
+                    <div class="space-y-3 text-sm">
+                        <div class="flex gap-4">
+                            <div class="w-28 shrink-0 font-mono text-xs text-slate-500 dark:text-slate-300 pt-0.5">networks</div>
+                            <div class="text-slate-600 dark:text-slate-100">The segments/zones in your network (CIDRs, gateways, optional VLANs)</div>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="w-28 shrink-0 font-mono text-xs text-slate-500 dark:text-slate-300 pt-0.5">policies</div>
+                            <div class="text-slate-600 dark:text-slate-100">Your declared access rules between zones (allow/deny intent)</div>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="w-28 shrink-0 font-mono text-xs text-slate-500 dark:text-slate-300 pt-0.5">vpn</div>
+                            <div class="text-slate-600 dark:text-slate-100">Expected VPN tunnels and the routes that should use them</div>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="w-28 shrink-0 font-mono text-xs text-slate-500 dark:text-slate-300 pt-0.5">probes</div>
+                            <div class="text-slate-600 dark:text-slate-100">Optional remote hosts (via SSH) so checks can run from other segments</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="text-xs uppercase tracking-widest text-cyan-400 mb-1">Executable Checks</div>
+                    <div class="space-y-3 text-sm">
+                        <div class="flex gap-4">
+                            <div class="w-28 shrink-0 font-mono text-xs text-slate-500 dark:text-slate-300 pt-0.5">assertions</div>
+                            <div class="text-slate-600 dark:text-slate-100"><strong>The actual checks nyx will execute.</strong> This is the core of the spec.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Example -->
+            <div class="lg:col-span-3 code-block rounded-3xl p-8 font-mono text-sm overflow-auto text-slate-700 dark:text-cyan-300">
+                <div class="flex items-center justify-between mb-3 text-xs text-slate-500 dark:text-slate-300">
+                    <div>examples/homelab.yaml (simplified)</div>
+                </div>
+                <pre class="text-[13px] leading-relaxed"><code>version: 1
+site: home-lab
+
+networks:
+  - name: trusted
+    cidr: 10.0.10.0/24
+    gateway: 10.0.10.1
+    zone: trusted
+    vlan: 10
+  - name: iot
+    cidr: 10.0.60.0/24
+    gateway: 10.0.60.1
+    zone: iot
+    vlan: 60
+
+policies:
+  - name: iot-isolation
+    from: iot
+    to: trusted
+    action: deny
+
+assertions:
+  - type: subnet_discovery
+    network: trusted
+    expect_hosts_min: 10
+    expect_hosts_max: 30
+
+  - type: isolation
+    from: trusted
+    to: iot
+    expect: deny</code></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Assertions -->
+    <div id="assertions" class="max-w-screen-xl mx-auto px-8 pt-16">
+        <div class="mb-6">
+            <span class="text-sm font-semibold tracking-[1px] text-cyan-400">THE CHECKS</span>
+            <h2 class="text-4xl font-semibold tracking-tighter section-header text-white">Assertion Types</h2>
+            <p class="text-slate-600 dark:text-slate-400 mt-2">These are the live validations nyx can perform.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <!-- Assertion cards -->
+            <div class="spec-card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+                <div class="flex items-center gap-x-3 mb-3">
+                    <i class="fa-solid fa-search text-xl text-blue-500"></i>
+                    <div class="font-semibold text-slate-900 dark:text-white">subnet_discovery</div>
+                </div>
+                <div class="text-sm text-slate-600 dark:text-slate-100">Discovers hosts on a network using nmap and validates host counts.</div>
+                <div class="mt-4 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-100 p-3 rounded-2xl">
+                    expect_hosts_min<br>
+                    expect_hosts_max
+                </div>
+            </div>
+
+            <div class="spec-card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+                <div class="flex items-center gap-x-3 mb-3">
+                    <i class="fa-solid fa-shield-halved text-xl text-red-500"></i>
+                    <div class="font-semibold text-slate-900 dark:text-white">isolation</div>
+                </div>
+                <div class="text-sm text-slate-600 dark:text-slate-100">Verifies that one zone cannot reach another (or can, if expected).</div>
+                <div class="mt-4 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-100 p-3 rounded-2xl">
+                    from, to, expect: deny|allow
+                </div>
+            </div>
+
+            <div class="spec-card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+                <div class="flex items-center gap-x-3 mb-3">
+                    <i class="fa-solid fa-route text-xl text-violet-500"></i>
+                    <div class="font-semibold text-slate-900 dark:text-white">route_check</div>
+                </div>
+                <div class="text-sm text-slate-600 dark:text-slate-100">Confirms a specific target is reachable via the expected gateway.</div>
+                <div class="mt-4 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-100 p-3 rounded-2xl">
+                    target
+                </div>
+            </div>
+
+            <div class="spec-card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+                <div class="flex items-center gap-x-3 mb-3">
+                    <i class="fa-solid fa-lock text-xl text-emerald-500"></i>
+                    <div class="font-semibold text-slate-900 dark:text-white">vpn_route</div>
+                </div>
+                <div class="text-sm text-slate-600 dark:text-slate-100">Ensures traffic to a target actually flows through the declared VPN tunnel.</div>
+                <div class="mt-4 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-100 p-3 rounded-2xl">
+                    vpn, target, expect_tunnel
+                </div>
+            </div>
+
+            <div class="spec-card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+                <div class="flex items-center gap-x-3 mb-3">
+                    <i class="fa-solid fa-heart-pulse text-xl text-rose-500"></i>
+                    <div class="font-semibold text-slate-900 dark:text-white">network_health</div>
+                </div>
+                <div class="text-sm text-slate-600 dark:text-slate-100">Measures latency and packet loss to a target.</div>
+                <div class="mt-4 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-100 p-3 rounded-2xl">
+                    target, expect_latency_ms, expect_loss_pct
+                </div>
+            </div>
+
+            <div class="spec-card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+                <div class="flex items-center gap-x-3 mb-3">
+                    <i class="fa-solid fa-plug text-xl text-amber-500"></i>
+                    <div class="font-semibold text-slate-900 dark:text-white">port_check</div>
+                </div>
+                <div class="text-sm text-slate-600 dark:text-slate-100">Verifies specific TCP ports are open and reachable.</div>
+                <div class="mt-4 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-100 p-3 rounded-2xl">
+                    target, ports[], scan_mode
+                </div>
+            </div>
+
+            <div class="spec-card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+                <div class="flex items-center gap-x-3 mb-3">
+                    <i class="fa-solid fa-globe text-xl text-sky-500"></i>
+                    <div class="font-semibold text-slate-900 dark:text-white">dns_check</div>
+                </div>
+                <div class="text-sm text-slate-600 dark:text-slate-100">Validates that a hostname resolves to the expected IP.</div>
+                <div class="mt-4 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-100 p-3 rounded-2xl">
+                    query, expect_ip, server
+                </div>
+            </div>
+
+            <div class="spec-card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+                <div class="flex items-center gap-x-3 mb-3">
+                    <i class="fa-solid fa-server text-xl text-indigo-500"></i>
+                    <div class="font-semibold text-slate-900 dark:text-white">acl_check</div>
+                </div>
+                <div class="text-sm text-slate-600 dark:text-slate-100">Verifies that a policy is actually enforced by a supported controller (Omada, future OPNsense).</div>
+                <div class="mt-4 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-100 p-3 rounded-2xl">
+                    provider, policy, expect: enforced
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Advanced Features -->
+    <div id="advanced" class="max-w-screen-xl mx-auto px-8 pt-16">
+        <h2 class="text-4xl font-semibold tracking-tighter section-header mb-6 text-slate-900 dark:text-white">Advanced Capabilities</h2>
+        
+        <div class="grid md:grid-cols-2 gap-6">
+            <!-- Probes -->
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8">
+                <div class="flex items-center gap-3 mb-4">
+                    <i class="fa-solid fa-satellite text-2xl text-teal-600 dark:text-teal-400"></i>
+                    <div>
+                        <div class="font-semibold text-xl text-slate-900 dark:text-white">Probes &amp; Runners</div>
+                        <div class="text-xs text-teal-600 dark:text-teal-400 font-medium">VANTAGE AWARENESS</div>
+                    </div>
+                </div>
+                <p class="text-sm text-slate-600 dark:text-slate-100">Run assertions from inside other VLANs using SSH probes. This is essential for accurate isolation testing of IoT or guest networks.</p>
+                <div class="mt-5 code-block text-emerald-700 dark:text-emerald-300 text-xs p-4 rounded-2xl font-mono">
+                    runner: iot-probe
+                </div>
+            </div>
+
+            <!-- Providers -->
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8">
+                <div class="flex items-center gap-3 mb-4">
+                    <i class="fa-solid fa-plug text-2xl text-orange-600 dark:text-orange-400"></i>
+                    <div>
+                        <div class="font-semibold text-xl text-slate-900 dark:text-white">Providers</div>
+                    </div>
+                </div>
+                <div class="space-y-2 text-sm text-slate-700 dark:text-slate-100">
+                    <div><span class="font-semibold text-slate-900 dark:text-white">Omada</span> — import + live ACL enforcement checks</div>
+                    <div><span class="font-semibold text-slate-900 dark:text-white">OPNsense</span> — import + check</div>
+                    <div class="text-xs text-slate-500 dark:text-slate-300 mt-3">Providers register themselves and expose <code>nyx omada</code> and <code>nyx opnsense</code> subcommands.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tool Features -->
+    <div id="features" class="max-w-screen-xl mx-auto px-8 pt-16 pb-20">
+        <h2 class="text-4xl font-semibold tracking-tighter section-header mb-6 text-slate-900 dark:text-white">What nyx Delivers</h2>
+        
+        <div class="grid md:grid-cols-3 gap-4">
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-7">
+                <div class="font-semibold mb-2 text-slate-900 dark:text-white">First Contact</div>
+                <div class="text-sm text-slate-600 dark:text-slate-100">`doctor` and bare invocation instantly tell you where you are on the network relative to your spec, including multi-homed detection and clear next steps.</div>
+            </div>
+            
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-7">
+                <div class="font-semibold mb-2 text-slate-900 dark:text-white">Recommendations Engine</div>
+                <div class="text-sm text-slate-600 dark:text-slate-100">When things fail, nyx doesn't just say "fail". It classifies root causes (vantage, isolation breach, service down, etc.) and proposes concrete fixes with ready-to-paste YAML patches.</div>
+            </div>
+            
+            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-7">
+                <div class="font-semibold mb-2 text-slate-900 dark:text-white">Snapshot + Drift</div>
+                <div class="text-sm text-slate-600 dark:text-slate-100">Save known-good states. Later, `drift status` shows exactly what changed — new failures, fixed issues, or degradations — giving you long-term confidence instead of one-off audits.</div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0a0c1a]">
+        <div class="max-w-screen-xl mx-auto px-8 py-8 text-sm text-slate-600 dark:text-slate-300 flex items-center justify-between">
+            <div>
+                Made for homelab and lab operators who want to sleep at night.
+            </div>
+            <div class="flex items-center gap-x-4 text-xs">
+                <a href="../README.md" class="hover:text-slate-700 dark:hover:text-slate-300">Back to README →</a>
+                <span class="text-slate-300 dark:text-slate-600">|</span>
+                <a href="spec.md" class="hover:text-slate-700 dark:hover:text-slate-300">Legacy Markdown version</a>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Simple Tailwind script for any future interactivity
+        console.log('%c[nyx] Spec HTML loaded — modern reference document ready.', 'color:#64748b');
+    </script>
+</body>
+</html>
