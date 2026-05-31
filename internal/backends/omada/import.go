@@ -256,7 +256,7 @@ func resolveRuleEndpoint(epType, name, id string, netsByID map[string]intent.Net
 // sanitizeName converts an Omada display name to a lowercase slug safe for
 // use as a YAML key. Strips parenthetical suffixes like "(Default)".
 func sanitizeName(s string) string {
-	// Strip parenthetical suffixes e.g. "Nightfall(Default)" → "Nightfall"
+	// Strip parenthetical suffixes e.g. "Trusted(Default)" → "Trusted"
 	if i := strings.Index(s, "("); i > 0 {
 		s = s[:i]
 	}

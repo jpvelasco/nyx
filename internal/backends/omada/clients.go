@@ -11,7 +11,7 @@ type ConnectedClient struct {
 	IP          string `json:"ip"`
 	Name        string `json:"name"`
 	Hostname    string `json:"hostName"`
-	NetworkName string `json:"networkName"` // e.g. "Nightfall", "Pinball"
+	NetworkName string `json:"networkName"` // e.g. "Trusted", "IoT"
 	SSID        string `json:"ssid"`
 	VLANID      int    `json:"vid"`
 	Wireless    bool   `json:"wireless"`
