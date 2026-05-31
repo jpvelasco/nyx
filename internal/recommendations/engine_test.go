@@ -33,21 +33,21 @@ func TestGenerateRecommendations_VantagePointAggregation(t *testing.T) {
 			CheckType: "isolation",
 			Target:    "personal -> iot",
 			Status:    models.StatusFail,
-			Summary:   "isolation violation: valhalla can reach pinball",
+			Summary:   "isolation violation: personal can reach iot",
 			Violations: []string{"expected deny but traffic is reachable"},
 		},
 		{
 			CheckType: "isolation",
-			Target:    "arcade -> valhalla",
+			Target:    "gaming -> personal",
 			Status:    models.StatusFail,
-			Summary:   "isolation violation: arcade can reach valhalla",
+			Summary:   "isolation violation: gaming can reach personal",
 			Violations: []string{"expected deny but traffic is reachable"},
 		},
 		{
 			CheckType: "isolation",
-			Target:    "valhalla -> nightfall",
+			Target:    "personal -> trusted",
 			Status:    models.StatusFail,
-			Summary:   "isolation violation: valhalla can reach nightfall",
+			Summary:   "isolation violation: personal can reach trusted",
 			Violations: []string{"expected deny but traffic is reachable"},
 		},
 	}
@@ -117,25 +117,25 @@ func TestGenerateRecommendations_IsolationBreach(t *testing.T) {
 	failures := []models.CheckResult{
 		{
 			CheckType: "isolation",
-			Target:    "arcade -> valhalla",
+			Target:    "gaming -> personal",
 			Status:    models.StatusFail,
-			Summary:   "isolation violation: arcade can reach valhalla",
+			Summary:   "isolation violation: gaming can reach personal",
 			Violations: []string{"expected deny but traffic is reachable"},
 		},
 	}
 
 	spec := &intent.Spec{
 		Networks: []intent.Network{
-			{Name: "arcade", CIDR: "192.168.30.0/24", Zone: "games"},
-			{Name: "valhalla", CIDR: "192.168.20.0/24", Zone: "personal"},
+			{Name: "gaming", CIDR: "192.168.30.0/24", Zone: "gaming"},
+			{Name: "personal", CIDR: "192.168.20.0/24", Zone: "personal"},
 		},
 		Policies: []intent.Policy{
-			{Name: "game-isolation", From: "arcade", To: "valhalla", Action: "deny"},
+			{Name: "game-isolation", From: "gaming", To: "personal", Action: "deny"},
 		},
 	}
 
 	runner := models.RunnerContext{
-		Networks: []string{"arcade"}, // runner IS in arcade
+		Networks: []string{"gaming"}, // runner IS in gaming
 	}
 
 	recs, err := GenerateRecommendations(failures, spec, runner)
@@ -205,9 +205,9 @@ func TestGenerateRecommendations_VPNFailure(t *testing.T) {
 	failures := []models.CheckResult{
 		{
 			CheckType: "vpn_route",
-			Target:    "192.168.20.50",
+			Target:    "192.168.20.77",
 			Status:    models.StatusFail,
-			Summary:   "192.168.20.50 routed via 192.168.0.112 (not tunnel)",
+			Summary:   "192.168.20.77 routed via 192.168.10.112 (not tunnel)",
 			Expected:  map[string]interface{}{"vpn": "primary-vpn"},
 		},
 	}
@@ -248,9 +248,9 @@ func TestGenerateRecommendations_NetworkUnreachable(t *testing.T) {
 		},
 		{
 			CheckType: "dns_check",
-			Target:    "nas.home.lan",
+			Target:    "nas.home.example",
 			Status:    models.StatusError,
-			Summary:   "failed to resolve nas.home.lan",
+			Summary:   "failed to resolve nas.home.example",
 		},
 	}
 
@@ -281,7 +281,7 @@ func TestGenerateRecommendations_ACLNotEnforced(t *testing.T) {
 			Target:     "personal-isolation",
 			Status:     models.StatusFail,
 			Summary:    `ACL policy "personal-isolation" is NOT enforced in Omada`,
-			Violations: []string{"no matching ACL rule found for policy \"personal-isolation\" (valhalla -> arcade deny)"},
+			Violations: []string{"no matching ACL rule found for policy \"personal-isolation\" (personal -> gaming deny)"},
 		},
 	}
 
@@ -309,9 +309,9 @@ func TestGenerateRecommendations_HostDown(t *testing.T) {
 	failures := []models.CheckResult{
 		{
 			CheckType: "port_check",
-			Target:    "192.168.50.10",
+			Target:    "192.168.50.55",
 			Status:    models.StatusFail,
-			Summary:   "port check failed on 192.168.50.10",
+			Summary:   "port check failed on 192.168.50.55",
 			Violations: []string{"port 8096: expected open, got filtered"},
 		},
 	}
@@ -337,7 +337,7 @@ func TestGenerateRecommendations_DNSFailure(t *testing.T) {
 	failures := []models.CheckResult{
 		{
 			CheckType: "dns_check",
-			Target:    "nas.home.lan",
+			Target:    "nas.home.example",
 			Status:    models.StatusFail,
 			Summary:   "dns_check failed: nas.home.lan resolved to 10.0.0.5 (expected 10.0.0.10)",
 			Violations: []string{"expected IP 10.0.0.10, got 10.0.0.5"},
@@ -368,9 +368,9 @@ func TestGenerateRecommendations_NetworkDegraded(t *testing.T) {
 	failures := []models.CheckResult{
 		{
 			CheckType: "network_health",
-			Target:    "192.168.20.1",
+			Target:    "192.168.20.254",
 			Status:    models.StatusFail,
-			Summary:   "network_health failed: 192.168.20.1 latency 500ms (expected <100ms)",
+			Summary:   "network_health failed: 192.168.20.254 latency 500ms (expected <100ms)",
 			Violations: []string{"latency 500ms exceeds threshold 100ms"},
 		},
 	}
@@ -396,7 +396,7 @@ func TestGenerateRecommendations_DiscoveryCountViolation(t *testing.T) {
 	failures := []models.CheckResult{
 		{
 			CheckType: "subnet_discovery",
-			Target:    "valhalla",
+			Target:    "personal",
 			Status:    models.StatusFail,
 			Summary:   "25 hosts discovered in 192.168.20.0/24",
 			Observed:  map[string]interface{}{"total": float64(25)},
@@ -472,60 +472,60 @@ func TestRealAuditScenario(t *testing.T) {
 	failures := []models.CheckResult{
 		{
 			CheckType:  "isolation",
-			Target:     "valhalla -> arcade",
+			Target:     "personal -> gaming",
 			Status:     models.StatusFail,
-			Summary:    "isolation violation: valhalla can reach arcade",
+			Summary:    "isolation violation: personal can reach gaming",
 			Violations: []string{"expected deny but traffic is reachable"},
 		},
 		{
 			CheckType:  "isolation",
-			Target:     "valhalla -> pinball",
+			Target:     "personal -> iot",
 			Status:     models.StatusFail,
-			Summary:    "isolation violation: valhalla can reach pinball",
+			Summary:    "isolation violation: personal can reach iot",
 			Violations: []string{"expected deny but traffic is reachable"},
 		},
 		{
 			CheckType:  "isolation",
-			Target:     "arcade -> valhalla",
+			Target:     "gaming -> personal",
 			Status:     models.StatusFail,
-			Summary:    "isolation violation: arcade can reach valhalla",
+			Summary:    "isolation violation: gaming can reach personal",
 			Violations: []string{"expected deny but traffic is reachable"},
 		},
 		{
 			CheckType:  "isolation",
-			Target:     "valhalla -> nightfall",
+			Target:     "personal -> trusted",
 			Status:     models.StatusFail,
-			Summary:    "isolation violation: valhalla can reach nightfall",
+			Summary:    "isolation violation: personal can reach trusted",
 			Violations: []string{"expected deny but traffic is reachable"},
 		},
 		{
 			CheckType: "vpn_route",
-			Target:    "192.168.20.50",
+			Target:    "192.168.20.77",
 			Status:    models.StatusFail,
-			Summary:   "192.168.20.50 routed via 192.168.0.112 (not tunnel)",
+			Summary:   "192.168.20.77 routed via 192.168.10.112 (not tunnel)",
 			Expected:  map[string]interface{}{"vpn": "primary-vpn"},
 		},
 		{
 			CheckType: "port_check",
-			Target:    "192.168.50.10",
+			Target:    "192.168.50.55",
 			Status:    models.StatusFail,
-			Summary:   "port check failed on 192.168.50.10",
+			Summary:   "port check failed on 192.168.50.55",
 			Violations: []string{"port 8096: expected open, got filtered"},
 		},
 		{
 			CheckType: "dns_check",
-			Target:    "nas.home.lan",
+			Target:    "nas.home.example",
 			Status:    models.StatusError,
-			Summary:   "failed to resolve nas.home.lan",
+			Summary:   "failed to resolve nas.home.example",
 		},
 	}
 
 	spec := &intent.Spec{
 		Networks: []intent.Network{
-			{Name: "trusted", CIDR: "192.168.0.0/24", Zone: "trusted", Gateway: "192.168.0.254"},
+			{Name: "trusted", CIDR: "192.168.10.0/24", Zone: "trusted", Gateway: "192.168.10.1"},
 			{Name: "personal", CIDR: "192.168.20.0/24", Zone: "personal", Gateway: "192.168.20.1"},
 			{Name: "gaming", CIDR: "192.168.30.0/24", Zone: "gaming", Gateway: "192.168.30.1"},
-			{Name: "iot", CIDR: "192.168.60.0/24", Zone: "iot", Gateway: "192.168.60.1"},
+			{Name: "iot", CIDR: "192.168.40.0/24", Zone: "iot", Gateway: "192.168.40.1"},
 			{Name: "media", CIDR: "192.168.50.0/24", Zone: "media", Gateway: "192.168.50.1"},
 		},
 		VPN: []intent.VPNConfig{
