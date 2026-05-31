@@ -1,5 +1,8 @@
 # netaudit Product and Behavior Spec
 
+> **Note:** This is the original Markdown specification document.  
+> The current, modern reference is available at [docs/spec.html](../spec.html).
+
 ## Purpose
 
 `netaudit` is a CLI-first network intent validation tool for private SDN-style networks, especially homelabs, labs, and developer-operated environments.

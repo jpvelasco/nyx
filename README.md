@@ -24,7 +24,7 @@ nyx doctor
 
 ### Longer-Term Confidence
 
-Once you've verified your network is behaving correctly, lock in that baseline and track drift over time:
+Once you've verified your network is behaving correctly, lock in that baseline. Future drift checks will show you exactly what changed — new failures, degradations, or fixes — so you can sleep at night knowing your segmentation and policies are still holding.
 
 ```bash
 # After a clean audit, save the baseline
@@ -34,7 +34,7 @@ nyx snapshot baseline
 sudo nyx audit --spec examples/homelab.yaml && nyx drift status
 ```
 
-The drift report tells you exactly what's new, what's fixed, and what's degraded — so you always know if your segmentation is still holding.
+For the full story of what this feels like on a real multi-VLAN homelab (including when things go wrong and drift catches it), see [docs/walkthrough.md](docs/walkthrough.md).
 
 ## Prerequisites
 
@@ -135,7 +135,9 @@ assertions:
     target: 192.168.0.254
 ```
 
-See `examples/homelab.yaml` for the full 7-VLAN example. See `docs/walkthrough.md` for a step-by-step walkthrough from zero to drift detection.
+See `examples/homelab.yaml` for the complete realistic 7-VLAN example used throughout this document.  
+See the [full structured spec reference](docs/spec.html) (modern HTML) or the [original Markdown version](docs/spec.md).  
+See `docs/walkthrough.md` for the full narrative — what it actually feels like to land on a complex network, hit real problems, get useful recommendations, and use drift to sleep better at night.
 
 ### Assertion Types
 
@@ -243,10 +245,10 @@ nyx provider list
 
 ### Omada SDN
 
-Omada provider supports Omada SDN controller 6.x:
+Omada provider supports Omada SDN controller 6.x. Pass your controller address (usually on your management VLAN):
 
 ```bash
-# Get info (no auth required)
+# Example using a typical management IP
 nyx omada info --host 192.168.10.20
 
 # Generate spec from controller
@@ -260,10 +262,10 @@ Credentials can be passed via flags or env vars: `OMADA_HOST`, `OMADA_USERNAME`,
 
 ### OPNsense
 
-OPNsense provider supports info, import, and check:
+OPNsense provider supports info, import, and check. Use your OPNsense address (typically the LAN or a management IP):
 
 ```bash
-# Get info
+# Example using a typical management IP
 nyx opnsense info --host 192.168.10.1 --api-key <key> --api-secret <secret>
 
 # Generate spec from OPNsense
