@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	providers "github.com/velasco-jp/nyx/internal/providers"
+	providers "github.com/jpvelasco/nyx/internal/providers"
 )
 
 type mockProvider struct{ name string }

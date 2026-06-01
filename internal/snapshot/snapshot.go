@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/models"
 )
 
 const (

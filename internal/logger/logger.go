@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/velasco-jp/nyx/internal/version"
+	"github.com/jpvelasco/nyx/internal/version"
 )
 
 // Logger writes JSON-line entries to a rotating log file.

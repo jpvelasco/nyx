@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/velasco-jp/nyx/internal/logger"
+	"github.com/jpvelasco/nyx/internal/logger"
 )
 
 func TestLogWritesJSONLine(t *testing.T) {

@@ -6,9 +6,9 @@ import (
 	"net"
 	"strings"
 
-	"github.com/velasco-jp/nyx/internal/audit"
-	"github.com/velasco-jp/nyx/internal/intent"
-	providers "github.com/velasco-jp/nyx/internal/providers"
+	"github.com/jpvelasco/nyx/internal/audit"
+	"github.com/jpvelasco/nyx/internal/intent"
+	providers "github.com/jpvelasco/nyx/internal/providers"
 )
 
 // OPNsenseProvider implements providers.Provider for OPNsense firewalls.

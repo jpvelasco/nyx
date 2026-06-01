@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/velasco-jp/nyx/internal/mcp"
-	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/mcp"
+	"github.com/jpvelasco/nyx/internal/models"
 )
 
 func TestVerifyIsolationNotStub(t *testing.T) {

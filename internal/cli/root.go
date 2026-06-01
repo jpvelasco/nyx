@@ -5,9 +5,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/velasco-jp/nyx/internal/logger"
-	"github.com/velasco-jp/nyx/internal/models"
-	"github.com/velasco-jp/nyx/internal/version"
+	"github.com/jpvelasco/nyx/internal/logger"
+	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/version"
 )
 
 var (

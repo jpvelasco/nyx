@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/models"
 )
 
 // reDigStatus matches the dig response status line: ";; ->>HEADER<<- ... status: SERVFAIL"

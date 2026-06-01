@@ -10,15 +10,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/velasco-jp/nyx/internal/backends/dns"
-	"github.com/velasco-jp/nyx/internal/backends/health"
-	"github.com/velasco-jp/nyx/internal/backends/nmap"
-	"github.com/velasco-jp/nyx/internal/backends/omada"
-	"github.com/velasco-jp/nyx/internal/backends/system"
-	"github.com/velasco-jp/nyx/internal/intent"
-	"github.com/velasco-jp/nyx/internal/models"
-	"github.com/velasco-jp/nyx/internal/probe"
-	"github.com/velasco-jp/nyx/internal/seendb"
+	"github.com/jpvelasco/nyx/internal/backends/dns"
+	"github.com/jpvelasco/nyx/internal/backends/health"
+	"github.com/jpvelasco/nyx/internal/backends/nmap"
+	"github.com/jpvelasco/nyx/internal/backends/omada"
+	"github.com/jpvelasco/nyx/internal/backends/system"
+	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/probe"
+	"github.com/jpvelasco/nyx/internal/seendb"
 )
 
 const (

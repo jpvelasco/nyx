@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/velasco-jp/nyx/internal/models"
-	"github.com/velasco-jp/nyx/internal/recommendations"
+	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/recommendations"
 )
 
 // RenderJSON writes the report as JSON

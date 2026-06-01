@@ -1,4 +1,4 @@
-module github.com/velasco-jp/nyx
+module github.com/jpvelasco/nyx
 
 go 1.25.0
 

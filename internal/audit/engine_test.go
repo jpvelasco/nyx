@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/velasco-jp/nyx/internal/audit"
-	"github.com/velasco-jp/nyx/internal/backends/nmap"
-	"github.com/velasco-jp/nyx/internal/intent"
-	"github.com/velasco-jp/nyx/internal/models"
-	"github.com/velasco-jp/nyx/internal/seendb"
+	"github.com/jpvelasco/nyx/internal/audit"
+	"github.com/jpvelasco/nyx/internal/backends/nmap"
+	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/seendb"
 )
 
 func TestDiscoveryWarnPreservedWhenZeroHostsWithinBounds(t *testing.T) {

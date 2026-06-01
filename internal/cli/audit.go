@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/velasco-jp/nyx/internal/audit"
-	"github.com/velasco-jp/nyx/internal/intent"
-	"github.com/velasco-jp/nyx/internal/models"
-	"github.com/velasco-jp/nyx/internal/recommendations"
-	"github.com/velasco-jp/nyx/internal/report"
-	"github.com/velasco-jp/nyx/internal/snapshot"
+	"github.com/jpvelasco/nyx/internal/audit"
+	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/recommendations"
+	"github.com/jpvelasco/nyx/internal/report"
+	"github.com/jpvelasco/nyx/internal/snapshot"
 )
 
 var auditCmd = &cobra.Command{

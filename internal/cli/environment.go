@@ -5,8 +5,8 @@ import (
 	"net"
 	"strings"
 
-	"github.com/velasco-jp/nyx/internal/intent"
-	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/models"
 )
 
 // EnvironmentBriefing contains a friendly summary of the current machine's network situation.

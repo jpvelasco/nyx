@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/velasco-jp/nyx/internal/audit"
-	omadabackend "github.com/velasco-jp/nyx/internal/backends/omada"
-	providers "github.com/velasco-jp/nyx/internal/providers"
+	"github.com/jpvelasco/nyx/internal/audit"
+	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
+	providers "github.com/jpvelasco/nyx/internal/providers"
 )
 
 // OmadaProvider implements providers.Provider for TP-Link Omada SDN controllers.

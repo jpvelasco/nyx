@@ -5,8 +5,8 @@ import (
 	"net"
 
 	"github.com/spf13/cobra"
-	"github.com/velasco-jp/nyx/internal/backends/system"
-	"github.com/velasco-jp/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/backends/system"
+	"github.com/jpvelasco/nyx/internal/intent"
 )
 
 var listInterfacesCmd = &cobra.Command{
