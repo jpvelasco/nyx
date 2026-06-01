@@ -47,6 +47,7 @@ var auditCmd = &cobra.Command{
 
 		engine := audit.NewEngine(spec)
 		engine.Interface = GetSelectedInterface()
+		engine.WarnVirtual = warnVirtual
 		auditReport, err := engine.Run(ctx)
 		if err != nil {
 			return fmt.Errorf("audit failed: %w", err)
