@@ -66,3 +66,29 @@ func TestLooksVirtual(t *testing.T) {
 		})
 	}
 }
+
+func TestIsVirtualIfaceName(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"VMware Network Adapter VMnet8", true},
+		{"vEthernet (Default Switch)", true},
+		{"vEthernet (WSL (Hyper-V firewall))", true},
+		{"docker0", true},
+		{"br-abc123", true},
+		{"virbr0", true},
+		{"eth0", false},
+		{"Ethernet", false},
+		{"en0", false},
+		{"Wi-Fi", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isVirtualIfaceName(tt.name)
+			if got != tt.want {
+				t.Errorf("isVirtualIfaceName(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}

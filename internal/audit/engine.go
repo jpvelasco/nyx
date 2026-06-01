@@ -347,7 +347,7 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 	// Virtual network suppression: if 0 hosts and nmap evidence suggests a VM
 	// hypervisor MAC, check seendb. First occurrence → WARN + ack. Subsequent
 	// occurrences → SKIP (unless WarnVirtual override is set).
-	if hostCount == 0 && looksVirtual(result.Evidence) {
+	if hostCount == 0 && (looksVirtual(result.Evidence) || looksVirtualByCIDR(net.CIDR)) {
 		db, _ := seendb.Load()
 		cidr := net.CIDR
 		if e.WarnVirtual || !db.IsVirtualAcked(cidr) {
