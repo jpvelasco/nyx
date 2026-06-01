@@ -2,7 +2,6 @@ package seendb
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -18,12 +17,25 @@ type SeenDB struct {
 	path            string
 }
 
-func Load() (*SeenDB, error) {
+// New returns an empty in-memory SeenDB with no backing file.
+// Acks are accepted but not persisted.
+func New() *SeenDB {
+	return &SeenDB{VirtualNetworks: map[string]Entry{}}
+}
+
+// Load reads from ~/.nyx/seen.json. On any error it returns a valid in-memory
+// DB with no path so that callers never receive a nil pointer; acks will be
+// lost across runs but no audit command will panic or fail.
+func Load() *SeenDB {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf("get home dir: %w", err)
+		return &SeenDB{VirtualNetworks: map[string]Entry{}}
 	}
-	return LoadFrom(filepath.Join(home, ".nyx", "seen.json"))
+	db, err := LoadFrom(filepath.Join(home, ".nyx", "seen.json"))
+	if err != nil {
+		return &SeenDB{VirtualNetworks: map[string]Entry{}}
+	}
+	return db
 }
 
 func LoadFrom(path string) (*SeenDB, error) {
