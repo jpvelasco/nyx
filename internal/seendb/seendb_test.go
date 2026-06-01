@@ -34,10 +34,12 @@ func TestAckAndReload(t *testing.T) {
 }
 
 func TestAckUnwritablePathIsGraceful(t *testing.T) {
-	db, _ := seendb.LoadFrom("/nonexistent/path/seen.json")
+	// Use NUL (Windows reserved device) or an empty path to trigger error
+	db, _ := seendb.LoadFrom("NUL\\seen.json")
 	err := db.AckVirtual("10.0.0.0/24")
-	// Should not panic; error is returned but not fatal
-	_ = err
+	if err == nil {
+		t.Error("expected error when writing to unwritable path")
+	}
 }
 
 func TestSeenAtIsPopulated(t *testing.T) {
