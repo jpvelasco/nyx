@@ -17,6 +17,7 @@ var (
 	verbose      bool
 	timeout      string
 	interfaceOpt string
+	warnVirtual  bool
 	log          *logger.Logger
 
 	// lastAuditReport caches the most recent audit result so that
@@ -40,6 +41,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "Enable verbose output")
 	rootCmd.PersistentFlags().StringVar(&timeout, "timeout", "60s", "Timeout for operations")
 	rootCmd.PersistentFlags().StringVar(&interfaceOpt, "interface", "", "Network interface to use for local checks (e.g. \"Ethernet\", \"Wi-Fi\"). Leave empty for automatic selection.")
+	auditCmd.Flags().BoolVar(&warnVirtual, "warn-virtual", false, "Always warn on virtual subnets, even if previously acknowledged")
 
 	rootCmd.AddCommand(discoverCmd)
 	rootCmd.AddCommand(checkRoutesCmd)
