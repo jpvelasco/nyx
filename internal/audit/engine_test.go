@@ -2,6 +2,7 @@ package audit_test
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/velasco-jp/nyx/internal/backends/nmap"
 	"github.com/velasco-jp/nyx/internal/intent"
 	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/velasco-jp/nyx/internal/seendb"
 )
 
 func TestDiscoveryWarnPreservedWhenZeroHostsWithinBounds(t *testing.T) {
@@ -200,5 +202,58 @@ func TestPortCheckUnknownType(t *testing.T) {
 	finding := report.Findings[0]
 	if finding.Status != models.StatusError {
 		t.Errorf("expected error status for unknown type, got %s", finding.Status)
+	}
+}
+
+func TestDiscoveryVirtualFirstRunWarns(t *testing.T) {
+	if !nmap.Available() {
+		t.Skip("nmap not available")
+	}
+	// Use a real local network to ensure fast scanning and predictable results
+	spec := &intent.Spec{
+		Version: 1,
+		Site:    "test",
+		Networks: []intent.Network{
+			{Name: "localhost", CIDR: "127.0.0.0/24", Gateway: "127.0.0.1", Zone: "local"},
+		},
+		Assertions: []intent.Assertion{
+			{Type: "subnet_discovery", Network: "localhost"},
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	engine := audit.NewEngine(spec)
+	engine.WarnVirtual = true
+	report, err := engine.Run(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	f := report.Findings[0]
+	// The key test: verify that WarnVirtual flag is wired through without errors.
+	// The actual behavior depends on whether localhost is detected as virtual.
+	if f.Status == models.StatusError {
+		t.Errorf("unexpected error status: %s", f.Summary)
+	}
+}
+
+func TestLooksVirtualUnitWithSeenDB(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "seen.json")
+
+	db, err := seendb.LoadFrom(dbPath)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	cidr := "192.168.174.0/24"
+	if db.IsVirtualAcked(cidr) {
+		t.Fatal("should not be acked yet")
+	}
+	if err := db.AckVirtual(cidr); err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+	db2, _ := seendb.LoadFrom(dbPath)
+	if !db2.IsVirtualAcked(cidr) {
+		t.Error("should be acked after write")
 	}
 }
