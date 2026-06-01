@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -13,6 +14,7 @@ type Entry struct {
 }
 
 type SeenDB struct {
+	mu              sync.Mutex
 	VirtualNetworks map[string]Entry `json:"virtual_networks"`
 	path            string
 }
@@ -55,11 +57,15 @@ func LoadFrom(path string) (*SeenDB, error) {
 }
 
 func (db *SeenDB) IsVirtualAcked(cidr string) bool {
+	db.mu.Lock()
+	defer db.mu.Unlock()
 	_, ok := db.VirtualNetworks[cidr]
 	return ok
 }
 
 func (db *SeenDB) GetEntry(cidr string) *Entry {
+	db.mu.Lock()
+	defer db.mu.Unlock()
 	e, ok := db.VirtualNetworks[cidr]
 	if !ok {
 		return nil
@@ -68,10 +74,13 @@ func (db *SeenDB) GetEntry(cidr string) *Entry {
 }
 
 func (db *SeenDB) AckVirtual(cidr string) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
 	db.VirtualNetworks[cidr] = Entry{SeenAt: time.Now().UTC(), Virtual: true}
 	return db.save()
 }
 
+// save must be called with mu held.
 func (db *SeenDB) save() error {
 	if db.path == "" {
 		return nil

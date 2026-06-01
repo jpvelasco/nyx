@@ -2,6 +2,7 @@ package seendb_test
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,6 +40,38 @@ func TestAckUnwritablePathIsGraceful(t *testing.T) {
 	err := db.AckVirtual("10.0.0.0/24")
 	if err == nil {
 		t.Error("expected error when writing to unwritable path")
+	}
+}
+
+func TestConcurrentAcksNoPanic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "seen.json")
+	db, _ := seendb.LoadFrom(path)
+
+	var wg sync.WaitGroup
+	cidrs := []string{
+		"192.168.1.0/24", "192.168.2.0/24", "192.168.3.0/24",
+		"10.0.0.0/24", "10.0.1.0/24", "10.0.2.0/24",
+	}
+	for _, cidr := range cidrs {
+		cidr := cidr
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = db.AckVirtual(cidr)
+			_ = db.IsVirtualAcked(cidr)
+		}()
+	}
+	wg.Wait()
+
+	// All CIDRs must be acked after concurrent writes
+	db2, err := seendb.LoadFrom(path)
+	if err != nil {
+		t.Fatalf("reload failed: %v", err)
+	}
+	for _, cidr := range cidrs {
+		if !db2.IsVirtualAcked(cidr) {
+			t.Errorf("CIDR %s not acked after concurrent writes", cidr)
+		}
 	}
 }
 

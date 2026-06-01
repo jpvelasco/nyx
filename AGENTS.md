@@ -122,7 +122,7 @@ All personal/homelab-specific data has been removed from the repository (tests, 
 - `seendb.Load()` never returns nil — on any error it returns an in-memory-only DB.
 - `engine.SeenDBPath` overrides the default path (used in tests).
 - `--warn-virtual` flag on `nyx audit` bypasses seendb and always emits WARN.
-- **Known limitation:** concurrent `subnet_discovery` assertions for multiple virtual networks can race on the seendb file (last write wins). This is best-effort — the worst outcome is an extra WARN on the next run. Fix tracked for a subsequent PR.
+- `SeenDB` is concurrency-safe — all methods hold a `sync.Mutex`, so concurrent `subnet_discovery` assertions can ack different CIDRs simultaneously without races.
 
 ## Current State
 
