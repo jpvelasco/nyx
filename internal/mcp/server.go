@@ -8,13 +8,13 @@ import (
 	"io"
 	"os"
 
-	"github.com/velasco-jp/nyx/internal/audit"
-	"github.com/velasco-jp/nyx/internal/backends/nmap"
-	"github.com/velasco-jp/nyx/internal/backends/system"
-	"github.com/velasco-jp/nyx/internal/intent"
-	"github.com/velasco-jp/nyx/internal/models"
-	"github.com/velasco-jp/nyx/internal/providers"
-	"github.com/velasco-jp/nyx/internal/version"
+	"github.com/jpvelasco/nyx/internal/audit"
+	"github.com/jpvelasco/nyx/internal/backends/nmap"
+	"github.com/jpvelasco/nyx/internal/backends/system"
+	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/providers"
+	"github.com/jpvelasco/nyx/internal/version"
 )
 
 // JSON-RPC types

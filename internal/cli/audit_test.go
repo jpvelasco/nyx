@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/velasco-jp/nyx/internal/models"
-	"github.com/velasco-jp/nyx/internal/recommendations"
-	"github.com/velasco-jp/nyx/internal/report"
+	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/recommendations"
+	"github.com/jpvelasco/nyx/internal/report"
 )
 
 func TestRenderRecommendationsGoesToWriter(t *testing.T) {

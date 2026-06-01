@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	providers "github.com/velasco-jp/nyx/internal/providers"
-	"github.com/velasco-jp/nyx/internal/report"
+	providers "github.com/jpvelasco/nyx/internal/providers"
+	"github.com/jpvelasco/nyx/internal/report"
 	"gopkg.in/yaml.v3"
 )
 

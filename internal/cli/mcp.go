@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"github.com/velasco-jp/nyx/internal/mcp"
+	"github.com/jpvelasco/nyx/internal/mcp"
 )
 
 var (

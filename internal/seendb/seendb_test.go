@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/velasco-jp/nyx/internal/seendb"
+	"github.com/jpvelasco/nyx/internal/seendb"
 )
 
 func TestLoadMissingFileReturnsEmpty(t *testing.T) {

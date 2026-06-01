@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/models"
 )
 
 func TestNewSnapshot(t *testing.T) {

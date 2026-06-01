@@ -4,6 +4,8 @@ netaudit-*
 nyx
 nyx-*
 *.exe
+*.out
+/dist/
 
 # Go
 vendor/

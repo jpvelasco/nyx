@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/velasco-jp/nyx/internal/intent"
-	"github.com/velasco-jp/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/models"
 )
 
 func TestGenerateRecommendations_NoFailures(t *testing.T) {
