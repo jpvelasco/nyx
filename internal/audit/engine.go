@@ -18,6 +18,7 @@ import (
 	"github.com/velasco-jp/nyx/internal/intent"
 	"github.com/velasco-jp/nyx/internal/models"
 	"github.com/velasco-jp/nyx/internal/probe"
+	"github.com/velasco-jp/nyx/internal/seendb"
 )
 
 const (
@@ -29,12 +30,10 @@ const (
 
 // Engine runs audit assertions
 type Engine struct {
-	Spec      *intent.Spec
-	runnerCtx models.RunnerContext // populated once at Run() time
-
-	// Interface, if set, restricts local IP detection and some checks to this specific network interface.
-	// Empty means "use all active interfaces" (current default behavior).
-	Interface string
+	Spec        *intent.Spec
+	Interface   string
+	WarnVirtual bool
+	runnerCtx   models.RunnerContext // populated once at Run() time
 }
 
 // NewEngine creates an audit engine for a spec
@@ -344,6 +343,28 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 		result.Status != models.StatusWarn) {
 		result.Status = models.StatusPass
 	}
+
+	// Virtual network suppression: if 0 hosts and nmap evidence suggests a VM
+	// hypervisor MAC, check seendb. First occurrence → WARN + ack. Subsequent
+	// occurrences → SKIP (unless WarnVirtual override is set).
+	if hostCount == 0 && looksVirtual(result.Evidence) {
+		db, _ := seendb.Load()
+		cidr := net.CIDR
+		if e.WarnVirtual || !db.IsVirtualAcked(cidr) {
+			result.Status = models.StatusWarn
+			result.Summary = fmt.Sprintf(
+				"0 hosts discovered in %s (virtual adapter detected — future scans will suppress this warning; use --warn-virtual to always show it)",
+				cidr,
+			)
+			_ = db.AckVirtual(cidr)
+		} else {
+			result.Status = models.StatusSkip
+			result.Summary = fmt.Sprintf("skipped: %s is a virtual network (acknowledged)", cidr)
+		}
+		result.Finish()
+		return result, nil
+	}
+
 	result.Summary = fmt.Sprintf("%d hosts discovered in %s", hostCount, net.CIDR)
 	return result, nil
 }
