@@ -33,6 +33,7 @@ type Engine struct {
 	Spec        *intent.Spec
 	Interface   string
 	WarnVirtual bool
+	SeenDBPath  string // if non-empty, overrides ~/.nyx/seen.json (used in tests)
 	runnerCtx   models.RunnerContext // populated once at Run() time
 }
 
@@ -348,14 +349,24 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 	// hypervisor MAC, check seendb. First occurrence → WARN + ack. Subsequent
 	// occurrences → SKIP (unless WarnVirtual override is set).
 	if hostCount == 0 && (looksVirtual(result.Evidence) || looksVirtualByCIDR(net.CIDR)) {
-		db, _ := seendb.Load()
+		var db *seendb.SeenDB
+		if e.SeenDBPath != "" {
+			if loaded, err := seendb.LoadFrom(e.SeenDBPath); err == nil {
+				db = loaded
+			} else {
+				db = seendb.New()
+			}
+		} else {
+			db = seendb.Load()
+		}
 		cidr := net.CIDR
 		if e.WarnVirtual || !db.IsVirtualAcked(cidr) {
 			result.Status = models.StatusWarn
-			result.Summary = fmt.Sprintf(
-				"0 hosts discovered in %s (virtual adapter detected — future scans will suppress this warning; use --warn-virtual to always show it)",
-				cidr,
-			)
+			if e.WarnVirtual {
+				result.Summary = fmt.Sprintf("0 hosts discovered in %s (virtual adapter detected; --warn-virtual is set)", cidr)
+			} else {
+				result.Summary = fmt.Sprintf("0 hosts discovered in %s (virtual adapter detected — future scans will suppress this warning; use --warn-virtual to always show it)", cidr)
+			}
 			_ = db.AckVirtual(cidr)
 		} else {
 			result.Status = models.StatusSkip
