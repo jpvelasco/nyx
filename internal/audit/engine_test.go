@@ -237,6 +237,58 @@ func TestDiscoveryVirtualFirstRunWarns(t *testing.T) {
 	}
 }
 
+func TestVirtualSubnetSuppressesRepeatWarn(t *testing.T) {
+	if !nmap.Available() {
+		t.Skip("nmap not available")
+	}
+	// Use a Hyper-V/WSL2 subnet that the local machine has an adapter for,
+	// so looksVirtualByCIDR returns true without needing a VM MAC in nmap output.
+	// 172.17.144.0/20 matches the vEthernet (Default Switch) adapter on this machine.
+	cidr := "172.17.144.0/20"
+	spec := &intent.Spec{
+		Version: 1,
+		Site:    "test",
+		Networks: []intent.Network{
+			{Name: "hyperv", CIDR: cidr, Gateway: "172.17.144.1", Zone: "hyperv"},
+		},
+		Assertions: []intent.Assertion{
+			{Type: "subnet_discovery", Network: "hyperv"},
+		},
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "seen.json")
+
+	// First run: should WARN and write seendb
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	e1 := audit.NewEngine(spec)
+	e1.SeenDBPath = dbPath
+	r1, err := e1.Run(ctx)
+	if err != nil {
+		t.Fatalf("first run error: %v", err)
+	}
+	f1 := r1.Findings[0]
+	if f1.Status != models.StatusWarn {
+		t.Skipf("CIDR %s not detected as virtual on this machine (status: %s) — skipping", cidr, f1.Status)
+	}
+
+	// Second run: should SKIP
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel2()
+
+	e2 := audit.NewEngine(spec)
+	e2.SeenDBPath = dbPath
+	r2, err := e2.Run(ctx2)
+	if err != nil {
+		t.Fatalf("second run error: %v", err)
+	}
+	f2 := r2.Findings[0]
+	if f2.Status != models.StatusSkip {
+		t.Errorf("second run: expected StatusSkip, got %s (%s)", f2.Status, f2.Summary)
+	}
+}
+
 func TestLooksVirtualUnitWithSeenDB(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "seen.json")
