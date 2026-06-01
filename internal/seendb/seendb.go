@@ -14,7 +14,7 @@ type Entry struct {
 }
 
 type SeenDB struct {
-	mu              sync.Mutex
+	mu              sync.Mutex       `json:"-"`
 	VirtualNetworks map[string]Entry `json:"virtual_networks"`
 	path            string
 }
