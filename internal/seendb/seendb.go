@@ -2,6 +2,7 @@ package seendb
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -20,7 +21,7 @@ type SeenDB struct {
 func Load() (*SeenDB, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return empty("")
+		return nil, fmt.Errorf("get home dir: %w", err)
 	}
 	return LoadFrom(filepath.Join(home, ".nyx", "seen.json"))
 }
@@ -39,10 +40,6 @@ func LoadFrom(path string) (*SeenDB, error) {
 	}
 	db.path = path
 	return db, nil
-}
-
-func empty(path string) (*SeenDB, error) {
-	return &SeenDB{VirtualNetworks: map[string]Entry{}, path: path}, nil
 }
 
 func (db *SeenDB) IsVirtualAcked(cidr string) bool {
