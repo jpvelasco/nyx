@@ -115,6 +115,15 @@ All personal/homelab-specific data has been removed from the repository (tests, 
 - `nyx interfaces --spec <file>` lists active interfaces with spec network matching.
 - `nyx check-vpn` supports `--expect split-tunnel|full-tunnel`.
 
+## SeenDB (Virtual Network Acknowledgement)
+
+`internal/seendb/` persists virtual network acknowledgements to `~/.nyx/seen.json`. Used by `runDiscovery` to suppress repeat WARNs on virtual subnets (VMware, Hyper-V, WSL2) that always return 0 hosts.
+
+- `seendb.Load()` never returns nil — on any error it returns an in-memory-only DB.
+- `engine.SeenDBPath` overrides the default path (used in tests).
+- `--warn-virtual` flag on `nyx audit` bypasses seendb and always emits WARN.
+- **Known limitation:** concurrent `subnet_discovery` assertions for multiple virtual networks can race on the seendb file (last write wins). This is best-effort — the worst outcome is an extra WARN on the next run. Fix tracked for a subsequent PR.
+
 ## Current State
 
 The core engine is feature-complete. All 8 assertion types, 10 recommendation categories, both providers (Omada + OPNsense), snapshot/drift system, and probe system are implemented and tested.
