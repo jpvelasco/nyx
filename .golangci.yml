@@ -1,5 +1,6 @@
 # .golangci.yml — run with: golangci-lint run ./...
 # Core linters only (revive disabled to avoid pre-existing style churn on exported names, unused ctx params in interfaces, etc.)
+version: "2"
 run:
   timeout: 5m
   modules-download-mode: readonly
