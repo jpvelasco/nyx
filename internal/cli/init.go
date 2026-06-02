@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/backends/system"
+	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
@@ -438,10 +438,10 @@ func buildInitSpec(nets []initNet) initSpec {
 			maxH = 10
 		}
 		a := initSpecAssertion{
-			Type:          "subnet_discovery",
-			Network:       name,
+			Type:           "subnet_discovery",
+			Network:        name,
 			ExpectHostsMax: &maxH,
-			ScanMode:      "normal",
+			ScanMode:       "normal",
 		}
 		if n.hosts > 0 {
 			minHosts := 1

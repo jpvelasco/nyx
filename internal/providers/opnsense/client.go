@@ -37,10 +37,10 @@ type opnsenseFirewallRule struct {
 	Destination struct {
 		Address string `json:"address"`
 	} `json:"destination"`
-	Action    string `json:"action"`
-	Disabled  bool   `json:"disabled"`
-	Label     string `json:"label"`
-	RuleUUID  string `json:"uuid"`
+	Action   string `json:"action"`
+	Disabled bool   `json:"disabled"`
+	Label    string `json:"label"`
+	RuleUUID string `json:"uuid"`
 }
 
 // opnsenseDHCPLease represents a DHCP lease from OPNsense.

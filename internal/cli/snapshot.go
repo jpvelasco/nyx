@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/snapshot"
+	"github.com/spf13/cobra"
 )
 
 var snapshotCmd = &cobra.Command{
@@ -29,16 +29,16 @@ Run this right after a clean 'nyx audit --spec <your-spec>' when everything look
 
 You can also point it at a previously saved snapshot file to restore an older baseline:
   nyx snapshot baseline ~/.nyx/snapshots/snapshot-20250601-140000.json`,
-	Args:  cobra.MaximumNArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var (
-			specPath    string
-			auditTime   time.Time
-			status      models.Status
-			passed      int
-			failed      int
-			warned      int
-			errored     int
+			specPath  string
+			auditTime time.Time
+			status    models.Status
+			passed    int
+			failed    int
+			warned    int
+			errored   int
 		)
 
 		if len(args) == 1 {

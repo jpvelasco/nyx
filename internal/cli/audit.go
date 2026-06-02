@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/jpvelasco/nyx/internal/audit"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/recommendations"
 	"github.com/jpvelasco/nyx/internal/report"
 	"github.com/jpvelasco/nyx/internal/snapshot"
+	"github.com/spf13/cobra"
 )
 
 var auditCmd = &cobra.Command{

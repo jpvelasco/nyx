@@ -8,9 +8,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/spf13/cobra"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/report"
+	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 

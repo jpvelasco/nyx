@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/report"
+	"github.com/spf13/cobra"
 )
 
 var (

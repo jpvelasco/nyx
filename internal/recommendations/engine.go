@@ -531,7 +531,7 @@ func recommendIsolationBreach(g failureGroup, spec *intent.Spec, runner models.R
 			"Add a deny rule for this flow and make sure it has higher priority than any allow rule. "+
 			"Check policy %q in your controller — it may be missing or misconfigured.", from, to, g.isolationCtx.policyName)
 	} else {
-		remediation = "Your firewall should be blocking this traffic flow. "+
+		remediation = "Your firewall should be blocking this traffic flow. " +
 			"Add a deny rule for the source zone to the destination zone and ensure it has higher priority than any allow rule."
 	}
 
@@ -579,8 +579,8 @@ func recommendACLEnforcement(g failureGroup, spec *intent.Spec, runner models.Ru
 	desc := fmt.Sprintf("Your Omada controller is missing ACL rules that should be in place. "+
 		"Policies that should be enforced: %s.", strings.Join(affected, ", "))
 
-	remediation := "Add the missing ACL rules in your Omada controller. "+
-		"Navigate to Security > ACL Rules and create rules matching the policies in your spec. "+
+	remediation := "Add the missing ACL rules in your Omada controller. " +
+		"Navigate to Security > ACL Rules and create rules matching the policies in your spec. " +
 		"Ensure the rules are enabled and have the correct source, destination, and action."
 
 	rec := Recommendation{
@@ -635,7 +635,7 @@ func recommendNetworkUnreachable(g failureGroup, spec *intent.Spec, runner model
 
 	desc := fmt.Sprintf("I couldn't reach these targets from %s. The checks that failed: %s.", runnerLocation, strings.Join(checkTypes, ", "))
 
-	remediation := "The target network may not be reachable from your current adapter. "+
+	remediation := "The target network may not be reachable from your current adapter. " +
 		"Try --interface to scan from a different adapter, or add a probe inside the target network so I can reach it."
 
 	rec := Recommendation{
@@ -709,15 +709,15 @@ func recommendVPN(g failureGroup, spec *intent.Spec, runner models.RunnerContext
 	for _, f := range g.failures {
 		affected = append(affected, f.Target)
 	}
-		affected = deduplicateStrings(affected)
+	affected = deduplicateStrings(affected)
 
-		if len(affected) == 0 {
-			return nil
-		}
+	if len(affected) == 0 {
+		return nil
+	}
 
-		desc := fmt.Sprintf("Traffic is not routing through the expected VPN tunnel. Target: %s.", affected[0])
+	desc := fmt.Sprintf("Traffic is not routing through the expected VPN tunnel. Target: %s.", affected[0])
 
-		// Try to find the VPN config for specific guidance
+	// Try to find the VPN config for specific guidance
 	var vpnName string
 	for _, f := range g.failures {
 		if v, ok := f.Expected["vpn"]; ok {
@@ -740,7 +740,7 @@ func recommendVPN(g failureGroup, spec *intent.Spec, runner models.RunnerContext
 				"Verify that expected routes are pushed by the VPN server.", vpnName)
 		}
 	} else {
-		remediation = "Check that the VPN is active and its interface exists on this machine. "+
+		remediation = "Check that the VPN is active and its interface exists on this machine. " +
 			"Verify that expected routes are pushed by the VPN server and that policy routing / split-tunnel config is correct."
 	}
 
@@ -873,8 +873,8 @@ func recommendHostDown(g failureGroup, spec *intent.Spec, runner models.RunnerCo
 
 	desc := fmt.Sprintf("These targets aren't responding from %s: %s.", runnerLocation, strings.Join(affected, ", "))
 
-	remediation := "The host may be down, or a firewall is blocking the check. "+
-		"Verify the target IP is correct and the service is running. "+
+	remediation := "The host may be down, or a firewall is blocking the check. " +
+		"Verify the target IP is correct and the service is running. " +
 		"If the target is on a different VLAN, try --interface or add a probe in that network."
 
 	rec := Recommendation{
@@ -925,8 +925,8 @@ func recommendDNSFailure(g failureGroup, spec *intent.Spec, runner models.Runner
 
 	desc := fmt.Sprintf("DNS queries aren't resolving correctly from %s. Affected: %s.", runnerLocation, strings.Join(affected, ", "))
 
-	remediation := "The DNS server may be unreachable, or the expected IP is wrong. "+
-		"Verify the DNS server address in your spec, and that it's reachable from your adapter. "+
+	remediation := "The DNS server may be unreachable, or the expected IP is wrong. " +
+		"Verify the DNS server address in your spec, and that it's reachable from your adapter. " +
 		"If the query resolved to a different IP, check for stale DNS records or split-horizon DNS issues."
 
 	rec := Recommendation{
@@ -977,8 +977,8 @@ func recommendServiceDown(g failureGroup, spec *intent.Spec, runner models.Runne
 
 	desc := fmt.Sprintf("Expected services aren't responding on these hosts from %s: %s.", runnerLocation, strings.Join(affected, ", "))
 
-	remediation := "The service may be down, or a firewall is blocking the port. "+
-		"Verify the target is up and the service is listening on the expected port. "+
+	remediation := "The service may be down, or a firewall is blocking the port. " +
+		"Verify the target is up and the service is listening on the expected port. " +
 		"If the target is on a different VLAN, try --interface or add a probe in that network."
 
 	rec := Recommendation{
@@ -1029,8 +1029,8 @@ func recommendNetworkDegraded(g failureGroup, spec *intent.Spec, runner models.R
 
 	desc := fmt.Sprintf("These hosts are degraded or unreachable from %s: %s.", runnerLocation, strings.Join(affected, ", "))
 
-	remediation := "The host may be slow, experiencing packet loss, or filtering ICMP. "+
-		"Verify the target is up and that your adapter can reach it. "+
+	remediation := "The host may be slow, experiencing packet loss, or filtering ICMP. " +
+		"Verify the target is up and that your adapter can reach it. " +
 		"Try --interface to test from a different adapter, or add a probe closer to the target."
 
 	rec := Recommendation{
@@ -1149,7 +1149,7 @@ func existingProbeUser(spec *intent.Spec) string {
 }
 
 // probeForZone returns the first probe whose VLAN matches the given zone, or nil.
-func probeForZone(spec *intent.Spec, zone string) *intent.Probe {
+func probeForZone(spec *intent.Spec, zone string) *intent.Probe { //nolint:unused // reserved for future recommendations
 	if spec == nil {
 		return nil
 	}
@@ -1186,7 +1186,7 @@ func deduplicateStrings(in []string) []string {
 			seen[s] = struct{}{}
 			out = append(out, s)
 		}
-		}
+	}
 	return out
 }
 

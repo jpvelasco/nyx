@@ -11,7 +11,7 @@ type ACLRule struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	Status     bool   `json:"status"`
-	Policy     string `json:"policy"`   // "accept" | "drop"
+	Policy     string `json:"policy"` // "accept" | "drop"
 	Protocols  string `json:"protocols"`
 	SourceType string `json:"srcType"`
 	SourceID   string `json:"srcId"`

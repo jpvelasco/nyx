@@ -27,20 +27,20 @@ type PingStats struct {
 
 // MTUResult captures MTU discovery results
 type MTUResult struct {
-	Target       string `json:"target"`
-	DiscoveredMTU int   `json:"discovered_mtu"`
-	RequestedMTU int   `json:"requested_mtu,omitempty"`
+	Target        string `json:"target"`
+	DiscoveredMTU int    `json:"discovered_mtu"`
+	RequestedMTU  int    `json:"requested_mtu,omitempty"`
 }
 
 // pingOutputParsers hold platform-specific regex patterns
 var (
-	rePktLossLinux  = regexp.MustCompile(`(\d+(?:\.\d+)?)% packet loss`)
-	reAvgRTTLinux   = regexp.MustCompile(`rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)/`)
+	rePktLossLinux   = regexp.MustCompile(`(\d+(?:\.\d+)?)% packet loss`)
+	reAvgRTTLinux    = regexp.MustCompile(`rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)/`)
 	rePktLossWindows = regexp.MustCompile(`\((\d+)% loss\)`)
-	reAvgRTTWindows = regexp.MustCompile(`Average = ([\d.]+)ms`)
-	reMinMaxWindows = regexp.MustCompile(`Minimum = (\d+)ms, Maximum = (\d+)ms`)
-	reRTTDarwin     = regexp.MustCompile(`min/avg/max/stddev = ([\d.]+)/([\d.]+)/([\d.]+)/`)
-	rePktLossDarwin = regexp.MustCompile(`(\d+(?:\.\d+)?)% packet loss`)
+	reAvgRTTWindows  = regexp.MustCompile(`Average = ([\d.]+)ms`)
+	reMinMaxWindows  = regexp.MustCompile(`Minimum = (\d+)ms, Maximum = (\d+)ms`)
+	reRTTDarwin      = regexp.MustCompile(`min/avg/max/stddev = ([\d.]+)/([\d.]+)/([\d.]+)/`)
+	rePktLossDarwin  = regexp.MustCompile(`(\d+(?:\.\d+)?)% packet loss`)
 )
 
 // PingCheck runs a ping with the specified count and returns detailed stats.
@@ -62,9 +62,9 @@ func PingCheck(ctx context.Context, target string, count int) (*models.CheckResu
 
 	// Convert stats to map for Observed
 	statsMap := map[string]interface{}{
-		"sent":      stats.Sent,
-		"received":  stats.Received,
-		"loss_pct":  stats.LossPct,
+		"sent":       stats.Sent,
+		"received":   stats.Received,
+		"loss_pct":   stats.LossPct,
 		"avg_rtt_ms": stats.AvgRTTMs,
 	}
 	if stats.MinRTTMs > 0 {
