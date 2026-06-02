@@ -1,3 +1,4 @@
+// Package version holds the single source of truth for the nyx CLI version string (overridden at build time via ldflags).
 package version
 
 // Version is the single source of truth for the nyx release version.

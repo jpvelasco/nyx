@@ -160,7 +160,7 @@ func RenderEnvironmentBriefing(b EnvironmentBriefing) string {
 // mapIfaceToIP tries to pair each interface with the IPs it holds.
 // Since the brief doesn't carry the raw iface→IP mapping, we infer by
 // checking the actual system state (same logic as GetEnvironmentBriefing).
-func mapIfaceToIP(interfaces, ips []string) map[string][]string {
+func mapIfaceToIP(interfaces []string, _ []string) map[string][]string {
 	result := map[string][]string{}
 	ifaces, _ := net.Interfaces()
 	for _, iface := range ifaces {

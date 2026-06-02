@@ -21,7 +21,7 @@ var verifyIsolationCmd = &cobra.Command{
 	Short: "Verify network isolation between zones",
 	Example: `  nyx verify-isolation --from zone:clients --to 10.0.30.0/24
   nyx verify-isolation --from zone:clients --to zone:iot --json`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		if isolationTo == "" {
 			return fmt.Errorf("--to is required")
 		}

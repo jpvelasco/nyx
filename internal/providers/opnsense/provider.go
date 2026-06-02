@@ -1,3 +1,4 @@
+// Package opnsense implements the providers.Provider interface for OPNsense firewalls using API key/secret auth.
 package opnsense
 
 import (
@@ -11,17 +12,20 @@ import (
 	providers "github.com/jpvelasco/nyx/internal/providers"
 )
 
-// OPNsenseProvider implements providers.Provider for OPNsense firewalls.
+// Provider implements providers.Provider for OPNsense firewalls.
 // Currently only Info is implemented. ImportSpec and Check return ErrCapabilityUnsupported.
-type OPNsenseProvider struct{}
+type Provider struct{}
 
-func (o *OPNsenseProvider) Name() string { return "opnsense" }
+// Name returns the provider identifier "opnsense".
+func (o *Provider) Name() string { return "opnsense" }
 
-func (o *OPNsenseProvider) Capabilities() []string {
+// Capabilities lists the supported operations for this provider.
+func (o *Provider) Capabilities() []string {
 	return []string{"info", "import", "check"}
 }
 
-func (o *OPNsenseProvider) Info(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInfo, error) {
+// Info fetches firmware and system info from the OPNsense device (no auth required for basic info).
+func (o *Provider) Info(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInfo, error) {
 	if opts.Host == "" {
 		return nil, fmt.Errorf("--host is required for opnsense provider")
 	}
@@ -41,7 +45,8 @@ func (o *OPNsenseProvider) Info(ctx context.Context, opts providers.ImportOption
 	}, nil
 }
 
-func (o *OPNsenseProvider) ImportSpec(ctx context.Context, opts providers.ImportOptions) (*providers.ImportResult, error) {
+// ImportSpec builds a full intent spec by querying interfaces, firewall rules, DHCP leases, etc. from OPNsense.
+func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions) (*providers.ImportResult, error) {
 	if opts.Host == "" {
 		return nil, fmt.Errorf("--host is required for opnsense provider")
 	}
@@ -189,7 +194,8 @@ func (o *OPNsenseProvider) ImportSpec(ctx context.Context, opts providers.Import
 	}, nil
 }
 
-func (o *OPNsenseProvider) Check(ctx context.Context, opts providers.ImportOptions) (*providers.AuditResult, error) {
+// Check imports a spec from OPNsense and runs a full audit using the local engine.
+func (o *Provider) Check(ctx context.Context, opts providers.ImportOptions) (*providers.AuditResult, error) {
 	imported, err := o.ImportSpec(ctx, opts)
 	if err != nil {
 		return nil, err
@@ -258,8 +264,8 @@ func ptrInt(i int) *int {
 	return &i
 }
 
-var _ providers.Provider = (*OPNsenseProvider)(nil)
+var _ providers.Provider = (*Provider)(nil)
 
 func init() {
-	providers.Register(&OPNsenseProvider{})
+	providers.Register(&Provider{})
 }

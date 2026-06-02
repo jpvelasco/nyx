@@ -1,3 +1,5 @@
+// Package recommendations analyzes audit failures and produces prioritized, actionable recommendations
+// with optional spec patches. It classifies into categories like vantage_point, isolation_breach, etc.
 package recommendations
 
 import (
@@ -512,7 +514,7 @@ func recommendVantagePoint(g failureGroup, spec *intent.Spec, runner models.Runn
 }
 
 // recommendIsolationBreach generates recommendations for real firewall misconfigurations.
-func recommendIsolationBreach(g failureGroup, spec *intent.Spec, runner models.RunnerContext, priority int) []Recommendation {
+func recommendIsolationBreach(g failureGroup, spec *intent.Spec, _ models.RunnerContext, priority int) []Recommendation {
 	var affected []string
 	var descParts []string
 
@@ -569,7 +571,7 @@ func recommendIsolationBreach(g failureGroup, spec *intent.Spec, runner models.R
 
 // recommendACLEnforcement generates recommendations when an ACL policy is not
 // enforced on the Omada controller (or vice versa).
-func recommendACLEnforcement(g failureGroup, spec *intent.Spec, runner models.RunnerContext, priority int) []Recommendation {
+func recommendACLEnforcement(g failureGroup, spec *intent.Spec, _ models.RunnerContext, priority int) []Recommendation {
 	var affected []string
 	for _, f := range g.failures {
 		affected = append(affected, f.Target)
@@ -704,7 +706,7 @@ func recommendNetworkUnreachable(g failureGroup, spec *intent.Spec, runner model
 }
 
 // recommendVPN generates recommendations for VPN routing failures.
-func recommendVPN(g failureGroup, spec *intent.Spec, runner models.RunnerContext, priority int) []Recommendation {
+func recommendVPN(g failureGroup, spec *intent.Spec, _ models.RunnerContext, priority int) []Recommendation {
 	var affected []string
 	for _, f := range g.failures {
 		affected = append(affected, f.Target)
@@ -779,7 +781,7 @@ func recommendVPN(g failureGroup, spec *intent.Spec, runner models.RunnerContext
 }
 
 // recommendDiscovery generates recommendations for host count violations.
-func recommendDiscovery(g failureGroup, spec *intent.Spec, runner models.RunnerContext, priority int) []Recommendation {
+func recommendDiscovery(g failureGroup, _ *intent.Spec, _ models.RunnerContext, priority int) []Recommendation {
 	var recs []Recommendation
 
 	for _, f := range g.failures {

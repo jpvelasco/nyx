@@ -27,7 +27,7 @@ is still holding or if something needs attention.
 
 Run after any 'nyx audit' (especially from different VLANs or after changes). If no
 fresh audit is available, falls back to the most recent saved snapshot.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		baseline, err := snapshot.LoadBaseline()
 		if err != nil {
 			return err
@@ -46,7 +46,7 @@ fresh audit is available, falls back to the most recent saved snapshot.`,
 			if len(snaps) == 0 {
 				return fmt.Errorf("no recent audit result and no saved snapshots — run 'nyx audit --spec <file>' first")
 			}
-			dir, err := snapshot.SnapshotDir()
+			dir, err := snapshot.Dir()
 			if err != nil {
 				return err
 			}
@@ -73,8 +73,8 @@ var driftCompareCmd = &cobra.Command{
 	Use:   "compare [snapshot1] [snapshot2]",
 	Short: "Compare two snapshots",
 	Args:  cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		dir, err := snapshot.SnapshotDir()
+	RunE: func(_ *cobra.Command, args []string) error {
+		dir, err := snapshot.Dir()
 		if err != nil {
 			return err
 		}

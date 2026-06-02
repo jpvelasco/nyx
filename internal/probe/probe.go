@@ -1,3 +1,4 @@
+// Package probe implements remote execution of certain assertions over SSH from declared probe hosts (for multi-VLAN vantage points).
 package probe
 
 import (

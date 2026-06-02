@@ -1,3 +1,4 @@
+// Package seendb provides a small persistence layer for "seen" virtual network CIDRs (e.g. from VM adapters) so that repeated subnet_discovery WARNs can be suppressed.
 package seendb
 
 import (
@@ -8,11 +9,13 @@ import (
 	"time"
 )
 
+// Entry records when a virtual CIDR was first observed (acked).
 type Entry struct {
 	SeenAt  time.Time `json:"seen_at"`
 	Virtual bool      `json:"virtual"`
 }
 
+// SeenDB is the in-memory + on-disk store of acked virtual networks.
 type SeenDB struct {
 	mu              sync.Mutex       `json:"-"`
 	VirtualNetworks map[string]Entry `json:"virtual_networks"`
@@ -40,6 +43,7 @@ func Load() *SeenDB {
 	return db
 }
 
+// LoadFrom loads (or creates) a SeenDB backed by the given JSON file path.
 func LoadFrom(path string) (*SeenDB, error) {
 	db := &SeenDB{VirtualNetworks: map[string]Entry{}, path: path}
 	data, err := os.ReadFile(path)
@@ -56,6 +60,7 @@ func LoadFrom(path string) (*SeenDB, error) {
 	return db, nil
 }
 
+// IsVirtualAcked reports whether the given CIDR has been previously acked as virtual.
 func (db *SeenDB) IsVirtualAcked(cidr string) bool {
 	db.mu.Lock()
 	defer db.mu.Unlock()
@@ -63,6 +68,7 @@ func (db *SeenDB) IsVirtualAcked(cidr string) bool {
 	return ok
 }
 
+// GetEntry returns the Entry for a CIDR if present, otherwise nil.
 func (db *SeenDB) GetEntry(cidr string) *Entry {
 	db.mu.Lock()
 	defer db.mu.Unlock()
@@ -73,6 +79,7 @@ func (db *SeenDB) GetEntry(cidr string) *Entry {
 	return &e
 }
 
+// AckVirtual records the CIDR as seen (virtual) and persists it if a backing file is configured.
 func (db *SeenDB) AckVirtual(cidr string) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()

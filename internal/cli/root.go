@@ -1,3 +1,4 @@
+// Package cli implements all Cobra commands and the top-level Execute entrypoint for the nyx binary.
 package cli
 
 import (
@@ -58,6 +59,7 @@ func init() {
 	}
 }
 
+// Execute sets up provider subcommands and runs the root Cobra command. Returns error for os.Exit(2).
 func Execute() error {
 	BuildProviderSubcommands(rootCmd)
 	return rootCmd.Execute()
@@ -77,7 +79,7 @@ func getWriter() (*os.File, error) {
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		fmt.Printf("nyx v%s\n", version.Version)
 	},
 }
