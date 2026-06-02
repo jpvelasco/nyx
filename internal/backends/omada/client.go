@@ -57,8 +57,8 @@ type Client struct {
 	omadaCID   string
 	token      string
 	httpClient *http.Client
-	info  *ControllerInfo
-	Debug bool // when true, raw API responses are printed to stderr
+	info       *ControllerInfo
+	Debug      bool // when true, raw API responses are printed to stderr
 }
 
 // NewClient creates an Omada client for the given controller host.

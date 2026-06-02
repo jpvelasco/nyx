@@ -227,9 +227,10 @@ func ComputeDrift(baseline, current *Snapshot) *DriftResult {
 	for key, cur := range currentMap {
 		base, exists := baselineMap[key]
 		if !exists {
-			if cur.Status == models.StatusFail {
+			switch cur.Status {
+			case models.StatusFail:
 				dr.NewFailures = append(dr.NewFailures, cur)
-			} else if cur.Status == models.StatusWarn {
+			case models.StatusWarn:
 				dr.NewWarnings = append(dr.NewWarnings, cur)
 			}
 			continue

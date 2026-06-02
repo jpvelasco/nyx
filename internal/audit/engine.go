@@ -504,10 +504,7 @@ func (e *Engine) runVPNRoute(ctx context.Context, a intent.Assertion) (*models.C
 		}
 	}
 
-	viaTunnel := false
-	if expectedIface != "" && route.Device == expectedIface {
-		viaTunnel = true
-	}
+	viaTunnel := expectedIface != "" && route.Device == expectedIface
 	// Also check if the device looks like a VPN interface
 	if !viaTunnel {
 		isVPN, _ := system.CheckVPNInterface(ctx, route.Device)

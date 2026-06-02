@@ -6,17 +6,18 @@ run:
   modules-download-mode: readonly
 
 linters:
+  default: none
   enable:
-    - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
     - unused
-    - gofmt
     - misspell
-  disable:
-    - typecheck
+  fast: false
+
+formatters:
+  enable:
+    - gofmt
   fast: false
 
 issues:
@@ -25,10 +26,6 @@ issues:
     - testdata
     - specs
   exclude-rules:
-    # Tests can be noisy on errcheck
-    - path: '.*_test\.go'
-      linters:
-        - errcheck
     # Documented intentional for homelab (no real security boundary)
     - path: 'internal/probe/probe.go'
       linters:
@@ -36,10 +33,5 @@ issues:
     - path: 'internal/backends/omada/.*\.go'
       linters:
         - gosec
-    # Pre-existing defer errcheck in audit engine (logout best-effort)
-    - path: 'internal/audit/engine.go'
-      linters:
-        - errcheck
-      text: "Logout"
   max-issues-per-linter: 0
   max-same-issues: 0

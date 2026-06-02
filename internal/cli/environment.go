@@ -138,18 +138,18 @@ func RenderEnvironmentBriefing(b EnvironmentBriefing) string {
 		ifacesWithIPs := mapIfaceToIP(b.ActiveInterfaces, b.CurrentIPs)
 		sb.WriteString("\n")
 		for name, ifaceIPs := range ifacesWithIPs {
-			sb.WriteString(fmt.Sprintf("  %s → %s\n", name, strings.Join(ifaceIPs, ", ")))
+			fmt.Fprintf(&sb, "  %s → %s\n", name, strings.Join(ifaceIPs, ", "))
 		}
 	}
 
 	if len(b.MatchedNetworks) > 0 {
-		sb.WriteString(fmt.Sprintf("\n  Your spec declares those as: %s\n", strings.Join(b.MatchedNetworks, ", ")))
+		fmt.Fprintf(&sb, "\n  Your spec declares those as: %s\n", strings.Join(b.MatchedNetworks, ", "))
 	}
 
 	if len(b.Recommendations) > 0 {
 		sb.WriteString("\n")
 		for _, r := range b.Recommendations {
-			sb.WriteString(fmt.Sprintf("  → %s\n", r))
+			fmt.Fprintf(&sb, "  → %s\n", r)
 		}
 	}
 

@@ -10,14 +10,15 @@ import (
 	"time"
 )
 
-type firmwareInfoResponse struct {
+// FirmwareInfoResponse holds the firmware version, name, and architecture from OPNsense.
+type FirmwareInfoResponse struct {
 	ProductVersion string `json:"product_version"`
 	ProductName    string `json:"product_name"`
 	ProductArch    string `json:"product_arch"`
 }
 
-// opnsenseInterface represents an OPNsense interface with its IP configuration.
-type opnsenseInterface struct {
+// Interface represents an OPNsense interface with its IP configuration.
+type Interface struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	DHCP        string `json:"dhcp"`
@@ -26,8 +27,8 @@ type opnsenseInterface struct {
 	Gateway     string `json:"gateway"`
 }
 
-// opnsenseFirewallRule represents a single firewall rule from OPNsense.
-type opnsenseFirewallRule struct {
+// FirewallRule represents a single firewall rule from OPNsense.
+type FirewallRule struct {
 	Type      string `json:"type"`
 	Interface string `json:"interface"`
 	Protocol  string `json:"protocol"`
@@ -43,8 +44,8 @@ type opnsenseFirewallRule struct {
 	RuleUUID string `json:"uuid"`
 }
 
-// opnsenseDHCPLease represents a DHCP lease from OPNsense.
-type opnsenseDHCPLease struct {
+// DHCPLease represents a DHCP lease from OPNsense.
+type DHCPLease struct {
 	MAC      string `json:"mac"`
 	IP       string `json:"ip"`
 	Hostname string `json:"hostname"`
@@ -103,14 +104,14 @@ func (c *Client) doRequest(ctx context.Context, path string) (*http.Response, er
 }
 
 // GetFirmwareInfo returns the running firmware version from the controller.
-func (c *Client) GetFirmwareInfo(ctx context.Context) (*firmwareInfoResponse, error) {
+func (c *Client) GetFirmwareInfo(ctx context.Context) (*FirmwareInfoResponse, error) {
 	resp, err := c.doRequest(ctx, "/core/firmware/running")
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var info firmwareInfoResponse
+	var info FirmwareInfoResponse
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
 		return nil, fmt.Errorf("decoding firmware response: %w", err)
 	}
@@ -118,7 +119,7 @@ func (c *Client) GetFirmwareInfo(ctx context.Context) (*firmwareInfoResponse, er
 }
 
 // GetInterfaces returns the list of interfaces with IP configuration.
-func (c *Client) GetInterfaces(ctx context.Context) ([]opnsenseInterface, error) {
+func (c *Client) GetInterfaces(ctx context.Context) ([]Interface, error) {
 	resp, err := c.doRequest(ctx, "/core/interfaces/status")
 	if err != nil {
 		return nil, err
@@ -126,7 +127,7 @@ func (c *Client) GetInterfaces(ctx context.Context) ([]opnsenseInterface, error)
 	defer resp.Body.Close()
 
 	var result struct {
-		Interfaces []opnsenseInterface `json:"interfaces"`
+		Interfaces []Interface `json:"interfaces"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decoding interfaces response: %w", err)
@@ -135,8 +136,8 @@ func (c *Client) GetInterfaces(ctx context.Context) ([]opnsenseInterface, error)
 }
 
 // GetFirewallRules returns all firewall rules from OPNsense.
-func (c *Client) GetFirewallRules(ctx context.Context) ([]opnsenseFirewallRule, error) {
-	var allRules []opnsenseFirewallRule
+func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
+	var allRules []FirewallRule
 
 	// Fetch rules from each interface
 	for _, iface := range []string{"wan", "lan", "opt1", "opt2", "opt3", "opt4", "opt5"} {
@@ -148,7 +149,7 @@ func (c *Client) GetFirewallRules(ctx context.Context) ([]opnsenseFirewallRule, 
 		defer resp.Body.Close()
 
 		var result struct {
-			Rules []opnsenseFirewallRule `json:"rules"`
+			Rules []FirewallRule `json:"rules"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			continue
@@ -159,7 +160,7 @@ func (c *Client) GetFirewallRules(ctx context.Context) ([]opnsenseFirewallRule, 
 }
 
 // GetDHCPLeases returns all DHCP leases from OPNsense.
-func (c *Client) GetDHCPLeases(ctx context.Context) ([]opnsenseDHCPLease, error) {
+func (c *Client) GetDHCPLeases(ctx context.Context) ([]DHCPLease, error) {
 	resp, err := c.doRequest(ctx, "/core/dhcp/leases")
 	if err != nil {
 		return nil, err
@@ -167,7 +168,7 @@ func (c *Client) GetDHCPLeases(ctx context.Context) ([]opnsenseDHCPLease, error)
 	defer resp.Body.Close()
 
 	var result struct {
-		Leases []opnsenseDHCPLease `json:"leases"`
+		Leases []DHCPLease `json:"leases"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decoding DHCP leases response: %w", err)
