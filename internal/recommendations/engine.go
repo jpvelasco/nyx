@@ -1148,19 +1148,6 @@ func existingProbeUser(spec *intent.Spec) string {
 	return "<user>"
 }
 
-// probeForZone returns the first probe whose VLAN matches the given zone, or nil.
-func probeForZone(spec *intent.Spec, zone string) *intent.Probe { //nolint:unused // reserved for future recommendations
-	if spec == nil {
-		return nil
-	}
-	for i := range spec.Probes {
-		if spec.Probes[i].VLAN == zone {
-			return &spec.Probes[i]
-		}
-	}
-	return nil
-}
-
 // networkForZone returns the first network whose zone matches, or nil.
 func networkForZone(spec *intent.Spec, zone string) *intent.Network {
 	if spec == nil {
