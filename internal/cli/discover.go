@@ -23,7 +23,7 @@ var discoverCmd = &cobra.Command{
 	Example: `  nyx discover --subnet 10.0.20.0/24
   nyx discover --subnet 10.0.20.0/24 --json
   nyx discover --subnet 10.0.20.0/24 --timing 3 --min-rate 200`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		if discoverSubnet == "" {
 			return fmt.Errorf("--subnet is required")
 		}

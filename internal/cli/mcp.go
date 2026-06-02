@@ -27,7 +27,7 @@ var mcpServeCmd = &cobra.Command{
 read-only tools for AI agents. Default transport is stdio.`,
 	Example: `  nyx mcp serve
   nyx mcp serve --stdio`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		if mcpTransport != "stdio" {
 			return fmt.Errorf("only stdio transport is supported in v1")
 		}

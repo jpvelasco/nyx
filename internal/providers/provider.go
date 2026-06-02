@@ -1,3 +1,4 @@
+// Package providers defines the interface for vendor-specific network providers (e.g. omada, opnsense) and the registry.
 package providers
 
 import (

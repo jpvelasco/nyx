@@ -15,7 +15,7 @@ var listInterfacesCmd = &cobra.Command{
 	Long: `List all active (non-loopback) network interfaces with their addresses.
 Useful for discovering the exact name to pass to --interface.
 When --spec is provided, highlights interfaces that match your spec networks.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
 
 		ifaces, err := system.GetInterfaces(ctx)

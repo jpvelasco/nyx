@@ -164,7 +164,7 @@ func buildAssertions(networks []intent.Network, omadaNets []Network, clients []C
 		// Min is 0 — many devices (IoT, mobile) block ICMP so nmap won't see them
 		// Max is generous: observed client count × 3, at least 20
 		minVal := 0
-		maxVal := max(observed*3, 20)
+		maxVal := maxInt(observed*3, 20)
 
 		assertions = append(assertions, intent.Assertion{
 			Type:           "subnet_discovery",
@@ -292,7 +292,7 @@ func selectSite(sites []Site, siteName string) (Site, error) {
 		siteName, strings.Join(names, ", "))
 }
 
-func max(a, b int) int {
+func maxInt(a, b int) int {
 	if a > b {
 		return a
 	}

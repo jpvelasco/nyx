@@ -58,8 +58,7 @@ type Client struct {
 	token      string
 	httpClient *http.Client
 	info       *ControllerInfo
-	lastRaw    map[string]json.RawMessage //nolint:unused // reserved for future debug / raw response access
-	Debug      bool                       // when true, raw API responses are printed to stderr
+	Debug      bool // when true, raw API responses are printed to stderr
 }
 
 // NewClient creates an Omada client for the given controller host.
@@ -83,6 +82,7 @@ func NewClient(ctx context.Context, host string) (*Client, error) {
 		Timeout: 30 * time.Second,
 		Jar:     jar,
 		Transport: &http.Transport{
+			// nosemgrep
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: true, //nolint:gosec // self-signed controller cert
 			},

@@ -21,7 +21,7 @@ var checkRoutesCmd = &cobra.Command{
 	Short: "Validate routes and gateways for targets",
 	Example: `  nyx check-routes --target 10.0.30.10
   nyx check-routes --target 1.1.1.1 --json`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		if routeTarget == "" {
 			return fmt.Errorf("--target is required")
 		}

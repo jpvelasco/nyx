@@ -31,7 +31,7 @@ var providerCmd = &cobra.Command{
 var providerListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all registered providers and their capabilities",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		list := providers.List()
 		sort.Slice(list, func(i, j int) bool {
 			return list[i].Name() < list[j].Name()
@@ -101,7 +101,7 @@ func buildInfoCmd(p providers.Provider) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "info",
 		Short: fmt.Sprintf("Show %s controller version and connection info", p.Name()),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			info, err := p.Info(ctx, providers.ImportOptions{
@@ -134,7 +134,7 @@ func buildImportCmd(p providers.Provider) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "import",
 		Short: fmt.Sprintf("Import network topology from %s and generate a spec", p.Name()),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			dur, _ := time.ParseDuration(timeout)
 			if dur == 0 {
 				dur = 60 * time.Second
@@ -184,7 +184,7 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: fmt.Sprintf("Import from %s and immediately run a live audit", p.Name()),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			dur, _ := time.ParseDuration(timeout)
 			if dur == 0 {
 				dur = 300 * time.Second

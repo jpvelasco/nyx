@@ -1,3 +1,4 @@
+// Package mcp implements the Model Context Protocol (MCP) stdio server for exposing nyx capabilities to AI agents.
 package mcp
 
 import (

@@ -1,3 +1,4 @@
+// Package logger implements a simple JSON-lines rotating logger used by the CLI for audit trails.
 package logger
 
 import (

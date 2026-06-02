@@ -24,7 +24,7 @@ var doctorCmd = &cobra.Command{
 	Example: `  nyx doctor
   nyx doctor --spec homelab.yaml
   nyx doctor --json`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		var checks []models.CheckResult
 		allPass := true
 

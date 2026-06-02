@@ -237,8 +237,11 @@ func DiscoverWithTimeout(parent context.Context, cidr string, timeout time.Durat
 type ScanMode string
 
 const (
-	ScanModePolite     ScanMode = "polite"
-	ScanModeNormal     ScanMode = "normal"
+	// ScanModePolite uses a slower, less intrusive scan timing (T2, min rate 100).
+	ScanModePolite ScanMode = "polite"
+	// ScanModeNormal uses default nmap timing (T3).
+	ScanModeNormal ScanMode = "normal"
+	// ScanModeAggressive uses faster timing (T4, higher min rate).
 	ScanModeAggressive ScanMode = "aggressive"
 )
 

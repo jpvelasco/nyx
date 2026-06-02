@@ -204,8 +204,8 @@ func TestValidateAssertionRequiredFields(t *testing.T) {
 		{
 			name: "subnet_discovery min > max",
 			assertion: func() Assertion {
-				min, max := 10, 5
-				return Assertion{Type: "subnet_discovery", Network: "net", ExpectHostsMin: &min, ExpectHostsMax: &max}
+				minHosts, maxHosts := 10, 5
+				return Assertion{Type: "subnet_discovery", Network: "net", ExpectHostsMin: &minHosts, ExpectHostsMax: &maxHosts}
 			}(),
 			wantErr: "expect_hosts_min must not exceed expect_hosts_max",
 		},

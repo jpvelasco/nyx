@@ -22,19 +22,19 @@ function getPlatformInfo() {
 
 async function download() {
   const info = getPlatformInfo();
-  const binaryName = `nyx-${info.platform}-${info.arch}${info.ext}`;
-  const url = `https://github.com/${REPO}/releases/download/v${VERSION}/${binaryName}`;
+  const binaryName = "nyx-"+info.platform+"-"+info.arch+info.ext;
+  const url = "https://github.com/"+REPO+"/releases/download/v"+VERSION+"/"+binaryName;
   const destDir = path.join(__dirname, '..', 'bin');
   const destPath = path.join(destDir, binaryName);
 
   if (fs.existsSync(destPath)) {
-    console.log(`Binary already exists: ${destPath}`);
+    console.log("Binary already exists: "+destPath);
     return;
   }
 
   fs.mkdirSync(destDir, { recursive: true });
 
-  console.log(`Downloading ${binaryName} from ${url}...`);
+  console.log("Downloading "+binaryName+" from "+url+"...");
   console.log('NOTE: Prebuilt binaries are not yet available for v0.1.0.');
   console.log('Build from source: go build -o nyx ./cmd/nyx/');
   console.log('');
