@@ -1,3 +1,4 @@
+// Package report provides human and JSON renderers for AuditReport and individual CheckResult values.
 package report
 
 import (

@@ -1,3 +1,4 @@
+// Package dns implements the dns_check assertion type using either the system resolver or a custom UDP resolver.
 package dns
 
 import (
@@ -41,7 +42,7 @@ func resolve(ctx context.Context, query, server string) (*models.CheckResult, []
 		// Use custom resolver pointing at server:53
 		resolver := &net.Resolver{
 			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				// Wrap IPv6 addresses in brackets for host:port format
 				serverAddr := server
 				if strings.Contains(server, ":") && !strings.HasPrefix(server, "[") {

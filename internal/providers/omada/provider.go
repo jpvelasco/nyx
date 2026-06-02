@@ -1,3 +1,4 @@
+// Package omadaprovider implements the providers.Provider interface for TP-Link Omada SDN controllers (v6+).
 package omadaprovider
 
 import (
@@ -12,12 +13,15 @@ import (
 // OmadaProvider implements providers.Provider for TP-Link Omada SDN controllers.
 type OmadaProvider struct{}
 
+// Name returns the provider identifier "omada".
 func (o *OmadaProvider) Name() string { return "omada" }
 
+// Capabilities lists the supported operations for this provider.
 func (o *OmadaProvider) Capabilities() []string {
 	return []string{"info", "import", "check"}
 }
 
+// Info returns basic controller information without requiring authentication.
 func (o *OmadaProvider) Info(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInfo, error) {
 	client, err := omadabackend.NewClient(ctx, opts.Host)
 	if err != nil {
@@ -35,6 +39,7 @@ func (o *OmadaProvider) Info(ctx context.Context, opts providers.ImportOptions) 
 	}, nil
 }
 
+// ImportSpec imports networks, policies, and clients from the Omada controller and returns a generated intent spec.
 func (o *OmadaProvider) ImportSpec(ctx context.Context, opts providers.ImportOptions) (*providers.ImportResult, error) {
 	result, err := omadabackend.ImportSpec(ctx, opts.Host, opts.Username, opts.Password, opts.Site, opts.Debug)
 	if err != nil {
@@ -54,6 +59,7 @@ func (o *OmadaProvider) ImportSpec(ctx context.Context, opts providers.ImportOpt
 	}, nil
 }
 
+// Check imports a spec from the controller and runs an audit against it.
 func (o *OmadaProvider) Check(ctx context.Context, opts providers.ImportOptions) (*providers.AuditResult, error) {
 	imported, err := o.ImportSpec(ctx, opts)
 	if err != nil {

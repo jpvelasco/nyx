@@ -1,3 +1,4 @@
+// Package cli (audit.go) contains the audit command implementation.
 package cli
 
 import (
@@ -21,7 +22,7 @@ var auditCmd = &cobra.Command{
 	Short: "Run a full audit from a YAML spec",
 	Example: `  nyx audit --spec homelab.yaml
   nyx audit --spec homelab.yaml --json`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		if specFile == "" {
 			// First Contact mode: orient the user immediately
 			brief := GetEnvironmentBriefing(nil)

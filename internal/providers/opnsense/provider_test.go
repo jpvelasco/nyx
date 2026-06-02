@@ -8,7 +8,7 @@ import (
 )
 
 func TestOPNsenseProviderBasics(t *testing.T) {
-	p := &OPNsenseProvider{}
+	p := &Provider{}
 
 	if p.Name() != "opnsense" {
 		t.Errorf("Name() = %q, want opnsense", p.Name())
@@ -30,7 +30,7 @@ func TestOPNsenseProviderBasics(t *testing.T) {
 }
 
 func TestOPNsenseInfoWithoutHost(t *testing.T) {
-	p := &OPNsenseProvider{}
+	p := &Provider{}
 	_, err := p.Info(context.Background(), providers.ImportOptions{})
 	if err == nil {
 		t.Error("expected error when no host for info")

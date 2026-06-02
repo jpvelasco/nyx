@@ -1,3 +1,4 @@
+// Package audit contains the concurrent assertion engine that executes a Spec's assertions using the appropriate backends and produces an AuditReport.
 package audit
 
 import (
@@ -224,10 +225,10 @@ func pickBestInterface(ifaces []net.Interface, spec *intent.Spec) string {
 	}
 
 	// Find the highest score
-	max := 0
+	maxCount := 0
 	for _, s := range scores {
-		if s.count > max {
-			max = s.count
+		if s.count > maxCount {
+			maxCount = s.count
 		}
 	}
 
@@ -235,7 +236,7 @@ func pickBestInterface(ifaces []net.Interface, spec *intent.Spec) string {
 	winners := 0
 	var winnerName string
 	for _, s := range scores {
-		if s.count == max {
+		if s.count == maxCount {
 			winners++
 			winnerName = s.name
 		}
@@ -503,10 +504,7 @@ func (e *Engine) runVPNRoute(ctx context.Context, a intent.Assertion) (*models.C
 		}
 	}
 
-	viaTunnel := false
-	if expectedIface != "" && route.Device == expectedIface {
-		viaTunnel = true
-	}
+	viaTunnel := expectedIface != "" && route.Device == expectedIface
 	// Also check if the device looks like a VPN interface
 	if !viaTunnel {
 		isVPN, _ := system.CheckVPNInterface(ctx, route.Device)

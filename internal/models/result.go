@@ -1,3 +1,4 @@
+// Package models defines the core data types (Status, CheckResult, AuditReport, RunnerContext, etc.) shared by the audit engine, backends, and report renderers.
 package models
 
 import "time"
@@ -6,11 +7,16 @@ import "time"
 type Status string
 
 const (
-	StatusPass  Status = "pass"
-	StatusFail  Status = "fail"
-	StatusWarn  Status = "warn"
+	// StatusPass indicates the check passed (behavior matched intent).
+	StatusPass Status = "pass"
+	// StatusFail indicates the check failed (behavior violated intent).
+	StatusFail Status = "fail"
+	// StatusWarn indicates the check produced a warning (e.g. no hosts discovered but within allowed range).
+	StatusWarn Status = "warn"
+	// StatusError indicates the check could not be executed (config error, timeout, etc.).
 	StatusError Status = "error"
-	StatusSkip  Status = "skip"
+	// StatusSkip indicates the check was skipped.
+	StatusSkip Status = "skip"
 )
 
 // CheckResult is the normalized result envelope for every check

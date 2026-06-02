@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+## Tools
+Document available tools, APIs (e.g. Codacy CLI, gh MCP, codacy_cli_analyze), and usage patterns here or in TOOLS.md.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Build & Test
@@ -42,7 +45,7 @@ YAML spec → intent.LoadSpec → audit.Engine.Run → []CheckResult → report.
 
 - `internal/backends/system` — Platform-specific implementations (`system_linux.go`, `system_darwin.go`, `system_windows.go`) selected via Go build tags.
 
-- `internal/backends/omada` — Read-only REST client for Omada SDN 6.x. `NewClient` calls `/api/info` unauthenticated. All authenticated calls use `/{omadaCID}/api/v2/...` with `Csrf-Token`. TLS verification intentionally skipped (self-signed cert). Not concurrency-safe.
+- `internal/backends/omada` — Read-only REST client for Omada **Software Defined Networking (SDN)** 6.x. `NewClient` calls `/api/info` unauthenticated. All authenticated calls use `/{omadaCID}/api/v2/...` with `Csrf-Token`. TLS verification intentionally skipped (self-signed cert). Not concurrency-safe.
 
 - `internal/providers` — Provider interface (`Provider`) and registry (`Register`/`Get`/`List`/`Reset`). Providers self-register via `init()` blank imports in `cmd/nyx/main.go`. CLI vendor subcommands (`nyx omada ...`) are built dynamically in `Execute()` via `BuildProviderSubcommands`.
 
@@ -50,11 +53,13 @@ YAML spec → intent.LoadSpec → audit.Engine.Run → []CheckResult → report.
 
 - `internal/providers/opnsense` — OPNsenseProvider fully implemented (Info + ImportSpec + Check). Uses API key/secret auth.
 
-- `internal/recommendations` — Analyzes `[]CheckResult` failures and produces prioritized `Recommendation` structs. Called by `audit` in human mode only (not JSON).
+- `internal/recommendations`
+  - Analyzes `[]CheckResult` failures and produces prioritized `Recommendation` structs.
+  - Called by `audit` in human mode only (not JSON).
 
-- `internal/logger` — JSON-lines append logger with file rotation. Writes to `~/.nyx/nyx.log`. 5MB max size, 3 rotated files. Best-effort — never fails a command.
+- `internal/logger` — JSON-lines append logger with file rotation. Writes to `~/.nyx/nyx.log`. 5MB max size, 3 rotated files. Best-effort — never fails a command (unless the user explicitly requests it).
 
-- `internal/mcp` — MCP stdio server. All tools return `CheckResult`-shaped JSON consistent with CLI `--json` output.
+- `internal/mcp` — **Model Context Protocol (MCP)** stdio server. All tools return `CheckResult`-shaped JSON consistent with CLI `--json` output.
 
 - `internal/report` — `RenderJSON`, `RenderHuman`, `RenderRecommendations` output renderers.
 
@@ -64,7 +69,12 @@ YAML spec → intent.LoadSpec → audit.Engine.Run → []CheckResult → report.
 
 ## Spec Format
 
-Version 1 intent spec: `networks`, `vpn`, `probes`, `policies`, `assertions`. Eight assertion types: `subnet_discovery`, `isolation`, `vpn_route`, `route_check`, `port_check`, `dns_check`, `network_health`, `acl_check`. `ValidateSpec` enforces required fields per type. Probes declare SSH nodes for remote checks. See `examples/homelab.yaml` (realistic 7-VLAN example) and `testdata/valid_spec.yaml`. The authoritative spec reference is now `docs/spec.html`. Assertions can use `runner: <probe-name>` to execute checks remotely via SSH from a different VLAN.
+Version 1 intent spec: `networks`, `vpn`, `probes`, `policies`, `assertions`.
+Eight assertion types: `subnet_discovery`, `isolation`, `vpn_route`, `route_check`, `port_check`, `dns_check`, `network_health`, `acl_check`.
+`ValidateSpec` enforces required fields per type. Probes declare SSH nodes for remote checks.
+See `examples/homelab.yaml` (realistic 7-VLAN example) and `testdata/valid_spec.yaml`.
+The authoritative spec reference is now `docs/spec.html`.
+Assertions can use `runner: <probe-name>` to execute checks remotely via SSH from a different VLAN.
 
 ## Provider System
 

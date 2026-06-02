@@ -41,7 +41,7 @@ func CheckAvailable() error {
 		"nmap is required but was not found in PATH\n\n"+
 			"  Install it with:\n"+
 			"    %s\n\n"+
-			"  Then re-run this command.",
+			"  Then re-run this command",
 		installCmd(),
 	)
 }

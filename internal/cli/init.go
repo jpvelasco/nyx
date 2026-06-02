@@ -23,7 +23,7 @@ var initCmd = &cobra.Command{
 then write a nyx.yaml spec you can customize.`,
 	Example: `  nyx init
   nyx init --output mynet.yaml`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		if err := nmap.CheckAvailable(); err != nil {
 			return fmt.Errorf("nyx init requires nmap: %w", err)
 		}
@@ -344,7 +344,7 @@ func inferNetworkName(cidr string, hostCount int) string {
 
 // nameForCIDR generates a network name, ensuring uniqueness across all networks.
 // It first tries to infer a meaningful name, then falls back to CIDR-based naming.
-func nameForCIDR(cidr, localIP string, hostCount int, usedNames map[string]bool) string {
+func nameForCIDR(cidr string, _ string, hostCount int, usedNames map[string]bool) string {
 	name := inferNetworkName(cidr, hostCount)
 	if !usedNames[name] {
 		usedNames[name] = true

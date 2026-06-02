@@ -2,6 +2,7 @@
 // ping, and traceroute checks. The public API is the same on every OS; the
 // actual implementations live in system_linux.go, system_darwin.go, and
 // system_windows.go selected at build time via Go build tags.
+// Package system provides platform-specific implementations (via build tags) for route lookup, ping, traceroute, and interface enumeration.
 package system
 
 import (

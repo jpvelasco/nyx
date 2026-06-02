@@ -30,7 +30,7 @@ Run this right after a clean 'nyx audit --spec <your-spec>' when everything look
 You can also point it at a previously saved snapshot file to restore an older baseline:
   nyx snapshot baseline ~/.nyx/snapshots/snapshot-20250601-140000.json`,
 	Args: cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, args []string) error {
 		var (
 			specPath  string
 			auditTime time.Time
@@ -103,7 +103,7 @@ You can also point it at a previously saved snapshot file to restore an older ba
 var snapshotListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List saved snapshots",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		snaps, err := snapshot.ListSnapshots()
 		if err != nil {
 			return err
@@ -116,7 +116,7 @@ var snapshotListCmd = &cobra.Command{
 
 		fmt.Printf("Saved snapshots (%d):\n", len(snaps))
 		for _, s := range snaps {
-			dir, _ := snapshot.SnapshotDir()
+			dir, _ := snapshot.Dir()
 			if dir != "" {
 				info, err := os.Stat(filepath.Join(dir, s))
 				if err == nil {
@@ -144,7 +144,7 @@ var snapshotDeleteCmd = &cobra.Command{
 	Use:   "delete [snapshot]",
 	Short: "Delete a snapshot or all snapshots",
 	Args:  cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			// Delete all snapshots (not baseline)
 			snaps, err := snapshot.ListSnapshots()
@@ -155,7 +155,7 @@ var snapshotDeleteCmd = &cobra.Command{
 				fmt.Println("No snapshots to delete.")
 				return nil
 			}
-			dir, err := snapshot.SnapshotDir()
+			dir, err := snapshot.Dir()
 			if err != nil {
 				return err
 			}
@@ -168,7 +168,7 @@ var snapshotDeleteCmd = &cobra.Command{
 
 		// Delete specific snapshot
 		snapName := args[0]
-		dir, err := snapshot.SnapshotDir()
+		dir, err := snapshot.Dir()
 		if err != nil {
 			return err
 		}
@@ -184,7 +184,7 @@ var snapshotDeleteCmd = &cobra.Command{
 var snapshotClearBaselineCmd = &cobra.Command{
 	Use:   "clear-baseline",
 	Short: "Remove the baseline snapshot",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		baselinePath := snapshot.BaselinePath()
 		if baselinePath == "" {
 			return fmt.Errorf("cannot determine baseline path")

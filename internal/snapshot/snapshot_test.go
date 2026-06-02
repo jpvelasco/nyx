@@ -39,7 +39,7 @@ func TestNewSnapshot(t *testing.T) {
 }
 
 func TestSnapshotDir(t *testing.T) {
-	dir, err := SnapshotDir()
+	dir, err := Dir()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestSnapshotDir(t *testing.T) {
 
 func TestSaveAndList(t *testing.T) {
 	// Clean up after test
-	dir, err := SnapshotDir()
+	dir, err := Dir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestSaveAndList(t *testing.T) {
 
 func TestSetBaselineAndLoad(t *testing.T) {
 	// Clean up after test
-	dir, err := SnapshotDir()
+	dir, err := Dir()
 	if err != nil {
 		t.Fatal(err)
 	}

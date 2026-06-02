@@ -204,8 +204,6 @@ func Traceroute(ctx context.Context, target string) ([]TracerouteHop, error) {
 	return hops, nil
 }
 
-var reTracertHop = regexp.MustCompile(`^\s*(\d+)`) //nolint:unused // used via parseTracertLine in same package
-
 func parseTracertLine(line string) *TracerouteHop {
 	fields := strings.Fields(line)
 	if len(fields) < 2 {

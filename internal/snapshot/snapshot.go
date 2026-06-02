@@ -1,3 +1,4 @@
+// Package snapshot handles persisting and comparing full audit reports (snapshots + baseline + drift detection).
 package snapshot
 
 import (
@@ -41,13 +42,13 @@ func NewSnapshot(specPath string, report *models.AuditReport) *Snapshot {
 	}
 }
 
-// SnapshotFilename generates a filename for a snapshot.
-func SnapshotFilename() string {
+// Filename generates a filename for a snapshot.
+func Filename() string {
 	return fmt.Sprintf("snapshot-%s%s", time.Now().Format("20060102-150405"), snapshotExt)
 }
 
-// SnapshotDir returns the path to the snapshots directory, creating it if needed.
-func SnapshotDir() (string, error) {
+// Dir returns the path to the snapshots directory, creating it if needed.
+func Dir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot determine home directory: %w", err)
@@ -61,12 +62,12 @@ func SnapshotDir() (string, error) {
 
 // Save writes a snapshot to disk and rotates old snapshots.
 func Save(specPath string, report *models.AuditReport) (string, error) {
-	dir, err := SnapshotDir()
+	dir, err := Dir()
 	if err != nil {
 		return "", err
 	}
 
-	filename := SnapshotFilename()
+	filename := Filename()
 	path := filepath.Join(dir, filename)
 
 	snap := NewSnapshot(specPath, report)
@@ -87,7 +88,7 @@ func Save(specPath string, report *models.AuditReport) (string, error) {
 
 // BaselinePath returns the path to the baseline snapshot file.
 func BaselinePath() string {
-	dir, err := SnapshotDir()
+	dir, err := Dir()
 	if err != nil {
 		return ""
 	}
@@ -148,7 +149,7 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 
 // ListSnapshots returns all snapshot filenames sorted by time (oldest first).
 func ListSnapshots() ([]string, error) {
-	dir, err := SnapshotDir()
+	dir, err := Dir()
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +183,7 @@ func rotate(dir string, maxSnapshots int) {
 	}
 }
 
-// Drift compares a newer snapshot against an older one and returns the differences.
+// DriftResult represents the result of comparing a newer snapshot against an older one for drift detection.
 type DriftResult struct {
 	BaselineTime   time.Time            `json:"baseline_time"`
 	CurrentTime    time.Time            `json:"current_time"`
@@ -226,9 +227,10 @@ func ComputeDrift(baseline, current *Snapshot) *DriftResult {
 	for key, cur := range currentMap {
 		base, exists := baselineMap[key]
 		if !exists {
-			if cur.Status == models.StatusFail {
+			switch cur.Status {
+			case models.StatusFail:
 				dr.NewFailures = append(dr.NewFailures, cur)
-			} else if cur.Status == models.StatusWarn {
+			case models.StatusWarn:
 				dr.NewWarnings = append(dr.NewWarnings, cur)
 			}
 			continue
@@ -296,7 +298,7 @@ func buildLookup(findings []models.CheckResult) map[string]models.CheckResult {
 }
 
 // statusWorsened returns true if newStatus is worse than oldStatus.
-func statusWorsened(old, new models.Status) bool {
+func statusWorsened(old, newStatus models.Status) bool {
 	rank := map[models.Status]int{
 		models.StatusPass:  0,
 		models.StatusWarn:  1,
@@ -304,12 +306,12 @@ func statusWorsened(old, new models.Status) bool {
 		models.StatusError: 3,
 		models.StatusSkip:  -1,
 	}
-	return rank[new] > rank[old]
+	return rank[newStatus] > rank[old]
 }
 
 // statusImproved returns true if newStatus is better than oldStatus.
-func statusImproved(old, new models.Status) bool {
-	return statusWorsened(new, old)
+func statusImproved(old, newStatus models.Status) bool {
+	return statusWorsened(newStatus, old)
 }
 
 // computeNetChange returns a human-readable description of the net change.

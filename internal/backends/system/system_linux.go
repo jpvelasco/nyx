@@ -15,6 +15,7 @@ import (
 // GetRoutes
 // -----------------------------------------------------------------------
 
+// GetRoutes returns all routes from the kernel routing table.
 func GetRoutes(ctx context.Context) ([]Route, error) {
 	out, err := runCmd(ctx, "ip", "route")
 	if err != nil {
@@ -81,6 +82,7 @@ func parseIPRouteLine(line string) *Route {
 // GetRouteToTarget
 // -----------------------------------------------------------------------
 
+// GetRouteToTarget returns the specific route entry used to reach the target.
 func GetRouteToTarget(ctx context.Context, target string) (*Route, error) {
 	out, err := runCmd(ctx, "ip", "route", "get", target)
 	if err != nil {
@@ -133,6 +135,7 @@ var (
 	reAvgRTTLinux  = regexp.MustCompile(`rtt min/avg/max/mdev = [\d.]+/([\d.]+)/`)
 )
 
+// Ping performs an ICMP ping to the target and returns results (Linux uses ping -c -W).
 func Ping(ctx context.Context, target string) (*PingResult, error) {
 	out, err := runCmd(ctx, "ping", "-c", "3", "-W", "2", target)
 	if err != nil && ctx.Err() != nil {
@@ -159,6 +162,7 @@ func Ping(ctx context.Context, target string) (*PingResult, error) {
 // Traceroute
 // -----------------------------------------------------------------------
 
+// Traceroute runs traceroute to the target and parses hops.
 func Traceroute(ctx context.Context, target string) ([]TracerouteHop, error) {
 	out, err := runCmd(ctx, "traceroute", "-n", "-m", "15", "-w", "2", target)
 	if err != nil && ctx.Err() != nil {
@@ -221,6 +225,7 @@ type ipAddrJSON struct {
 	} `json:"addr_info"`
 }
 
+// GetInterfaces lists active non-loopback interfaces with their addresses (Linux: ip addr).
 func GetInterfaces(ctx context.Context) ([]Interface, error) {
 	out, err := runCmd(ctx, "ip", "-j", "addr", "show")
 	if err == nil && strings.TrimSpace(out) != "" && strings.HasPrefix(strings.TrimSpace(out), "[") {
@@ -299,6 +304,7 @@ func parseInterfacesText(output string) []Interface {
 // CheckVPNInterface
 // -----------------------------------------------------------------------
 
+// CheckVPNInterface returns whether the given interface name looks like a VPN tunnel.
 func CheckVPNInterface(ctx context.Context, ifaceName string) (bool, error) {
 	if !isVPNInterfaceName(ifaceName) {
 		return false, nil

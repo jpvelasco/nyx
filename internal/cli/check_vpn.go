@@ -21,7 +21,7 @@ var checkVPNCmd = &cobra.Command{
 	Short: "Verify VPN status and routing",
 	Example: `  nyx check-vpn --target 10.0.20.15
   nyx check-vpn --target 10.0.20.15 --json`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		if vpnTarget == "" {
 			return fmt.Errorf("--target is required")
 		}

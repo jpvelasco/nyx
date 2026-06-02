@@ -324,13 +324,21 @@ make release  # Cross-compile for all platforms
 
 All three platforms cross-compile from any OS. Platform-specific code uses Go build tags.
 
-## npm Distribution
+## Distribution & Releases
+
+Official binaries are published automatically on every `v*` tag via GitHub Releases.
 
 ```bash
+# Build from source (recommended for development)
+make build
+
+# Or install via npm (once a release exists)
 npm install -g @nyx/cli
 ```
 
-The npm package is a thin wrapper that downloads the prebuilt Go binary for your platform. For v0.1.0, build from source instead (binaries not yet published to GitHub Releases).
+The npm package (`@nyx/cli`) is a thin platform-aware wrapper that downloads the matching prebuilt binary from the GitHub Release.
+
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md) (or the release workflow) for the exact tagging process.
 
 ## License
 

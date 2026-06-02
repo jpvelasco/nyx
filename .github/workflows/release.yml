@@ -1,0 +1,131 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. v0.2.0). Required for manual dispatch.'
+        required: true
+      draft:
+        description: 'Create as draft release?'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Run verification (vet + test)
+        run: make vet && make test
+
+      - name: Determine version
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VER="${{ inputs.version }}"
+          else
+            VER="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "version=${VER}" >> $GITHUB_OUTPUT
+          echo "tag=v${VER}" >> $GITHUB_OUTPUT
+
+      - name: Build release binaries
+        run: make release VERSION=${{ steps.ver.outputs.version }}
+
+      - name: Verify built binaries
+        run: |
+          echo "=== Linux amd64 ==="
+          ./nyx-linux-amd64 version
+          echo "=== Linux arm64 ==="
+          ./nyx-linux-arm64 version || echo "arm64 binary (cannot run on x86 runner)"
+          echo "=== Windows ==="
+          file nyx-windows-amd64.exe || true
+          echo "Binaries look good."
+
+      - name: Generate checksums
+        run: |
+          sha256sum nyx-* > checksums.txt
+          cat checksums.txt
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        shell: bash
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          # Extract the section for this version from CHANGELOG.md
+          # Assumes Keep a Changelog format with ## [X.Y.Z] headers
+          awk -v ver="$VERSION" '
+            /^## \[/ { if (p) exit; if ($0 ~ "\\[" ver "\\]") p=1; next }
+            p && /^## \[/ { exit }
+            p { print }
+          ' CHANGELOG.md > /tmp/body.md || true
+
+          if [ ! -s /tmp/body.md ]; then
+            echo "## v${VERSION}" > /tmp/body.md
+            echo "" >> /tmp/body.md
+            echo "See full [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details." >> /tmp/body.md
+          fi
+
+          # Prepend nice header
+          {
+            echo "# v${VERSION}"
+            echo ""
+            cat /tmp/body.md
+            echo ""
+            echo "---"
+            echo "Full changelog: https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md"
+          } > /tmp/release-body.md
+
+          echo "body_path=/tmp/release-body.md" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DRAFT_FLAG=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.draft }}" = "true" ]; then
+            DRAFT_FLAG="--draft"
+          fi
+
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            --title "v${{ steps.ver.outputs.version }}" \
+            --notes-file "${{ steps.notes.outputs.body_path }}" \
+            $DRAFT_FLAG \
+            nyx-linux-amd64 \
+            nyx-linux-arm64 \
+            nyx-darwin-amd64 \
+            nyx-darwin-arm64 \
+            nyx-windows-amd64.exe \
+            checksums.txt
+
+      - name: Summary
+        run: |
+          echo "✅ Released ${{ steps.ver.outputs.tag }}"
+          echo "🔗 https://github.com/${{ github.repository }}/releases/tag/${{ steps.ver.outputs.tag }}"
+          echo "📦 Binaries + checksums attached."
+          echo "npm: npm install -g @nyx/cli (pulls from this release)"

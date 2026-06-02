@@ -1,3 +1,4 @@
+// Package main is the entrypoint for the nyx CLI binary.
 package main
 
 import (

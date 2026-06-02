@@ -1,3 +1,4 @@
+// Package intent defines the YAML spec model (Spec, Assertion, Network, etc.) and validation logic.
 package intent
 
 import (
