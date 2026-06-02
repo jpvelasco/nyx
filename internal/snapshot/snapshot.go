@@ -14,18 +14,18 @@ import (
 
 const (
 	defaultMaxSnapshots = 50
-	snapshotExt        = ".json"
+	snapshotExt         = ".json"
 )
 
 // Snapshot wraps an audit report with metadata for persistence.
 type Snapshot struct {
-	SpecPath          string               `json:"spec_path"`
-	RunAt             time.Time            `json:"run_at"`
-	Runner            models.RunnerContext  `json:"runner"`
-	Summary           models.ReportSummary  `json:"summary"`
-	Status            models.Status         `json:"status"`
-	Findings          []models.CheckResult  `json:"findings"`
-	Recommendations   []models.Recommendation `json:"recommendations,omitempty"`
+	SpecPath        string                  `json:"spec_path"`
+	RunAt           time.Time               `json:"run_at"`
+	Runner          models.RunnerContext    `json:"runner"`
+	Summary         models.ReportSummary    `json:"summary"`
+	Status          models.Status           `json:"status"`
+	Findings        []models.CheckResult    `json:"findings"`
+	Recommendations []models.Recommendation `json:"recommendations,omitempty"`
 }
 
 // NewSnapshot creates a Snapshot from an AuditReport and the spec path.
@@ -184,36 +184,36 @@ func rotate(dir string, maxSnapshots int) {
 
 // Drift compares a newer snapshot against an older one and returns the differences.
 type DriftResult struct {
-	BaselineTime  time.Time          `json:"baseline_time"`
-	CurrentTime   time.Time          `json:"current_time"`
-	BaselineStatus models.Status    `json:"baseline_status"`
-	CurrentStatus  models.Status    `json:"current_status"`
+	BaselineTime   time.Time            `json:"baseline_time"`
+	CurrentTime    time.Time            `json:"current_time"`
+	BaselineStatus models.Status        `json:"baseline_status"`
+	CurrentStatus  models.Status        `json:"current_status"`
 	NewFailures    []models.CheckResult `json:"new_failures,omitempty"`
 	NewWarnings    []models.CheckResult `json:"new_warnings,omitempty"`
 	FixedFailures  []models.CheckResult `json:"fixed_failures,omitempty"`
 	Degraded       []models.CheckResult `json:"degraded,omitempty"`
 	Improved       []models.CheckResult `json:"improved,omitempty"`
-	Summary        DriftSummary     `json:"summary"`
+	Summary        DriftSummary         `json:"summary"`
 }
 
 // DriftSummary gives a high-level view of the drift.
 type DriftSummary struct {
-	BaselinePass  int `json:"baseline_pass"`
-	BaselineFail  int `json:"baseline_fail"`
-	BaselineWarn  int `json:"baseline_warn"`
-	BaselineError int `json:"baseline_error"`
-	CurrentPass   int `json:"current_pass"`
-	CurrentFail   int `json:"current_fail"`
-	CurrentWarn   int `json:"current_warn"`
-	CurrentError  int `json:"current_error"`
+	BaselinePass  int    `json:"baseline_pass"`
+	BaselineFail  int    `json:"baseline_fail"`
+	BaselineWarn  int    `json:"baseline_warn"`
+	BaselineError int    `json:"baseline_error"`
+	CurrentPass   int    `json:"current_pass"`
+	CurrentFail   int    `json:"current_fail"`
+	CurrentWarn   int    `json:"current_warn"`
+	CurrentError  int    `json:"current_error"`
 	NetChange     string `json:"net_change"`
 }
 
 // ComputeDrift compares two snapshots and returns the drift result.
 func ComputeDrift(baseline, current *Snapshot) *DriftResult {
 	dr := &DriftResult{
-		BaselineTime:  baseline.RunAt,
-		CurrentTime:   current.RunAt,
+		BaselineTime:   baseline.RunAt,
+		CurrentTime:    current.RunAt,
 		BaselineStatus: baseline.Status,
 		CurrentStatus:  current.Status,
 	}

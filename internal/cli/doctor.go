@@ -9,13 +9,13 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/logger"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/report"
+	"github.com/spf13/cobra"
 )
 
 var doctorCmd = &cobra.Command{
@@ -163,7 +163,7 @@ var doctorCmd = &cobra.Command{
 
 		if allPass {
 			if specFile != "" {
-				fmt.Fprintln(w, fmt.Sprintf("Everything checks out — ready to audit. Try: nyx audit --spec %s", specFile))
+				fmt.Fprintf(w, "Everything checks out — ready to audit. Try: nyx audit --spec %s\n", specFile)
 				fmt.Fprintln(w, "For ongoing confidence: nyx snapshot baseline then nyx drift status after future changes.")
 			} else {
 				fmt.Fprintln(w, "Everything checks out — nyx is ready to go.")

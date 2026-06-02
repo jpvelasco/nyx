@@ -27,31 +27,31 @@ func TestGenerateRecommendations_VantagePointAggregation(t *testing.T) {
 	// All should be aggregated into ONE vantage_point recommendation.
 	failures := []models.CheckResult{
 		{
-			CheckType: "isolation",
-			Target:    "personal -> gaming",
-			Status:    models.StatusFail,
-			Summary:   "isolation violation: personal can reach gaming",
+			CheckType:  "isolation",
+			Target:     "personal -> gaming",
+			Status:     models.StatusFail,
+			Summary:    "isolation violation: personal can reach gaming",
 			Violations: []string{"expected deny but traffic is reachable"},
 		},
 		{
-			CheckType: "isolation",
-			Target:    "personal -> iot",
-			Status:    models.StatusFail,
-			Summary:   "isolation violation: personal can reach iot",
+			CheckType:  "isolation",
+			Target:     "personal -> iot",
+			Status:     models.StatusFail,
+			Summary:    "isolation violation: personal can reach iot",
 			Violations: []string{"expected deny but traffic is reachable"},
 		},
 		{
-			CheckType: "isolation",
-			Target:    "gaming -> personal",
-			Status:    models.StatusFail,
-			Summary:   "isolation violation: gaming can reach personal",
+			CheckType:  "isolation",
+			Target:     "gaming -> personal",
+			Status:     models.StatusFail,
+			Summary:    "isolation violation: gaming can reach personal",
 			Violations: []string{"expected deny but traffic is reachable"},
 		},
 		{
-			CheckType: "isolation",
-			Target:    "personal -> trusted",
-			Status:    models.StatusFail,
-			Summary:   "isolation violation: personal can reach trusted",
+			CheckType:  "isolation",
+			Target:     "personal -> trusted",
+			Status:     models.StatusFail,
+			Summary:    "isolation violation: personal can reach trusted",
 			Violations: []string{"expected deny but traffic is reachable"},
 		},
 	}
@@ -120,10 +120,10 @@ func TestGenerateRecommendations_IsolationBreach(t *testing.T) {
 	// When the runner IS in the source zone and the check fails, it's a real breach.
 	failures := []models.CheckResult{
 		{
-			CheckType: "isolation",
-			Target:    "gaming -> personal",
-			Status:    models.StatusFail,
-			Summary:   "isolation violation: gaming can reach personal",
+			CheckType:  "isolation",
+			Target:     "gaming -> personal",
+			Status:     models.StatusFail,
+			Summary:    "isolation violation: gaming can reach personal",
 			Violations: []string{"expected deny but traffic is reachable"},
 		},
 	}
@@ -166,10 +166,10 @@ func TestGenerateRecommendations_ProbeAlreadyDeclared(t *testing.T) {
 	// When a probe exists in the needed zone, the recommendation should tell the user to use it.
 	failures := []models.CheckResult{
 		{
-			CheckType: "isolation",
-			Target:    "personal -> gaming",
-			Status:    models.StatusFail,
-			Summary:   "isolation violation: personal can reach gaming",
+			CheckType:  "isolation",
+			Target:     "personal -> gaming",
+			Status:     models.StatusFail,
+			Summary:    "isolation violation: personal can reach gaming",
 			Violations: []string{"expected deny but traffic is reachable"},
 		},
 	}
@@ -312,10 +312,10 @@ func TestGenerateRecommendations_ACLNotEnforced(t *testing.T) {
 func TestGenerateRecommendations_HostDown(t *testing.T) {
 	failures := []models.CheckResult{
 		{
-			CheckType: "port_check",
-			Target:    "192.168.50.55",
-			Status:    models.StatusFail,
-			Summary:   "port check failed on 192.168.50.55",
+			CheckType:  "port_check",
+			Target:     "192.168.50.55",
+			Status:     models.StatusFail,
+			Summary:    "port check failed on 192.168.50.55",
 			Violations: []string{"port 8096: expected open, got filtered"},
 		},
 	}
@@ -340,10 +340,10 @@ func TestGenerateRecommendations_HostDown(t *testing.T) {
 func TestGenerateRecommendations_DNSFailure(t *testing.T) {
 	failures := []models.CheckResult{
 		{
-			CheckType: "dns_check",
-			Target:    "nas.home.example",
-			Status:    models.StatusFail,
-			Summary:   "dns_check failed: nas.home.lan resolved to 10.0.0.5 (expected 10.0.0.10)",
+			CheckType:  "dns_check",
+			Target:     "nas.home.example",
+			Status:     models.StatusFail,
+			Summary:    "dns_check failed: nas.home.lan resolved to 10.0.0.5 (expected 10.0.0.10)",
 			Violations: []string{"expected IP 10.0.0.10, got 10.0.0.5"},
 		},
 	}
@@ -371,10 +371,10 @@ func TestGenerateRecommendations_DNSFailure(t *testing.T) {
 func TestGenerateRecommendations_NetworkDegraded(t *testing.T) {
 	failures := []models.CheckResult{
 		{
-			CheckType: "network_health",
-			Target:    "192.168.20.254",
-			Status:    models.StatusFail,
-			Summary:   "network_health failed: 192.168.20.254 latency 500ms (expected <100ms)",
+			CheckType:  "network_health",
+			Target:     "192.168.20.254",
+			Status:     models.StatusFail,
+			Summary:    "network_health failed: 192.168.20.254 latency 500ms (expected <100ms)",
 			Violations: []string{"latency 500ms exceeds threshold 100ms"},
 		},
 	}
@@ -399,12 +399,12 @@ func TestGenerateRecommendations_NetworkDegraded(t *testing.T) {
 func TestGenerateRecommendations_DiscoveryCountViolation(t *testing.T) {
 	failures := []models.CheckResult{
 		{
-			CheckType: "subnet_discovery",
-			Target:    "personal",
-			Status:    models.StatusFail,
-			Summary:   "25 hosts discovered in 192.168.20.0/24",
-			Observed:  map[string]interface{}{"total": float64(25)},
-			Expected:  map[string]interface{}{"expect_hosts_max": float64(20)},
+			CheckType:  "subnet_discovery",
+			Target:     "personal",
+			Status:     models.StatusFail,
+			Summary:    "25 hosts discovered in 192.168.20.0/24",
+			Observed:   map[string]interface{}{"total": float64(25)},
+			Expected:   map[string]interface{}{"expect_hosts_max": float64(20)},
 			Violations: []string{"found 25 hosts, expected max 20"},
 		},
 	}
@@ -510,10 +510,10 @@ func TestRealAuditScenario(t *testing.T) {
 			Expected:  map[string]interface{}{"vpn": "primary-vpn"},
 		},
 		{
-			CheckType: "port_check",
-			Target:    "192.168.50.55",
-			Status:    models.StatusFail,
-			Summary:   "port check failed on 192.168.50.55",
+			CheckType:  "port_check",
+			Target:     "192.168.50.55",
+			Status:     models.StatusFail,
+			Summary:    "port check failed on 192.168.50.55",
 			Violations: []string{"port 8096: expected open, got filtered"},
 		},
 		{
@@ -586,5 +586,27 @@ func TestRealAuditScenario(t *testing.T) {
 	}
 	if !categories["service_down"] {
 		t.Error("missing service_down category")
+	}
+}
+
+func TestGenerateRecommendations_EmptyOrAllPass(t *testing.T) {
+	// No failures -> no recommendations (or only non-failure ones filtered)
+	recs, err := GenerateRecommendations(nil, nil, models.RunnerContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(recs) != 0 {
+		t.Errorf("expected 0 recs for nil/empty failures, got %d", len(recs))
+	}
+
+	passOnly := []models.CheckResult{
+		{CheckType: "dummy", Status: models.StatusPass, Summary: "fine"},
+	}
+	recs, err = GenerateRecommendations(passOnly, nil, models.RunnerContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 0 {
+		t.Errorf("expected 0 recs for passing only, got %d", len(recs))
 	}
 }

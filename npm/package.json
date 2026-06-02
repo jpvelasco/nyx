@@ -1,14 +1,14 @@
 {
-  "name": "@netaudit/cli",
+  "name": "@nyx/cli",
   "version": "0.1.0",
   "description": "Network audit CLI for validating private networks against intended behavior",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/velasco-jp/netaudit"
+    "url": "https://github.com/jpvelasco/nyx"
   },
   "bin": {
-    "netaudit": "bin/netaudit"
+    "nyx": "bin/nyx"
   },
   "scripts": {
     "postinstall": "node scripts/install.js"

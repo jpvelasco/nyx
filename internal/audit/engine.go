@@ -33,7 +33,7 @@ type Engine struct {
 	Spec        *intent.Spec
 	Interface   string
 	WarnVirtual bool
-	SeenDBPath  string // if non-empty, overrides ~/.nyx/seen.json (used in tests)
+	SeenDBPath  string               // if non-empty, overrides ~/.nyx/seen.json (used in tests)
 	runnerCtx   models.RunnerContext // populated once at Run() time
 }
 
@@ -79,9 +79,7 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 				// Produce a clearer user-facing explanation instead of raw Go error
 				summary, details := explainAssertionError(assertion, err)
 				errResult.Summary = summary
-				for _, d := range details {
-					errResult.Violations = append(errResult.Violations, d)
-				}
+				errResult.Violations = append(errResult.Violations, details...)
 				errResult.Observed["raw_error"] = err.Error() // keep raw for advanced users / debugging
 				errResult.Finish()
 				findings[i] = *errResult

@@ -1,6 +1,7 @@
 package seendb_test
 
 import (
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -35,11 +36,24 @@ func TestAckAndReload(t *testing.T) {
 }
 
 func TestAckUnwritablePathIsGraceful(t *testing.T) {
-	// Use NUL (Windows reserved device) or an empty path to trigger error
-	db, _ := seendb.LoadFrom("NUL\\seen.json")
+	// Portable way to force a write error: point path at an existing directory.
+	// os.WriteFile on a dir path fails ("is a directory") on all platforms.
+	tmp := t.TempDir()
+	dirAsFile := filepath.Join(tmp, "seen.json")
+	if err := os.Mkdir(dirAsFile, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	db, _ := seendb.LoadFrom(dirAsFile)
 	err := db.AckVirtual("10.0.0.0/24")
 	if err == nil {
-		t.Error("expected error when writing to unwritable path")
+		t.Error("expected error when writing to unwritable path (directory)")
+	}
+
+	// Critical: ack must still succeed in memory (the graceful part).
+	// Callers do ` _ = db.AckVirtual(...) ` and continue.
+	if !db.IsVirtualAcked("10.0.0.0/24") {
+		t.Error("virtual CIDR should be acked in-memory even when persist fails")
 	}
 }
 

@@ -38,11 +38,11 @@ type RunnerContext struct {
 
 // AuditReport is the top-level report for a full audit run
 type AuditReport struct {
-	Audit          string        `json:"audit"`
-	Status         Status        `json:"status"`
-	Summary        ReportSummary `json:"summary"`
-	Runner         RunnerContext  `json:"runner"`
-	Findings       []CheckResult `json:"findings"`
+	Audit           string           `json:"audit"`
+	Status          Status           `json:"status"`
+	Summary         ReportSummary    `json:"summary"`
+	Runner          RunnerContext    `json:"runner"`
+	Findings        []CheckResult    `json:"findings"`
 	Recommendations []Recommendation `json:"recommendations,omitempty"`
 }
 

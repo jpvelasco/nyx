@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/spf13/cobra"
 	"github.com/jpvelasco/nyx/internal/mcp"
+	"github.com/spf13/cobra"
 )
 
 var (
