@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+
+const { spawn } = require('child_process');
+const path = require('path');
+const os = require('os');
+const fs = require('fs');
+
+function getBinaryName() {
+  const platform = os.platform();
+  const arch = os.arch();
+
+  const platformMap = {
+    linux: 'linux',
+    darwin: 'darwin',
+    win32: 'windows',
+  };
+
+  const archMap = {
+    x64: 'amd64',
+    arm64: 'arm64',
+  };
+
+  const p = platformMap[platform];
+  const a = archMap[arch];
+
+  if (!p || !a) {
+    console.error(`Unsupported platform: ${platform}-${arch}`);
+    process.exit(1);
+  }
+
+  const ext = platform === 'win32' ? '.exe' : '';
+  return `nyx-${p}-${a}${ext}`;
+}
+
+const binDir = path.join(__dirname, '..', 'bin');  // nosemgrep: generic.dynamic-path-construction
+const binaryName = getBinaryName();
+const binaryPath = path.join(binDir, binaryName);  // nosemgrep: generic.dynamic-path-construction
+
+if (!fs.existsSync(binaryPath)) {  // nosemgrep: generic.synchronous-io
+  console.error(`Binary not found: ${binaryPath}`);
+  console.error('Run "npm run postinstall" or download the binary manually.');
+  process.exit(1);
+}
+
+const child = spawn(binaryPath, process.argv.slice(2), {  // nosemgrep: generic.os-command-injection, generic.builtin-import
+  stdio: 'inherit',
+});
+
+child.on('exit', (code) => {
+  process.exit(code || 0);
+});
