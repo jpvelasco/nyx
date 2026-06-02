@@ -42,3 +42,22 @@ func TestRunUnreachable(t *testing.T) {
 		t.Errorf("error should mention probe name, got: %v", err)
 	}
 }
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"simple", "'simple'"},
+		{"with space", "'with space'"},
+		{"has'quote", "'has'\\''quote'"},
+		{"", "''"},
+		{"multiple'quotes'here", "'multiple'\\''quotes'\\''here'"},
+		{"$dollar `backtick`", "'$dollar `backtick`'"},
+	}
+	for _, tt := range tests {
+		if got := shellQuote(tt.in); got != tt.want {
+			t.Errorf("shellQuote(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}

@@ -13,12 +13,12 @@ import (
 
 // reDigStatus matches the dig response status line: ";; ->>HEADER<<- ... status: SERVFAIL"
 var (
-	reDigBogus    = regexp.MustCompile(`(?m);\s+status:\s+BOGUS`)
-	reDigServFail = regexp.MustCompile(`(?m);\s+status:\s+SERVFAIL`)
-	reDigNoError  = regexp.MustCompile(`(?m);\s+status:\s+NOERROR`)
+	reDigBogus     = regexp.MustCompile(`(?m);\s+status:\s+BOGUS`)
+	reDigServFail  = regexp.MustCompile(`(?m);\s+status:\s+SERVFAIL`)
+	reDigNoError   = regexp.MustCompile(`(?m);\s+status:\s+NOERROR`)
 	reDigValidated = regexp.MustCompile(`(?m);\s+status:\s+VALIDATED`)
 	// RRSIG records appear on their own line: "example.com. 300 IN RRSIG A ..."
-	reRRSIG       = regexp.MustCompile(`(?m)^\S+\s+\d+\s+IN\s+RRSIG\s`)
+	reRRSIG = regexp.MustCompile(`(?m)^\S+\s+\d+\s+IN\s+RRSIG\s`)
 )
 
 // resolve is the internal implementation, does not call Finish.

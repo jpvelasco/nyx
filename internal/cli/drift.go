@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/snapshot"
+	"github.com/spf13/cobra"
 )
 
 var driftCmd = &cobra.Command{

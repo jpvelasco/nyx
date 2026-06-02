@@ -1,7 +1,6 @@
-.PHONY: build test vet clean
+.PHONY: build test vet clean release lint
 
 BINARY = nyx
-MODULE = github.com/velasco-jp/nyx
 
 build:
 	go build -o $(BINARY) ./cmd/nyx/
@@ -13,9 +12,12 @@ vet:
 	go vet ./...
 
 clean:
-	rm -f $(BINARY) nyx-*
+	rm -f $(BINARY) nyx-* nyx.exe
 
-# Cross-compile for releases
+lint:
+	golangci-lint run ./...
+
+# Cross-compile for releases (run on any OS with Go)
 release:
 	GOOS=linux GOARCH=amd64 go build -o $(BINARY)-linux-amd64 ./cmd/nyx/
 	GOOS=linux GOARCH=arm64 go build -o $(BINARY)-linux-arm64 ./cmd/nyx/

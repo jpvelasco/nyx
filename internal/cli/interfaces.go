@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/spf13/cobra"
 	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/spf13/cobra"
 )
 
 var listInterfacesCmd = &cobra.Command{

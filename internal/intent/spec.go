@@ -10,13 +10,13 @@ import (
 
 // Spec is the top-level intent file
 type Spec struct {
-	Version    int          `yaml:"version" json:"version"`
-	Site       string       `yaml:"site" json:"site"`
-	Networks   []Network    `yaml:"networks" json:"networks"`
-	VPN        []VPNConfig  `yaml:"vpn" json:"vpn"`
-	Probes     []Probe      `yaml:"probes,omitempty" json:"probes,omitempty"`
-	Policies   []Policy     `yaml:"policies" json:"policies"`
-	Assertions []Assertion  `yaml:"assertions" json:"assertions"`
+	Version    int         `yaml:"version" json:"version"`
+	Site       string      `yaml:"site" json:"site"`
+	Networks   []Network   `yaml:"networks" json:"networks"`
+	VPN        []VPNConfig `yaml:"vpn" json:"vpn"`
+	Probes     []Probe     `yaml:"probes,omitempty" json:"probes,omitempty"`
+	Policies   []Policy    `yaml:"policies" json:"policies"`
+	Assertions []Assertion `yaml:"assertions" json:"assertions"`
 }
 
 // Network defines a named CIDR block

@@ -58,8 +58,8 @@ type Client struct {
 	token      string
 	httpClient *http.Client
 	info       *ControllerInfo
-	lastRaw    map[string]json.RawMessage
-	Debug      bool // when true, raw API responses are printed to stderr
+	lastRaw    map[string]json.RawMessage //nolint:unused // reserved for future debug / raw response access
+	Debug      bool                       // when true, raw API responses are printed to stderr
 }
 
 // NewClient creates an Omada client for the given controller host.

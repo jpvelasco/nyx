@@ -9,8 +9,8 @@ import (
 
 type mockProvider struct{ name string }
 
-func (m *mockProvider) Name() string             { return m.name }
-func (m *mockProvider) Capabilities() []string   { return []string{"info"} }
+func (m *mockProvider) Name() string           { return m.name }
+func (m *mockProvider) Capabilities() []string { return []string{"info"} }
 func (m *mockProvider) Info(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInfo, error) {
 	return &providers.ProviderInfo{Provider: m.name}, nil
 }

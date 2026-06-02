@@ -101,15 +101,15 @@ func (o *OPNsenseProvider) ImportSpec(ctx context.Context, opts providers.Import
 	var assertions []intent.Assertion
 	for _, n := range networks {
 		assertions = append(assertions, intent.Assertion{
-			Type:          "subnet_discovery",
-			Network:       n.Name,
+			Type:           "subnet_discovery",
+			Network:        n.Name,
 			ExpectHostsMax: ptrInt(50),
-			ScanMode:      "normal",
+			ScanMode:       "normal",
 		})
 
 		assertions = append(assertions, intent.Assertion{
-			Type:          "network_health",
-			Target:        n.Gateway,
+			Type:            "network_health",
+			Target:          n.Gateway,
 			ExpectLatencyMs: 20,
 			ExpectLossPct:   0,
 		})
