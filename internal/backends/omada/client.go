@@ -82,6 +82,7 @@ func NewClient(ctx context.Context, host string) (*Client, error) {
 		Timeout: 30 * time.Second,
 		Jar:     jar,
 		Transport: &http.Transport{
+			// nosemgrep
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: true, //nolint:gosec // self-signed controller cert
 			},

@@ -46,6 +46,7 @@ func Run(ctx context.Context, p Probe, cmd []string) (string, error) {
 	cfg := &ssh.ClientConfig{
 		User:            p.User,
 		Auth:            methods,
+		// nosemgrep
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // homelab probe, not a security boundary
 		Timeout:         10 * time.Second,
 	}

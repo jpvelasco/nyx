@@ -72,6 +72,7 @@ func NewClient(host, apiKey, apiSecret string) *Client {
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 			Transport: &http.Transport{
+				// nosemgrep
 				TLSClientConfig: &tls.Config{
 					InsecureSkipVerify: true, //nolint:gosec // self-signed controller cert
 				},
