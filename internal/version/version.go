@@ -1,4 +1,5 @@
 package version
 
 // Version is the single source of truth for the nyx release version.
-const Version = "0.1.0"
+// It is set at build time via -ldflags for releases (see Makefile release target).
+var Version = "0.1.0"

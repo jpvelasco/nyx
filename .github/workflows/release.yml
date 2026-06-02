@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. v0.2.0). Only needed for manual dispatch.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write   # Required to create GitHub Releases and attach assets
+  actions: read
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # Needed for git describe in Makefile
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Run tests (defense in depth)
+        run: make vet && make test
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            # From tag push: v0.1.0 → 0.1.0
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build release binaries
+        run: make release VERSION=v${{ steps.version.outputs.version }}
+
+      - name: Generate release notes
+        run: |
+          # Basic release notes from recent commits since last tag
+          echo "## What's Changed" > /tmp/notes.md
+          git log --pretty=format:"- %s (%h)" $(git describe --tags --abbrev=0 HEAD^)..HEAD >> /tmp/notes.md || true
+          echo "" >> /tmp/notes.md
+          echo "" >> /tmp/notes.md
+          echo "Full changelog: https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md" >> /tmp/notes.md
+
+      - name: Create GitHub Release + upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          body_path: /tmp/notes.md
+          draft: false
+          prerelease: false
+          files: |
+            nyx-linux-amd64
+            nyx-linux-arm64
+            nyx-darwin-amd64
+            nyx-darwin-arm64
+            nyx-windows-amd64.exe
+          # Note: The npm wrapper (@nyx/cli) will automatically pick these up on next `npm install`
+
+      - name: Summary
+        run: |
+          echo "✅ Released v${{ steps.version.outputs.version }}"
+          echo "Binaries attached to https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }}"
+          echo "npm users: npm install -g @nyx/cli (once published or after next npm wrapper update)"
