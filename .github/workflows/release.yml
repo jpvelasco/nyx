@@ -55,7 +55,7 @@ jobs:
           echo "tag=v${VER}" >> $GITHUB_OUTPUT
 
       - name: Build release binaries
-        run: make release VERSION=v${{ steps.ver.outputs.version }}
+        run: make release VERSION=${{ steps.ver.outputs.version }}
 
       - name: Verify built binaries
         run: |
