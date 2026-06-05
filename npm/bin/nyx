@@ -3,7 +3,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const os = require('os');
-const fs = require('fs');
+const fs = require('fs/promises');
 
 function getBinaryName() {
   const platform = os.platform();
@@ -24,28 +24,51 @@ function getBinaryName() {
   const a = archMap[arch];
 
   if (!p || !a) {
-    console.error(`Unsupported platform: ${platform}-${arch}`);
-    process.exit(1);
+    throw new Error(`Unsupported platform: ${platform}-${arch}`);
   }
 
   const ext = platform === 'win32' ? '.exe' : '';
   return `nyx-${p}-${a}${ext}`;
 }
 
-const binDir = path.join(__dirname, '..', 'bin');  // nosemgrep: generic.dynamic-path-construction
-const binaryName = getBinaryName();
-const binaryPath = path.join(binDir, binaryName);  // nosemgrep: generic.dynamic-path-construction
-
-if (!fs.existsSync(binaryPath)) {  // nosemgrep: generic.synchronous-io
-  console.error(`Binary not found: ${binaryPath}`);
-  console.error('Run "npm run postinstall" or download the binary manually.');
-  process.exit(1);
+function exitCodeForSignal(signal) {
+  const signalNumber = signal ? os.constants.signals[signal] : 0;
+  return signalNumber ? 128 + signalNumber : 1;
 }
 
-const child = spawn(binaryPath, process.argv.slice(2), {  // nosemgrep: generic.os-command-injection, generic.builtin-import
-  stdio: 'inherit',
-});
+async function main() {
+  const binaryName = getBinaryName();
+  const binaryPath = path.join(__dirname, binaryName);  // nosemgrep: generic.dynamic-path-construction
 
-child.on('exit', (code) => {
-  process.exit(code || 0);
+  try {
+    await fs.access(binaryPath);
+  } catch (err) {
+    console.error(`Binary not found: ${binaryPath}`);
+    console.error('Reinstall @nyx/cli so npm can download the platform binary.');
+    process.exit(1);
+  }
+
+  const child = spawn(binaryPath, process.argv.slice(2), {  // nosemgrep: generic.os-command-injection
+    stdio: 'inherit',
+    windowsHide: true,
+  });
+
+  child.on('error', (err) => {
+    console.error(`Failed to start nyx binary: ${err.message}`);
+    process.exit(1);
+  });
+
+  child.on('exit', (code, signal) => {
+    if (code !== null) {
+      process.exit(code);
+    }
+
+    console.error(`nyx terminated by ${signal || 'an unknown signal'}`);
+    process.exit(exitCodeForSignal(signal));
+  });
+}
+
+main().catch((err) => {
+  console.error(err.message);
+  process.exit(1);
 });
