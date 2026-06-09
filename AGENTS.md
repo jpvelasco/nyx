@@ -147,6 +147,6 @@ Documentation has been overhauled:
 Repository hygiene:
 - Personal or homelab-specific data has been removed from source code, tests, docs, and examples unless the user explicitly requests it.
 - The repository is clean for external viewers and collaborators.
-- Personal specs must live in `specs/` (gitignored) or outside the repository.
+- Keep personal specs in `specs/` (gitignored) or outside the repository. Use another location only when the user explicitly requests a temporary test fixture.
 
 GitHub Release `v0.1.0` is published. Remaining distribution work is publishing the npm package.
