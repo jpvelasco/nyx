@@ -29,6 +29,7 @@ release:
 	GOOS=darwin  GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY)-darwin-amd64         ./cmd/nyx/
 	GOOS=darwin  GOARCH=arm64 go build $(LDFLAGS) -o $(BINARY)-darwin-arm64         ./cmd/nyx/
 	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY)-windows-amd64.exe    ./cmd/nyx/
+	GOOS=windows GOARCH=arm64 go build $(LDFLAGS) -o $(BINARY)-windows-arm64.exe    ./cmd/nyx/
 	@echo "Release binaries built for $(VERSION)"
 
 .DEFAULT_GOAL := build

@@ -177,9 +177,11 @@ async function main() {
 
   try {
     await fs.promises.access(destPath);
+    await verifyChecksum(binaryName, destPath);
     console.log("Binary already exists: "+destPath);
     return;
   } catch (err) {
+    await fs.promises.unlink(destPath).catch(() => {});
     await fs.promises.mkdir(destDir, { recursive: true });
   }
 

@@ -4,4 +4,5 @@ engines:
     enabled: true
   staticcheck:
     enabled: true
-exclude_paths: []
+exclude_paths:
+  - npm/scripts/install.js

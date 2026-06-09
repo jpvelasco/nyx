@@ -1,6 +1,6 @@
 module github.com/jpvelasco/nyx
 
-go 1.25.10
+go 1.25.11
 
 require (
 	github.com/spf13/cobra v1.8.1
