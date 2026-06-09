@@ -1,7 +1,7 @@
-# CLAUDE.md
+# Claude Code Guidance
 
 ## Tools
-Document available tools, APIs (e.g. Codacy CLI, gh MCP, codacy_cli_analyze), and usage patterns here or in TOOLS.md.
+Document available tools, application programming interfaces (APIs), and usage patterns here or in TOOLS.md, including the Codacy command-line interface (CLI), GitHub CLI, and **MCP (Model Context Protocol)** integrations.
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -12,7 +12,7 @@ make build        # go build -o nyx ./cmd/nyx/
 make test         # go test ./...
 make vet          # go vet ./...
 make clean        # remove built binaries
-make release      # cross-compile for linux/darwin (amd64+arm64) and windows/amd64
+make release      # cross-compile linux/darwin/windows (amd64+arm64)
 
 # Run a single test package
 go test ./internal/intent/...
@@ -72,7 +72,7 @@ YAML spec → intent.LoadSpec → audit.Engine.Run → []CheckResult → report.
 Version 1 intent spec: `networks`, `vpn`, `probes`, `policies`, `assertions`.
 Eight assertion types: `subnet_discovery`, `isolation`, `vpn_route`, `route_check`, `port_check`, `dns_check`, `network_health`, `acl_check`.
 `ValidateSpec` enforces required fields per type. Probes declare SSH nodes for remote checks.
-See `examples/homelab.yaml` (realistic 7-VLAN example) and `testdata/valid_spec.yaml`.
+See `examples/homelab.yaml` (a realistic seven-network **VLAN (Virtual Local Area Network)** example) and `testdata/valid_spec.yaml`.
 The authoritative spec reference is now `docs/spec.html`.
 Assertions can use `runner: <probe-name>` to execute checks remotely via SSH from a different VLAN.
 
