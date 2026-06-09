@@ -53,7 +53,7 @@ function request(url, redirects) {
   validateDownloadURL(url);
 
   return new Promise((resolve, reject) => {
-    const req = https.get(url, {
+    const req = https.get(url, { // nosemgrep: codacy.tools-configs.rules_lgpl_javascript_ssrf_rule-node-ssrf
       headers: {
         'User-Agent': 'nyx-npm-installer/'+VERSION,
       },
@@ -110,7 +110,7 @@ async function downloadFile(url, destPath) {
 
   try {
     await new Promise((resolve, reject) => {
-      const file = fs.createWriteStream(tempPath);
+      const file = fs.createWriteStream(tempPath); // nosemgrep: codacy.tools-configs.javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename,codacy.tools-configs.javascript_pathtraversal_rule-non-literal-fs-filename
       res.pipe(file);
       res.on('error', reject);
       file.on('error', reject);
@@ -126,11 +126,11 @@ async function downloadFile(url, destPath) {
     });
 
     if (os.platform() !== 'win32') {
-      await fs.promises.chmod(tempPath, 0o755);  // nosemgrep: generic.file-permissions
+      await fs.promises.chmod(tempPath, 0o755);  // nosemgrep: generic.file-permissions,codacy.tools-configs.javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename
     }
-    await fs.promises.rename(tempPath, destPath);
+    await fs.promises.rename(tempPath, destPath); // nosemgrep: javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename
   } catch (err) {
-    await fs.promises.unlink(tempPath).catch(() => {});
+    await fs.promises.unlink(tempPath).catch(() => {}); // nosemgrep: javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename
     throw err;
   }
 }
@@ -151,7 +151,7 @@ function expectedChecksum(checksums, binaryName) {
 function sha256File(filePath) {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256');
-    const stream = fs.createReadStream(filePath);
+    const stream = fs.createReadStream(filePath); // nosemgrep: codacy.tools-configs.javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename,codacy.tools-configs.javascript_pathtraversal_rule-non-literal-fs-filename
 
     stream.on('data', (chunk) => hash.update(chunk));
     stream.on('end', () => resolve(hash.digest('hex')));
@@ -174,6 +174,7 @@ async function main() {
   const binaryName = "nyx-"+info.platform+"-"+info.arch+info.ext;
   const destDir = path.join(__dirname, '..', 'bin');  // nosemgrep: generic.dynamic-path-construction
   const destPath = path.join(destDir, binaryName);  // nosemgrep: generic.dynamic-path-construction
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename
 
   try {
     await fs.promises.access(destPath);

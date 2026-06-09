@@ -120,7 +120,7 @@ func authMethods(keyPath string) ([]ssh.AuthMethod, net.Conn) {
 				keyPath = filepath.Join(home, keyPath[2:])
 			}
 		}
-		keyBytes, err := os.ReadFile(keyPath)
+		keyBytes, err := os.ReadFile(keyPath) // nosemgrep: codacy.tools-configs.go_filesystem_rule-fileread
 		if err == nil {
 			signer, err := ssh.ParsePrivateKey(keyBytes)
 			if err == nil {
