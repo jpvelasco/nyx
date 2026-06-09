@@ -1,7 +1,7 @@
-# AGENTS.md
+# Agent Instructions
 
 ## Tools and Setup
-See CLAUDE.md ## Tools section for available tools, APIs, and usage (including Codacy CLI).
+See the [Tools section](CLAUDE.md#tools) for available tools, APIs, and usage, including Codacy CLI.
 
 ## Build & Test
 
@@ -9,7 +9,7 @@ See CLAUDE.md ## Tools section for available tools, APIs, and usage (including C
 make build          # go build -o nyx ./cmd/nyx/
 make test           # go test ./...
 make vet            # go vet ./...
-make release        # cross-compile linux/darwin (amd64+arm64) + windows/amd64 (.exe)
+make release        # cross-compile linux/darwin/windows (amd64+arm64)
 ```
 
 CI order: `go vet ./...` → `go test ./...` → `go build -o nyx ./cmd/nyx/`. Follow that order for local validation.
@@ -118,7 +118,7 @@ All personal/homelab-specific data has been removed from the repository (tests, 
 For example:
 - `isolation` requires `from`, `to`, `expect`
 - `port_check` requires `target`, `ports`, `expect`
-`runner:` references must be declared in the probes section (or be `"local"`).
+`runner:` references must be declared in the probes section (or be `"local"`). Do not bypass this validation unless the user explicitly requests a test-only exception.
 
 ## Other CLI Commands Worth Knowing
 
@@ -132,7 +132,7 @@ For example:
 
 - `seendb.Load()` never returns nil — on any error it returns an in-memory-only DB (unless the user explicitly requests it).
 - `engine.SeenDBPath` overrides the default path (used in tests).
-- `--warn-virtual` flag on `nyx audit` bypasses seendb and always emits **WARN (warning status)**.
+- Use `--warn-virtual` only when the user explicitly requests repeated virtual-network warnings; it bypasses seendb and always emits **WARN (warning status)**.
 - `SeenDB` is concurrency-safe — all methods hold a `sync.Mutex`, so concurrent `subnet_discovery` assertions can ack different CIDRs simultaneously without races.
 
 ## Current State
@@ -144,6 +144,9 @@ Documentation has been overhauled:
 - Narrative experience: `docs/walkthrough.md`.
 - `docs/spec.md` has been removed.
 
-All personal/homelab-specific data (real network names, IPs, controller details) has been removed from source code, tests, docs, and examples (unless the user explicitly requests it). The repository is now clean for external viewers/collaborators. Personal specs must live in `specs/` (gitignored) or outside the repo entirely.
+Repository hygiene:
+- Personal or homelab-specific data has been removed from source code, tests, docs, and examples unless the user explicitly requests it.
+- The repository is clean for external viewers and collaborators.
+- Personal specs must live in `specs/` (gitignored) or outside the repository.
 
-Remaining work is distribution (GitHub Releases, npm package) and release tagging.
+GitHub Release `v0.1.0` is published. Remaining distribution work is publishing the npm package.
