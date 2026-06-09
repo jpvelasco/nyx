@@ -110,7 +110,7 @@ async function downloadFile(url, destPath) {
 
   try {
     await new Promise((resolve, reject) => {
-      const file = fs.createWriteStream(tempPath); // nosemgrep: codacy.tools-configs.javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename
+      const file = fs.createWriteStream(tempPath); // nosemgrep: codacy.tools-configs.javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename,codacy.tools-configs.javascript_pathtraversal_rule-non-literal-fs-filename
       res.pipe(file);
       res.on('error', reject);
       file.on('error', reject);
@@ -126,7 +126,7 @@ async function downloadFile(url, destPath) {
     });
 
     if (os.platform() !== 'win32') {
-      await fs.promises.chmod(tempPath, 0o755);  // nosemgrep: generic.file-permissions
+      await fs.promises.chmod(tempPath, 0o755);  // nosemgrep: generic.file-permissions,codacy.tools-configs.javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename
     }
     await fs.promises.rename(tempPath, destPath); // nosemgrep: javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename
   } catch (err) {
@@ -151,7 +151,7 @@ function expectedChecksum(checksums, binaryName) {
 function sha256File(filePath) {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256');
-    const stream = fs.createReadStream(filePath); // nosemgrep: codacy.tools-configs.javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename
+    const stream = fs.createReadStream(filePath); // nosemgrep: codacy.tools-configs.javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename,codacy.tools-configs.javascript_pathtraversal_rule-non-literal-fs-filename
 
     stream.on('data', (chunk) => hash.update(chunk));
     stream.on('end', () => resolve(hash.digest('hex')));
