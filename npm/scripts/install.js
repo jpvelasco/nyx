@@ -1,3 +1,4 @@
+/* eslint-env node */
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -49,34 +50,24 @@ function validateDownloadURL(url) {
   }
 }
 
-function request(url, redirects) {
+async function request(url, redirects) {
+  if (redirects > MAX_REDIRECTS) {
+    throw new Error("Too many redirects for "+url.href);
+  }
   validateDownloadURL(url);
 
   return new Promise((resolve, reject) => {
     const req = https.get(url, { // nosemgrep: codacy.tools-configs.rules_lgpl_javascript_ssrf_rule-node-ssrf
-      headers: {
-        'User-Agent': 'nyx-npm-installer/'+VERSION,
-      },
+      timeout: DOWNLOAD_TIMEOUT_MS,
     }, (res) => {
       const statusCode = res.statusCode || 0;
-
-      if ([301, 302, 303, 307, 308].includes(statusCode)) {
+      if (statusCode >= 300 && statusCode < 400 && res.headers.location) {
+        const next = new URL(res.headers.location, url);
         res.resume();
-        if (!res.headers.location) {
-          reject(new Error("Redirect response did not include a Location header"));
-          return;
-        }
-        if (redirects >= MAX_REDIRECTS) {
-          reject(new Error("Too many redirects while downloading "+url.href));
-          return;
-        }
-
-        const nextURL = new URL(res.headers.location, url);
-        request(nextURL, redirects + 1).then(resolve, reject);
+        request(next, redirects + 1).then(resolve).catch(reject);
         return;
       }
-
-      if (statusCode < 200 || statusCode > 299) {
+      if (statusCode !== 200) {
         res.resume();
         reject(new Error("Download failed with HTTP "+statusCode+" for "+url.href));
         return;
