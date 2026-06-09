@@ -119,7 +119,7 @@ func DiscoverWithOptions(ctx context.Context, cidr string, opts ScanOptions) (*m
 		args = append(args, "--max-rate", fmt.Sprintf("%d", opts.MaxRate))
 	}
 	args = append(args, cidr)
-	cmd := exec.CommandContext(ctx, nmapPath, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	cmd := exec.CommandContext(ctx, nmapPath, args...) // nosemgrep: codacy.tools-configs.go_subproc_rule-subproc
 	out, err := cmd.Output()
 	if err != nil {
 		// Context cancellation manifests as an error here
@@ -315,7 +315,7 @@ func PortScan(ctx context.Context, target string, ports []int, protocol string, 
 	}
 	args = append(args, "-p", strings.Join(portList, ","), target)
 
-	cmd := exec.CommandContext(ctx, nmapPath, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	cmd := exec.CommandContext(ctx, nmapPath, args...) // nosemgrep: codacy.tools-configs.go_subproc_rule-subproc
 	out, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() != nil {

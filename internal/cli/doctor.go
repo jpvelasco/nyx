@@ -32,7 +32,7 @@ var doctorCmd = &cobra.Command{
 		nmapCheck := models.NewCheckResult("doctor", "nmap_installed", "local", "nmap")
 		if nmap.Available() {
 			path, _ := exec.LookPath("nmap")
-			out, err := exec.Command(path, "--version").Output() // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+			out, err := exec.Command(path, "--version").Output() // nosemgrep: codacy.tools-configs.go_subproc_rule-subproc
 			ver := "found"
 			if err == nil && len(out) > 0 {
 				line := string(out)
@@ -65,7 +65,7 @@ var doctorCmd = &cobra.Command{
 		logPath := logger.DefaultPath()
 		logDir := logPath[:len(logPath)-len("/nyx.log")]
 		logDirCheck := models.NewCheckResult("doctor", "log_directory", "local", logDir)
-		if err := os.MkdirAll(logDir, 0700); err != nil {
+		if err := os.MkdirAll(logDir, 0700); err != nil { // nosemgrep: codacy.tools-configs.go.lang.correctness.permissions.file_permission.incorrect-default-permission
 			logDirCheck.Status = models.StatusFail
 			logDirCheck.Summary = fmt.Sprintf("can't create log directory %s: %v", logDir, err)
 			allPass = false

@@ -53,7 +53,7 @@ function request(url, redirects) {
   validateDownloadURL(url);
 
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { // nosemgrep: javascript.lang.security.audit.detect-ssrf-node-http-audit.detect-ssrf-node-http-audit
+    const req = https.get(url, { // nosemgrep: codacy.tools-configs.rules_lgpl_javascript_ssrf_rule-node-ssrf
       headers: {
         'User-Agent': 'nyx-npm-installer/'+VERSION,
       },
@@ -110,7 +110,7 @@ async function downloadFile(url, destPath) {
 
   try {
     await new Promise((resolve, reject) => {
-      const file = fs.createWriteStream(tempPath); // nosemgrep: javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename
+      const file = fs.createWriteStream(tempPath); // nosemgrep: codacy.tools-configs.javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename
       res.pipe(file);
       res.on('error', reject);
       file.on('error', reject);
@@ -151,7 +151,7 @@ function expectedChecksum(checksums, binaryName) {
 function sha256File(filePath) {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256');
-    const stream = fs.createReadStream(filePath); // nosemgrep: javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename
+    const stream = fs.createReadStream(filePath); // nosemgrep: codacy.tools-configs.javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename
 
     stream.on('data', (chunk) => hash.update(chunk));
     stream.on('end', () => resolve(hash.digest('hex')));

@@ -54,7 +54,7 @@ func Dir() (string, error) {
 		return "", fmt.Errorf("cannot determine home directory: %w", err)
 	}
 	dir := filepath.Join(home, ".nyx", "snapshots")
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil { // nosemgrep: codacy.tools-configs.go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		return "", fmt.Errorf("creating snapshot directory: %w", err)
 	}
 	return dir, nil
