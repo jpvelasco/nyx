@@ -92,7 +92,7 @@ func (db *SeenDB) save() error {
 	if db.path == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(db.path), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(db.path), 0700); err != nil { // nosemgrep: codacy.tools-configs.go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		return err
 	}
 	data, err := json.MarshalIndent(db, "", "  ")

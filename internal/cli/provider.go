@@ -163,7 +163,7 @@ func buildImportCmd(p providers.Provider) *cobra.Command {
 				return err
 			}
 			if providerOutFile != "" {
-				if err := os.WriteFile(providerOutFile, out, 0644); err != nil {
+				if err := os.WriteFile(providerOutFile, out, 0600); err != nil {
 					return fmt.Errorf("writing spec: %w", err)
 				}
 				fmt.Fprintf(os.Stderr, "Spec written to %s\n", providerOutFile)
