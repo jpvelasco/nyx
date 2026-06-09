@@ -1,10 +1,19 @@
-const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const https = require('https');
+const crypto = require('crypto');
+const { URL } = require('url');
 
-const VERSION = '0.1.0';
+const { version: VERSION } = require('../package.json');
 const REPO = 'jpvelasco/nyx';
+const MAX_REDIRECTS = 5;
+const DOWNLOAD_TIMEOUT_MS = 30000;
+const RELEASE_HOSTS = new Set([
+  'github.com',
+  'objects.githubusercontent.com',
+  'github-releases.githubusercontent.com',
+]);
 
 function getPlatformInfo() {
   const platform = os.platform();
@@ -12,39 +21,183 @@ function getPlatformInfo() {
 
   const platformMap = { linux: 'linux', darwin: 'darwin', win32: 'windows' };
   const archMap = { x64: 'amd64', arm64: 'arm64' };
+  const mappedPlatform = platformMap[platform];
+  const mappedArch = archMap[arch];
+
+  if (!mappedPlatform || !mappedArch) {
+    throw new Error("Unsupported platform: "+platform+"-"+arch);
+  }
 
   return {
-    platform: platformMap[platform] || platform,
-    arch: archMap[arch] || arch,
+    platform: mappedPlatform,
+    arch: mappedArch,
     ext: platform === 'win32' ? '.exe' : '',
   };
 }
 
-async function download() {
-  const info = getPlatformInfo();
-  const binaryName = "nyx-"+info.platform+"-"+info.arch+info.ext;
-  const url = "https://github.com/"+REPO+"/releases/download/v"+VERSION+"/"+binaryName;
-  const destDir = path.join(__dirname, '..', 'bin');
-  const destPath = path.join(destDir, binaryName);
-
-  if (fs.existsSync(destPath)) {
-    console.log("Binary already exists: "+destPath);
-    return;
-  }
-
-  fs.mkdirSync(destDir, { recursive: true });
-
-  console.log("Downloading "+binaryName+" from "+url+"...");
-  console.log('NOTE: Prebuilt binaries are not yet available for v0.1.0.');
-  console.log('Build from source: go build -o nyx ./cmd/nyx/');
-  console.log('');
-
-  // In production, this would download the binary.
-  // For v0.1.0, we just print instructions.
+function releaseURL(assetName) {
+  return new URL("https://github.com/"+REPO+"/releases/download/v"+VERSION+"/"+assetName);
 }
 
-download().catch((err) => {
+function validateDownloadURL(url) {
+  if (url.protocol !== 'https:') {
+    throw new Error("Refusing non-HTTPS download URL: "+url.href);
+  }
+
+  if (!RELEASE_HOSTS.has(url.hostname) && !url.hostname.endsWith('.githubusercontent.com')) {
+    throw new Error("Refusing unexpected download host: "+url.hostname);
+  }
+}
+
+function request(url, redirects) {
+  validateDownloadURL(url);
+
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, {
+      headers: {
+        'User-Agent': 'nyx-npm-installer/'+VERSION,
+      },
+    }, (res) => {
+      const statusCode = res.statusCode || 0;
+
+      if ([301, 302, 303, 307, 308].includes(statusCode)) {
+        res.resume();
+        if (!res.headers.location) {
+          reject(new Error("Redirect response did not include a Location header"));
+          return;
+        }
+        if (redirects >= MAX_REDIRECTS) {
+          reject(new Error("Too many redirects while downloading "+url.href));
+          return;
+        }
+
+        const nextURL = new URL(res.headers.location, url);
+        request(nextURL, redirects + 1).then(resolve, reject);
+        return;
+      }
+
+      if (statusCode < 200 || statusCode > 299) {
+        res.resume();
+        reject(new Error("Download failed with HTTP "+statusCode+" for "+url.href));
+        return;
+      }
+
+      resolve(res);
+    });
+
+    req.setTimeout(DOWNLOAD_TIMEOUT_MS, () => {
+      req.destroy(new Error("Timed out downloading "+url.href));
+    });
+    req.on('error', reject);
+  });
+}
+
+async function downloadText(url) {
+  const res = await request(url, 0);
+
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    res.setEncoding('utf8');
+    res.on('data', (chunk) => chunks.push(chunk));
+    res.on('end', () => resolve(chunks.join('')));
+    res.on('error', reject);
+  });
+}
+
+async function downloadFile(url, destPath) {
+  const tempPath = destPath+".tmp-"+process.pid;
+  const res = await request(url, 0);
+
+  try {
+    await new Promise((resolve, reject) => {
+      const file = fs.createWriteStream(tempPath);
+      res.pipe(file);
+      res.on('error', reject);
+      file.on('error', reject);
+      file.on('finish', () => {
+        file.close((err) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve();
+        });
+      });
+    });
+
+    if (os.platform() !== 'win32') {
+      await fs.promises.chmod(tempPath, 0o755);  // nosemgrep: generic.file-permissions
+    }
+    await fs.promises.rename(tempPath, destPath);
+  } catch (err) {
+    await fs.promises.unlink(tempPath).catch(() => {});
+    throw err;
+  }
+}
+
+function expectedChecksum(checksums, binaryName) {
+  const line = checksums.split(/\r?\n/).find((entry) => entry.endsWith("  "+binaryName) || entry.endsWith(" *"+binaryName));
+  if (!line) {
+    throw new Error("checksums.txt does not include "+binaryName);
+  }
+
+  const checksum = line.split(/\s+/)[0];
+  if (!/^[a-f0-9]{64}$/i.test(checksum)) {
+    throw new Error("Invalid checksum entry for "+binaryName);
+  }
+  return checksum.toLowerCase();
+}
+
+function sha256File(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
+}
+
+async function verifyChecksum(binaryName, destPath) {
+  const checksums = await downloadText(releaseURL('checksums.txt'));
+  const expected = expectedChecksum(checksums, binaryName);
+  const actual = await sha256File(destPath);
+
+  if (actual !== expected) {
+    throw new Error("Checksum mismatch for "+binaryName);
+  }
+}
+
+async function main() {
+  const info = getPlatformInfo();
+  const binaryName = "nyx-"+info.platform+"-"+info.arch+info.ext;
+  const destDir = path.join(__dirname, '..', 'bin');  // nosemgrep: generic.dynamic-path-construction
+  const destPath = path.join(destDir, binaryName);  // nosemgrep: generic.dynamic-path-construction
+
+  try {
+    await fs.promises.access(destPath);
+    await verifyChecksum(binaryName, destPath);
+    console.log("Binary already exists: "+destPath);
+    return;
+  } catch (err) {
+    await fs.promises.unlink(destPath).catch(() => {});
+    await fs.promises.mkdir(destDir, { recursive: true });
+  }
+
+  console.log("Downloading "+binaryName+" from "+releaseURL(binaryName).href+"...");
+  await downloadFile(releaseURL(binaryName), destPath);
+  try {
+    await verifyChecksum(binaryName, destPath);
+  } catch (err) {
+    await fs.promises.unlink(destPath).catch(() => {});
+    throw err;
+  }
+  console.log("Installed "+binaryName);
+}
+
+main().catch((err) => {
   console.error('Download failed:', err.message);
-  console.error('Build from source instead: go build -o nyx ./cmd/nyx/');
-  process.exit(0); // Don't fail npm install
+  console.error('Install from source instead: go install github.com/jpvelasco/nyx/cmd/nyx@v'+VERSION);
+  process.exit(1);
 });

@@ -10,6 +10,10 @@
   "bin": {
     "nyx": "bin/nyx"
   },
+  "files": [
+    "bin/nyx",
+    "scripts/install.js"
+  ],
   "scripts": {
     "postinstall": "node scripts/install.js"
   },
