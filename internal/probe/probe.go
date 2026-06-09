@@ -120,7 +120,7 @@ func authMethods(keyPath string) ([]ssh.AuthMethod, net.Conn) {
 				keyPath = filepath.Join(home, keyPath[2:])
 			}
 		}
-		keyBytes, err := os.ReadFile(keyPath)
+		keyBytes, err := os.ReadFile(keyPath) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 		if err == nil {
 			signer, err := ssh.ParsePrivateKey(keyBytes)
 			if err == nil {

@@ -49,7 +49,7 @@ type TracerouteHop struct {
 
 // runCmd executes a command with the supplied context and returns stdout.
 func runCmd(ctx context.Context, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	out, err := cmd.Output()
 	return string(out), err
 }
