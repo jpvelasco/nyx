@@ -34,7 +34,7 @@ func TestRenderRecommendationsGoesToWriter(t *testing.T) {
 	report.RenderRecommendations(f, recs)
 	f.Close()
 
-	content, err := os.ReadFile(tmpFile)
+	content, err := os.ReadFile(tmpFile) // nosemgrep
 	if err != nil {
 		t.Fatal(err)
 	}

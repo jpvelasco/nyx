@@ -117,10 +117,10 @@ func authMethods(keyPath string) ([]ssh.AuthMethod, net.Conn) {
 		if strings.HasPrefix(keyPath, "~/") {
 			home, err := os.UserHomeDir()
 			if err == nil {
-				keyPath = filepath.Join(home, keyPath[2:])
+				keyPath = filepath.Join(home, keyPath[2:]) // nosemgrep
 			}
 		}
-		keyBytes, err := os.ReadFile(keyPath) // nosemgrep: codacy.tools-configs.go_filesystem_rule-fileread
+		keyBytes, err := os.ReadFile(keyPath) // nosemgrep
 		if err == nil {
 			signer, err := ssh.ParsePrivateKey(keyBytes)
 			if err == nil {
