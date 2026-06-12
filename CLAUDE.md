@@ -6,8 +6,10 @@ Document available tools, application programming interfaces (APIs), and usage p
 ### Codacy CLI (codacy-cli-v2)
 **Must be run in WSL2 on this Windows machine** (native Windows is not supported per the CLI's own docs).
 
-The binary used here lives at:
-`/home/jpvelasco/.cache/codacy/codacy-cli-v2/1.0.0-main.376.sha.799aab5/codacy-cli-v2`
+The binary is cached under `~/.cache/codacy/codacy-cli-v2/<version>/codacy-cli-v2`. Discover it with:
+```bash
+find ~/.cache/codacy/codacy-cli-v2 -name codacy-cli-v2 -type f | head -1
+```
 
 **Consult the CLI itself for help/docs** (do not guess flags):
 - `codacy-cli --help`
@@ -19,7 +21,7 @@ The binary used here lives at:
 - etc.
 
 The authoritative docs are also in the distribution:
-`/home/jpvelasco/.cache/codacy/codacy-cli-v2/1.0.0-main.376.sha.799aab5/README.md`
+`~/.cache/codacy/codacy-cli-v2/<version>/README.md`
 
 **Key commands for this repo (jpvelasco/nyx):**
 
