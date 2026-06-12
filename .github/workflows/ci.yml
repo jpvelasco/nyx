@@ -8,7 +8,7 @@ on:
 
 jobs:
   ci:
-    name: CI (vet → test → build)
+    name: CI (gosec → vet → test → build)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -22,14 +22,5 @@ jobs:
           go-version-file: "go.mod"
           cache: true
 
-      - name: Gosec
-        run: go run github.com/securego/gosec/v2/cmd/gosec@latest ./...
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Test
-        run: go test ./...
-
-      - name: Build
-        run: go build -o nyx ./cmd/nyx/
+      - name: Check (gosec → vet → test → build)
+        run: make check
