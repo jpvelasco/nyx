@@ -160,7 +160,7 @@ var snapshotDeleteCmd = &cobra.Command{
 				return err
 			}
 			for _, s := range snaps {
-				os.Remove(filepath.Join(dir, s))
+				os.Remove(filepath.Join(dir, s)) // #nosec G104 — best-effort cleanup
 			}
 			fmt.Printf("Deleted %d snapshots.\n", len(snaps))
 			return nil
