@@ -1,22 +1,28 @@
 # Agent Instructions
 
-## Tools and Setup
-See the [Tools section](CLAUDE.md#tools) for available tools, APIs, and usage, including Codacy CLI.
-
 ## Build & Test
 
 ```bash
 make build          # go build -o nyx ./cmd/nyx/
 make test           # go test ./...
 make vet            # go vet ./...
+make lint           # golangci-lint run ./...
 make release        # cross-compile linux/darwin/windows (amd64+arm64)
 ```
 
-CI order: `go vet ./...` → `go test ./...` → `go build -o nyx ./cmd/nyx/`. Follow that order for local validation.
+CI order: `go vet ./...` → `go test ./...` → `go build`. `golangci-lint` is available locally but **not** in CI — use `make lint` for deeper checks.
+
+### Release flow
+
+Release workflow (`.github/workflows/release.yml`) runs `make vet && make test` then `make release VERSION=X.Y.Z`. Tag `vX.Y.Z` or use `workflow_dispatch` with the version input. The workflow builds all 6 binaries, generates SHA-256 checksums, extracts release notes from `CHANGELOG.md`, and creates the GitHub Release with attached artifacts.
+
+See CLAUDE.md under "Codacy CLI" for Codacy tool details (WSL2, config reset, etc.).
 
 ## Entrypoint
 
 `cmd/nyx/main.go` calls `cli.Execute()`. If it returns an error, `os.Exit(2)`. Exit code 1 is set inside the audit command when status is `StatusFail`.
+
+Audit flow: `YAML spec → intent.LoadSpec → audit.Engine.Run → []CheckResult → report.Render`.
 
 ## Provider Registration
 
@@ -91,9 +97,7 @@ All personal/homelab-specific data has been removed from the repository (tests, 
 
 ## Key Invariants
 
-- `StatusWarn` from nmap (e.g. 0 hosts found) is **preserved** — the engine does not overwrite it to pass.
 - Audit results are returned in the **same order** as spec assertions, despite concurrent execution.
-- `internal/backends/batfish` is a stub returning `ErrNotImplemented`; `Available()` returns `false`.
 - Runner context is precomputed once at the beginning of `Engine.Run()`.
 
 ## Recommendations Engine
@@ -135,18 +139,12 @@ For example:
 - Use `--warn-virtual` only when the user explicitly requests repeated virtual-network warnings; it bypasses seendb and always emits **WARN (warning status)**.
 - `SeenDB` is concurrency-safe — all methods hold a `sync.Mutex`, so concurrent `subnet_discovery` assertions can ack different CIDRs simultaneously without races.
 
-## Current State
+## Backends
 
-The core engine is feature-complete. All 8 assertion types, 10 recommendation categories, both providers (Omada + OPNsense), snapshot/drift system, and probe system are implemented and tested.
-
-Documentation has been overhauled:
-- Primary reference: `docs/spec.html` (modern HTML with diagram, light/dark mode, clear information architecture).
-- Narrative experience: `docs/walkthrough.md`.
-- `docs/spec.md` has been removed.
-
-Repository hygiene:
-- Personal or homelab-specific data has been removed from source code, tests, docs, and examples unless the user explicitly requests it.
-- The repository is clean for external viewers and collaborators.
-- Keep personal specs in `specs/` (gitignored) or outside the repository. Use another location only when the user explicitly requests a temporary test fixture.
-
-GitHub Release `v0.1.0` is published. Remaining distribution work is publishing the npm package.
+`internal/backends/` contains the low-level network check implementations:
+- `nmap/` — wraps `nmap -sn` subprocess for discovery; `nmap.PortScan` for port checks. `StatusWarn` from nmap (e.g. 0 hosts) is **preserved** — the engine does not overwrite it to pass.
+- `system/` — platform-specific system commands (`system_linux.go`, `system_darwin.go`, `system_windows.go`). Only `system.go` is shared.
+- `dns/` — DNS resolution checks, including optional DNSSEC validation.
+- `health/` — latency, packet loss, and MTU probing.
+- `omada/` — read-only REST client for Omada SDN 6.x. Not concurrency-safe. TLS verification disabled (self-signed).
+- `batfish/` — stub returning `ErrNotImplemented`; `Available()` returns `false`.

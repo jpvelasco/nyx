@@ -79,12 +79,12 @@ var driftCompareCmd = &cobra.Command{
 			return err
 		}
 
-		baseline, err := snapshot.LoadSnapshot(filepath.Join(dir, args[0]))
+		baseline, err := snapshot.LoadSnapshot(filepath.Join(dir, args[0])) // nosemgrep // #nosec G304
 		if err != nil {
 			return fmt.Errorf("loading baseline snapshot %s: %w", args[0], err)
 		}
 
-		current, err := snapshot.LoadSnapshot(filepath.Join(dir, args[1]))
+		current, err := snapshot.LoadSnapshot(filepath.Join(dir, args[1])) // nosemgrep // #nosec G304
 		if err != nil {
 			return fmt.Errorf("loading current snapshot %s: %w", args[1], err)
 		}

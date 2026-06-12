@@ -6,3 +6,5 @@ engines:
     enabled: true
 exclude_paths:
   - npm/scripts/install.js
+  - AGENTS.md
+  - CLAUDE.md
