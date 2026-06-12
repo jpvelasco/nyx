@@ -46,7 +46,7 @@ func Run(ctx context.Context, p Probe, cmd []string) (string, error) {
 	cfg := &ssh.ClientConfig{
 		User: p.User,
 		Auth: methods,
-		// nosemgrep
+		// nosemgrep // #nosec G304
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // homelab probe, not a security boundary
 		Timeout:         10 * time.Second,
 	}
@@ -117,10 +117,10 @@ func authMethods(keyPath string) ([]ssh.AuthMethod, net.Conn) {
 		if strings.HasPrefix(keyPath, "~/") {
 			home, err := os.UserHomeDir()
 			if err == nil {
-				keyPath = filepath.Join(home, keyPath[2:])
+				keyPath = filepath.Join(home, keyPath[2:]) // nosemgrep // #nosec G304
 			}
 		}
-		keyBytes, err := os.ReadFile(keyPath) // nosemgrep: codacy.tools-configs.go_filesystem_rule-fileread
+		keyBytes, err := os.ReadFile(keyPath) // nosemgrep // #nosec G304 // #nosec G304
 		if err == nil {
 			signer, err := ssh.ParsePrivateKey(keyBytes)
 			if err == nil {

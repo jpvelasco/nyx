@@ -3,6 +3,86 @@
 ## Tools
 Document available tools, application programming interfaces (APIs), and usage patterns here or in TOOLS.md, including the Codacy command-line interface (CLI), GitHub CLI, and **MCP (Model Context Protocol)** integrations.
 
+### Codacy CLI (codacy-cli-v2)
+**Must be run in WSL2 on this Windows machine** (native Windows is not supported per the CLI's own docs).
+
+The binary is cached under `~/.cache/codacy/codacy-cli-v2/<version>/codacy-cli-v2`. Discover it with:
+```bash
+find ~/.cache/codacy/codacy-cli-v2 -name codacy-cli-v2 -type f | head -1
+```
+
+**Consult the CLI itself for help/docs** (do not guess flags):
+- `codacy-cli --help`
+- `codacy-cli init --help`
+- `codacy-cli config --help`
+- `codacy-cli config reset --help`
+- `codacy-cli analyze --help`
+- `codacy-cli config discover --help`
+- etc.
+
+The authoritative docs are also in the distribution:
+`~/.cache/codacy/codacy-cli-v2/<version>/README.md`
+
+**Key commands for this repo (jpvelasco/nyx):**
+
+To (re)download the full project rules + tool configs from Codacy (what was done to initialize `.codacy/`):
+
+```bash
+# Preferred: use env var for token (avoids some quoting/flag issues in the harness)
+export CODACY_API_TOKEN=...
+cd /mnt/f/source/nyx   # or the WSL path to the nyx checkout
+$CLI config reset --provider gh --organization jpvelasco --repository nyx
+# or with explicit flag:
+$CLI config reset --api-token $CODACY_API_TOKEN --provider gh --organization jpvelasco --repository nyx
+```
+
+`init` does similar bootstrapping (creates `.codacy/codacy.yaml` etc.):
+
+```bash
+$CLI init --api-token $TOKEN --provider gh --organization jpvelasco --repository nyx
+```
+
+After (re)sync:
+
+```bash
+$CLI install          # ensure runtimes + tools (cached after first run)
+$CLI analyze          # all configured tools (opengrep, revive, eslint, pmd, trivy, ...)
+$CLI analyze --tool revive
+$CLI analyze --tool opengrep -o /tmp/opengrep.txt
+```
+
+**Config files (do not casually overwrite generated ones):**
+- `.codacy/codacy.yaml` — runtimes + enabled tools list (managed by this CLI + `config reset`).
+- `.codacy/tools-configs/` — the actual rule files (semgrep.yaml is huge, revive.toml, eslint.config.mjs, ruleset.xml for PMD, etc.).
+- `.codacy.yml` (at repo root) — older/engines config (currently only govet + staticcheck + exclude for the npm shim). This is separate from the v2 CLI config.
+
+We intentionally keep manual tweaks on top of what `config reset` produces:
+- PMD ruleset has an `<exclude-pattern>.*/npm/.*</exclude-pattern>` (the JS shim uses top-level await + ESM-ish constructs that make the PMD JS parser emit noise).
+- eslint.config.mjs ignores `npm/scripts/**` + provides node globals (the shim is a postinstall downloader, not part of the Go app; it has many intentional `nosemgrep` for fs/path/perm patterns that opengrep correctly flags in general code).
+
+**Token handling (this repo):**
+- Pass via `CODACY_API_TOKEN` env var **or** `--api-token`.
+- Provider is always `gh` for this project.
+- The token only needs to be present for `init` / `config reset` / analyze when you want to pull the *remote* Codacy project ruleset. Local analysis works without it once configs are present.
+
+**WSL gotchas (from the CLI README):**
+- Always run inside a real WSL distro terminal.
+- The harness (pwsh calling `wsl bash -c "..."`) is fragile with multi-line strings, `$VAR` expansion, and nested quotes. Prefer one-liner commands or write temp scripts with `python3 -c '...'`.
+- PATH for Go, etc. inside the codacy tool invocations is handled by the CLI (it constructs its own env with the downloaded runtimes).
+
+**Typical local validation flow (after editing code or configs):**
+1. In WSL: `export CODACY_API_TOKEN=...`
+2. `cd .../nyx`
+3. `.../codacy-cli-v2 config reset --provider gh --organization jpvelasco --repository nyx` (if you want latest rules)
+4. `.../codacy-cli-v2 analyze`
+5. Fix anything that appears (add `nosemgrep` only when the exception is truly intentional and documented, like the probe SSH key read or the nmap/system execs).
+
+The project deliberately keeps the number of suppressions low and uses the root `.codacy.yml` `exclude_paths` + tool-level ignores where possible.
+
+For uploading SARIF or other advanced flows, see the bundled README (upload, container-scan, etc.).
+
+**History note:** Earlier manual runs of `config reset` + small follow-up PRs (#27, #28) were used to pull the current rule set and make the npm shim produce fewer false positives under the generated eslint/pmd configs while preserving the semgrep `nosemgrep` annotations. All checks (including Codacy's own "Static Code Analysis" and the various Analyze jobs) were green before the squash merges.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Build & Test
