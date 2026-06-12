@@ -85,7 +85,7 @@ func NewClient(ctx context.Context, host string) (*Client, error) {
 			// nosemgrep
 			TLSClientConfig: &tls.Config{
 				// #nosec G402 — self-signed controller cert
-				InsecureSkipVerify: true, // nosemgrep // lgtm[go/disabled-certificate-check]
+				InsecureSkipVerify: true, // nosemgrep
 			},
 		},
 	}
