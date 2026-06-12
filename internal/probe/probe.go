@@ -48,8 +48,7 @@ func Run(ctx context.Context, p Probe, cmd []string) (string, error) {
 		Auth: methods,
 		// nosemgrep
 		// #nosec G106 — homelab probe, not a security boundary
-		// lgtm[go/insecure-hostkeycallback]
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // nosemgrep
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // nosemgrep // lgtm[go/insecure-hostkeycallback]
 		Timeout:         10 * time.Second,
 	}
 
