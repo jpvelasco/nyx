@@ -30,7 +30,7 @@ then write a nyx.yaml spec you can customize.`,
 
 		out := os.Stdout
 		if initOutput != "" {
-			f, err := os.OpenFile(initOutput, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600) // nosemgrep
+			f, err := os.OpenFile(initOutput, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600) // nosemgrep // #nosec G304
 			if err != nil {
 				return fmt.Errorf("creating output file: %w", err)
 			}

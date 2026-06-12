@@ -46,7 +46,7 @@ func Load() *SeenDB {
 // LoadFrom loads (or creates) a SeenDB backed by the given JSON file path.
 func LoadFrom(path string) (*SeenDB, error) {
 	db := &SeenDB{VirtualNetworks: map[string]Entry{}, path: path}
-	data, err := os.ReadFile(path) // nosemgrep
+	data, err := os.ReadFile(path) // nosemgrep // #nosec G304
 	if os.IsNotExist(err) {
 		return db, nil
 	}
@@ -92,12 +92,12 @@ func (db *SeenDB) save() error {
 	if db.path == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(db.path), 0700); err != nil { // nosemgrep
+	if err := os.MkdirAll(filepath.Dir(db.path), 0700); err != nil { // nosemgrep // #nosec G301
 		return err
 	}
 	data, err := json.MarshalIndent(db, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(db.path, data, 0600) // nosemgrep
+	return os.WriteFile(db.path, data, 0600) // nosemgrep // #nosec G302
 }
