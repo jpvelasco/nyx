@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -65,13 +66,16 @@ type Client struct {
 // It immediately fetches /api/info to obtain the omadaCID and validate the
 // controller version. No credentials are required for this step.
 //
-// The client skips TLS certificate verification because Omada controllers
-// ship with self-signed certificates. All traffic is still encrypted.
-func NewClient(ctx context.Context, host string) (*Client, error) {
+// TLS certificate verification is enabled by default. If the controller uses a
+// self-signed certificate, set skipTLSVerify to true or provide caCertPath
+// pointing to the controller's CA certificate.
+func NewClient(ctx context.Context, host string, skipTLSVerify bool, caCertPath string) (*Client, error) {
 	// Strip any trailing slash or scheme — we normalise internally.
 	host = strings.TrimPrefix(host, "https://")
 	host = strings.TrimPrefix(host, "http://")
 	host = strings.TrimRight(host, "/")
+
+	tlsConfig := buildTLSConfig(skipTLSVerify, caCertPath)
 
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -82,11 +86,7 @@ func NewClient(ctx context.Context, host string) (*Client, error) {
 		Timeout: 30 * time.Second,
 		Jar:     jar,
 		Transport: &http.Transport{
-			// nosemgrep
-			TLSClientConfig: &tls.Config{
-				// #nosec G402 — self-signed controller cert
-				InsecureSkipVerify: true, // nosemgrep
-			},
+			TLSClientConfig: tlsConfig,
 		},
 	}
 
@@ -225,6 +225,7 @@ func (c *Client) addAuthHeaders(req *http.Request) {
 
 // doRequest executes req, checks the Omada error envelope, and decodes result.
 func (c *Client) doRequest(req *http.Request, dest interface{}) error {
+	// #nosec G704 — user-specified controller host, not a third-party redirect
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("http request to %s: %w", req.URL.Path, err)
@@ -281,4 +282,34 @@ func isVersionSupported(ver string) bool {
 	major := parts[0]
 	// Anything >= 6 is supported
 	return major >= "6"
+}
+
+// buildTLSConfig creates a TLS config based on the provided options.
+// By default, standard certificate verification is used.
+// If skipTLSVerify is true, verification is disabled (for self-signed certs).
+// If caCertPath is set, a custom CA is loaded for verification.
+func buildTLSConfig(skipTLSVerify bool, caCertPath string) *tls.Config {
+	if caCertPath != "" {
+		certPool := x509.NewCertPool()
+		// #nosec G304 — path from CLI flag, not user-controlled
+		pemData, err := os.ReadFile(caCertPath) // nosemgrep
+		if err != nil {
+			// Fall back to system pool if file can't be read
+			return &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+		if !certPool.AppendCertsFromPEM(pemData) {
+			return &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+		return &tls.Config{
+			RootCAs:    certPool,
+			MinVersion: tls.VersionTLS12,
+		}
+	}
+	if skipTLSVerify {
+		return &tls.Config{
+			InsecureSkipVerify: true, // #nosec G402 — user explicitly opted out
+			MinVersion:         tls.VersionTLS12,
+		}
+	}
+	return &tls.Config{MinVersion: tls.VersionTLS12}
 }

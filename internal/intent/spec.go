@@ -40,11 +40,12 @@ type VPNConfig struct {
 
 // Probe declares an SSH node that can run checks from a different VLAN.
 type Probe struct {
-	Name string `yaml:"name" json:"name"`
-	Host string `yaml:"host" json:"host"`
-	User string `yaml:"user" json:"user"`
-	Key  string `yaml:"key,omitempty" json:"key,omitempty"`
-	VLAN string `yaml:"vlan,omitempty" json:"vlan,omitempty"`
+	Name              string `yaml:"name" json:"name"`
+	Host              string `yaml:"host" json:"host"`
+	User              string `yaml:"user" json:"user"`
+	Key               string `yaml:"key,omitempty" json:"key,omitempty"`
+	VLAN              string `yaml:"vlan,omitempty" json:"vlan,omitempty"`
+	SkipHostKeyVerify bool   `yaml:"skip_host_key_verify,omitempty" json:"skip_host_key_verify,omitempty"`
 }
 
 // Policy defines network access rules

@@ -3,9 +3,11 @@ package opnsense
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -52,7 +54,7 @@ type DHCPLease struct {
 }
 
 // Client is a read-only OPNsense API client using API key/secret auth.
-// TLS verification is skipped because OPNsense ships with a self-signed cert.
+// TLS verification is enabled by default; use NewClient options to customize.
 type Client struct {
 	host       string
 	apiKey     string
@@ -61,7 +63,9 @@ type Client struct {
 }
 
 // NewClient creates an OPNsense client. No network calls are made here.
-func NewClient(host, apiKey, apiSecret string) *Client {
+// TLS certificate verification is enabled by default. Set skipTLSVerify to true
+// for self-signed certs, or provide caCertPath for a custom CA.
+func NewClient(host, apiKey, apiSecret string, skipTLSVerify bool, caCertPath string) *Client {
 	host = strings.TrimPrefix(host, "https://")
 	host = strings.TrimPrefix(host, "http://")
 	host = strings.TrimRight(host, "/")
@@ -72,11 +76,7 @@ func NewClient(host, apiKey, apiSecret string) *Client {
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 			Transport: &http.Transport{
-				// nosemgrep
-				TLSClientConfig: &tls.Config{
-					// #nosec G402 — self-signed controller cert
-					InsecureSkipVerify: true, // nosemgrep
-				},
+				TLSClientConfig: buildTLSConfig(skipTLSVerify, caCertPath),
 			},
 		},
 	}
@@ -176,4 +176,34 @@ func (c *Client) GetDHCPLeases(ctx context.Context) ([]DHCPLease, error) {
 		return nil, fmt.Errorf("decoding DHCP leases response: %w", err)
 	}
 	return result.Leases, nil
+}
+
+// buildTLSConfig creates a TLS config based on the provided options.
+// By default, standard certificate verification is used.
+// If skipTLSVerify is true, verification is disabled (for self-signed certs).
+// If caCertPath is set, a custom CA is loaded for verification.
+func buildTLSConfig(skipTLSVerify bool, caCertPath string) *tls.Config {
+	if caCertPath != "" {
+		certPool := x509.NewCertPool()
+		// #nosec G304 — path from CLI flag, not user-controlled
+		pemData, err := os.ReadFile(caCertPath) // nosemgrep
+		if err != nil {
+			// Fall back to system pool if file can't be read
+			return &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+		if !certPool.AppendCertsFromPEM(pemData) {
+			return &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+		return &tls.Config{
+			RootCAs:    certPool,
+			MinVersion: tls.VersionTLS12,
+		}
+	}
+	if skipTLSVerify {
+		return &tls.Config{
+			InsecureSkipVerify: true, // #nosec G402 — user explicitly opted out
+			MinVersion:         tls.VersionTLS12,
+		}
+	}
+	return &tls.Config{MinVersion: tls.VersionTLS12}
 }

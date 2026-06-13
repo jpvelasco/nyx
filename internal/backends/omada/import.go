@@ -21,8 +21,8 @@ type ImportResult struct {
 
 // ImportSpec connects to the controller, fetches all relevant configuration,
 // and produces an intent.Spec that reflects the observed design.
-func ImportSpec(ctx context.Context, host, username, password, siteName string, debug bool) (*ImportResult, error) {
-	client, err := NewClient(ctx, host)
+func ImportSpec(ctx context.Context, host, username, password, siteName string, debug bool, skipTLSVerify bool, caCertPath string) (*ImportResult, error) {
+	client, err := NewClient(ctx, host, skipTLSVerify, caCertPath)
 	if err != nil {
 		return nil, err
 	}
