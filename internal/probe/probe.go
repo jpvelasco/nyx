@@ -50,7 +50,7 @@ func Run(ctx context.Context, p Probe, cmd []string, skipHostKeyVerify bool) (st
 		return fmt.Errorf("probe %q: host key verification failed for %s — use --skip-host-key-verify or set skip_host_key_verify: true in probe spec", p.Name, hostname)
 	})
 	if skipHostKeyVerify || p.SkipHostKeyVerify {
-		hostKeyCallback = ssh.InsecureIgnoreHostKey() // #nosec G106 — user explicitly opted out
+		hostKeyCallback = ssh.InsecureIgnoreHostKey() // #nosec G106 — user explicitly opted out // nosemgrep:codacy.tools-configs.go.lang.security.audit.crypto.insecure_ssh.avoid-ssh-insecure-ignore-host-key,codacy.tools-configs.go_crypto_rule-insecure-ignore-host-key
 	}
 
 	cfg := &ssh.ClientConfig{
