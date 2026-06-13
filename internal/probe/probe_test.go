@@ -34,7 +34,7 @@ func TestRunUnreachable(t *testing.T) {
 		User: "testuser",
 		VLAN: "iot",
 	}
-	_, err := Run(ctx, p, []string{"echo", "hello"})
+	_, err := Run(ctx, p, []string{"echo", "hello"}, false)
 	if err == nil {
 		t.Fatal("expected error for unreachable host")
 	}

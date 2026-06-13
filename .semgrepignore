@@ -1,0 +1,2 @@
+# Opengrep defaults skip *_test.go; Codacy cloud scans test files.
+!*_test.go

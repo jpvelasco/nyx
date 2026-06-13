@@ -15,12 +15,14 @@ import (
 )
 
 var (
-	providerHost     string
-	providerUsername string
-	providerPassword string
-	providerSite     string
-	providerDebug    bool
-	providerOutFile  string
+	providerHost        string
+	providerUsername    string
+	providerPassword    string
+	providerSite        string
+	providerDebug       bool
+	providerOutFile     string
+	providerSkipTLS     bool
+	providerCACertPath  string
 )
 
 var providerCmd = &cobra.Command{
@@ -105,9 +107,11 @@ func buildInfoCmd(p providers.Provider) *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			info, err := p.Info(ctx, providers.ImportOptions{
-				Host:     providerHost,
-				Username: providerUsername,
-				Password: providerPassword,
+				Host:          providerHost,
+				Username:      providerUsername,
+				Password:      providerPassword,
+				SkipTLSVerify: providerSkipTLS,
+				CACertPath:    providerCACertPath,
 			})
 			if err != nil {
 				return err
@@ -143,11 +147,13 @@ func buildImportCmd(p providers.Provider) *cobra.Command {
 			defer cancel()
 
 			result, err := p.ImportSpec(ctx, providers.ImportOptions{
-				Host:     providerHost,
-				Username: providerUsername,
-				Password: providerPassword,
-				Site:     providerSite,
-				Debug:    providerDebug,
+				Host:          providerHost,
+				Username:      providerUsername,
+				Password:      providerPassword,
+				Site:          providerSite,
+				Debug:         providerDebug,
+				SkipTLSVerify: providerSkipTLS,
+				CACertPath:    providerCACertPath,
 			})
 			if err != nil {
 				return err
@@ -194,11 +200,13 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 			defer cancel()
 
 			result, err := p.Check(ctx, providers.ImportOptions{
-				Host:     providerHost,
-				Username: providerUsername,
-				Password: providerPassword,
-				Site:     providerSite,
-				Debug:    providerDebug,
+				Host:          providerHost,
+				Username:      providerUsername,
+				Password:      providerPassword,
+				Site:          providerSite,
+				Debug:         providerDebug,
+				SkipTLSVerify: providerSkipTLS,
+				CACertPath:    providerCACertPath,
 			})
 			if err != nil {
 				return err
@@ -231,6 +239,8 @@ func addProviderFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&providerHost, "host", "", "Controller IP or hostname")
 	cmd.Flags().StringVar(&providerUsername, "username", "", "Admin username")
 	cmd.Flags().StringVar(&providerPassword, "password", "", "Admin password")
+	cmd.Flags().BoolVar(&providerSkipTLS, "skip-tls-verify", false, "Skip TLS certificate verification (like curl -k)")
+	cmd.Flags().StringVar(&providerCACertPath, "ca-cert", "", "Path to custom CA certificate PEM file")
 }
 
 func marshalSpecYAML(result *providers.ImportResult, providerName string) ([]byte, error) {

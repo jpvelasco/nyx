@@ -31,11 +31,14 @@ const (
 
 // Engine runs audit assertions
 type Engine struct {
-	Spec        *intent.Spec
-	Interface   string
-	WarnVirtual bool
-	SeenDBPath  string               // if non-empty, overrides ~/.nyx/seen.json (used in tests)
-	runnerCtx   models.RunnerContext // populated once at Run() time
+	Spec               *intent.Spec
+	Interface          string
+	WarnVirtual        bool
+	SkipTLSVerify      bool // allow self-signed TLS certs (like curl -k)
+	CACertPath         string // path to custom CA cert PEM file
+	SkipHostKeyVerify  bool // skip SSH host key verification for probes
+	SeenDBPath         string               // if non-empty, overrides ~/.nyx/seen.json (used in tests)
+	runnerCtx          models.RunnerContext // populated once at Run() time
 }
 
 // NewEngine creates an audit engine for a spec
@@ -668,7 +671,7 @@ func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.C
 		return result, nil
 	}
 
-	client, err := omada.NewClient(ctx, host)
+	client, err := omada.NewClient(ctx, host, e.SkipTLSVerify, e.CACertPath)
 	if err != nil {
 		result.Status = models.StatusError
 		result.Summary = fmt.Sprintf("failed to connect to Omada: %v", err)
@@ -761,11 +764,12 @@ func (e *Engine) runViaProbe(ctx context.Context, a intent.Assertion) (*models.C
 	}
 
 	probeP := probe.Probe{
-		Name: p.Name,
-		Host: p.Host,
-		User: p.User,
-		Key:  p.Key,
-		VLAN: p.VLAN,
+		Name:              p.Name,
+		Host:              p.Host,
+		User:              p.User,
+		Key:               p.Key,
+		VLAN:              p.VLAN,
+		SkipHostKeyVerify: p.SkipHostKeyVerify,
 	}
 
 	cmd := probeCommandFor(a)
@@ -773,7 +777,7 @@ func (e *Engine) runViaProbe(ctx context.Context, a intent.Assertion) (*models.C
 		return nil, fmt.Errorf("assertion type %q does not support remote probe execution", a.Type)
 	}
 
-	output, err := probe.Run(ctx, probeP, cmd)
+	output, err := probe.Run(ctx, probeP, cmd, e.SkipHostKeyVerify)
 	result := models.NewCheckResult("probe", a.Type, a.Runner, probeTarget(a))
 	result.Evidence = append(result.Evidence, fmt.Sprintf("probe: %s@%s", p.User, p.Host))
 	result.Evidence = append(result.Evidence, fmt.Sprintf("command: %s", strings.Join(cmd, " ")))

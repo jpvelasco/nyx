@@ -16,18 +16,21 @@ import (
 
 // Probe represents a remote node that can execute commands via SSH.
 type Probe struct {
-	Name string // probe name
-	Host string // IP or hostname
-	User string // SSH username
-	Key  string // path to private key; empty = ssh-agent only
-	VLAN string // informational label
+	Name              string // probe name
+	Host              string // IP or hostname
+	User              string // SSH username
+	Key               string // path to private key; empty = ssh-agent only
+	VLAN              string // informational label
+	SkipHostKeyVerify bool   // skip SSH host key verification (like ssh -o StrictHostKeyChecking=no)
 }
 
 // Run executes a command on the probe and returns combined stdout+stderr output.
+// When skipHostKeyVerify is true, SSH host key verification is bypassed (like ssh -o StrictHostKeyChecking=no).
+// When false (default), the probe's own SkipHostKeyVerify setting is honored.
 // Each argument is shell-quoted before joining so args with spaces or special
 // characters are preserved across the SSH shell boundary.
 // On dial failure, returns a descriptive error mentioning the probe name, host, and VLAN.
-func Run(ctx context.Context, p Probe, cmd []string) (string, error) {
+func Run(ctx context.Context, p Probe, cmd []string, skipHostKeyVerify bool) (string, error) {
 	conn, err := dialWithContext(ctx, p)
 	if err != nil {
 		return "", fmt.Errorf("probe %q unreachable at %s:22 — is the host on VLAN %s and SSH running?", p.Name, p.Host, p.VLAN)
@@ -43,12 +46,17 @@ func Run(ctx context.Context, p Probe, cmd []string) (string, error) {
 		return "", fmt.Errorf("probe %q: no authentication methods available", p.Name)
 	}
 
+	hostKeyCallback := ssh.HostKeyCallback(func(hostname string, _ net.Addr, _ ssh.PublicKey) error {
+		return fmt.Errorf("probe %q: host key verification failed for %s — use --skip-host-key-verify or set skip_host_key_verify: true in probe spec", p.Name, hostname)
+	})
+	if skipHostKeyVerify || p.SkipHostKeyVerify {
+		hostKeyCallback = ssh.InsecureIgnoreHostKey() // #nosec G106 — user explicitly opted out // nosemgrep codacy.tools-configs.go.lang.security.audit.crypto.insecure_ssh.avoid-ssh-insecure-ignore-host-key codacy.tools-configs.go_crypto_rule-insecure-ignore-host-key
+	}
+
 	cfg := &ssh.ClientConfig{
-		User: p.User,
-		Auth: methods,
-		// nosemgrep
-		// #nosec G106 — homelab probe, not a security boundary
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // nosemgrep
+		User:            p.User,
+		Auth:            methods,
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         10 * time.Second,
 	}
 

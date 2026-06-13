@@ -28,3 +28,8 @@ npm/bin/nyx-*
 # OS
 .DS_Store
 Thumbs.db
+
+# Codacy local artifacts (configs under .codacy/ are committed)
+.codacy/logs/
+.codacy/*.sarif
+.codacy/server-issues.json
