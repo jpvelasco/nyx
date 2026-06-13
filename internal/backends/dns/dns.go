@@ -151,7 +151,8 @@ func CheckDNSSEC(ctx context.Context, query, server string) (*models.CheckResult
 	}
 	args = append(args, query)
 
-	cmd := exec.CommandContext(ctx, "dig", args...) // nosemgrep // #nosec G204
+	//nolint:gosec
+	cmd := exec.CommandContext(ctx, "dig", args...) // nosemgrep
 	output, _ := cmd.CombinedOutput() //nolint:errcheck // dig may exit non-zero with valid output; parsed via regex below
 	outputStr := string(output)
 

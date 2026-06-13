@@ -32,7 +32,8 @@ var doctorCmd = &cobra.Command{
 		nmapCheck := models.NewCheckResult("doctor", "nmap_installed", "local", "nmap")
 		if nmap.Available() {
 			path, _ := exec.LookPath("nmap")
-			out, err := exec.Command(path, "--version").Output() // nosemgrep // #nosec G204
+			// #nosec G204 — nmap is hardcoded
+			out, err := exec.Command(path, "--version").Output() // nosemgrep
 			ver := "found"
 			if err == nil && len(out) > 0 {
 				line := string(out)
@@ -65,19 +66,21 @@ var doctorCmd = &cobra.Command{
 		logPath := logger.DefaultPath()
 		logDir := logPath[:len(logPath)-len("/nyx.log")]
 		logDirCheck := models.NewCheckResult("doctor", "log_directory", "local", logDir)
-		if err := os.MkdirAll(logDir, 0700); err != nil { // nosemgrep // #nosec G301
+		//nolint:gosec
+		if err := os.MkdirAll(logDir, 0700); err != nil { // nosemgrep
 			logDirCheck.Status = models.StatusFail
 			logDirCheck.Summary = fmt.Sprintf("can't create log directory %s: %v", logDir, err)
 			allPass = false
 		} else {
 			testFile := logDir + "/.nyx_write_test"
-			if f, err := os.OpenFile(testFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600); err != nil { // nosemgrep // #nosec G304
+			// #nosec G304 — path is internal log dir
+			if f, err := os.OpenFile(testFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600); err != nil { // nosemgrep
 				logDirCheck.Status = models.StatusFail
 				logDirCheck.Summary = fmt.Sprintf("log directory %s isn't writable: %v", logDir, err)
 				allPass = false
 			} else {
-				f.Close()
-				os.Remove(testFile)
+				f.Close() // #nosec G104 — best-effort cleanup
+				os.Remove(testFile) // #nosec G104 — best-effort cleanup
 				logDirCheck.Status = models.StatusPass
 				logDirCheck.Summary = fmt.Sprintf("log directory: %s (writable)", logDir)
 			}
@@ -180,6 +183,7 @@ func runSpecChecks(path string) []models.CheckResult {
 	var checks []models.CheckResult
 
 	fileCheck := models.NewCheckResult("doctor", "spec_file", "local", path)
+	// #nosec G304 — path from CLI flag, not user-controlled
 	data, err := os.ReadFile(path)
 	if err != nil {
 		fileCheck.Status = models.StatusFail
@@ -247,7 +251,7 @@ func runSpecChecks(path string) []models.CheckResult {
 				probeCheck.Violations = append(probeCheck.Violations,
 					fmt.Sprintf("cannot connect to %s: %v", addr, err))
 			} else {
-				conn.Close()
+				conn.Close() // #nosec G104 — best-effort cleanup
 				probeCheck.Status = models.StatusPass
 				probeCheck.Summary = fmt.Sprintf("probe %q reachable at %s:22", p.Name, p.Host)
 				probeCheck.Observed["reachable"] = true

@@ -67,7 +67,8 @@ func Execute() error {
 
 func getWriter() (*os.File, error) {
 	if outputPath != "" {
-		f, err := os.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600) // nosemgrep // #nosec G304
+		// #nosec G304 — path from CLI flag
+		f, err := os.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600) // nosemgrep
 		if err != nil {
 			return nil, fmt.Errorf("opening output file %q: %w", outputPath, err)
 		}

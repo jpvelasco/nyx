@@ -34,7 +34,8 @@ func TestRenderRecommendationsGoesToWriter(t *testing.T) {
 	report.RenderRecommendations(f, recs)
 	f.Close()
 
-	content, err := os.ReadFile(tmpFile) // nosemgrep // #nosec G304
+	//nolint:gosec
+	content, err := os.ReadFile(tmpFile) // nosemgrep
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-.PHONY: build test vet clean release lint
+.PHONY: build test vet clean release lint gosec check
 
 BINARY = nyx
 
@@ -10,6 +10,11 @@ test:
 
 vet:
 	go vet ./...
+
+gosec:
+	go run github.com/securego/gosec/v2/cmd/gosec@latest ./...
+
+check: gosec vet test build
 
 clean:
 	rm -f $(BINARY) nyx-* nyx.exe

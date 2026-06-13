@@ -181,11 +181,14 @@ func runPing(ctx context.Context, target string, count int) (string, error) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = exec.CommandContext(ctx, "ping", "-n", fmt.Sprintf("%d", count), "-w", "2000", target) // nosemgrep // #nosec G204
+		// #nosec G204 — ping is hardcoded, target from spec
+		cmd = exec.CommandContext(ctx, "ping", "-n", fmt.Sprintf("%d", count), "-w", "2000", target) // nosemgrep
 	case "darwin":
-		cmd = exec.CommandContext(ctx, "ping", "-c", fmt.Sprintf("%d", count), "-W", "2000", target) // nosemgrep // #nosec G204
+		// #nosec G204 — ping is hardcoded, target from spec
+		cmd = exec.CommandContext(ctx, "ping", "-c", fmt.Sprintf("%d", count), "-W", "2000", target) // nosemgrep
 	default: // linux
-		cmd = exec.CommandContext(ctx, "ping", "-c", fmt.Sprintf("%d", count), "-W", "2", target) // nosemgrep // #nosec G204
+		// #nosec G204 — ping is hardcoded, target from spec
+		cmd = exec.CommandContext(ctx, "ping", "-c", fmt.Sprintf("%d", count), "-W", "2", target) // nosemgrep
 	}
 	out, err := cmd.Output()
 	return string(out), err
@@ -324,13 +327,16 @@ func canPing(ctx context.Context, target string, size int) bool {
 	switch runtime.GOOS {
 	case "windows":
 		// Windows: -f sets DF bit, -l sets packet size
-		cmd = exec.CommandContext(ctx, "ping", "-n", "1", "-f", "-l", fmt.Sprintf("%d", dataSize), target) // nosemgrep // #nosec G204
+		// #nosec G204 — ping is hardcoded, target from spec
+		cmd = exec.CommandContext(ctx, "ping", "-n", "1", "-f", "-l", fmt.Sprintf("%d", dataSize), target) // nosemgrep
 	case "darwin":
 		// macOS: -D sets DF bit, -s sets packet size
-		cmd = exec.CommandContext(ctx, "ping", "-c", "1", "-D", "-s", fmt.Sprintf("%d", dataSize), target) // nosemgrep // #nosec G204
+		// #nosec G204 — ping is hardcoded, target from spec
+		cmd = exec.CommandContext(ctx, "ping", "-c", "1", "-D", "-s", fmt.Sprintf("%d", dataSize), target) // nosemgrep
 	default: // linux
 		// Linux: -M do sets DF bit, -s sets packet size
-		cmd = exec.CommandContext(ctx, "ping", "-c", "1", "-M", "do", "-s", fmt.Sprintf("%d", dataSize), target) // nosemgrep // #nosec G204
+		// #nosec G204 — ping is hardcoded, target from spec
+		cmd = exec.CommandContext(ctx, "ping", "-c", "1", "-M", "do", "-s", fmt.Sprintf("%d", dataSize), target) // nosemgrep
 	}
 
 	out, err := cmd.Output()

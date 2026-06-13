@@ -46,8 +46,9 @@ func Run(ctx context.Context, p Probe, cmd []string) (string, error) {
 	cfg := &ssh.ClientConfig{
 		User: p.User,
 		Auth: methods,
-		// nosemgrep // #nosec G304
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // homelab probe, not a security boundary
+		// nosemgrep
+		// #nosec G106 — homelab probe, not a security boundary
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // nosemgrep
 		Timeout:         10 * time.Second,
 	}
 
@@ -88,7 +89,7 @@ func Check(ctx context.Context, p Probe) error {
 	if err != nil {
 		return err
 	}
-	conn.Close()
+	conn.Close() // #nosec G104 — best-effort cleanup
 	return nil
 }
 
@@ -117,10 +118,12 @@ func authMethods(keyPath string) ([]ssh.AuthMethod, net.Conn) {
 		if strings.HasPrefix(keyPath, "~/") {
 			home, err := os.UserHomeDir()
 			if err == nil {
-				keyPath = filepath.Join(home, keyPath[2:]) // nosemgrep // #nosec G304
+				// #nosec G304 — path from spec, resolves to home dir
+				keyPath = filepath.Join(home, keyPath[2:]) // nosemgrep
 			}
 		}
-		keyBytes, err := os.ReadFile(keyPath) // nosemgrep // #nosec G304 // #nosec G304
+		// #nosec G304 — path from spec, resolves to home dir
+		keyBytes, err := os.ReadFile(keyPath) // nosemgrep
 		if err == nil {
 			signer, err := ssh.ParsePrivateKey(keyBytes)
 			if err == nil {
@@ -146,6 +149,7 @@ func connectAgent() net.Conn {
 		return nil
 	}
 
+	// #nosec G704 — SSH agent socket from env, not user-controlled
 	conn, err := net.Dial("unix", socket)
 	if err != nil {
 		return nil

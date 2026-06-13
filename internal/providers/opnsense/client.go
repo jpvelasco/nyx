@@ -74,7 +74,8 @@ func NewClient(host, apiKey, apiSecret string) *Client {
 			Transport: &http.Transport{
 				// nosemgrep
 				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true, //nolint:gosec // self-signed controller cert
+					// #nosec G402 — self-signed controller cert
+					InsecureSkipVerify: true, // nosemgrep
 				},
 			},
 		},
