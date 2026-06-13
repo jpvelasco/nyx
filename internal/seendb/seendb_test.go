@@ -40,6 +40,8 @@ func TestAckUnwritablePathIsGraceful(t *testing.T) {
 	// os.WriteFile on a dir path fails ("is a directory") on all platforms.
 	tmp := t.TempDir()
 	dirAsFile := filepath.Join(tmp, "seen.json")
+	// #nosec G301 — test-only; directory needs execute bits to exist
+	// #nosec G301 — test-only; directory needs execute bits to exist
 	if err := os.Mkdir(dirAsFile, 0o700); err != nil {
 		t.Fatalf("setup: %v", err)
 	}

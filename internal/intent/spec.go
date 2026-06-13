@@ -94,6 +94,7 @@ type Assertion struct {
 
 // LoadSpec reads and parses a YAML spec file
 func LoadSpec(path string) (*Spec, error) {
+	// #nosec G304 — path from CLI flag, not user-controlled
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading spec file: %w", err)

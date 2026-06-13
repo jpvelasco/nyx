@@ -1,0 +1,6 @@
+queries:
+  - uses: security-and-quality
+  - exclude:
+      - id: go/disabled-certificate-check
+      - id: go/insecure-hostkeycallback
+

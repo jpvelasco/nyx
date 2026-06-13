@@ -28,7 +28,8 @@ type Logger struct {
 // maxSize is the max bytes per file before rotation.
 // maxFiles is the number of rotated files to keep.
 func New(path string, maxSize int64, maxFiles int) (*Logger, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil { // nosemgrep // #nosec G301
+	//nolint:gosec
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil { // nosemgrep
 		return nil, fmt.Errorf("creating log directory: %w", err)
 	}
 	l := &Logger{path: path, maxSize: maxSize, maxFiles: maxFiles}

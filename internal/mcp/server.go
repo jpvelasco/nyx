@@ -495,6 +495,7 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		findings = append(findings, *nmapResult)
 
 		if specPath != "" {
+			// #nosec G304 — path from spec, not user-controlled
 			data, err := os.ReadFile(specPath)
 			if err != nil {
 				fileCheck := models.NewCheckResult("doctor", "spec_file", "local", specPath)

@@ -22,7 +22,8 @@ func TestLogWritesJSONLine(t *testing.T) {
 		"duration_ms": 100,
 	})
 
-	content, err := os.ReadFile(filepath.Join(dir, "nyx.log")) // nosemgrep // #nosec G304
+	//nolint:gosec
+	content, err := os.ReadFile(filepath.Join(dir, "nyx.log")) // nosemgrep
 	if err != nil {
 		t.Fatal(err)
 	}
