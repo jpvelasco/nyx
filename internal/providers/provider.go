@@ -10,11 +10,13 @@ import (
 
 // ImportOptions holds credentials and options for provider connections.
 type ImportOptions struct {
-	Host     string
-	Username string
-	Password string
-	Site     string
-	Debug    bool
+	Host          string
+	Username      string
+	Password      string
+	Site          string
+	Debug         bool
+	SkipTLSVerify bool
+	CACertPath    string
 }
 
 // ProviderInfo holds version and connection metadata returned by Info.

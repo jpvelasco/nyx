@@ -23,7 +23,7 @@ func (o *OmadaProvider) Capabilities() []string {
 
 // Info returns basic controller information without requiring authentication.
 func (o *OmadaProvider) Info(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInfo, error) {
-	client, err := omadabackend.NewClient(ctx, opts.Host)
+	client, err := omadabackend.NewClient(ctx, opts.Host, opts.SkipTLSVerify, opts.CACertPath)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to omada controller: %w", err)
 	}
@@ -41,7 +41,7 @@ func (o *OmadaProvider) Info(ctx context.Context, opts providers.ImportOptions) 
 
 // ImportSpec imports networks, policies, and clients from the Omada controller and returns a generated intent spec.
 func (o *OmadaProvider) ImportSpec(ctx context.Context, opts providers.ImportOptions) (*providers.ImportResult, error) {
-	result, err := omadabackend.ImportSpec(ctx, opts.Host, opts.Username, opts.Password, opts.Site, opts.Debug)
+	result, err := omadabackend.ImportSpec(ctx, opts.Host, opts.Username, opts.Password, opts.Site, opts.Debug, opts.SkipTLSVerify, opts.CACertPath)
 	if err != nil {
 		return nil, err
 	}
