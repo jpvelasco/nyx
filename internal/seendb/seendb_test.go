@@ -40,8 +40,7 @@ func TestAckUnwritablePathIsGraceful(t *testing.T) {
 	// os.WriteFile on a dir path fails ("is a directory") on all platforms.
 	tmp := t.TempDir()
 	dirAsFile := filepath.Join(tmp, "seen.json")
-	// nosemgrep:go.lang.correctness.permissions.file_permission.incorrect-default-permission — test-only; directory needs execute bits to exist
-	if err := os.Mkdir(dirAsFile, 0o700); err != nil {
+	if err := os.Mkdir(dirAsFile, 0o700); err != nil { // nosemgrep go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		t.Fatalf("setup: %v", err)
 	}
 

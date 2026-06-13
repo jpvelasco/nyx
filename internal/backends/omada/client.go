@@ -306,7 +306,7 @@ func buildTLSConfig(skipTLSVerify bool, caCertPath string) *tls.Config {
 		}
 	}
 	if skipTLSVerify {
-		// nosemgrep:codacy.tools-configs.problem-based-packs.insecure-transport.go-stdlib.bypass-tls-verification.bypass-tls-verification — user explicitly opted out for self-signed certs
+		// nosemgrep codacy.tools-configs.problem-based-packs.insecure-transport.go-stdlib.bypass-tls-verification.bypass-tls-verification — user explicitly opted out for self-signed certs
 		return &tls.Config{
 			InsecureSkipVerify: true, // #nosec G402 — user explicitly opted out
 			MinVersion:         tls.VersionTLS12,
