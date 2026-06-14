@@ -10,6 +10,13 @@ const { spawnSync } = require("child_process");
 
 const REPO = "jpvelasco/nyx";
 const MAX_REDIRECTS = 5;
+const DOWNLOAD_TIMEOUT_MS = 30000;
+
+const RELEASE_HOSTS = new Set([
+  "github.com",
+  "objects.githubusercontent.com",
+  "github-releases.githubusercontent.com",
+]);
 
 const PLATFORM_MAP = {
   linux: "linux",
@@ -36,10 +43,7 @@ function getPackageVersion() {
   return version;
 }
 
-function getExpectedChecksum(archiveName) {
-  const pkg = JSON.parse(
-    fs.readFileSync(path.join(__dirname, "package.json"), "utf8")
-  );
+function getExpectedChecksum(pkg, archiveName) {
   return pkg.binaryChecksums?.[archiveName] || null;
 }
 
@@ -59,34 +63,40 @@ function download(url, redirectCount = 0) {
       return reject(new Error(`Too many redirects (max ${MAX_REDIRECTS})`));
     }
 
-    https
-      .get(url, (res) => {
-        if (
-          res.statusCode >= 300 &&
-          res.statusCode < 400 &&
-          res.headers.location
-        ) {
-          return download(res.headers.location, redirectCount + 1).then(
-            resolve,
-            reject
-          );
+    const req = https.get(url, { timeout: DOWNLOAD_TIMEOUT_MS }, (res) => {
+      if (
+        res.statusCode >= 300 &&
+        res.statusCode < 400 &&
+        res.headers.location
+      ) {
+        const nextUrl = new URL(res.headers.location, url);
+        if (!RELEASE_HOSTS.has(nextUrl.hostname) &&
+            !nextUrl.hostname.endsWith('.githubusercontent.com')) {
+          return reject(new Error(`Refusing redirect to unexpected host: ${nextUrl.hostname}`));
         }
-        if (res.statusCode !== 200) {
-          return reject(
-            new Error(`Download failed: HTTP ${res.statusCode} for ${url}`)
-          );
-        }
-        const chunks = [];
-        res.on("data", (chunk) => chunks.push(chunk));
-        res.on("end", () => resolve(Buffer.concat(chunks)));
-        res.on("error", reject);
-      })
-      .on("error", reject);
+        res.resume();
+        return download(nextUrl.href, redirectCount + 1).then(resolve, reject);
+      }
+      if (res.statusCode !== 200) {
+        return reject(
+          new Error(`Download failed: HTTP ${res.statusCode} for ${url}`)
+        );
+      }
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+      res.on("error", reject);
+    });
+
+    req.setTimeout(DOWNLOAD_TIMEOUT_MS, () => {
+      req.destroy(new Error(`Timed out downloading ${url}`));
+    });
+    req.on("error", reject);
   });
 }
 
-function verifyChecksum(buffer, archiveName) {
-  const expected = getExpectedChecksum(archiveName);
+function verifyChecksum(buffer, archiveName, pkg) {
+  const expected = getExpectedChecksum(pkg, archiveName);
   if (!expected) {
     console.log("nyx: no checksum available, skipping verification");
     return;
@@ -171,7 +181,10 @@ function extract(buffer, archiveName, binDir) {
 }
 
 async function main() {
-  const version = getPackageVersion();
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(__dirname, "package.json"), "utf8")
+  );
+  const version = pkg.version;
   if (version === "0.0.0") {
     console.error("nyx: skipping binary download for development version");
     return;
@@ -184,7 +197,7 @@ async function main() {
   console.log(`nyx: downloading ${archiveName}...`);
   const buffer = await download(url);
 
-  verifyChecksum(buffer, archiveName);
+  verifyChecksum(buffer, archiveName, pkg);
 
   console.log("nyx: extracting binary...");
   extract(buffer, archiveName, binDir);

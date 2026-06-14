@@ -26,7 +26,7 @@ for (const line of checksums.split("\n")) {
   const match = line.match(/^([0-9a-f]{64})\s+(.+)$/i);
   if (match) {
     const [, hash, filename] = match;
-    pkg.binaryChecksums[filename] = hash;
+    pkg.binaryChecksums[filename] = hash.toLowerCase();
   }
 }
 
