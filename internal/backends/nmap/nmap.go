@@ -138,6 +138,8 @@ func DiscoverWithOptions(ctx context.Context, cidr string, opts ScanOptions) (*m
 			result.Finish()
 			return result, fmt.Errorf("nmap error: %w", err)
 		}
+		result.Status = models.StatusWarn
+		result.Summary = fmt.Sprintf("nmap exited with warning: %v", err)
 	}
 
 	hosts := parseNmapOutput(string(out))
@@ -332,6 +334,8 @@ func PortScan(ctx context.Context, target string, ports []int, protocol string, 
 			result.Finish()
 			return result, fmt.Errorf("nmap error: %w", err)
 		}
+		result.Status = models.StatusWarn
+		result.Summary = fmt.Sprintf("nmap exited with warning: %v", err)
 	}
 
 	portStates := parsePortScanOutput(string(out), ports, protocol)
@@ -341,7 +345,10 @@ func PortScan(ctx context.Context, target string, ports []int, protocol string, 
 	_ = json.Unmarshal(psJSON, &psMap)
 	result.Observed = psMap
 	result.Evidence = append(result.Evidence, strings.TrimSpace(string(out)))
-	result.Status = models.StatusPass
+
+	if err == nil {
+		result.Status = models.StatusPass
+	}
 	result.Summary = fmt.Sprintf("port scan of %s: %d ports checked", target, len(ports))
 	result.Finish()
 	return result, nil

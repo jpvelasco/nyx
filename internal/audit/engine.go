@@ -341,15 +341,10 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 			fmt.Sprintf("found %d hosts, expected min %d", hostCount, *a.ExpectHostsMin))
 	}
 
-	if result.Status == "" || (len(result.Violations) == 0 &&
-		result.Status != models.StatusError &&
-		result.Status != models.StatusWarn) {
-		result.Status = models.StatusPass
-	}
-
 	// Virtual network suppression: if 0 hosts and nmap evidence suggests a VM
 	// hypervisor MAC, check seendb. First occurrence → WARN + ack. Subsequent
 	// occurrences → SKIP (unless WarnVirtual override is set).
+	// Check this BEFORE setting default pass status so the flow is clearer.
 	if hostCount == 0 && (looksVirtual(result.Evidence) || looksVirtualByCIDR(net.CIDR)) {
 		var db *seendb.SeenDB
 		if e.SeenDBPath != "" {
@@ -369,13 +364,21 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 			} else {
 				result.Summary = fmt.Sprintf("0 hosts discovered in %s (virtual adapter detected — future scans will suppress this warning; use --warn-virtual to always show it)", cidr)
 			}
-			_ = db.AckVirtual(cidr)
+			if err := db.AckVirtual(cidr); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to ack virtual network %s: %v\n", cidr, err)
+			}
 		} else {
 			result.Status = models.StatusSkip
 			result.Summary = fmt.Sprintf("skipped: %s is a virtual network (acknowledged)", cidr)
 		}
 		result.Finish()
 		return result, nil
+	}
+
+	if result.Status == "" || (len(result.Violations) == 0 &&
+		result.Status != models.StatusError &&
+		result.Status != models.StatusWarn) {
+		result.Status = models.StatusPass
 	}
 
 	result.Summary = fmt.Sprintf("%d hosts discovered in %s", hostCount, net.CIDR)
@@ -657,7 +660,19 @@ func (e *Engine) runNetworkHealth(ctx context.Context, a intent.Assertion) (*mod
 }
 
 func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
-	result := models.NewCheckResult("omada", "acl_check", "omada", a.Policy)
+	provider := a.Provider
+	if provider == "" {
+		provider = "omada"
+	}
+
+	result := models.NewCheckResult(provider, "acl_check", provider, a.Policy)
+
+	if provider != "omada" {
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("acl_check provider %q is not supported yet (only 'omada' is supported)", provider)
+		result.Finish()
+		return result, nil
+	}
 
 	// Get Omada credentials from environment
 	host := os.Getenv("OMADA_HOST")
@@ -772,7 +787,12 @@ func (e *Engine) runViaProbe(ctx context.Context, a intent.Assertion) (*models.C
 		SkipHostKeyVerify: p.SkipHostKeyVerify,
 	}
 
-	cmd := probeCommandFor(a)
+	// For isolation assertions, check all gateways in the destination zone
+	if a.Type == "isolation" {
+		return e.runIsolationViaProbe(ctx, a, probeP)
+	}
+
+	cmd := probeCommandFor(a, e.Spec)
 	if cmd == nil {
 		return nil, fmt.Errorf("assertion type %q does not support remote probe execution", a.Type)
 	}
@@ -793,16 +813,82 @@ func (e *Engine) runViaProbe(ctx context.Context, a intent.Assertion) (*models.C
 	return parseProbeOutput(result, a, output), nil
 }
 
+// runIsolationViaProbe runs isolation checks against all gateways in the destination zone.
+func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, probeP probe.Probe) (*models.CheckResult, error) {
+	gateways := resolveZoneToGateways(a.To, e.Spec)
+	if len(gateways) == 0 {
+		gateways = []string{a.To}
+	}
+
+	result := models.NewCheckResult("probe", "isolation", a.Runner, fmt.Sprintf("%s -> %s", a.From, a.To))
+	result.Evidence = append(result.Evidence, fmt.Sprintf("probe: %s@%s", probeP.User, probeP.Host))
+
+	allBlocked := true
+	anyTested := false
+
+	for _, gw := range gateways {
+		cmd := []string{"ping", "-c", "3", "-W", "3", gw}
+		result.Evidence = append(result.Evidence, fmt.Sprintf("command: %s", strings.Join(cmd, " ")))
+
+		output, err := probe.Run(ctx, probeP, cmd, e.SkipHostKeyVerify)
+		result.Evidence = append(result.Evidence, output)
+
+		if err != nil {
+			// Ping failed — treat as blocked (unreachable)
+			anyTested = true
+			result.Evidence = append(result.Evidence, fmt.Sprintf("gateway %s: unreachable", gw))
+			continue
+		}
+		anyTested = true
+
+		isBlocked := strings.Contains(output, "100% packet loss") ||
+			strings.Contains(output, "0 received") ||
+			strings.Contains(output, "100.0% packet loss")
+		if isBlocked {
+			result.Evidence = append(result.Evidence, fmt.Sprintf("gateway %s: blocked", gw))
+		} else {
+			allBlocked = false
+			result.Evidence = append(result.Evidence, fmt.Sprintf("gateway %s: reachable", gw))
+		}
+	}
+
+	expectDeny := a.ExpectDeny == "deny"
+	if !anyTested {
+		result.Status = models.StatusWarn
+		result.Summary = fmt.Sprintf("isolation unverifiable from probe %q: %s → %s (no gateways reachable)", a.Runner, a.From, a.To)
+	} else if expectDeny && allBlocked {
+		result.Status = models.StatusPass
+		result.Summary = fmt.Sprintf("isolation confirmed from probe %q: %s cannot reach %s", a.Runner, a.From, a.To)
+	} else if expectDeny && !allBlocked {
+		result.Status = models.StatusFail
+		result.Summary = fmt.Sprintf("isolation violation from probe %q: %s can reach %s", a.Runner, a.From, a.To)
+		result.Violations = append(result.Violations, "expected deny but traffic is reachable from probe VLAN")
+	} else if !expectDeny && !allBlocked {
+		result.Status = models.StatusPass
+		result.Summary = fmt.Sprintf("connectivity confirmed from probe %q: %s can reach %s", a.Runner, a.From, a.To)
+	} else {
+		result.Status = models.StatusFail
+		result.Summary = fmt.Sprintf("connectivity failure from probe %q: %s cannot reach %s", a.Runner, a.From, a.To)
+	}
+
+	result.Finish()
+	return result, nil
+}
+
 // probeCommandFor returns the shell command to run on a remote probe for the assertion.
+// For isolation assertions, the spec is used to resolve zone names to gateway IPs.
 // Returns nil if the assertion type doesn't support remote execution.
-func probeCommandFor(a intent.Assertion) []string {
+func probeCommandFor(a intent.Assertion, spec *intent.Spec) []string {
 	switch a.Type {
 	case "isolation", "network_health":
 		// ping -c 3 <target>
 		target := a.Target
+		if target == "" && a.Type == "isolation" {
+			// For isolation, resolve the destination zone to gateway IPs
+			target = resolveZoneToGateway(a.To, spec)
+		}
 		if target == "" {
-			// For isolation, we probe the destination gateway
-			target = a.To
+			return nil
 		}
 		return []string{"ping", "-c", "3", "-W", "3", target}
 	case "port_check":
@@ -821,6 +907,43 @@ func probeCommandFor(a intent.Assertion) []string {
 	default:
 		return nil
 	}
+}
+
+// resolveZoneToGateway resolves a zone name to a gateway IP using the spec.
+// It first tries to find networks by zone name, then by network name.
+// Returns the first gateway IP found, or the original name if no gateway is available.
+func resolveZoneToGateway(zone string, spec *intent.Spec) string {
+	gateways := resolveZoneToGateways(zone, spec)
+	if len(gateways) > 0 {
+		return gateways[0]
+	}
+	return zone
+}
+
+// resolveZoneToGateways resolves a zone name to all gateway IPs using the spec.
+// It checks networks by zone name first, then by network name.
+func resolveZoneToGateways(zone string, spec *intent.Spec) []string {
+	if spec == nil {
+		return nil
+	}
+
+	var gateways []string
+
+	// Try zone name first
+	for _, n := range spec.NetworkByZone(zone) {
+		if n.Gateway != "" {
+			gateways = append(gateways, n.Gateway)
+		}
+	}
+
+	// Try network name if no zone match
+	if len(gateways) == 0 {
+		if net := spec.NetworkByName(zone); net != nil && net.Gateway != "" {
+			gateways = append(gateways, net.Gateway)
+		}
+	}
+
+	return gateways
 }
 
 // probeTarget returns a human-readable target string for the assertion.
