@@ -1,5 +1,5 @@
-// nosemgrep: all — npm run shim, not application code
 #!/usr/bin/env node
+// nosemgrep: all — npm run shim, not application code
 "use strict";
 
 const path = require("path");

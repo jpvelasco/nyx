@@ -1,5 +1,5 @@
-// nosemgrep: all — npm install shim, not application code
 #!/usr/bin/env node
+// nosemgrep: all — npm install shim, not application code
 "use strict";
 
 const fs = require("fs");
