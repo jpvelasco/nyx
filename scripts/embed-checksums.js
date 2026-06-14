@@ -1,5 +1,5 @@
-// nosemgrep: all — release build script, not application code
 #!/usr/bin/env node
+// nosemgrep: all — release build script, not application code
 "use strict";
 
 // embed-checksums.js — Embeds SHA-256 checksums from GoReleaser's checksums.txt
