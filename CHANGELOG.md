@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-14
+
+**Patch release.** Fixes the release workflow so `@nyx/cli` publishes to npm.
+
+### Fixed
+
+- **embed-checksums.js.** Move `#!/usr/bin/env node` to line 1 — a nosemgrep comment above the shebang caused Node to throw `SyntaxError` in CI, blocking npm publish for v0.2.0.
+
 ## [0.2.0] - 2026-06-14
 
 **Feature release.** First `@nyx/cli` npm publish, secure-by-default TLS/SSH verification, and engine/provider hardening since v0.1.0.
@@ -66,6 +74,7 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.1
 [0.2.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.1.0
