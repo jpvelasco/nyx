@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"net/http/cookiejar"
 	"os"
 	"strings"
@@ -279,9 +280,11 @@ func isVersionSupported(ver string) bool {
 	if len(parts) < 2 {
 		return false
 	}
-	major := parts[0]
-	// Anything >= 6 is supported
-	return major >= "6"
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return false
+	}
+	return major >= 6
 }
 
 // buildTLSConfig creates a TLS config based on the provided options.

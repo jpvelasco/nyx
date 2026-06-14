@@ -39,6 +39,7 @@ type Engine struct {
 	SkipHostKeyVerify  bool // skip SSH host key verification for probes
 	SeenDBPath         string               // if non-empty, overrides ~/.nyx/seen.json (used in tests)
 	runnerCtx          models.RunnerContext // populated once at Run() time
+	seenDB             *seendb.SeenDB       // populated once at Run() time
 }
 
 // NewEngine creates an audit engine for a spec
@@ -50,6 +51,18 @@ func NewEngine(spec *intent.Spec) *Engine {
 // Results are returned in the same order as the assertions in the spec.
 func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 	e.runnerCtx = localRunnerContext(e.Spec, e.Interface)
+
+	// Load SeenDB once for the entire run so concurrent subnet_discovery
+	// assertions share the same in-memory state and avoid redundant file I/O.
+	if e.SeenDBPath != "" {
+		if loaded, err := seendb.LoadFrom(e.SeenDBPath); err == nil {
+			e.seenDB = loaded
+		} else {
+			e.seenDB = seendb.New()
+		}
+	} else {
+		e.seenDB = seendb.Load()
+	}
 
 	// Warn the user if we can't place them in any spec network (noob-friendly)
 	if e.Interface == "" && len(e.runnerCtx.Networks) == 0 && len(e.Spec.Networks) > 0 {
@@ -337,12 +350,13 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 	}
 
 	// Evaluate host count assertions.
-	// The nmap backend serializes DiscoveryResult into Observed, where
-	// "total" is the host count (JSON number → float64 after marshal/unmarshal).
+	// The nmap backend puts the host count under "total" in Observed.
 	hostCount := 0
 	if v, ok := result.Observed["total"]; ok {
-		// JSON unmarshal always produces float64 for numbers
-		if n, ok := v.(float64); ok {
+		switch n := v.(type) {
+		case int:
+			hostCount = n
+		case float64:
 			hostCount = int(n)
 		}
 	}
@@ -363,25 +377,15 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 	// occurrences → SKIP (unless WarnVirtual override is set).
 	// Check this BEFORE setting default pass status so the flow is clearer.
 	if hostCount == 0 && (looksVirtual(result.Evidence) || looksVirtualByCIDR(net.CIDR)) {
-		var db *seendb.SeenDB
-		if e.SeenDBPath != "" {
-			if loaded, err := seendb.LoadFrom(e.SeenDBPath); err == nil {
-				db = loaded
-			} else {
-				db = seendb.New()
-			}
-		} else {
-			db = seendb.Load()
-		}
 		cidr := net.CIDR
-		if e.WarnVirtual || !db.IsVirtualAcked(cidr) {
+		if e.WarnVirtual || !e.seenDB.IsVirtualAcked(cidr) {
 			result.Status = models.StatusWarn
 			if e.WarnVirtual {
 				result.Summary = fmt.Sprintf("0 hosts discovered in %s (virtual adapter detected; --warn-virtual is set)", cidr)
 			} else {
 				result.Summary = fmt.Sprintf("0 hosts discovered in %s (virtual adapter detected — future scans will suppress this warning; use --warn-virtual to always show it)", cidr)
 			}
-			if err := db.AckVirtual(cidr); err != nil {
+			if err := e.seenDB.AckVirtual(cidr); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: failed to ack virtual network %s: %v\n", cidr, err)
 			}
 		} else {
@@ -725,7 +729,10 @@ func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.C
 		result.Finish()
 		return result, nil
 	}
-	gwRules, _ := client.GetGatewayACLRules(ctx, siteID)
+	gwRules, gwErr := client.GetGatewayACLRules(ctx, siteID)
+	if gwErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to fetch gateway ACL rules: %v\n", gwErr)
+	}
 	allRules := append(rules, gwRules...)
 
 	// Find the declared policy

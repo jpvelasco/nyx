@@ -161,12 +161,10 @@ func ValidateSpec(spec *Spec) error {
 		if p.User == "" {
 			return fmt.Errorf("probe[%d]: 'user' is required", i)
 		}
-		if p.Name != "" {
-			if probeNames[p.Name] {
-				return fmt.Errorf("probe[%d]: duplicate probe name %q", i, p.Name)
-			}
-			probeNames[p.Name] = true
+		if probeNames[p.Name] {
+			return fmt.Errorf("probe[%d]: duplicate probe name %q", i, p.Name)
 		}
+		probeNames[p.Name] = true
 	}
 	// Validate policies
 	for i, p := range spec.Policies {

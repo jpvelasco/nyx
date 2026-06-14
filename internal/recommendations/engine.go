@@ -269,7 +269,10 @@ func classifyDiscovery(f models.CheckResult, groups map[string]*failureGroup, sp
 	// Zero hosts — could be network unreachable or just empty
 	hostCount := 0
 	if v, ok := f.Observed["total"]; ok {
-		if n, ok := v.(float64); ok {
+		switch n := v.(type) {
+		case int:
+			hostCount = n
+		case float64:
 			hostCount = int(n)
 		}
 	}
@@ -787,7 +790,10 @@ func recommendDiscovery(g failureGroup, _ *intent.Spec, _ models.RunnerContext, 
 	for _, f := range g.failures {
 		hostCount := 0
 		if v, ok := f.Observed["total"]; ok {
-			if n, ok := v.(float64); ok {
+			switch n := v.(type) {
+			case int:
+				hostCount = n
+			case float64:
 				hostCount = int(n)
 			}
 		}

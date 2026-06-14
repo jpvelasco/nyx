@@ -150,10 +150,10 @@ func DiscoverWithOptions(ctx context.Context, cidr string, opts ScanOptions) (*m
 	}
 
 	// Serialise into Observed so the generic report machinery can use it
-	drJSON, _ := json.Marshal(dr)
-	var drMap map[string]interface{}
-	_ = json.Unmarshal(drJSON, &drMap)
-	result.Observed = drMap
+	result.Observed = map[string]interface{}{
+		"hosts": dr.Hosts,
+		"total": dr.Total,
+	}
 
 	result.Summary = fmt.Sprintf("discovered %d host(s) in %s", len(hosts), cidr)
 	if len(hosts) == 0 {
