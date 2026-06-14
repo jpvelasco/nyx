@@ -68,6 +68,23 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 		i, assertion := i, assertion // capture loop vars
 		go func() {
 			defer wg.Done()
+
+			// Check if context is already cancelled before starting work
+			select {
+			case <-ctx.Done():
+				target := assertion.Target
+				if target == "" {
+					target = assertion.Network
+				}
+				errResult := models.NewCheckResult("audit", assertion.Type, "local", target)
+				errResult.Status = models.StatusError
+				errResult.Summary = fmt.Sprintf("%s cancelled: %v", assertion.Type, ctx.Err())
+				errResult.Finish()
+				findings[i] = *errResult
+				return
+			default:
+			}
+
 			result, err := e.runAssertion(ctx, assertion)
 			if err != nil {
 				target := assertion.Target

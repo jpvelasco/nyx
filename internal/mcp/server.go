@@ -88,8 +88,9 @@ type contentBlock struct {
 
 // Server is the MCP stdio server
 type Server struct {
-	reader io.Reader
-	writer io.Writer
+	reader    io.Reader
+	writer    io.Writer
+	initialized bool
 }
 
 // NewServer creates a new MCP server
@@ -120,7 +121,10 @@ func (s *Server) Serve(ctx context.Context) error {
 
 		// Notifications have no ID and need no response
 		if req.ID == nil || string(req.ID) == "null" {
-			// Handle notification silently
+			// Handle notifications (e.g., notifications/initialized)
+			if req.Method == "notifications/initialized" {
+				continue
+			}
 			continue
 		}
 
@@ -152,6 +156,7 @@ func (s *Server) handleRequest(ctx context.Context, req *jsonRPCRequest) *jsonRP
 }
 
 func (s *Server) handleInitialize(req *jsonRPCRequest) *jsonRPCResponse {
+	s.initialized = true
 	return &jsonRPCResponse{
 		JSONRPC: "2.0",
 		ID:      req.ID,
@@ -169,6 +174,13 @@ func (s *Server) handleInitialize(req *jsonRPCRequest) *jsonRPCResponse {
 }
 
 func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
+	if !s.initialized {
+		return &jsonRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error:   &rpcError{Code: -32002, Message: "server not initialized"},
+		}
+	}
 	tools := []tool{
 		{
 			Name:        "discover_subnet",
@@ -288,6 +300,13 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 }
 
 func (s *Server) handleToolCall(ctx context.Context, req *jsonRPCRequest) *jsonRPCResponse {
+	if !s.initialized {
+		return &jsonRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error:   &rpcError{Code: -32002, Message: "server not initialized"},
+		}
+	}
 	var params toolCallParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return &jsonRPCResponse{
