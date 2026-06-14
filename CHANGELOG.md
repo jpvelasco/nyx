@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-06-14
+
+**Patch release.** Fixes CodeQL parse errors in the npm install/run shims.
+
+### Fixed
+
+- **npm shim shebang order.** Move `#!/usr/bin/env node` to line 1 in `npm/install.js` and `npm/run.js` so CodeQL's JavaScript extractor no longer reports syntax errors.
+
 ## [0.2.4] - 2026-06-14
 
 **Patch release.** Publishes the npm package README and expanded registry metadata.
@@ -99,7 +107,11 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.5
+[0.2.4]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.4
+[0.2.3]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.3
+[0.2.2]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.2
 [0.2.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.1
 [0.2.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.1.0
