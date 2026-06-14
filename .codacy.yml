@@ -6,5 +6,8 @@ engines:
     enabled: true
 exclude_paths:
   - npm/scripts/install.js
+  - npm/install.js
+  - npm/run.js
+  - scripts/embed-checksums.js
   - AGENTS.md
   - CLAUDE.md

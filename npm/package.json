@@ -1,6 +1,6 @@
 {
   "name": "@nyx/cli",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "Network audit CLI for validating private networks against intended behavior",
   "license": "MIT",
   "repository": {
@@ -8,15 +8,20 @@
     "url": "https://github.com/jpvelasco/nyx"
   },
   "bin": {
-    "nyx": "bin/nyx"
+    "nyx": "run.js"
   },
-  "files": [
-    "bin/nyx",
-    "scripts/install.js"
-  ],
   "scripts": {
-    "postinstall": "node scripts/install.js"
+    "postinstall": "node install.js"
   },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
   "keywords": [
     "network",
     "audit",
@@ -27,12 +32,10 @@
     "mcp",
     "cli"
   ],
-  "engines": {
-    "node": ">=16"
-  },
-  "os": [
-    "linux",
-    "darwin",
-    "win32"
-  ]
+  "files": [
+    "install.js",
+    "run.js",
+    "bin/"
+  ],
+  "binaryChecksums": {}
 }
