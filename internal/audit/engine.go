@@ -865,10 +865,7 @@ func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, p
 		}
 		anyTested = true
 
-		isBlocked := strings.Contains(output, "100% packet loss") ||
-			strings.Contains(output, "0 received") ||
-			strings.Contains(output, "100.0% packet loss")
-		if isBlocked {
+		if isPingBlocked(output) {
 			result.Evidence = append(result.Evidence, fmt.Sprintf("gateway %s: blocked", gw))
 		} else {
 			allBlocked = false
@@ -986,9 +983,7 @@ func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output str
 	switch a.Type {
 	case "isolation":
 		// ping output — if contains "0 received" or "100% packet loss" → isolated (pass for deny)
-		isBlocked := strings.Contains(output, "100% packet loss") ||
-			strings.Contains(output, "0 received") ||
-			strings.Contains(output, "100.0% packet loss")
+		isBlocked := isPingBlocked(output)
 		expectDeny := a.ExpectDeny == "deny"
 		if expectDeny && isBlocked {
 			result.Status = models.StatusPass
@@ -1019,9 +1014,7 @@ func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output str
 		}
 	case "network_health":
 		// ping output — parse loss
-		isBlocked := strings.Contains(output, "100% packet loss") ||
-			strings.Contains(output, "0 received") ||
-			strings.Contains(output, "100.0% packet loss")
+		isBlocked := isPingBlocked(output)
 		if isBlocked {
 			result.Status = models.StatusFail
 			result.Summary = fmt.Sprintf("100%% packet loss to %s from probe %q", a.Target, a.Runner)
@@ -1046,6 +1039,13 @@ func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output str
 	}
 	result.Finish()
 	return result
+}
+
+// isPingBlocked returns true if ping output indicates 100% packet loss.
+func isPingBlocked(output string) bool {
+	return strings.Contains(output, "100% packet loss") ||
+		strings.Contains(output, "0 received") ||
+		strings.Contains(output, "100.0% packet loss")
 }
 
 // explainAssertionError turns raw errors into clearer, actionable messages for users.
