@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-14
+
+**Patch release.** First npm publish fully automated via GitHub Actions OIDC (trusted publisher for `nyx-audit-cli`).
+
 ## [0.2.2] - 2026-06-14
 
 **Patch release.** Renames the npm package so publishing works under `devrecon` without the `@nyx` org.
