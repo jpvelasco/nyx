@@ -1,11 +1,11 @@
 {
-  "name": "@nyx/cli",
+  "name": "nyx-audit-cli",
   "version": "0.0.0",
   "description": "Network audit CLI for validating private networks against intended behavior",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jpvelasco/nyx"
+    "url": "git+https://github.com/jpvelasco/nyx.git"
   },
   "bin": {
     "nyx": "run.js"

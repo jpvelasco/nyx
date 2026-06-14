@@ -333,10 +333,10 @@ Official binaries are published automatically on every `v*` tag via GitHub Relea
 make build
 
 # Or install via npm (once a release exists)
-npm install -g @nyx/cli
+npm install -g nyx-audit-cli
 ```
 
-The npm package (`@nyx/cli`) is a thin platform-aware wrapper that downloads the matching prebuilt binary from the GitHub Release.
+The npm package (`nyx-audit-cli`) is a thin platform-aware wrapper that downloads the matching prebuilt binary from the GitHub Release.
 
 See [CONTRIBUTING.md](.github/CONTRIBUTING.md) (or the release workflow) for the exact tagging process.
 

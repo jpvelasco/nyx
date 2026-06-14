@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-14
+
+**Patch release.** Renames the npm package so publishing works under `devrecon` without the `@nyx` org.
+
+### Changed
+
+- **npm package name.** `@nyx/cli` → `nyx-audit-cli` (unscoped; `nyx-cli` is taken on the registry). Install via `npm install -g nyx-audit-cli`.
+
 ## [0.2.1] - 2026-06-14
 
-**Patch release.** Fixes the release workflow so `@nyx/cli` publishes to npm.
+**Patch release.** Fixes the release workflow so the npm shim publishes (package was still `@nyx/cli`, which never succeeded).
 
 ### Fixed
 

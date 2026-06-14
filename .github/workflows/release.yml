@@ -60,4 +60,4 @@ jobs:
           echo "✅ Released ${GITHUB_REF_NAME}"
           echo "🔗 https://github.com/${{ github.repository }}/releases/tag/${GITHUB_REF_NAME}"
           echo "📦 Binaries + checksums attached via GoReleaser"
-          echo "📦 npm: npm install -g @nyx/cli"
+          echo "📦 npm: npm install -g nyx-audit-cli"

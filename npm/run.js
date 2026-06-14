@@ -21,7 +21,7 @@ child.on("error", (err) => {
   if (err.code === "ENOENT") {
     console.error(
       `nyx: binary not found at ${binaryPath}\n` +
-        "Run 'npm rebuild @nyx/cli' or reinstall the package."
+        "Run 'npm rebuild nyx-audit-cli' or reinstall the package."
     );
   } else {
     console.error(`nyx: failed to start: ${err.message}`);
