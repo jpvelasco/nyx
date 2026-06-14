@@ -23,7 +23,7 @@ const pkg = JSON.parse(fs.readFileSync(packageFile, "utf8"));
 
 pkg.binaryChecksums = {};
 for (const line of checksums.split("\n")) {
-  const match = line.match(/^([0-9a-f]{64})\s+(.+)$/);
+  const match = line.match(/^([0-9a-f]{64})\s+(.+)$/i);
   if (match) {
     const [, hash, filename] = match;
     pkg.binaryChecksums[filename] = hash;

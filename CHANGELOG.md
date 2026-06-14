@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-14
+
+**Feature release.** First `@nyx/cli` npm publish, secure-by-default TLS/SSH verification, and engine/provider hardening since v0.1.0.
+
+### Added
+
+- **npm distribution.** GoReleaser builds plus GitHub Actions OIDC publish — install via `npm install -g @nyx/cli`; postinstall downloads the matching binary with embedded SHA-256 verification.
+- **Gosec in CI and locally.** `make gosec` and `make check` (gosec → vet → test → build) catch security findings before push.
+- **Secure-by-default TLS.** Omada and OPNsense verify TLS certificates by default; opt out with `--skip-tls-verify` or supply a custom CA via `--ca-cert`.
+- **Secure-by-default SSH.** Probes verify host keys by default; opt out with `--skip-host-key-verify` or `skip_host_key_verify: true` per probe in the spec.
+
+### Changed
+
+- **Release pipeline.** Replaced hand-rolled release steps with GoReleaser, cross-platform archives (including Windows ARM64), and checksum embedding in the npm shim.
+- **Codacy toolchain.** Refreshed rules and tool configs; tuned ignores for the npm shim and build scripts.
+
+### Fixed
+
+- **Audit engine.** Load SeenDB once at `Run()` instead of per-discovery; handle `int` and `float64` host counts in `Observed`; log gateway ACL fetch errors instead of swallowing them.
+- **Recommendations engine.** Handle `int` type for `Observed["total"]` after nmap backend change (was silently misclassifying subnet_discovery failures).
+- **nmap backend.** Build `Observed` maps directly instead of JSON round-trip.
+- **Omada provider.** Integer version comparison instead of string sort (fixes false negatives on values like `5.4.10`).
+- **acl_check, probe isolation, port scan.** Critical correctness bugs including partial nmap error status and multi-gateway ACL probing.
+- **MCP server.** Context cancellation respected in goroutines; initialization state tracked correctly.
+- **embed-checksums.js.** Case-insensitive hex matching for GoReleaser `sha256sum` output on platforms that emit uppercase digests.
+- **Codacy/Gosec/CodeQL.** Resolved CRITICAL/HIGH findings, correct suppression syntax per tool chain, and CodeQL config exclusions for intentional homelab TLS/SSH patterns.
+
+### Documentation
+
+- **Codacy guidance.** Resolved documentation findings; clarified personal spec exception path.
+
 ## [0.1.0] - 2026-06-02
 
 Initial public release after major stabilization.
@@ -35,5 +66,6 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.1.0
