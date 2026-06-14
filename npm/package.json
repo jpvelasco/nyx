@@ -1,12 +1,16 @@
 {
   "name": "nyx-audit-cli",
   "version": "0.0.0",
-  "description": "Network audit CLI for validating private networks against intended behavior",
+  "description": "Prove your homelab matches your intent — YAML network specs, live VLAN/VPN audits, drift detection, Omada/OPNsense import. Cross-platform CLI with MCP for AI agents.",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jpvelasco/nyx.git"
   },
+  "bugs": {
+    "url": "https://github.com/jpvelasco/nyx/issues"
+  },
+  "homepage": "https://github.com/jpvelasco/nyx#readme",
   "bin": {
     "nyx": "run.js"
   },
@@ -24,15 +28,41 @@
   ],
   "keywords": [
     "network",
-    "audit",
-    "nmap",
-    "vpn",
-    "vlan",
+    "network-audit",
+    "network-security",
+    "network-monitoring",
+    "network-validation",
     "homelab",
+    "homelab-network",
+    "vlan",
+    "vpn",
+    "wireguard",
+    "firewall",
+    "segmentation",
+    "zero-trust",
+    "routing",
+    "dns",
+    "nmap",
+    "infrastructure",
+    "intent",
+    "yaml",
+    "audit",
+    "compliance",
+    "drift-detection",
+    "devops",
+    "sre",
+    "opnsense",
+    "omada",
+    "tp-link",
+    "sdn",
     "mcp",
-    "cli"
+    "model-context-protocol",
+    "ai-agent",
+    "cli",
+    "port-scan"
   ],
   "files": [
+    "README.md",
     "install.js",
     "run.js",
     "bin/"

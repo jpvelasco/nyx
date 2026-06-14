@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-06-14
+
+**Patch release.** Publishes the npm package README and expanded registry metadata.
+
+### Added
+
+- **npm README.** Install, quickstart, badges, assertion overview, MCP setup, and vendor integration docs on [npmjs.com](https://www.npmjs.com/package/nyx-audit-cli).
+
+### Changed
+
+- **GitHub README.** npm badge, install link, and npm-first quick start.
+- **npm package metadata.** Expanded description and SEO keywords.
+
 ## [0.2.3] - 2026-06-14
 
 **Patch release.** First npm publish fully automated via GitHub Actions OIDC (trusted publisher for `nyx-audit-cli`).

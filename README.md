@@ -1,3 +1,11 @@
+<p align="center">
+  <a href="https://github.com/jpvelasco/nyx/actions/workflows/ci.yml"><img src="https://github.com/jpvelasco/nyx/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/jpvelasco/nyx/releases/latest"><img src="https://img.shields.io/github/v/release/jpvelasco/nyx" alt="Release"></a>
+  <a href="https://github.com/jpvelasco/nyx/blob/main/LICENSE"><img src="https://img.shields.io/github/license/jpvelasco/nyx" alt="License"></a>
+  <a href="https://github.com/jpvelasco/nyx/blob/main/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/jpvelasco/nyx" alt="Go"></a>
+  <a href="https://www.npmjs.com/package/nyx-audit-cli"><img src="https://img.shields.io/npm/v/nyx-audit-cli" alt="npm"></a>
+</p>
+
 # nyx
 
 Your homelab should be doing what you think it's doing. **nyx** proves it.
@@ -6,10 +14,15 @@ Validate your network behavior against a declared YAML intent model — VLAN iso
 
 Every command produces structured JSON for automation and AI agent consumption.
 
+**Install from npm:** [`nyx-audit-cli`](https://www.npmjs.com/package/nyx-audit-cli) — `npm install -g nyx-audit-cli`
+
 ## Quick Start
 
 ```bash
-# Build from source (requires Go 1.22+)
+# Install prebuilt binary (recommended)
+npm install -g nyx-audit-cli
+
+# Or build from source (requires Go 1.22+)
 git clone https://github.com/jpvelasco/nyx.git && cd nyx && make build
 
 # Discover hosts on a subnet
@@ -27,8 +40,10 @@ nyx doctor
 Once you've verified your network is behaving correctly, lock in that baseline. Future drift checks will show you exactly what changed — new failures, degradations, or fixes — so you can sleep at night knowing your segmentation and policies are still holding.
 
 ```bash
-# After a clean audit, save the baseline
-nyx snapshot baseline
+# After a clean audit, save the baseline from the persisted snapshot
+sudo nyx audit --spec examples/homelab.yaml
+nyx snapshot list
+nyx snapshot baseline ~/.nyx/snapshots/snapshot-YYYYMMDD-HHMMSS.json
 
 # Days or weeks later, re-audit and check drift
 sudo nyx audit --spec examples/homelab.yaml && nyx drift status
