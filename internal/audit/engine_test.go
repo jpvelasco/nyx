@@ -241,9 +241,9 @@ func TestVirtualSubnetSuppressesRepeatWarn(t *testing.T) {
 	if !nmap.Available() {
 		t.Skip("nmap not available")
 	}
-	// Use a Hyper-V/WSL2 subnet that the local machine has an adapter for,
+	// Use a Hyper-V/WSL2 subnet that the test host has an adapter for,
 	// so looksVirtualByCIDR returns true without needing a VM MAC in nmap output.
-	// 10.255.144.0/20 matches the vEthernet (Default Switch) adapter on this machine.
+	// 10.255.144.0/20 is the default Hyper-V vEthernet (Default Switch) range.
 	cidr := "10.255.144.0/20"
 	spec := &intent.Spec{
 		Version: 1,

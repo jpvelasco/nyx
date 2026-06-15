@@ -282,7 +282,7 @@ func TestValidateSpecProbes(t *testing.T) {
 	spec := &Spec{
 		Version: 1,
 		Site:    "test",
-		Probes:  []Probe{{Name: "laptop", Host: "192.168.1.5", User: "jp"}},
+		Probes:  []Probe{{Name: "laptop", Host: "192.168.1.5", User: "admin"}},
 	}
 	if err := ValidateSpec(spec); err != nil {
 		t.Errorf("expected valid probes, got: %v", err)
@@ -293,7 +293,7 @@ func TestValidateSpecProbesMissingFields(t *testing.T) {
 	spec := &Spec{
 		Version: 1,
 		Site:    "test",
-		Probes:  []Probe{{Name: "", Host: "192.168.1.5", User: "jp"}},
+		Probes:  []Probe{{Name: "", Host: "192.168.1.5", User: "admin"}},
 	}
 	if err := ValidateSpec(spec); err == nil {
 		t.Error("expected error for probe missing name")

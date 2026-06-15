@@ -21,6 +21,13 @@ npm/bin/nyx-*
 *.swp
 *.swo
 
+# Agent / IDE harness artifacts (not part of nyx)
+mcps/
+agent-tools/
+terminals/
+.remember/
+.claude/
+
 # Local scratch specs
 # Put any personal/generated specs inside the specs/ directory.
 # The specs/ directory contains its own .gitignore to ignore content.
