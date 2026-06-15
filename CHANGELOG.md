@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-06-15
+
+**Patch release.** Removes accidentally committed IDE harness artifacts and tightens gitignore.
+
+### Other
+
+- **Remove Grok MCP artifacts.** Delete `mcps/grok_com_github/` (44 JSON files) that were IDE harness output, not part of nyx.
+- **Tighten gitignore.** Ignore `mcps/`, `agent-tools/`, `terminals/`, `.remember/`, `.claude/` to prevent future accidental commits.
+- **Genericize test strings.** Remove machine-specific comments and probe username from tests.
+
 ## [0.2.5] - 2026-06-14
 
 **Patch release.** Fixes CodeQL parse errors in the npm install/run shims.
@@ -107,7 +117,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.6
 [0.2.5]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.5
 [0.2.4]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.4
 [0.2.3]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.3
