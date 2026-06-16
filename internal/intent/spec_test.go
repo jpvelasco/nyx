@@ -173,12 +173,12 @@ func TestValidateAssertionRequiredFields(t *testing.T) {
 		},
 		{
 			name:      "isolation missing from",
-			assertion: Assertion{Type: "isolation", To: "iot", ExpectDeny: "deny"},
+			assertion: Assertion{Type: "isolation", To: "iot", Expect: "deny"},
 			wantErr:   "from is required",
 		},
 		{
 			name:      "isolation missing to",
-			assertion: Assertion{Type: "isolation", From: "clients", ExpectDeny: "deny"},
+			assertion: Assertion{Type: "isolation", From: "clients", Expect: "deny"},
 			wantErr:   "to is required",
 		},
 		{
@@ -231,7 +231,7 @@ func TestValidateSpecPortCheck(t *testing.T) {
 		Version: 1,
 		Site:    "test",
 		Assertions: []Assertion{
-			{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}, ExpectDeny: "open"},
+			{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}, Expect: "open"},
 		},
 	}
 	if err := ValidateSpec(spec); err != nil {
@@ -245,8 +245,8 @@ func TestValidateSpecPortCheckMissingFields(t *testing.T) {
 		a    Assertion
 		want string
 	}{
-		{"no target", Assertion{Type: "port_check", Ports: []int{80}, ExpectDeny: "open"}, "requires 'target'"},
-		{"no ports", Assertion{Type: "port_check", Target: "10.0.0.1", ExpectDeny: "open"}, "requires 'ports'"},
+		{"no target", Assertion{Type: "port_check", Ports: []int{80}, Expect: "open"}, "requires 'target'"},
+		{"no ports", Assertion{Type: "port_check", Target: "10.0.0.1", Expect: "open"}, "requires 'ports'"},
 		{"no expect", Assertion{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}}, "requires 'expect'"},
 	}
 	for _, tc := range cases {

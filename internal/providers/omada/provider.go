@@ -3,10 +3,13 @@ package omadaprovider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jpvelasco/nyx/internal/audit"
 	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
+	"github.com/jpvelasco/nyx/internal/models"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 )
 
@@ -76,8 +79,79 @@ func (o *OmadaProvider) Check(ctx context.Context, opts providers.ImportOptions)
 	}, nil
 }
 
+// CheckACL verifies that an ACL policy is enforced (or not) on the Omada controller.
+func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequest, opts providers.ImportOptions) (*models.CheckResult, error) {
+	result := models.NewCheckResult("omada", "acl_check", "omada", req.PolicyName)
+
+	client, err := omadabackend.NewClient(ctx, opts.Host, opts.SkipTLSVerify, opts.CACertPath)
+	if err != nil {
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("failed to connect to Omada: %v", err)
+		result.Finish()
+		return result, nil
+	}
+	if err := client.Login(ctx, opts.Username, opts.Password); err != nil {
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("Omada login failed: %v", err)
+		result.Finish()
+		return result, nil
+	}
+	defer client.Logout(ctx)
+
+	rules, err := client.GetACLRules(ctx, opts.Site)
+	if err != nil {
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("failed to fetch ACL rules: %v", err)
+		result.Finish()
+		return result, nil
+	}
+	gwRules, _ := client.GetGatewayACLRules(ctx, opts.Site) // best-effort, don't fail on gateway rule fetch
+	allRules := append(rules, gwRules...)
+
+	// Check if a matching ACL rule exists
+	found := false
+	for _, rule := range allRules {
+		if !rule.Status {
+			continue // skip disabled rules
+		}
+		fromMatch := rule.SourceName == req.From || strings.EqualFold(rule.SourceName, req.From)
+		toMatch := rule.DestName == req.To || strings.EqualFold(rule.DestName, req.To)
+		actionMatch := (req.Action == "deny" && rule.Policy == "drop") ||
+			(req.Action == "allow" && rule.Policy == "accept")
+		if fromMatch && toMatch && actionMatch {
+			found = true
+			break
+		}
+	}
+
+	rulesJSON, _ := json.Marshal(allRules)
+	result.Evidence = append(result.Evidence, string(rulesJSON))
+	result.Observed["rule_count"] = len(allRules)
+	result.Expected["policy"] = req.PolicyName
+	result.Expected["expect"] = "enforced"
+
+	if req.ExpectEnforced && found {
+		result.Status = models.StatusPass
+		result.Summary = fmt.Sprintf("ACL policy %q is enforced in Omada", req.PolicyName)
+	} else if req.ExpectEnforced && !found {
+		result.Status = models.StatusFail
+		result.Summary = fmt.Sprintf("ACL policy %q is NOT enforced in Omada", req.PolicyName)
+		result.Violations = append(result.Violations,
+			fmt.Sprintf("no matching ACL rule found for policy %q (%s → %s %s)", req.PolicyName, req.From, req.To, req.Action))
+	} else if !req.ExpectEnforced && !found {
+		result.Status = models.StatusPass
+		result.Summary = fmt.Sprintf("ACL policy %q is correctly not enforced", req.PolicyName)
+	} else {
+		result.Status = models.StatusFail
+		result.Summary = fmt.Sprintf("ACL policy %q is enforced but expected not_enforced", req.PolicyName)
+	}
+
+	result.Finish()
+	return result, nil
+}
+
 var _ providers.Provider = (*OmadaProvider)(nil)
 
 func init() {
-	providers.Register(&OmadaProvider{})
+	_ = providers.Register(&OmadaProvider{})
 }

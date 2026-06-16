@@ -42,7 +42,7 @@ func TestComputeOverallStatus(t *testing.T) {
 		{"all pass", []Status{StatusPass, StatusPass}, StatusPass},
 		{"one warn", []Status{StatusPass, StatusWarn}, StatusWarn},
 		{"one fail", []Status{StatusPass, StatusFail, StatusWarn}, StatusFail},
-		{"error wins", []Status{StatusPass, StatusFail, StatusError}, StatusError},
+		{"fail beats error", []Status{StatusPass, StatusFail, StatusError}, StatusFail},
 		{"empty", []Status{}, StatusPass},
 	}
 

@@ -291,13 +291,24 @@ func ComputeDrift(baseline, current *Snapshot) *DriftResult {
 	return dr
 }
 
-// buildLookup creates a map keyed by check_type + target.
-// This provides stable identity for the same assertion across runs
-// so we can reliably detect status changes (degradation / improvement / fixed).
+// buildLookup creates a map keyed by check_type + target, with type-specific
+// disambiguators to avoid collisions (e.g. two port_check assertions on the
+// same target but different ports).
 func buildLookup(findings []models.CheckResult) map[string]models.CheckResult {
 	lookup := make(map[string]models.CheckResult)
 	for _, f := range findings {
 		key := fmt.Sprintf("%s:%s", f.CheckType, f.Target)
+		// Disambiguate by expected values when target alone is insufficient
+		switch f.CheckType {
+		case "port_check":
+			if ports, ok := f.Expected["ports"]; ok {
+				key = fmt.Sprintf("%s:%v", key, ports)
+			}
+		case "dns_check":
+			if query, ok := f.Expected["query"]; ok {
+				key = fmt.Sprintf("%s:%v", key, query)
+			}
+		}
 		lookup[key] = f
 	}
 	return lookup

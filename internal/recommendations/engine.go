@@ -217,11 +217,13 @@ func buildIsolationContext(from, to string, spec *intent.Spec, runner models.Run
 			if ipInCIDR(p.Host, n.CIDR) {
 				ctx.probeInFromZone = true
 				ctx.probeName = p.Name
-				goto probeFound
+				break
 			}
 		}
+		if ctx.probeInFromZone {
+			break
+		}
 	}
-probeFound:
 
 	// Find the matching policy
 	for _, p := range spec.Policies {

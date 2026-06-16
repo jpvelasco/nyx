@@ -15,14 +15,14 @@ import (
 )
 
 var (
-	providerHost        string
-	providerUsername    string
-	providerPassword    string
-	providerSite        string
-	providerDebug       bool
-	providerOutFile     string
-	providerSkipTLS     bool
-	providerCACertPath  string
+	providerHost       string
+	providerUsername   string
+	providerPassword   string
+	providerSite       string
+	providerDebug      bool
+	providerOutFile    string
+	providerSkipTLS    bool
+	providerCACertPath string
 )
 
 var providerCmd = &cobra.Command{

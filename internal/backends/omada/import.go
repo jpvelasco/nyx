@@ -196,10 +196,10 @@ func buildAssertions(networks []intent.Network, omadaNets []Network, clients []C
 			continue
 		}
 		assertions = append(assertions, intent.Assertion{
-			Type:       "isolation",
-			From:       from,
-			To:         to,
-			ExpectDeny: "deny",
+			Type:   "isolation",
+			From:   from,
+			To:     to,
+			Expect: "deny",
 		})
 	}
 

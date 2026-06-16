@@ -9,6 +9,7 @@ import (
 
 	"github.com/jpvelasco/nyx/internal/audit"
 	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/models"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 )
 
@@ -152,11 +153,11 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 	// Add isolation assertions for deny policies
 	for _, p := range policies {
 		assertions = append(assertions, intent.Assertion{
-			Type:       "isolation",
-			From:       p.From,
-			To:         p.To,
-			ExpectDeny: "deny",
-			Policy:     p.Name,
+			Type:   "isolation",
+			From:   p.From,
+			To:     p.To,
+			Expect: "deny",
+			Policy: p.Name,
 		})
 	}
 
@@ -209,6 +210,15 @@ func (o *Provider) Check(ctx context.Context, opts providers.ImportOptions) (*pr
 		Report:   report,
 		Warnings: imported.Warnings,
 	}, nil
+}
+
+// CheckACL is not yet implemented for OPNsense.
+func (o *Provider) CheckACL(ctx context.Context, req providers.ACLCheckRequest, opts providers.ImportOptions) (*models.CheckResult, error) {
+	result := models.NewCheckResult("opnsense", "acl_check", "opnsense", req.PolicyName)
+	result.Status = models.StatusError
+	result.Summary = "CheckACL is not yet implemented for the OPNsense provider"
+	result.Finish()
+	return result, nil
 }
 
 // inferZone guesses a zone name from the OPNsense interface name or description.
@@ -267,5 +277,5 @@ func ptrInt(i int) *int {
 var _ providers.Provider = (*Provider)(nil)
 
 func init() {
-	providers.Register(&Provider{})
+	_ = providers.Register(&Provider{})
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
+	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/version"
 )
 
@@ -88,16 +89,18 @@ type contentBlock struct {
 
 // Server is the MCP stdio server
 type Server struct {
-	reader    io.Reader
-	writer    io.Writer
+	reader      io.Reader
+	writer      io.Writer
 	initialized bool
+	checkSvc    *service.CheckService
 }
 
 // NewServer creates a new MCP server
 func NewServer() *Server {
 	return &Server{
-		reader: os.Stdin,
-		writer: os.Stdout,
+		reader:   os.Stdin,
+		writer:   os.Stdout,
+		checkSvc: service.NewCheckService(),
 	}
 }
 
@@ -352,19 +355,10 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		if target == "" {
 			return "target parameter is required", true
 		}
-		result := models.NewCheckResult("system", "route_check", "local", target)
-		route, err := system.GetRouteToTarget(ctx, target)
-		if err != nil {
-			result.Status = models.StatusError
-			result.Summary = fmt.Sprintf("failed to get route to %s: %v", target, err)
-			result.Finish()
+		result := s.checkSvc.CheckRoute(ctx, target)
+		if result.Status == models.StatusError {
 			return toJSON(result), true
 		}
-		result.Observed["gateway"] = route.Gateway
-		result.Observed["device"] = route.Device
-		result.Status = models.StatusPass
-		result.Summary = fmt.Sprintf("route to %s via %s dev %s", target, route.Gateway, route.Device)
-		result.Finish()
 		return toJSON(result), false
 
 	case "check_vpn":
@@ -372,26 +366,10 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		if target == "" {
 			return "target parameter is required", true
 		}
-		result := models.NewCheckResult("system", "vpn_route", "local", target)
-		route, err := system.GetRouteToTarget(ctx, target)
-		if err != nil {
-			result.Status = models.StatusError
-			result.Summary = fmt.Sprintf("failed to get route to %s: %v", target, err)
-			result.Finish()
+		result := s.checkSvc.CheckVPN(ctx, target)
+		if result.Status == models.StatusError {
 			return toJSON(result), true
 		}
-		result.Observed["device"] = route.Device
-		result.Observed["gateway"] = route.Gateway
-		isVPN, _ := system.CheckVPNInterface(ctx, route.Device)
-		result.Observed["via_tunnel"] = isVPN
-		if isVPN {
-			result.Status = models.StatusPass
-			result.Summary = fmt.Sprintf("%s routes via tunnel (%s)", target, route.Device)
-		} else {
-			result.Status = models.StatusWarn
-			result.Summary = fmt.Sprintf("%s routes via %s (not a tunnel interface)", target, route.Device)
-		}
-		result.Finish()
 		return toJSON(result), false
 
 	case "verify_isolation":
@@ -416,10 +394,10 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 				Site:     spec.Site,
 				Networks: spec.Networks,
 				Assertions: []intent.Assertion{{
-					Type:       "isolation",
-					From:       from,
-					To:         to,
-					ExpectDeny: expectDeny,
+					Type:   "isolation",
+					From:   from,
+					To:     to,
+					Expect: expectDeny,
 				}},
 			}
 			eng := audit.NewEngine(miniSpec)
@@ -481,7 +459,7 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		return toJSON(spec), false
 
 	case "get_interfaces":
-		ifaces, err := system.GetInterfaces(ctx)
+		ifaces, err := s.checkSvc.GetInterfaces(ctx)
 		if err != nil {
 			return fmt.Sprintf("failed to get interfaces: %v", err), true
 		}

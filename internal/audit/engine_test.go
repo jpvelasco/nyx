@@ -105,7 +105,7 @@ func TestRunPortCheckLocalhost(t *testing.T) {
 		Version: 1,
 		Site:    "test",
 		Assertions: []intent.Assertion{
-			{Type: "port_check", Target: "127.0.0.1", Ports: []int{22}, Protocol: "tcp", ExpectDeny: "open", ScanMode: "polite"},
+			{Type: "port_check", Target: "127.0.0.1", Ports: []int{22}, Protocol: "tcp", Expect: "open", ScanMode: "polite"},
 		},
 	}
 	eng := audit.NewEngine(spec)

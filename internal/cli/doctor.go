@@ -79,7 +79,7 @@ var doctorCmd = &cobra.Command{
 				logDirCheck.Summary = fmt.Sprintf("log directory %s isn't writable: %v", logDir, err)
 				allPass = false
 			} else {
-				f.Close() // #nosec G104 — best-effort cleanup
+				f.Close()           // #nosec G104 — best-effort cleanup
 				os.Remove(testFile) // #nosec G104 — best-effort cleanup
 				logDirCheck.Status = models.StatusPass
 				logDirCheck.Summary = fmt.Sprintf("log directory: %s (writable)", logDir)

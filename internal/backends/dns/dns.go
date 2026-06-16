@@ -153,7 +153,7 @@ func CheckDNSSEC(ctx context.Context, query, server string) (*models.CheckResult
 
 	//nolint:gosec
 	cmd := exec.CommandContext(ctx, "dig", args...) // nosemgrep
-	output, _ := cmd.CombinedOutput() //nolint:errcheck // dig may exit non-zero with valid output; parsed via regex below
+	output, _ := cmd.CombinedOutput()               //nolint:errcheck // dig may exit non-zero with valid output; parsed via regex below
 	outputStr := string(output)
 
 	// Parse output for DNSSEC validation indicators using header-anchored patterns

@@ -93,7 +93,9 @@ func (r *CheckResult) Finish() {
 	r.DurationMs = r.FinishedAt.Sub(r.StartedAt).Milliseconds()
 }
 
-// ComputeOverallStatus determines the worst status from a list of results
+// ComputeOverallStatus determines the worst status from a list of results.
+// StatusFail takes precedence over StatusError so that a real security breach
+// always results in exit code 1, even if some checks errored out.
 func ComputeOverallStatus(results []CheckResult) Status {
 	hasWarn := false
 	hasFail := false
@@ -108,11 +110,11 @@ func ComputeOverallStatus(results []CheckResult) Status {
 			hasWarn = true
 		}
 	}
-	if hasError {
-		return StatusError
-	}
 	if hasFail {
 		return StatusFail
+	}
+	if hasError {
+		return StatusError
 	}
 	if hasWarn {
 		return StatusWarn

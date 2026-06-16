@@ -12,15 +12,15 @@ import (
 )
 
 var (
-	jsonOutput          bool
-	outputPath          string
-	specFile            string
-	verbose             bool
-	timeout             string
-	interfaceOpt        string
-	warnVirtual         bool
-	skipHostKeyVerify   bool
-	log                 *logger.Logger
+	jsonOutput        bool
+	outputPath        string
+	specFile          string
+	verbose           bool
+	timeout           string
+	interfaceOpt      string
+	warnVirtual       bool
+	skipHostKeyVerify bool
+	log               *logger.Logger
 
 	// lastAuditReport caches the most recent audit result so that
 	// `nyx snapshot baseline` and `nyx drift status` can work immediately after an audit.

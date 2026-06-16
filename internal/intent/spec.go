@@ -74,7 +74,7 @@ type Assertion struct {
 	Target          string  `yaml:"target,omitempty" json:"target,omitempty"`
 	ExpectHostsMin  *int    `yaml:"expect_hosts_min,omitempty" json:"expect_hosts_min,omitempty"`
 	ExpectHostsMax  *int    `yaml:"expect_hosts_max,omitempty" json:"expect_hosts_max,omitempty"`
-	ExpectDeny      string  `yaml:"expect,omitempty" json:"expect,omitempty"`
+	Expect          string  `yaml:"expect,omitempty" json:"expect,omitempty"`
 	ExpectTunnel    *bool   `yaml:"expect_tunnel,omitempty" json:"expect_tunnel,omitempty"`
 	Ports           []int   `yaml:"ports,omitempty" json:"ports,omitempty"`
 	Protocol        string  `yaml:"protocol,omitempty" json:"protocol,omitempty"`
@@ -205,7 +205,7 @@ func ValidateSpec(spec *Spec) error {
 			if a.To == "" {
 				return fmt.Errorf("assertion[%d] (isolation): to is required", i)
 			}
-			if a.ExpectDeny == "" {
+			if a.Expect == "" {
 				return fmt.Errorf("assertion[%d] (isolation): expect is required (use 'deny' or 'allow')", i)
 			}
 		case "vpn_route":
@@ -226,7 +226,7 @@ func ValidateSpec(spec *Spec) error {
 			if len(a.Ports) == 0 {
 				return fmt.Errorf("assertion[%d]: port_check requires 'ports'", i)
 			}
-			if a.ExpectDeny == "" {
+			if a.Expect == "" {
 				return fmt.Errorf("assertion[%d]: port_check requires 'expect' (open or closed)", i)
 			}
 		case "dns_check":
@@ -244,7 +244,7 @@ func ValidateSpec(spec *Spec) error {
 			if a.Policy == "" {
 				return fmt.Errorf("assertion[%d]: acl_check requires 'policy'", i)
 			}
-			if a.ExpectDeny == "" {
+			if a.Expect == "" {
 				return fmt.Errorf("assertion[%d]: acl_check requires 'expect' (enforced or not_enforced)", i)
 			}
 		}

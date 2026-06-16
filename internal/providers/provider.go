@@ -43,6 +43,15 @@ type AuditResult struct {
 	Warnings []string
 }
 
+// ACLCheckRequest holds the policy details needed for ACL enforcement checking.
+type ACLCheckRequest struct {
+	PolicyName     string
+	From           string
+	To             string
+	Action         string // "allow" or "deny"
+	ExpectEnforced bool
+}
+
 // Provider is implemented by each vendor backend.
 type Provider interface {
 	Name() string
@@ -50,6 +59,7 @@ type Provider interface {
 	Info(ctx context.Context, opts ImportOptions) (*ProviderInfo, error)
 	ImportSpec(ctx context.Context, opts ImportOptions) (*ImportResult, error)
 	Check(ctx context.Context, opts ImportOptions) (*AuditResult, error)
+	CheckACL(ctx context.Context, req ACLCheckRequest, opts ImportOptions) (*models.CheckResult, error)
 }
 
 // ErrCapabilityUnsupported is returned when a provider does not support an operation.

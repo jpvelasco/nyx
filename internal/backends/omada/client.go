@@ -18,8 +18,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
-	"strconv"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -297,10 +297,11 @@ func buildTLSConfig(skipTLSVerify bool, caCertPath string) *tls.Config {
 		// #nosec G304 — path from CLI flag, not user-controlled
 		pemData, err := os.ReadFile(caCertPath) // nosemgrep
 		if err != nil {
-			// Fall back to system pool if file can't be read
+			fmt.Fprintf(os.Stderr, "warning: failed to read CA cert %q: %v; using system CA pool\n", caCertPath, err)
 			return &tls.Config{MinVersion: tls.VersionTLS12}
 		}
 		if !certPool.AppendCertsFromPEM(pemData) {
+			fmt.Fprintf(os.Stderr, "warning: no valid certs found in %q; using system CA pool\n", caCertPath)
 			return &tls.Config{MinVersion: tls.VersionTLS12}
 		}
 		return &tls.Config{

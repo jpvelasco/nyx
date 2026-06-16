@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jpvelasco/nyx/internal/models"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 )
 
@@ -20,11 +21,16 @@ func (m *mockProvider) ImportSpec(ctx context.Context, opts providers.ImportOpti
 func (m *mockProvider) Check(ctx context.Context, opts providers.ImportOptions) (*providers.AuditResult, error) {
 	return nil, &providers.ErrCapabilityUnsupported{Provider: m.name, Capability: "check"}
 }
+func (m *mockProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequest, opts providers.ImportOptions) (*models.CheckResult, error) {
+	return nil, &providers.ErrCapabilityUnsupported{Provider: m.name, Capability: "check_acl"}
+}
 
 func TestRegisterAndGet(t *testing.T) {
 	providers.Reset()
 	p := &mockProvider{name: "test"}
-	providers.Register(p)
+	if err := providers.Register(p); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	got := providers.Get("test")
 	if got == nil {
@@ -45,10 +51,25 @@ func TestGetUnknown(t *testing.T) {
 
 func TestList(t *testing.T) {
 	providers.Reset()
-	providers.Register(&mockProvider{name: "a"})
-	providers.Register(&mockProvider{name: "b"})
+	if err := providers.Register(&mockProvider{name: "a"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := providers.Register(&mockProvider{name: "b"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	list := providers.List()
 	if len(list) != 2 {
 		t.Fatalf("expected 2 providers, got %d", len(list))
+	}
+}
+
+func TestRegisterDuplicate(t *testing.T) {
+	providers.Reset()
+	p := &mockProvider{name: "dup"}
+	if err := providers.Register(p); err != nil {
+		t.Fatalf("first registration should succeed: %v", err)
+	}
+	if err := providers.Register(p); err == nil {
+		t.Fatal("expected error on duplicate registration")
 	}
 }

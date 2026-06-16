@@ -1,20 +1,24 @@
 package providers
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 var (
 	mu       sync.RWMutex
 	registry = map[string]Provider{}
 )
 
-// Register adds a provider to the registry. Panics on duplicate name.
-func Register(p Provider) {
+// Register adds a provider to the registry. Returns an error on duplicate name.
+func Register(p Provider) error {
 	mu.Lock()
 	defer mu.Unlock()
 	if _, exists := registry[p.Name()]; exists {
-		panic("provider already registered: " + p.Name())
+		return fmt.Errorf("provider already registered: %s", p.Name())
 	}
 	registry[p.Name()] = p
+	return nil
 }
 
 // Get returns the provider with the given name, or nil if not found.

@@ -3,22 +3,20 @@ package audit
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/jpvelasco/nyx/internal/backends/dns"
-	"github.com/jpvelasco/nyx/internal/backends/health"
+	"github.com/jpvelasco/nyx/internal/backends"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
-	"github.com/jpvelasco/nyx/internal/backends/omada"
-	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/probe"
+	providers "github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/seendb"
 )
 
@@ -31,24 +29,32 @@ const (
 
 // Engine runs audit assertions
 type Engine struct {
-	Spec               *intent.Spec
-	Interface          string
-	WarnVirtual        bool
-	SkipTLSVerify      bool // allow self-signed TLS certs (like curl -k)
-	CACertPath         string // path to custom CA cert PEM file
-	SkipHostKeyVerify  bool // skip SSH host key verification for probes
-	SeenDBPath         string               // if non-empty, overrides ~/.nyx/seen.json (used in tests)
-	runnerCtx          models.RunnerContext // populated once at Run() time
-	seenDB             *seendb.SeenDB       // populated once at Run() time
+	Spec              *intent.Spec
+	Interface         string
+	WarnVirtual       bool
+	SkipTLSVerify     bool                 // allow self-signed TLS certs (like curl -k)
+	CACertPath        string               // path to custom CA cert PEM file
+	SkipHostKeyVerify bool                 // skip SSH host key verification for probes
+	SeenDBPath        string               // if non-empty, overrides ~/.nyx/seen.json (used in tests)
+	Backend           backends.Backend     // backend abstraction; nil means use default
+	Logger            *slog.Logger         // structured logger; nil means use default stderr logger
+	runnerCtx         models.RunnerContext // populated once at Run() time
+	seenDB            *seendb.SeenDB       // populated once at Run() time
 }
 
 // NewEngine creates an audit engine for a spec
 func NewEngine(spec *intent.Spec) *Engine {
-	return &Engine{Spec: spec}
+	return &Engine{
+		Spec:    spec,
+		Backend: backends.NewDefaultBackend(),
+		Logger:  slog.New(slog.NewTextHandler(os.Stderr, nil)),
+	}
 }
 
 // Run executes all assertions concurrently and returns a report.
 // Results are returned in the same order as the assertions in the spec.
+// Engine is designed for single-use; Run resets internal state for safety
+// but callers should create a new Engine via NewEngine for each audit.
 func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 	e.runnerCtx = localRunnerContext(e.Spec, e.Interface)
 
@@ -66,9 +72,7 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 
 	// Warn the user if we can't place them in any spec network (noob-friendly)
 	if e.Interface == "" && len(e.runnerCtx.Networks) == 0 && len(e.Spec.Networks) > 0 {
-		fmt.Fprintf(os.Stderr, "warning: I couldn't place your current network inside any spec network.\n")
-		fmt.Fprintf(os.Stderr, "         You're likely multi-homed. Use --interface to pick which adapter to scan from.\n")
-		fmt.Fprintf(os.Stderr, "         (Run 'nyx interfaces' to see the list.)\n")
+		e.Logger.Warn("couldn't place your current network inside any spec network; you're likely multi-homed. Use --interface to pick which adapter to scan from. (Run 'nyx interfaces' to see the list.)")
 	}
 
 	assertions := e.Spec.Assertions
@@ -198,8 +202,7 @@ func localRunnerContext(spec *intent.Spec, interfaceName string) models.RunnerCo
 			return localRunnerContext(spec, bestIface)
 		}
 		// Still ambiguous → warn the user
-		fmt.Fprintf(os.Stderr, "warning: multiple network interfaces, no clear winner for your spec.\n")
-		fmt.Fprintf(os.Stderr, "         Use --interface to pick one. (Run 'nyx interfaces' to see the list.)\n")
+		fmt.Fprintf(os.Stderr, "warning: multiple network interfaces, no clear winner for your spec. Use --interface to pick one. (Run 'nyx interfaces' to see the list.)\n")
 	}
 
 	return models.RunnerContext{
@@ -336,7 +339,7 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 		opts.MinRate = a.ScanMinRate
 	}
 
-	result, err := nmap.DiscoverWithOptions(ctx, net.CIDR, opts)
+	result, err := e.Backend.Discover(ctx, net.CIDR, opts)
 	if err != nil {
 		return nil, fmt.Errorf("nmap discovery failed: %w", err)
 	}
@@ -372,6 +375,15 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 			fmt.Sprintf("found %d hosts, expected min %d", hostCount, *a.ExpectHostsMin))
 	}
 
+	// Host count violations take precedence over virtual network detection —
+	// a real host-count failure should not be silently downgraded to a virtual
+	// network warning.
+	if len(result.Violations) > 0 {
+		result.Summary = fmt.Sprintf("%d hosts discovered in %s", hostCount, net.CIDR)
+		result.Finish()
+		return result, nil
+	}
+
 	// Virtual network suppression: if 0 hosts and nmap evidence suggests a VM
 	// hypervisor MAC, check seendb. First occurrence → WARN + ack. Subsequent
 	// occurrences → SKIP (unless WarnVirtual override is set).
@@ -386,7 +398,7 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 				result.Summary = fmt.Sprintf("0 hosts discovered in %s (virtual adapter detected — future scans will suppress this warning; use --warn-virtual to always show it)", cidr)
 			}
 			if err := e.seenDB.AckVirtual(cidr); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: failed to ack virtual network %s: %v\n", cidr, err)
+				e.Logger.Warn("failed to ack virtual network", slog.String("cidr", cidr), slog.String("error", err.Error()))
 			}
 		} else {
 			result.Status = models.StatusSkip
@@ -432,7 +444,7 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 		if targetNet.Gateway == "" {
 			continue
 		}
-		pingResult, err := system.Ping(ctx, targetNet.Gateway)
+		pingResult, err := e.Backend.Ping(ctx, targetNet.Gateway)
 		if err != nil {
 			result.Evidence = append(result.Evidence, fmt.Sprintf("ping to %s failed: %v", targetNet.Gateway, err))
 			continue
@@ -457,7 +469,7 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 		}
 	}
 
-	expectDeny := a.ExpectDeny == "deny"
+	expectDeny := a.Expect == "deny"
 	if expectDeny {
 		if !anyTested {
 			result.Status = models.StatusWarn
@@ -511,7 +523,7 @@ func (e *Engine) runVPNRoute(ctx context.Context, a intent.Assertion) (*models.C
 	result.Expected["target"] = a.Target
 
 	// Check route to target
-	route, err := system.GetRouteToTarget(ctx, a.Target)
+	route, err := e.Backend.GetRouteToTarget(ctx, a.Target)
 	if err != nil {
 		result.Status = models.StatusError
 		result.Summary = fmt.Sprintf("failed to get route to %s: %v", a.Target, err)
@@ -534,7 +546,7 @@ func (e *Engine) runVPNRoute(ctx context.Context, a intent.Assertion) (*models.C
 	viaTunnel := expectedIface != "" && route.Device == expectedIface
 	// Also check if the device looks like a VPN interface
 	if !viaTunnel {
-		isVPN, _ := system.CheckVPNInterface(ctx, route.Device)
+		isVPN, _ := e.Backend.CheckVPNInterface(ctx, route.Device)
 		viaTunnel = isVPN
 	}
 
@@ -560,7 +572,7 @@ func (e *Engine) runVPNRoute(ctx context.Context, a intent.Assertion) (*models.C
 func (e *Engine) runRouteCheck(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
 	result := models.NewCheckResult("system", "route_check", "local", a.Target)
 
-	route, err := system.GetRouteToTarget(ctx, a.Target)
+	route, err := e.Backend.GetRouteToTarget(ctx, a.Target)
 	if err != nil {
 		result.Status = models.StatusError
 		result.Summary = fmt.Sprintf("failed to get route: %v", err)
@@ -587,13 +599,13 @@ func (e *Engine) runPortCheck(ctx context.Context, a intent.Assertion) (*models.
 	}
 	opts := nmap.ScanOptionsForMode(scanMode)
 
-	result, err := nmap.PortScan(ctx, a.Target, a.Ports, protocol, opts)
+	result, err := e.Backend.PortScan(ctx, a.Target, a.Ports, protocol, opts)
 	if err != nil {
 		return nil, fmt.Errorf("port scan failed: %w", err)
 	}
 
 	// Evaluate pass/fail: all ports must match expect
-	expect := a.ExpectDeny // "open" or "closed"
+	expect := a.Expect // "open" or "closed"
 	var violations []string
 	if portData, ok := result.Observed["ports"]; ok {
 		if ports, ok := portData.([]interface{}); ok {
@@ -622,16 +634,16 @@ func (e *Engine) runDNSCheck(ctx context.Context, a intent.Assertion) (*models.C
 	var err error
 
 	if a.ExpectIP != "" {
-		result, err = dns.ResolveExpect(ctx, a.Query, a.Server, a.ExpectIP)
+		result, err = e.Backend.ResolveExpect(ctx, a.Query, a.Server, a.ExpectIP)
 	} else {
-		result, err = dns.Resolve(ctx, a.Query, a.Server)
+		result, err = e.Backend.Resolve(ctx, a.Query, a.Server)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("dns check failed: %w", err)
 	}
 
 	if a.DNSSEC {
-		dnssecResult, dnssecErr := dns.CheckDNSSEC(ctx, a.Query, a.Server)
+		dnssecResult, dnssecErr := e.Backend.CheckDNSSEC(ctx, a.Query, a.Server)
 		if dnssecErr != nil {
 			result.Evidence = append(result.Evidence, fmt.Sprintf("DNSSEC check error: %v", dnssecErr))
 		} else {
@@ -651,16 +663,16 @@ func (e *Engine) runNetworkHealth(ctx context.Context, a intent.Assertion) (*mod
 	var err error
 
 	if a.ExpectLatencyMs > 0 || a.ExpectLossPct > 0 {
-		result, err = health.CheckLatencyAndLoss(ctx, a.Target, a.ExpectLatencyMs, a.ExpectLossPct)
+		result, err = e.Backend.CheckLatencyAndLoss(ctx, a.Target, a.ExpectLatencyMs, a.ExpectLossPct)
 	} else {
-		result, _, err = health.PingCheck(ctx, a.Target, 10)
+		result, _, err = e.Backend.PingCheck(ctx, a.Target, 10)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("network health check failed: %w", err)
 	}
 
 	if a.ExpectMTU > 0 {
-		mtuResult, mtuErr := health.ProbeMTU(ctx, a.Target, a.ExpectMTU)
+		mtuResult, mtuErr := e.Backend.ProbeMTU(ctx, a.Target, a.ExpectMTU)
 		if mtuErr != nil {
 			result.Evidence = append(result.Evidence, fmt.Sprintf("MTU probe error: %v", mtuErr))
 		} else {
@@ -681,61 +693,12 @@ func (e *Engine) runNetworkHealth(ctx context.Context, a intent.Assertion) (*mod
 }
 
 func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
-	provider := a.Provider
-	if provider == "" {
-		provider = "omada"
+	providerName := a.Provider
+	if providerName == "" {
+		providerName = "omada"
 	}
 
-	result := models.NewCheckResult(provider, "acl_check", provider, a.Policy)
-
-	if provider != "omada" {
-		result.Status = models.StatusError
-		result.Summary = fmt.Sprintf("acl_check provider %q is not supported yet (only 'omada' is supported)", provider)
-		result.Finish()
-		return result, nil
-	}
-
-	// Get Omada credentials from environment
-	host := os.Getenv("OMADA_HOST")
-	username := os.Getenv("OMADA_USERNAME")
-	password := os.Getenv("OMADA_PASSWORD")
-	siteID := os.Getenv("OMADA_SITE")
-	if host == "" || username == "" || password == "" {
-		result.Status = models.StatusError
-		result.Summary = "acl_check requires OMADA_HOST, OMADA_USERNAME, OMADA_PASSWORD environment variables"
-		result.Finish()
-		return result, nil
-	}
-
-	client, err := omada.NewClient(ctx, host, e.SkipTLSVerify, e.CACertPath)
-	if err != nil {
-		result.Status = models.StatusError
-		result.Summary = fmt.Sprintf("failed to connect to Omada: %v", err)
-		result.Finish()
-		return result, nil
-	}
-	if err := client.Login(ctx, username, password); err != nil {
-		result.Status = models.StatusError
-		result.Summary = fmt.Sprintf("Omada login failed: %v", err)
-		result.Finish()
-		return result, nil
-	}
-	defer client.Logout(ctx)
-
-	rules, err := client.GetACLRules(ctx, siteID)
-	if err != nil {
-		result.Status = models.StatusError
-		result.Summary = fmt.Sprintf("failed to fetch ACL rules: %v", err)
-		result.Finish()
-		return result, nil
-	}
-	gwRules, gwErr := client.GetGatewayACLRules(ctx, siteID)
-	if gwErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to fetch gateway ACL rules: %v\n", gwErr)
-	}
-	allRules := append(rules, gwRules...)
-
-	// Find the declared policy
+	// Find the declared policy in the spec
 	var policy *intent.Policy
 	for i := range e.Spec.Policies {
 		if e.Spec.Policies[i].Name == a.Policy {
@@ -744,56 +707,52 @@ func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.C
 		}
 	}
 	if policy == nil {
+		result := models.NewCheckResult(providerName, "acl_check", providerName, a.Policy)
 		result.Status = models.StatusError
 		result.Summary = fmt.Sprintf("policy %q not found in spec", a.Policy)
 		result.Finish()
 		return result, nil
 	}
 
-	// Check if a matching ACL rule exists
-	found := false
-	for _, rule := range allRules {
-		if !rule.Status {
-			continue // skip disabled rules
-		}
-		fromMatch := rule.SourceName == policy.From || strings.EqualFold(rule.SourceName, policy.From)
-		toMatch := rule.DestName == policy.To || strings.EqualFold(rule.DestName, policy.To)
-		actionMatch := (policy.Action == "deny" && rule.Policy == "drop") ||
-			(policy.Action == "allow" && rule.Policy == "accept")
-		if fromMatch && toMatch && actionMatch {
-			found = true
-			break
-		}
+	// Look up provider from registry
+	p := providers.Get(providerName)
+	if p == nil {
+		result := models.NewCheckResult(providerName, "acl_check", providerName, a.Policy)
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("provider %q not found in registry", providerName)
+		result.Finish()
+		return result, nil
 	}
 
-	expect := a.ExpectDeny // "enforced" or "not_enforced"
+	// Build import options from environment (backward-compatible with existing env var pattern)
+	opts := providers.ImportOptions{
+		Host:          os.Getenv("OMADA_HOST"),
+		Username:      os.Getenv("OMADA_USERNAME"),
+		Password:      os.Getenv("OMADA_PASSWORD"),
+		Site:          os.Getenv("OMADA_SITE"),
+		SkipTLSVerify: e.SkipTLSVerify,
+		CACertPath:    e.CACertPath,
+	}
+	if opts.Host == "" || opts.Username == "" || opts.Password == "" {
+		result := models.NewCheckResult(providerName, "acl_check", providerName, a.Policy)
+		result.Status = models.StatusError
+		result.Summary = "acl_check requires OMADA_HOST, OMADA_USERNAME, OMADA_PASSWORD environment variables"
+		result.Finish()
+		return result, nil
+	}
+
+	expect := a.Expect // "enforced" or "not_enforced"
 	wantEnforced := expect == "enforced"
 
-	// Serialize rules as evidence
-	rulesJSON, _ := json.Marshal(allRules)
-	result.Evidence = append(result.Evidence, string(rulesJSON))
-	result.Observed["rule_count"] = len(allRules)
-	result.Expected["policy"] = a.Policy
-	result.Expected["expect"] = expect
-
-	if wantEnforced && found {
-		result.Status = models.StatusPass
-		result.Summary = fmt.Sprintf("ACL policy %q is enforced in Omada", a.Policy)
-	} else if wantEnforced && !found {
-		result.Status = models.StatusFail
-		result.Summary = fmt.Sprintf("ACL policy %q is NOT enforced in Omada", a.Policy)
-		result.Violations = append(result.Violations,
-			fmt.Sprintf("no matching ACL rule found for policy %q (%s → %s %s)", a.Policy, policy.From, policy.To, policy.Action))
-	} else if !wantEnforced && !found {
-		result.Status = models.StatusPass
-		result.Summary = fmt.Sprintf("ACL policy %q is correctly not enforced", a.Policy)
-	} else {
-		result.Status = models.StatusFail
-		result.Summary = fmt.Sprintf("ACL policy %q is enforced but expected not_enforced", a.Policy)
+	req := providers.ACLCheckRequest{
+		PolicyName:     a.Policy,
+		From:           policy.From,
+		To:             policy.To,
+		Action:         policy.Action,
+		ExpectEnforced: wantEnforced,
 	}
 
-	result.Finish()
-	return result, nil
+	return p.CheckACL(ctx, req, opts)
 }
 
 func (e *Engine) runViaProbe(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
@@ -873,7 +832,7 @@ func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, p
 		}
 	}
 
-	expectDeny := a.ExpectDeny == "deny"
+	expectDeny := a.Expect == "deny"
 	if !anyTested {
 		result.Status = models.StatusWarn
 		result.Summary = fmt.Sprintf("isolation unverifiable from probe %q: %s → %s (no gateways reachable)", a.Runner, a.From, a.To)
@@ -984,7 +943,7 @@ func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output str
 	case "isolation":
 		// ping output — if contains "0 received" or "100% packet loss" → isolated (pass for deny)
 		isBlocked := isPingBlocked(output)
-		expectDeny := a.ExpectDeny == "deny"
+		expectDeny := a.Expect == "deny"
 		if expectDeny && isBlocked {
 			result.Status = models.StatusPass
 			result.Summary = fmt.Sprintf("isolation confirmed from probe %q: %s cannot reach %s", a.Runner, a.From, a.To)
@@ -1003,7 +962,7 @@ func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output str
 		// nc -z exits 0 if open, non-zero if closed/filtered
 		// Since probe.Run returns err on non-zero exit, we handle this differently:
 		// If we got here (no error), port is open
-		expect := a.ExpectDeny
+		expect := a.Expect
 		if expect == "open" {
 			result.Status = models.StatusPass
 			result.Summary = fmt.Sprintf("port %d is open on %s (from probe %q)", a.Ports[0], a.Target, a.Runner)
