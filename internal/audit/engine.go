@@ -13,6 +13,7 @@ import (
 
 	"github.com/jpvelasco/nyx/internal/backends"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
+	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/probe"
@@ -27,7 +28,9 @@ const (
 	assertionTimeoutDefault = 30 * time.Second
 )
 
-// Engine runs audit assertions
+// Engine runs audit assertions. It is NOT safe for concurrent use —
+// Run() mutates runnerCtx and seenDB, and callers should create a new
+// Engine via NewEngine for each audit.
 type Engine struct {
 	Spec              *intent.Spec
 	Interface         string
@@ -86,6 +89,26 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 		go func() {
 			defer wg.Done()
 
+			// Recover from panics so a single assertion failure doesn't
+			// leave findings[i] as a zero-value (which ComputeOverallStatus
+			// treats as pass).
+			defer func() {
+				if r := recover(); r != nil {
+					target := assertion.Target
+					if target == "" {
+						target = assertion.Network
+					}
+					if target == "" {
+						target = assertion.From
+					}
+					errResult := models.NewCheckResult("audit", assertion.Type, "local", target)
+					errResult.Status = models.StatusError
+					errResult.Summary = fmt.Sprintf("%s panicked: %v", assertion.Type, r)
+					errResult.Finish()
+					findings[i] = *errResult
+				}
+			}()
+
 			// Check if context is already cancelled before starting work
 			select {
 			case <-ctx.Done():
@@ -139,6 +162,26 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 	return report, nil
 }
 
+// matchNetworks returns the names of spec networks whose CIDRs contain at least
+// one of the given IPs. This helper consolidates the CIDR-matching loop shared by
+// localRunnerContext and pickBestInterface.
+func matchNetworks(ips []net.IP, spec *intent.Spec) []string {
+	var matched []string
+	for _, n := range spec.Networks {
+		_, cidr, err := net.ParseCIDR(n.CIDR)
+		if err != nil {
+			continue
+		}
+		for _, ip := range ips {
+			if cidr.Contains(ip) {
+				matched = append(matched, n.Name)
+				break
+			}
+		}
+	}
+	return matched
+}
+
 // localRunnerContext detects which of the spec networks this machine is inside.
 // If interfaceName is non-empty, only addresses on that specific interface are considered.
 func localRunnerContext(spec *intent.Spec, interfaceName string) models.RunnerContext {
@@ -179,19 +222,7 @@ func localRunnerContext(spec *intent.Spec, interfaceName string) models.RunnerCo
 		}
 	}
 
-	var matchedNetworks []string
-	for _, n := range spec.Networks {
-		_, cidr, err := net.ParseCIDR(n.CIDR)
-		if err != nil {
-			continue
-		}
-		for _, ip := range localIPs {
-			if cidr.Contains(ip) {
-				matchedNetworks = append(matchedNetworks, n.Name)
-				break
-			}
-		}
-	}
+	matchedNetworks := matchNetworks(localIPs, spec)
 
 	// Smart default for multi-homed machines (noob-friendly)
 	// When no interface was forced, try to pick the "best" one (the one that matches the most spec networks).
@@ -237,22 +268,9 @@ func pickBestInterface(ifaces []net.Interface, spec *intent.Spec) string {
 			}
 		}
 
-		matches := 0
-		for _, n := range spec.Networks {
-			_, cidr, err := net.ParseCIDR(n.CIDR)
-			if err != nil {
-				continue
-			}
-			for _, ip := range ifaceIPs {
-				if cidr.Contains(ip) {
-					matches++
-					break
-				}
-			}
-		}
-
-		if matches > 0 {
-			scores = append(scores, score{name: iface.Name, count: matches})
+		matched := matchNetworks(ifaceIPs, spec)
+		if len(matched) > 0 {
+			scores = append(scores, score{name: iface.Name, count: len(matched)})
 		}
 	}
 
@@ -398,7 +416,8 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 				result.Summary = fmt.Sprintf("0 hosts discovered in %s (virtual adapter detected — future scans will suppress this warning; use --warn-virtual to always show it)", cidr)
 			}
 			if err := e.seenDB.AckVirtual(cidr); err != nil {
-				e.Logger.Warn("failed to ack virtual network", slog.String("cidr", cidr), slog.String("error", err.Error()))
+				e.Logger.Warn("failed to ack virtual network; warning will reappear on next run", slog.String("cidr", cidr), slog.String("error", err.Error()))
+				result.Evidence = append(result.Evidence, fmt.Sprintf("warning: failed to persist virtual network ack for %s: %v", cidr, err))
 			}
 		} else {
 			result.Status = models.StatusSkip
@@ -420,6 +439,7 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 
 func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
 	result := models.NewCheckResult("system", "isolation", "local", fmt.Sprintf("%s -> %s", a.From, a.To))
+	result.Expected["expect"] = a.Expect
 
 	// Find target networks by zone name
 	toNets := e.Spec.NetworkByZone(a.To)
@@ -512,24 +532,34 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 	return result, nil
 }
 
+// resolveRoute creates a CheckResult for the given assertion type, resolves the
+// target route, and returns an early-error result if the route lookup fails.
+// On success, the caller should populate result.Observed and continue.
+func (e *Engine) resolveRoute(ctx context.Context, aType string, target string) (*models.CheckResult, *system.Route, error) {
+	result := models.NewCheckResult("system", aType, "local", target)
+
+	route, err := e.Backend.GetRouteToTarget(ctx, target)
+	if err != nil {
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("failed to get route to %s: %v", target, err)
+		result.Finish()
+		return result, nil, nil
+	}
+	return result, route, nil
+}
+
 func (e *Engine) runVPNRoute(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
 	vpn := e.Spec.VPNByName(a.VPN)
 	if vpn == nil {
 		return nil, fmt.Errorf("vpn %q not found in spec", a.VPN)
 	}
 
-	result := models.NewCheckResult("system", "vpn_route", "local", a.Target)
-	result.Expected["vpn"] = vpn.Name
-	result.Expected["target"] = a.Target
-
-	// Check route to target
-	route, err := e.Backend.GetRouteToTarget(ctx, a.Target)
-	if err != nil {
-		result.Status = models.StatusError
-		result.Summary = fmt.Sprintf("failed to get route to %s: %v", a.Target, err)
-		result.Finish()
+	result, route, _ := e.resolveRoute(ctx, "vpn_route", a.Target)
+	if route == nil {
 		return result, nil
 	}
+	result.Expected["vpn"] = vpn.Name
+	result.Expected["target"] = a.Target
 
 	result.Observed["device"] = route.Device
 	result.Observed["gateway"] = route.Gateway
@@ -570,13 +600,8 @@ func (e *Engine) runVPNRoute(ctx context.Context, a intent.Assertion) (*models.C
 }
 
 func (e *Engine) runRouteCheck(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
-	result := models.NewCheckResult("system", "route_check", "local", a.Target)
-
-	route, err := e.Backend.GetRouteToTarget(ctx, a.Target)
-	if err != nil {
-		result.Status = models.StatusError
-		result.Summary = fmt.Sprintf("failed to get route: %v", err)
-		result.Finish()
+	result, route, _ := e.resolveRoute(ctx, "route_check", a.Target)
+	if route == nil {
 		return result, nil
 	}
 

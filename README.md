@@ -22,6 +22,10 @@ Every command produces structured JSON for automation and AI agent consumption.
 # Install prebuilt binary (recommended)
 npm install -g nyx-audit-cli
 
+# If npm blocked the postinstall script (Ubuntu 26+, hardened envs), just run nyx once —
+# it detects the missing binary and downloads it automatically. Or manually:
+#   node $(npm root -g)/nyx-audit-cli/install.js
+
 # Or build from source (requires Go 1.22+)
 git clone https://github.com/jpvelasco/nyx.git && cd nyx && make build
 

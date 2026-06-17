@@ -29,6 +29,14 @@ npx nyx-audit-cli doctor
 
 Works on **macOS**, **Linux**, **Windows**, and **WSL** — `x64` and `arm64`. Postinstall downloads the matching prebuilt binary from GitHub Releases with embedded SHA-256 verification.
 
+> **npm 9+ / Ubuntu 26+ note:** npm's `allow-scripts` security policy may block the postinstall
+> script, so the binary won't be downloaded at install time. No worries — if `nyx` is invoked
+> without a binary present it detects this and downloads automatically. You can also trigger it
+> manually:
+> ```bash
+> node $(npm root -g)/nyx-audit-cli/install.js
+> ```
+
 ## Quickstart
 
 ```bash

@@ -275,7 +275,7 @@ func (c *Client) doRequest(req *http.Request, dest interface{}) error {
 
 // isVersionSupported returns true if the controller version is >= 6.0.
 func isVersionSupported(ver string) bool {
-	// Version format: "6.0.0.36" — we only check major.minor
+	// Version format: "6.0.0.36" — we check major.minor
 	parts := strings.SplitN(ver, ".", 3)
 	if len(parts) < 2 {
 		return false
@@ -284,7 +284,18 @@ func isVersionSupported(ver string) bool {
 	if err != nil {
 		return false
 	}
-	return major >= 6
+	if major > 6 {
+		return true
+	}
+	if major < 6 {
+		return false
+	}
+	// major == 6, check minor
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return false
+	}
+	return minor >= 0
 }
 
 // buildTLSConfig creates a TLS config based on the provided options.

@@ -4,14 +4,20 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 )
 
 // NmapCheck returns a CheckResult for whether nmap is available.
 func NmapCheck() *models.CheckResult {
-	//nolint:govet // package level variable
 	result := models.NewCheckResult("doctor", "nmap_installed", "local", "nmap")
+	if !nmap.Available() {
+		result.Status = models.StatusFail
+		result.Summary = "nmap is not installed or not in PATH"
+		result.Finish()
+		return result
+	}
 	result.Status = models.StatusPass
 	result.Summary = "nmap is available"
 	result.Finish()

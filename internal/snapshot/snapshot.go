@@ -293,7 +293,8 @@ func ComputeDrift(baseline, current *Snapshot) *DriftResult {
 
 // buildLookup creates a map keyed by check_type + target, with type-specific
 // disambiguators to avoid collisions (e.g. two port_check assertions on the
-// same target but different ports).
+// same target but different ports, or two isolation assertions with the same
+// from→to but different expect values).
 func buildLookup(findings []models.CheckResult) map[string]models.CheckResult {
 	lookup := make(map[string]models.CheckResult)
 	for _, f := range findings {
@@ -307,6 +308,17 @@ func buildLookup(findings []models.CheckResult) map[string]models.CheckResult {
 		case "dns_check":
 			if query, ok := f.Expected["query"]; ok {
 				key = fmt.Sprintf("%s:%v", key, query)
+			}
+		case "isolation":
+			if expect, ok := f.Expected["expect"]; ok {
+				key = fmt.Sprintf("%s:%v", key, expect)
+			}
+		case "subnet_discovery":
+			if min, ok := f.Expected["expect_hosts_min"]; ok {
+				key = fmt.Sprintf("%s:%v", key, min)
+			}
+			if max, ok := f.Expected["expect_hosts_max"]; ok {
+				key = fmt.Sprintf("%s:%v", key, max)
 			}
 		}
 		lookup[key] = f

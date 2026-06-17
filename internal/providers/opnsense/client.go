@@ -148,14 +148,15 @@ func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
 			// Some interfaces may not exist; skip them
 			continue
 		}
-		defer resp.Body.Close() //nolint:defer-in-loop // best-effort: if a request panics, the process exits anyway
 
 		var result struct {
 			Rules []FirewallRule `json:"rules"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close() // #nosec G104 — close error unactionable in error path
 			continue
 		}
+		resp.Body.Close() // #nosec G104 — close error unactionable after successful read
 		allRules = append(allRules, result.Rules...)
 	}
 	return allRules, nil
