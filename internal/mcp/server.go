@@ -356,6 +356,7 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 			return "target parameter is required", true
 		}
 		result := s.checkSvc.CheckRoute(ctx, target)
+		result.Finish()
 		if result.Status == models.StatusError {
 			return toJSON(result), true
 		}
@@ -367,6 +368,7 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 			return "target parameter is required", true
 		}
 		result := s.checkSvc.CheckVPN(ctx, target)
+		result.Finish()
 		if result.Status == models.StatusError {
 			return toJSON(result), true
 		}
@@ -480,44 +482,16 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		specPath, _ := args["spec_file"].(string)
 		var findings []models.CheckResult
 
-		nmapResult := models.NewCheckResult("doctor", "nmap_installed", "local", "nmap")
-		if nmap.Available() {
-			nmapResult.Status = models.StatusPass
-			nmapResult.Summary = "nmap is available"
-		} else {
+		nmapResult := service.NmapCheck()
+		if !nmap.Available() {
 			nmapResult.Status = models.StatusFail
 			nmapResult.Summary = "nmap is not installed or not in PATH"
 		}
-		nmapResult.Finish()
 		findings = append(findings, *nmapResult)
 
 		if specPath != "" {
-			// #nosec G304 — path from spec, not user-controlled
-			data, err := os.ReadFile(specPath)
-			if err != nil {
-				fileCheck := models.NewCheckResult("doctor", "spec_file", "local", specPath)
-				fileCheck.Status = models.StatusFail
-				fileCheck.Summary = fmt.Sprintf("cannot read spec file: %v", err)
-				fileCheck.Finish()
-				findings = append(findings, *fileCheck)
-			} else {
-				fileCheck := models.NewCheckResult("doctor", "spec_file", "local", specPath)
-				fileCheck.Status = models.StatusPass
-				fileCheck.Summary = fmt.Sprintf("spec file readable (%d bytes)", len(data))
-				fileCheck.Finish()
-				findings = append(findings, *fileCheck)
-
-				validCheck := models.NewCheckResult("doctor", "spec_valid", "local", specPath)
-				if _, err := intent.ParseSpec(data); err != nil {
-					validCheck.Status = models.StatusFail
-					validCheck.Summary = fmt.Sprintf("spec invalid: %v", err)
-				} else {
-					validCheck.Status = models.StatusPass
-					validCheck.Summary = "spec is valid"
-				}
-				validCheck.Finish()
-				findings = append(findings, *validCheck)
-			}
+			findings = append(findings, *service.SpecFileCheck(specPath))
+			findings = append(findings, *service.SpecValidCheck(specPath))
 		}
 
 		doctorReport := &models.AuditReport{

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/backends/system"
-	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/report"
+	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/spf13/cobra"
 )
 
@@ -33,30 +33,18 @@ var checkRoutesCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), dur)
 		defer cancel()
 
-		result := models.NewCheckResult("system", "route_check", "local", routeTarget)
+		checkSvc := service.NewCheckService()
+		result := checkSvc.CheckRoute(ctx, routeTarget)
 
-		route, err := system.GetRouteToTarget(ctx, routeTarget)
-		if err != nil {
-			result.Status = models.StatusError
-			result.Summary = fmt.Sprintf("failed to get route: %v", err)
-			result.Finish()
-		} else {
-			result.Observed["gateway"] = route.Gateway
-			result.Observed["device"] = route.Device
-			result.Observed["destination"] = route.Destination
-			result.Status = models.StatusPass
-			result.Summary = fmt.Sprintf("route to %s via %s dev %s", routeTarget, route.Gateway, route.Device)
-			result.Finish()
-
-			// Also get full route table if verbose
-			if verbose {
-				routes, routeErr := system.GetRoutes(ctx)
-				if routeErr == nil {
-					routeData, _ := json.Marshal(routes)
-					result.Evidence = append(result.Evidence, string(routeData))
-				}
+		// Also get full route table if verbose
+		if verbose {
+			routes, routeErr := system.GetRoutes(ctx)
+			if routeErr == nil {
+				routeData, _ := json.Marshal(routes)
+				result.Evidence = append(result.Evidence, string(routeData))
 			}
 		}
+		result.Finish()
 
 		w, err := getWriter()
 		if err != nil {

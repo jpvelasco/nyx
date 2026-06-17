@@ -22,31 +22,31 @@ func NewCheckService() *CheckService {
 }
 
 // CheckRoute returns the routing path to a target IP.
+// Callers must call result.Finish() before rendering.
 func (s *CheckService) CheckRoute(ctx context.Context, target string) *models.CheckResult {
 	result := models.NewCheckResult("system", "route_check", "local", target)
 	route, err := s.Backend.GetRouteToTarget(ctx, target)
 	if err != nil {
 		result.Status = models.StatusError
 		result.Summary = fmt.Sprintf("failed to get route to %s: %v", target, err)
-		result.Finish()
 		return result
 	}
 	result.Observed["gateway"] = route.Gateway
 	result.Observed["device"] = route.Device
+	result.Observed["destination"] = route.Destination
 	result.Status = models.StatusPass
 	result.Summary = fmt.Sprintf("route to %s via %s dev %s", target, route.Gateway, route.Device)
-	result.Finish()
 	return result
 }
 
 // CheckVPN checks if traffic to a target routes through a VPN tunnel.
+// Callers must call result.Finish() before rendering.
 func (s *CheckService) CheckVPN(ctx context.Context, target string) *models.CheckResult {
 	result := models.NewCheckResult("system", "vpn_route", "local", target)
 	route, err := s.Backend.GetRouteToTarget(ctx, target)
 	if err != nil {
 		result.Status = models.StatusError
 		result.Summary = fmt.Sprintf("failed to get route to %s: %v", target, err)
-		result.Finish()
 		return result
 	}
 	result.Observed["device"] = route.Device
@@ -60,18 +60,17 @@ func (s *CheckService) CheckVPN(ctx context.Context, target string) *models.Chec
 		result.Status = models.StatusWarn
 		result.Summary = fmt.Sprintf("%s routes via %s (not a tunnel interface)", target, route.Device)
 	}
-	result.Finish()
 	return result
 }
 
 // Ping returns reachability status for a target.
+// Callers must call result.Finish() before rendering.
 func (s *CheckService) Ping(ctx context.Context, target string) *models.CheckResult {
 	result := models.NewCheckResult("system", "ping", "local", target)
 	pingResult, err := s.Backend.Ping(ctx, target)
 	if err != nil {
 		result.Status = models.StatusError
 		result.Summary = fmt.Sprintf("ping failed: %v", err)
-		result.Finish()
 		return result
 	}
 	result.Observed["reachable"] = pingResult.Reachable
@@ -82,7 +81,6 @@ func (s *CheckService) Ping(ctx context.Context, target string) *models.CheckRes
 		result.Status = models.StatusFail
 		result.Summary = fmt.Sprintf("%s is not reachable", target)
 	}
-	result.Finish()
 	return result
 }
 

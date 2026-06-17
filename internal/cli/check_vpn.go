@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/report"
+	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/spf13/cobra"
 )
 
@@ -33,35 +33,16 @@ var checkVPNCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), dur)
 		defer cancel()
 
-		result := models.NewCheckResult("system", "vpn_check", "local", vpnTarget)
+		checkSvc := service.NewCheckService()
+		result := checkSvc.CheckVPN(ctx, vpnTarget)
 
-		route, err := system.GetRouteToTarget(ctx, vpnTarget)
-		if err != nil {
-			result.Status = models.StatusError
-			result.Summary = fmt.Sprintf("failed to get route: %v", err)
-			result.Finish()
-		} else {
-			result.Observed["device"] = route.Device
-			result.Observed["gateway"] = route.Gateway
-
-			isVPN, _ := system.CheckVPNInterface(ctx, route.Device)
-			result.Observed["via_tunnel"] = isVPN
-
-			if isVPN {
-				result.Status = models.StatusPass
-				result.Summary = fmt.Sprintf("%s routed via tunnel interface %s", vpnTarget, route.Device)
-			} else {
-				if vpnExpect == "split-tunnel" || vpnExpect == "full-tunnel" {
-					result.Status = models.StatusFail
-					result.Summary = fmt.Sprintf("%s NOT routed via tunnel (using %s)", vpnTarget, route.Device)
-					result.Violations = append(result.Violations, "expected tunnel routing but traffic uses non-tunnel interface")
-				} else {
-					result.Status = models.StatusPass
-					result.Summary = fmt.Sprintf("%s routed via %s (not a tunnel interface)", vpnTarget, route.Device)
-				}
-			}
-			result.Finish()
+		// Override with --expect flag if provided
+		if vpnExpect != "" && result.Status == models.StatusWarn {
+			result.Status = models.StatusFail
+			result.Summary = fmt.Sprintf("%s NOT routed via tunnel (using %s)", vpnTarget, result.Observed["device"])
+			result.Violations = append(result.Violations, "expected tunnel routing but traffic uses non-tunnel interface")
 		}
+		result.Finish()
 
 		w, err := getWriter()
 		if err != nil {
