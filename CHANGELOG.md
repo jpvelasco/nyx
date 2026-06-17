@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-06-17
+
+**Patch release.** Fixes a broken install on npm 9+ / Ubuntu 26 where `allow-scripts` blocks the postinstall binary download, plus several engine and backend bug fixes from recent refactors.
+
+### Fixed
+
+- **npm allow-scripts broken install.** On npm 9+ (default on Ubuntu 26+), the postinstall script that downloads the Go binary is silently skipped, leaving `nyx` installed but non-functional. `run.js` now detects the missing binary and runs `install.js` on first invocation. Root-owned global installs (via `sudo npm install -g`) print a clear recovery command instead of crashing with `EACCES`.
+- **Engine panic recovery.** Added recover in the engine goroutine so a panicking assertion no longer kills the whole audit run.
+- **buildLookup key collision.** Snapshot drift lookup keys now include ports/query as a disambiguator, preventing false "fixed" or "new" drift entries when multiple assertions share the same target.
+- **Engine concurrency guard.** Prevents double-invocation of the audit engine in concurrent contexts.
+- **seendb error visibility.** Errors from seendb operations are now surfaced rather than silently dropped.
+- **Omada version check.** The Omada client now validates the controller API version before making authenticated calls.
+- **resolveRuleEndpoint empty string.** Fixed a case where an empty-string endpoint was returned instead of an error.
+- **OPNsense resource leak.** Response body was not closed after use in the OPNsense client; fixed.
+- **NmapCheck no-op.** NmapCheck was a no-op in certain code paths; wired correctly.
+- **gosec G104 in OPNsense client.** `Body.Close()` return values in error paths are now explicitly annotated as unactionable.
+
+### Changed
+
+- **CLI/MCP deduplication.** `check_routes` and `check_vpn` CLI commands now route through `CheckService`; MCP `run_doctor` uses shared helpers from the service package, eliminating duplicated logic.
+- **Backend interface.** Engine now uses a `backends.Backend` interface for testability.
+- **CIDR matching extracted.** `matchNetworks` helper consolidates duplicated CIDR-matching logic across `localRunnerContext` and `pickBestInterface`.
+
 ## [0.2.6] - 2026-06-15
 
 **Patch release.** Removes accidentally committed IDE harness artifacts and tightens gitignore.
@@ -117,7 +140,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.7
 [0.2.6]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.6
 [0.2.5]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.5
 [0.2.4]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.4
