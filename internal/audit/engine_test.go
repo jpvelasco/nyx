@@ -3,6 +3,7 @@ package audit_test
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,74 @@ import (
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/seendb"
 )
+
+func TestEvalIsolationStatus(t *testing.T) {
+	tests := []struct {
+		name         string
+		expectDeny   bool
+		anyTested    bool
+		allBlocked   bool
+		wantStatus   models.Status
+		wantSummary  string
+		wantViolates bool
+	}{
+		{
+			name:       "deny-expected-untested",
+			expectDeny: true, anyTested: false, allBlocked: false,
+			wantStatus:  models.StatusWarn,
+			wantSummary: "isolation unverifiable",
+		},
+		{
+			name:       "deny-expected-all-blocked",
+			expectDeny: true, anyTested: true, allBlocked: true,
+			wantStatus:  models.StatusPass,
+			wantSummary: "isolation confirmed",
+		},
+		{
+			name:       "deny-expected-not-blocked",
+			expectDeny: true, anyTested: true, allBlocked: false,
+			wantStatus:   models.StatusFail,
+			wantSummary:  "isolation violation",
+			wantViolates: true,
+		},
+		{
+			name:       "allow-expected-all-blocked",
+			expectDeny: false, anyTested: true, allBlocked: true,
+			wantStatus:  models.StatusFail,
+			wantSummary: "connectivity failure",
+		},
+		{
+			name:       "allow-expected-not-blocked",
+			expectDeny: false, anyTested: true, allBlocked: false,
+			wantStatus:  models.StatusPass,
+			wantSummary: "connectivity confirmed",
+		},
+		{
+			name:       "allow-expected-untested",
+			expectDeny: false, anyTested: false, allBlocked: false,
+			wantStatus:  models.StatusWarn,
+			wantSummary: "isolation unverifiable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, summary, violations := audit.EvalIsolationStatus("probe1", "from-zone", "to-zone", tt.expectDeny, tt.anyTested, tt.allBlocked)
+			if status != tt.wantStatus {
+				t.Errorf("status = %s, want %s", status, tt.wantStatus)
+			}
+			if !strings.Contains(summary, tt.wantSummary) {
+				t.Errorf("summary %q does not contain %q", summary, tt.wantSummary)
+			}
+			if tt.wantViolates && len(violations) == 0 {
+				t.Error("expected violations but got none")
+			}
+			if !tt.wantViolates && len(violations) > 0 {
+				t.Errorf("unexpected violations: %v", violations)
+			}
+		})
+	}
+}
 
 func TestDiscoveryWarnPreservedWhenZeroHostsWithinBounds(t *testing.T) {
 	if !nmap.Available() {

@@ -490,42 +490,43 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 	}
 
 	expectDeny := a.Expect == "deny"
-	if expectDeny {
-		if !anyTested {
-			result.Status = models.StatusWarn
+
+	// Determine isolation status with structured branching.
+	// The runnerInFromZone check is unique to the direct (non-probe) case —
+	// when the runner isn't in the source zone, allBlocked could mean
+	// isolation OR just no route from this host.
+	if !anyTested {
+		result.Status = models.StatusWarn
+		if expectDeny {
 			result.Summary = fmt.Sprintf(
 				"isolation unverifiable: %s → %s (target zone not routable from this host; use runner: <probe> from inside the %s zone)",
 				a.From, a.To, a.From,
 			)
-		} else if allBlocked && !runnerInFromZone {
-			// Unreachable could mean isolation OR just no route from this host.
-			result.Status = models.StatusWarn
-			result.Summary = fmt.Sprintf(
-				"isolation unconfirmed: %s → %s gateways unreachable, but nyx is not running from inside the %s zone — use runner: <probe> for a definitive check",
-				a.From, a.To, a.From,
-			)
-		} else if allBlocked {
-			result.Status = models.StatusPass
-			result.Summary = fmt.Sprintf("isolation confirmed: %s cannot reach %s", a.From, a.To)
 		} else {
-			result.Status = models.StatusFail
-			result.Summary = fmt.Sprintf("isolation violation: %s can reach %s", a.From, a.To)
-			result.Violations = append(result.Violations, "expected deny but traffic is reachable")
-		}
-	} else {
-		if !anyTested {
-			result.Status = models.StatusWarn
 			result.Summary = fmt.Sprintf(
 				"connectivity unverifiable: %s → %s (target zone not routable from this host)",
 				a.From, a.To,
 			)
-		} else if !allBlocked {
-			result.Status = models.StatusPass
-			result.Summary = fmt.Sprintf("connectivity confirmed: %s can reach %s", a.From, a.To)
-		} else {
-			result.Status = models.StatusFail
-			result.Summary = fmt.Sprintf("connectivity failure: %s cannot reach %s", a.From, a.To)
 		}
+	} else if expectDeny && allBlocked && !runnerInFromZone {
+		result.Status = models.StatusWarn
+		result.Summary = fmt.Sprintf(
+			"isolation unconfirmed: %s → %s gateways unreachable, but nyx is not running from inside the %s zone — use runner: <probe> for a definitive check",
+			a.From, a.To, a.From,
+		)
+	} else if expectDeny && allBlocked {
+		result.Status = models.StatusPass
+		result.Summary = fmt.Sprintf("isolation confirmed: %s cannot reach %s", a.From, a.To)
+	} else if expectDeny && !allBlocked {
+		result.Status = models.StatusFail
+		result.Summary = fmt.Sprintf("isolation violation: %s can reach %s", a.From, a.To)
+		result.Violations = append(result.Violations, "expected deny but traffic is reachable")
+	} else if !expectDeny && !allBlocked {
+		result.Status = models.StatusPass
+		result.Summary = fmt.Sprintf("connectivity confirmed: %s can reach %s", a.From, a.To)
+	} else {
+		result.Status = models.StatusFail
+		result.Summary = fmt.Sprintf("connectivity failure: %s cannot reach %s", a.From, a.To)
 	}
 
 	result.Finish()
@@ -858,23 +859,10 @@ func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, p
 	}
 
 	expectDeny := a.Expect == "deny"
-	if !anyTested {
-		result.Status = models.StatusWarn
-		result.Summary = fmt.Sprintf("isolation unverifiable from probe %q: %s → %s (no gateways reachable)", a.Runner, a.From, a.To)
-	} else if expectDeny && allBlocked {
-		result.Status = models.StatusPass
-		result.Summary = fmt.Sprintf("isolation confirmed from probe %q: %s cannot reach %s", a.Runner, a.From, a.To)
-	} else if expectDeny && !allBlocked {
-		result.Status = models.StatusFail
-		result.Summary = fmt.Sprintf("isolation violation from probe %q: %s can reach %s", a.Runner, a.From, a.To)
-		result.Violations = append(result.Violations, "expected deny but traffic is reachable from probe VLAN")
-	} else if !expectDeny && !allBlocked {
-		result.Status = models.StatusPass
-		result.Summary = fmt.Sprintf("connectivity confirmed from probe %q: %s can reach %s", a.Runner, a.From, a.To)
-	} else {
-		result.Status = models.StatusFail
-		result.Summary = fmt.Sprintf("connectivity failure from probe %q: %s cannot reach %s", a.Runner, a.From, a.To)
-	}
+	status, summary, violations := EvalIsolationStatus(a.Runner, a.From, a.To, expectDeny, anyTested, allBlocked)
+	result.Status = status
+	result.Summary = summary
+	result.Violations = append(result.Violations, violations...)
 
 	result.Finish()
 	return result, nil
@@ -962,6 +950,31 @@ func probeTarget(a intent.Assertion) string {
 	return fmt.Sprintf("%s→%s", a.From, a.To)
 }
 
+// EvalIsolationStatus determines the status, summary, and violations for an isolation
+// check based on the probe context and connectivity results. This helper consolidates
+// the branching logic shared by runIsolationViaProbe and parseProbeOutput.
+func EvalIsolationStatus(runner, from, to string, expectDeny, anyTested, allBlocked bool) (models.Status, string, []string) {
+	if !anyTested {
+		return models.StatusWarn,
+			fmt.Sprintf("isolation unverifiable from probe %q: %s → %s (no gateways reachable)", runner, from, to), nil
+	}
+	if expectDeny && allBlocked {
+		return models.StatusPass,
+			fmt.Sprintf("isolation confirmed from probe %q: %s cannot reach %s", runner, from, to), nil
+	}
+	if expectDeny && !allBlocked {
+		return models.StatusFail,
+			fmt.Sprintf("isolation violation from probe %q: %s can reach %s", runner, from, to),
+			[]string{"expected deny but traffic is reachable from probe VLAN"}
+	}
+	if !expectDeny && !allBlocked {
+		return models.StatusPass,
+			fmt.Sprintf("connectivity confirmed from probe %q: %s can reach %s", runner, from, to), nil
+	}
+	return models.StatusFail,
+		fmt.Sprintf("connectivity failure from probe %q: %s cannot reach %s", runner, from, to), nil
+}
+
 // parseProbeOutput interprets raw probe command output and updates result status.
 func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output string) *models.CheckResult {
 	switch a.Type {
@@ -969,20 +982,10 @@ func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output str
 		// ping output — if contains "0 received" or "100% packet loss" → isolated (pass for deny)
 		isBlocked := isPingBlocked(output)
 		expectDeny := a.Expect == "deny"
-		if expectDeny && isBlocked {
-			result.Status = models.StatusPass
-			result.Summary = fmt.Sprintf("isolation confirmed from probe %q: %s cannot reach %s", a.Runner, a.From, a.To)
-		} else if expectDeny && !isBlocked {
-			result.Status = models.StatusFail
-			result.Summary = fmt.Sprintf("isolation violation from probe %q: %s can reach %s", a.Runner, a.From, a.To)
-			result.Violations = append(result.Violations, "expected deny but traffic is reachable from probe VLAN")
-		} else if !expectDeny && !isBlocked {
-			result.Status = models.StatusPass
-			result.Summary = fmt.Sprintf("connectivity confirmed from probe %q: %s can reach %s", a.Runner, a.From, a.To)
-		} else {
-			result.Status = models.StatusFail
-			result.Summary = fmt.Sprintf("connectivity failure from probe %q: %s cannot reach %s", a.Runner, a.From, a.To)
-		}
+		status, summary, violations := EvalIsolationStatus(a.Runner, a.From, a.To, expectDeny, true, isBlocked)
+		result.Status = status
+		result.Summary = summary
+		result.Violations = append(result.Violations, violations...)
 	case "port_check":
 		// nc -z exits 0 if open, non-zero if closed/filtered
 		// Since probe.Run returns err on non-zero exit, we handle this differently:
