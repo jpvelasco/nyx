@@ -34,6 +34,10 @@ var auditCmd = &cobra.Command{
 			return nil
 		}
 
+		if _, statErr := os.Stat(specFile); os.IsNotExist(statErr) {
+			return fmt.Errorf("spec file %q not found\n\n  Create one with:\n    nyx init --output %s\n\n  Then run:\n    nyx audit --spec %s", specFile, specFile, specFile)
+		}
+
 		spec, err := intent.LoadSpec(specFile)
 		if err != nil {
 			return fmt.Errorf("loading spec: %w", err)

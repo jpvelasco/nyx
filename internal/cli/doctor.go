@@ -43,7 +43,7 @@ var doctorCmd = &cobra.Command{
 				ver = line
 			}
 			nmapCheck.Status = models.StatusPass
-			nmapCheck.Summary = fmt.Sprintf("nmap: %s", ver)
+			nmapCheck.Summary = fmt.Sprintf("nmap: %s (no root/admin needed to run nyx)", ver)
 		} else {
 			nmapCheck.Status = models.StatusFail
 			nmapCheck.Summary = "nmap is missing — we can't scan without it"
@@ -280,11 +280,11 @@ func doctorTag(s models.Status) string {
 func nmapInstallHint() string {
 	switch runtime.GOOS {
 	case "windows":
-		return "Install nmap: winget install nmap"
+		return "Install nmap: winget install nmap\n       → After installing, run nyx normally — no admin required"
 	case "darwin":
-		return "Install nmap: brew install nmap"
+		return "Install nmap: brew install nmap\n       → After installing, run nyx normally — no sudo required"
 	default:
-		return "Install nmap: sudo apt install nmap (Debian/Ubuntu) or sudo dnf install nmap (Fedora/RHEL)"
+		return "Install nmap: sudo apt install nmap (Debian/Ubuntu) or sudo dnf install nmap (Fedora/RHEL)\n       → After installing, run nyx normally — no sudo required"
 	}
 }
 
