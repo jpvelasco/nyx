@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-06-18
+
+**Patch release.** Improves first-run experience by clarifying that nyx never needs sudo/root, and by surfacing an actionable error when `audit` is run against a spec file that doesn't exist yet.
+
+### Fixed
+
+- **No-sudo clarification in install hint.** `nyx doctor` now appends a platform-aware note ("no sudo required" / "no admin required") to the nmap install hint, so users who followed the `sudo apt install nmap` instruction don't carry that sudo habit into running `nyx` itself.
+- **No-root note in nmap PASS output.** When nmap is found, `nyx doctor` now shows `(no root/admin needed to run nyx)` in the pass line, reinforcing the message after install.
+- **Actionable error for missing spec file.** `nyx audit --spec <file>` now detects when the spec file doesn't exist and returns a structured error with the exact `nyx init --output <file>` and `nyx audit --spec <file>` commands to fix it, instead of a raw OS error.
+
 ## [0.2.7] - 2026-06-17
 
 **Patch release.** Fixes a broken install on npm 9+ / Ubuntu 26 where `allow-scripts` blocks the postinstall binary download, plus several engine and backend bug fixes from recent refactors.
@@ -140,7 +150,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.2.7...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.2.8...HEAD
+[0.2.8]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.8
 [0.2.7]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.7
 [0.2.6]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.6
 [0.2.5]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.5
