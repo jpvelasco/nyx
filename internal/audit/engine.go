@@ -717,6 +717,15 @@ func (e *Engine) runNetworkHealth(ctx context.Context, a intent.Assertion) (*mod
 	return result, nil
 }
 
+// aclCheckErrorResult creates a finished CheckResult with StatusError for acl_check failures.
+func aclCheckErrorResult(provider, policy string, summary string) *models.CheckResult {
+	result := models.NewCheckResult(provider, "acl_check", provider, policy)
+	result.Status = models.StatusError
+	result.Summary = summary
+	result.Finish()
+	return result
+}
+
 func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
 	providerName := a.Provider
 	if providerName == "" {
@@ -732,21 +741,15 @@ func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.C
 		}
 	}
 	if policy == nil {
-		result := models.NewCheckResult(providerName, "acl_check", providerName, a.Policy)
-		result.Status = models.StatusError
-		result.Summary = fmt.Sprintf("policy %q not found in spec", a.Policy)
-		result.Finish()
-		return result, nil
+		return aclCheckErrorResult(providerName, a.Policy,
+			fmt.Sprintf("policy %q not found in spec", a.Policy)), nil
 	}
 
 	// Look up provider from registry
 	p := providers.Get(providerName)
 	if p == nil {
-		result := models.NewCheckResult(providerName, "acl_check", providerName, a.Policy)
-		result.Status = models.StatusError
-		result.Summary = fmt.Sprintf("provider %q not found in registry", providerName)
-		result.Finish()
-		return result, nil
+		return aclCheckErrorResult(providerName, a.Policy,
+			fmt.Sprintf("provider %q not found in registry", providerName)), nil
 	}
 
 	// Build import options from environment (backward-compatible with existing env var pattern)
@@ -759,11 +762,8 @@ func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.C
 		CACertPath:    e.CACertPath,
 	}
 	if opts.Host == "" || opts.Username == "" || opts.Password == "" {
-		result := models.NewCheckResult(providerName, "acl_check", providerName, a.Policy)
-		result.Status = models.StatusError
-		result.Summary = "acl_check requires OMADA_HOST, OMADA_USERNAME, OMADA_PASSWORD environment variables"
-		result.Finish()
-		return result, nil
+		return aclCheckErrorResult(providerName, a.Policy,
+			"acl_check requires OMADA_HOST, OMADA_USERNAME, OMADA_PASSWORD environment variables"), nil
 	}
 
 	expect := a.Expect // "enforced" or "not_enforced"
