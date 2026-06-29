@@ -2,7 +2,9 @@ package nmap
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestPoliteScanOptionsDefaults(t *testing.T) {
@@ -38,8 +40,6 @@ func TestPortScanResultShape(t *testing.T) {
 	if !Available() {
 		t.Skip("nmap not available")
 	}
-	// Uses an RFC5737 non-routable address to get a quick "filtered" result
-	// without actually scanning anything live. Just verifies result shape.
 	result, err := PortScan(context.Background(), "192.0.2.1", []int{80, 443}, "tcp", PoliteScanOptions)
 	if err != nil {
 		t.Fatalf("PortScan returned error: %v", err)
@@ -49,5 +49,84 @@ func TestPortScanResultShape(t *testing.T) {
 	}
 	if result.CheckType != "port_check" {
 		t.Errorf("expected check_type 'port_check', got %q", result.CheckType)
+	}
+}
+
+func TestPortScanResultShape_SingleOpenPort(t *testing.T) {
+	if !Available() {
+		t.Skip("nmap not available")
+	}
+	result, err := PortScan(context.Background(), "127.0.0.1", []int{22}, "tcp", PoliteScanOptions)
+	if err != nil {
+		t.Fatalf("PortScan returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestPortScanResultShape_MultipleOpenPorts(t *testing.T) {
+	if !Available() {
+		t.Skip("nmap not available")
+	}
+	result, err := PortScan(context.Background(), "127.0.0.1", []int{80, 443, 8080}, "tcp", PoliteScanOptions)
+	if err != nil {
+		t.Fatalf("PortScan returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestPortScanResultShape_AllFiltered(t *testing.T) {
+	if !Available() {
+		t.Skip("nmap not available")
+	}
+	result, err := PortScan(context.Background(), "192.0.2.1", []int{80, 443}, "tcp", PoliteScanOptions)
+	if err != nil {
+		t.Fatalf("PortScan returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestPortScanResultShape_MixedStates(t *testing.T) {
+	if !Available() {
+		t.Skip("nmap not available")
+	}
+	result, err := PortScan(context.Background(), "127.0.0.1", []int{22, 80, 443, 9999}, "tcp", PoliteScanOptions)
+	if err != nil {
+		t.Fatalf("PortScan returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestPortScanTimeout(t *testing.T) {
+	if !Available() {
+		t.Skip("nmap not available")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err := PortScan(ctx, "192.0.2.1", []int{80}, "tcp", PoliteScanOptions)
+	if err == nil {
+		t.Error("expected timeout error")
+	} else if !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Errorf("expected timeout-related error, got: %v", err)
+	}
+}
+
+func TestPortScanMultipleHosts(t *testing.T) {
+	if !Available() {
+		t.Skip("nmap not available")
+	}
+	result, err := PortScan(context.Background(), "127.0.0.1", []int{22, 80, 443, 8080}, "tcp", DefaultScanOptions)
+	if err != nil {
+		t.Fatalf("PortScan error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
 	}
 }

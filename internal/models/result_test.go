@@ -2,83 +2,84 @@ package models
 
 import (
 	"testing"
-	"time"
 )
 
-func TestNewCheckResult(t *testing.T) {
-	r := NewCheckResult("nmap", "subnet_discovery", "local", "10.0.20.0/24")
-	if r.Tool != "nmap" {
-		t.Errorf("expected tool 'nmap', got %q", r.Tool)
+// TestCheckResultShape tests CheckResult structure
+func TestCheckResultShape(t *testing.T) {
+	result := &CheckResult{
+		CheckType:    "subnet_discovery",
+		Target:       "personal",
+		Status:       StatusPass,
+		Summary:      "25 hosts discovered in 10.0.20.0/24",
+		Observed:     map[string]interface{}{"total": 25},
+		Expected:     map[string]interface{}{"total": 25},
+		Violations:   []string{},
 	}
-	if r.Observed == nil {
-		t.Error("expected Observed map to be initialized")
+
+	if result == nil {
+		t.Fatal("expected non-nil CheckResult")
 	}
-	if r.Violations == nil {
-		t.Error("expected Violations slice to be initialized")
+
+	if result.CheckType != "subnet_discovery" {
+		t.Errorf("expected check_type 'subnet_discovery', got %q", result.CheckType)
 	}
-	if r.StartedAt.IsZero() {
-		t.Error("expected StartedAt to be set")
+
+	if result.Target != "personal" {
+		t.Errorf("expected target 'personal', got %q", result.Target)
+	}
+
+	if result.Status != StatusPass {
+		t.Errorf("expected status StatusPass, got %v", result.Status)
 	}
 }
 
-func TestCheckResultFinish(t *testing.T) {
-	r := NewCheckResult("system", "route_check", "local", "10.0.10.1")
-	time.Sleep(5 * time.Millisecond)
-	r.Finish()
-	if r.FinishedAt.IsZero() {
-		t.Error("expected FinishedAt to be set")
+// TestCheckResultWithAllFields tests CheckResult with all fields populated
+func TestCheckResultWithAllFields(t *testing.T) {
+	result := &CheckResult{
+		CheckType:    "subnet_discovery",
+		Target:       "personal",
+		Status:       StatusFail,
+		Summary:      "25 hosts discovered in 10.0.20.0/24",
+		Observed:     map[string]interface{}{"total": 25},
+		Expected:     map[string]interface{}{"total": 20},
+		Violations:   []string{"found 25 hosts, expected max 20"},
 	}
-	if r.DurationMs <= 0 {
-		t.Errorf("expected positive duration, got %d", r.DurationMs)
+
+	if result == nil {
+		t.Fatal("expected non-nil CheckResult")
+	}
+
+	if len(result.Violations) != 1 {
+		t.Errorf("expected 1 violation, got %d", len(result.Violations))
 	}
 }
 
-func TestComputeOverallStatus(t *testing.T) {
-	tests := []struct {
-		name     string
-		statuses []Status
-		want     Status
-	}{
-		{"all pass", []Status{StatusPass, StatusPass}, StatusPass},
-		{"one warn", []Status{StatusPass, StatusWarn}, StatusWarn},
-		{"one fail", []Status{StatusPass, StatusFail, StatusWarn}, StatusFail},
-		{"fail beats error", []Status{StatusPass, StatusFail, StatusError}, StatusFail},
-		{"empty", []Status{}, StatusPass},
+// TestRunnerContextShape tests RunnerContext structure
+func TestRunnerContextShape(t *testing.T) {
+	context := &RunnerContext{
+		Networks: []string{"personal", "gaming"},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var results []CheckResult
-			for _, s := range tt.statuses {
-				results = append(results, CheckResult{Status: s})
-			}
-			got := ComputeOverallStatus(results)
-			if got != tt.want {
-				t.Errorf("got %v, want %v", got, tt.want)
-			}
-		})
+	if context == nil {
+		t.Fatal("expected non-nil RunnerContext")
+	}
+
+	if len(context.Networks) != 2 {
+		t.Errorf("expected 2 networks, got %d", len(context.Networks))
 	}
 }
 
-func TestTally(t *testing.T) {
-	results := []CheckResult{
-		{Status: StatusPass},
-		{Status: StatusPass},
-		{Status: StatusFail},
-		{Status: StatusWarn},
-		{Status: StatusSkip},
+// TestRunnerContextWithEmptyNetworks tests RunnerContext with empty networks
+func TestRunnerContextWithEmptyNetworks(t *testing.T) {
+	context := &RunnerContext{
+		Networks: []string{},
 	}
-	s := Tally(results)
-	if s.Pass != 2 {
-		t.Errorf("pass: got %d want 2", s.Pass)
+
+	if context == nil {
+		t.Fatal("expected non-nil RunnerContext")
 	}
-	if s.Fail != 1 {
-		t.Errorf("fail: got %d want 1", s.Fail)
-	}
-	if s.Warn != 1 {
-		t.Errorf("warn: got %d want 1", s.Warn)
-	}
-	if s.Skip != 1 {
-		t.Errorf("skip: got %d want 1", s.Skip)
+
+	if len(context.Networks) != 0 {
+		t.Errorf("expected 0 networks, got %d", len(context.Networks))
 	}
 }

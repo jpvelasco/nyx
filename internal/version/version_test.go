@@ -1,9 +1,11 @@
 package version
 
-import "testing"
+import (
+	"testing"
+)
 
-func TestVersionIsNotEmpty(t *testing.T) {
+func TestVersionString(t *testing.T) {
 	if Version == "" {
-		t.Skip("Version is empty (not set via ldflags)")
+		t.Error("expected non-empty version string")
 	}
 }

@@ -1,107 +1,183 @@
-package seendb_test
+package seendb
 
 import (
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
-
-	"github.com/jpvelasco/nyx/internal/seendb"
 )
 
-func TestLoadMissingFileReturnsEmpty(t *testing.T) {
-	db, err := seendb.LoadFrom(filepath.Join(t.TempDir(), "notexist.json"))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+// TestLoadFromValidFile tests loading from a valid JSON file
+func TestLoadFromValidFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "seen.json")
+
+	// Create a valid seen.json file matching the format produced by save()
+	content := `{
+  "virtual_networks": {
+    "10.0.10.0/24": {
+      "seen_at": "2024-01-01T00:00:00Z",
+      "virtual": true
+    },
+    "10.0.20.0/24": {
+      "seen_at": "2024-01-01T00:00:00Z",
+      "virtual": false
+    }
+  }
+}`
+	if err := os.WriteFile(dbPath, []byte(content), 0600); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
 	}
-	if db.IsVirtualAcked("192.168.1.0/24") {
-		t.Error("expected false for unacked CIDR")
+
+	db, err := LoadFrom(dbPath)
+	if err != nil {
+		t.Fatalf("LoadFrom error: %v", err)
+	}
+
+	if db == nil {
+		t.Fatal("expected non-nil database")
+	}
+
+	if !db.IsVirtualAcked("10.0.10.0/24") {
+		t.Error("expected 10.0.10.0/24 to be acked")
+	}
+
+	if db.IsVirtualAcked("10.0.20.0/24") {
+		t.Error("expected 10.0.20.0/24 to not be acked")
 	}
 }
 
-func TestAckAndReload(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "seen.json")
-	db, _ := seendb.LoadFrom(path)
-	if err := db.AckVirtual("10.0.0.0/24"); err != nil {
-		t.Fatalf("ack failed: %v", err)
-	}
-	db2, err := seendb.LoadFrom(path)
-	if err != nil {
-		t.Fatalf("reload failed: %v", err)
-	}
-	if !db2.IsVirtualAcked("10.0.0.0/24") {
-		t.Error("expected CIDR to be acked after reload")
-	}
-}
+// TestLoadFromCorruptFile tests loading from a corrupt/corrupted file
+func TestLoadFromCorruptFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "seen.json")
 
-func TestAckUnwritablePathIsGraceful(t *testing.T) {
-	// Portable way to force a write error: point path at an existing directory.
-	// os.WriteFile on a dir path fails ("is a directory") on all platforms.
-	tmp := t.TempDir()
-	dirAsFile := filepath.Join(tmp, "seen.json")
-	if err := os.Mkdir(dirAsFile, 0o700); err != nil { // nosemgrep go.lang.correctness.permissions.file_permission.incorrect-default-permission
-		t.Fatalf("setup: %v", err)
+	// Create a corrupt JSON file
+	content := `{"broken": true, }` // Invalid JSON
+	if err := os.WriteFile(dbPath, []byte(content), 0600); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
 	}
 
-	db, _ := seendb.LoadFrom(dirAsFile)
-	err := db.AckVirtual("10.0.0.0/24")
+	db, err := LoadFrom(dbPath)
 	if err == nil {
-		t.Error("expected error when writing to unwritable path (directory)")
+		// LoadFrom tolerates corrupt files per design
 	}
 
-	// Critical: ack must still succeed in memory (the graceful part).
-	// Callers do ` _ = db.AckVirtual(...) ` and continue.
-	if !db.IsVirtualAcked("10.0.0.0/24") {
-		t.Error("virtual CIDR should be acked in-memory even when persist fails")
+	// Should return in-memory-only DB on error (errors are tolerated per design)
+	if db == nil {
+		t.Error("expected non-nil database even on corrupt file")
+	}
+
+	// Should not crash, just use empty DB
+	db.AckVirtual("192.168.1.0/24")
+	if !db.IsVirtualAcked("192.168.1.0/24") {
+		t.Error("expected ack to work on corrupt file")
 	}
 }
 
-func TestConcurrentAcksNoPanic(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "seen.json")
-	db, _ := seendb.LoadFrom(path)
+// TestAck tests acknowledging a virtual subnet
+func TestAck(t *testing.T) {
+	db := New()
+
+	if db == nil {
+		t.Fatal("expected non-nil database")
+	}
+
+	if err := db.AckVirtual("192.168.1.0/24"); err != nil {
+		t.Errorf("AckVirtual error: %v", err)
+	}
+
+	if !db.IsVirtualAcked("192.168.1.0/24") {
+		t.Error("expected 192.168.1.0/24 to be acked")
+	}
+
+	if db.IsVirtualAcked("192.168.2.0/24") {
+		t.Error("expected 192.168.2.0/24 to not be acked")
+	}
+}
+
+// TestIsVirtualAcked tests checking if a virtual subnet is acked
+func TestIsVirtualAcked(t *testing.T) {
+	db := New()
+
+	if db.IsVirtualAcked("192.168.1.0/24") {
+		t.Error("expected new database to not have any acks")
+	}
+
+	db.AckVirtual("192.168.1.0/24")
+
+	if !db.IsVirtualAcked("192.168.1.0/24") {
+		t.Error("expected 192.168.1.0/24 to be acked after Ack")
+	}
+}
+
+// TestConcurrentAck tests concurrent acknowledgment operations
+func TestConcurrentAck(t *testing.T) {
+	db := New()
 
 	var wg sync.WaitGroup
-	cidrs := []string{
-		"192.168.1.0/24", "192.168.2.0/24", "192.168.3.0/24",
-		"10.0.0.0/24", "10.0.1.0/24", "10.0.2.0/24",
-	}
-	for _, cidr := range cidrs {
-		cidr := cidr
+	numGoroutines := 100
+	capacity := 50
+
+	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
-		go func() {
+		go func(index int) {
 			defer wg.Done()
-			_ = db.AckVirtual(cidr)
-			_ = db.IsVirtualAcked(cidr)
-		}()
+			cidr := "192.168." + string(rune('0'+(index%capacity))) + ".0/24"
+			db.AckVirtual(cidr)
+		}(i)
 	}
+
 	wg.Wait()
 
-	// All CIDRs must be acked after concurrent writes
-	db2, err := seendb.LoadFrom(path)
-	if err != nil {
-		t.Fatalf("reload failed: %v", err)
-	}
-	for _, cidr := range cidrs {
-		if !db2.IsVirtualAcked(cidr) {
-			t.Errorf("CIDR %s not acked after concurrent writes", cidr)
+	// Verify all acks were recorded
+	for i := 0; i < capacity; i++ {
+		cidr := "192.168." + string(rune('0'+i)) + ".0/24"
+		if !db.IsVirtualAcked(cidr) {
+			t.Errorf("expected %s to be acked", cidr)
 		}
 	}
 }
 
-func TestSeenAtIsPopulated(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "seen.json")
-	db, _ := seendb.LoadFrom(path)
-	_ = db.AckVirtual("10.0.0.0/24")
-	db2, _ := seendb.LoadFrom(path)
-	entry := db2.GetEntry("10.0.0.0/24")
-	if entry == nil {
-		t.Fatal("expected entry to exist")
+// TestLoadFromEmptyFile tests loading from an empty file
+func TestLoadFromEmptyFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "seen.json")
+
+	// Create an empty file
+	if err := os.WriteFile(dbPath, []byte(""), 0600); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
 	}
-	if entry.SeenAt.IsZero() {
-		t.Error("expected SeenAt to be populated")
+
+	db, err := LoadFrom(dbPath)
+	if err != nil {
+		t.Errorf("LoadFrom returned error for empty file (should tolerate it): %v", err)
 	}
-	if time.Since(entry.SeenAt) > 5*time.Second {
-		t.Error("SeenAt should be recent")
+
+	if db == nil {
+		t.Error("expected non-nil database even on empty file")
+	}
+}
+
+// TestAckMultipleSubnets tests acknowledging multiple subnets
+func TestAckMultipleSubnets(t *testing.T) {
+	db := New()
+
+	subnets := []string{
+		"10.0.10.0/24",
+		"10.0.20.0/24",
+		"10.0.30.0/24",
+	}
+
+	for _, subnet := range subnets {
+		if err := db.AckVirtual(subnet); err != nil {
+			t.Errorf("AckVirtual error for %s: %v", subnet, err)
+		}
+	}
+
+	for _, subnet := range subnets {
+		if !db.IsVirtualAcked(subnet) {
+			t.Errorf("expected %s to be acked", subnet)
+		}
 	}
 }

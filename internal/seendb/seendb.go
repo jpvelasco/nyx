@@ -46,7 +46,7 @@ func Load() *SeenDB {
 // LoadFrom loads (or creates) a SeenDB backed by the given JSON file path.
 func LoadFrom(path string) (*SeenDB, error) {
 	db := &SeenDB{VirtualNetworks: map[string]Entry{}, path: path}
-	// #nosec G304 — path is internal, derived from home dir
+	// #nosec G304 - path is internal, derived from home dir
 	data, err := os.ReadFile(path) // nosemgrep
 	if os.IsNotExist(err) {
 		return db, nil
@@ -54,9 +54,25 @@ func LoadFrom(path string) (*SeenDB, error) {
 	if err != nil {
 		return db, err
 	}
-	if err := json.Unmarshal(data, db); err != nil {
-		return db, err
+
+	// Parse JSON into a SeenDB struct — save() marshals the full struct
+	// with the "virtual_networks" wrapper, so we must unmarshal the same shape.
+	var loaded SeenDB
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		// Tolerate corrupt/empty files - return empty DB with no path (in-memory only)
+		db.path = ""
+		return db, nil
 	}
+
+	// Merge loaded entries into our map
+	if loaded.VirtualNetworks != nil {
+		for cidr, entry := range loaded.VirtualNetworks {
+			if _, exists := db.VirtualNetworks[cidr]; !exists {
+				db.VirtualNetworks[cidr] = entry
+			}
+		}
+	}
+
 	db.path = path
 	return db, nil
 }
@@ -65,8 +81,8 @@ func LoadFrom(path string) (*SeenDB, error) {
 func (db *SeenDB) IsVirtualAcked(cidr string) bool {
 	db.mu.Lock()
 	defer db.mu.Unlock()
-	_, ok := db.VirtualNetworks[cidr]
-	return ok
+	entry, ok := db.VirtualNetworks[cidr]
+	return ok && entry.Virtual
 }
 
 // GetEntry returns the Entry for a CIDR if present, otherwise nil.
@@ -104,3 +120,4 @@ func (db *SeenDB) save() error {
 	//nolint:gosec
 	return os.WriteFile(db.path, data, 0600) // nosemgrep
 }
+

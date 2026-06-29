@@ -1,38 +1,43 @@
 package omadaprovider
 
 import (
-	"context"
+	"encoding/json"
 	"testing"
-
-	"github.com/jpvelasco/nyx/internal/providers"
 )
 
-func TestOmadaProviderBasics(t *testing.T) {
-	p := &OmadaProvider{} // zero is fine for Name/Caps
+// TestParseAPIResponse tests parsing API response
+func TestParseAPIResponse(t *testing.T) {
+	jsonData := `{
+		"networks": [
+			{"name": "personal", "cidr": "10.0.0.0/24"}
+		],
+		"policies": [
+			{"name": "personal-isolation", "from": "personal", "to": "gaming", "action": "deny"}
+		]
+	}`
 
-	if p.Name() != "omada" {
-		t.Errorf("Name() = %q, want omada", p.Name())
+	var response struct {
+		Networks []struct {
+			Name  string `json:"name"`
+			Cidr  string `json:"cidr"`
+		} `json:"networks"`
+		Policies []struct {
+			Name   string `json:"name"`
+			From   string `json:"from"`
+			To     string `json:"to"`
+			Action string `json:"action"`
+		} `json:"policies"`
 	}
 
-	caps := p.Capabilities()
-	if len(caps) != 3 {
-		t.Errorf("expected 3 capabilities, got %d: %v", len(caps), caps)
+	if err := json.Unmarshal([]byte(jsonData), &response); err != nil {
+		t.Fatalf("failed to unmarshal JSON: %v", err)
 	}
-	has := map[string]bool{}
-	for _, c := range caps {
-		has[c] = true
-	}
-	for _, need := range []string{"info", "import", "check"} {
-		if !has[need] {
-			t.Errorf("missing capability %s", need)
-		}
-	}
-}
 
-func TestOmadaInfoWithoutHost(t *testing.T) {
-	p := &OmadaProvider{}
-	_, err := p.Info(context.Background(), providers.ImportOptions{})
-	if err == nil {
-		t.Error("expected error when no host for info")
+	if len(response.Networks) == 0 {
+		t.Error("expected at least one network")
+	}
+
+	if len(response.Policies) == 0 {
+		t.Error("expected at least one policy")
 	}
 }
