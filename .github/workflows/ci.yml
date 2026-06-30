@@ -24,3 +24,17 @@ jobs:
 
       - name: Check (gosec → vet → test → build)
         run: make check
+
+  codacy:
+    name: Codacy Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Run Codacy Analysis CLI
+        uses: codacy/codacy-analysis-cli-action@562ee3e92b8e92df8b67e0a5ff8aa8e261919c08
+        with:
+          max-allowed-issues: 520
