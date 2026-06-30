@@ -314,11 +314,11 @@ func buildLookup(findings []models.CheckResult) map[string]models.CheckResult {
 				key = fmt.Sprintf("%s:%v", key, expect)
 			}
 		case "subnet_discovery":
-			if min, ok := f.Expected["expect_hosts_min"]; ok {
-				key = fmt.Sprintf("%s:%v", key, min)
+			if hostsMin, ok := f.Expected["expect_hosts_min"]; ok {
+				key = fmt.Sprintf("%s:%v", key, hostsMin)
 			}
-			if max, ok := f.Expected["expect_hosts_max"]; ok {
-				key = fmt.Sprintf("%s:%v", key, max)
+			if hostsMax, ok := f.Expected["expect_hosts_max"]; ok {
+				key = fmt.Sprintf("%s:%v", key, hostsMax)
 			}
 		}
 		lookup[key] = f

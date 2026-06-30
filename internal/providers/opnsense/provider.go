@@ -213,7 +213,7 @@ func (o *Provider) Check(ctx context.Context, opts providers.ImportOptions) (*pr
 }
 
 // CheckACL is not yet implemented for OPNsense.
-func (o *Provider) CheckACL(ctx context.Context, req providers.ACLCheckRequest, opts providers.ImportOptions) (*models.CheckResult, error) {
+func (o *Provider) CheckACL(_ context.Context, req providers.ACLCheckRequest, _ providers.ImportOptions) (*models.CheckResult, error) {
 	result := models.NewCheckResult("opnsense", "acl_check", "opnsense", req.PolicyName)
 	result.Status = models.StatusError
 	result.Summary = "CheckACL is not yet implemented for the OPNsense provider"

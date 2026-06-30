@@ -1,6 +1,7 @@
 package seendb
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -59,19 +60,19 @@ func TestLoadFromCorruptFile(t *testing.T) {
 	}
 
 	db, err := LoadFrom(dbPath)
-	if err == nil {
-		// LoadFrom tolerates corrupt files per design
+	if err != nil {
+		t.Fatalf("LoadFrom returned unexpected error for corrupt file: %v", err)
 	}
-
-	// Should return in-memory-only DB on error (errors are tolerated per design)
 	if db == nil {
-		t.Error("expected non-nil database even on corrupt file")
+		t.Fatal("expected non-nil database even on corrupt file")
 	}
 
-	// Should not crash, just use empty DB
-	db.AckVirtual("192.168.1.0/24")
+	// Should return in-memory-only DB (path cleared on corrupt file)
+	if err := db.AckVirtual("192.168.1.0/24"); err != nil {
+		t.Errorf("AckVirtual failed: %v", err)
+	}
 	if !db.IsVirtualAcked("192.168.1.0/24") {
-		t.Error("expected ack to work on corrupt file")
+		t.Error("expected ack to be recorded after AckVirtual")
 	}
 }
 
@@ -123,7 +124,7 @@ func TestConcurrentAck(t *testing.T) {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			cidr := "192.168." + string(rune('0'+(index%capacity))) + ".0/24"
+			cidr := fmt.Sprintf("192.168.%d.0/24", index%capacity)
 			db.AckVirtual(cidr)
 		}(i)
 	}
@@ -132,7 +133,7 @@ func TestConcurrentAck(t *testing.T) {
 
 	// Verify all acks were recorded
 	for i := 0; i < capacity; i++ {
-		cidr := "192.168." + string(rune('0'+i)) + ".0/24"
+		cidr := fmt.Sprintf("192.168.%d.0/24", i)
 		if !db.IsVirtualAcked(cidr) {
 			t.Errorf("expected %s to be acked", cidr)
 		}

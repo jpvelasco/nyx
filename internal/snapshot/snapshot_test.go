@@ -1,9 +1,10 @@
 package snapshot
 
 import (
-	"github.com/jpvelasco/nyx/internal/models"
-	"time"
 	"testing"
+	"time"
+
+	"github.com/jpvelasco/nyx/internal/models"
 )
 
 // TestNewSnapshot tests creating a new snapshot

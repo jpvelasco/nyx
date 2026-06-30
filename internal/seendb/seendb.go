@@ -64,12 +64,10 @@ func LoadFrom(path string) (*SeenDB, error) {
 		return db, nil
 	}
 
-	// Merge loaded entries into our map
+	// Copy loaded entries into our map
 	if loaded.VirtualNetworks != nil {
 		for cidr, entry := range loaded.VirtualNetworks {
-			if _, exists := db.VirtualNetworks[cidr]; !exists {
-				db.VirtualNetworks[cidr] = entry
-			}
+			db.VirtualNetworks[cidr] = entry
 		}
 	}
 
