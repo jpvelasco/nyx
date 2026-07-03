@@ -42,11 +42,10 @@ func (n Network) CIDR() string {
 	if n.GatewaySubnet == "" {
 		return ""
 	}
-	ip, ipnet, err := net.ParseCIDR(n.GatewaySubnet)
+	_, ipnet, err := net.ParseCIDR(n.GatewaySubnet)
 	if err != nil {
 		return ""
 	}
-	_ = ip
 	return ipnet.String()
 }
 

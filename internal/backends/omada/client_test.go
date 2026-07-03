@@ -2,6 +2,65 @@ package omada
 
 import "testing"
 
+func TestSiteEffectiveID(t *testing.T) {
+	cases := []struct {
+		name string
+		site Site
+		want string
+	}{
+		{"id populated", Site{ID: "abc123", SiteID: "old456"}, "abc123"},
+		{"fallback to siteId", Site{SiteID: "fallback789"}, "fallback789"},
+		{"both empty", Site{}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.site.EffectiveID(); got != tc.want {
+				t.Errorf("EffectiveID() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNetworkCIDR(t *testing.T) {
+	cases := []struct {
+		name string
+		n    Network
+		want string
+	}{
+		{"standard subnet", Network{GatewaySubnet: "10.0.10.1/24"}, "10.0.10.0/24"},
+		{"empty gateway", Network{}, ""},
+		{"invalid cidr", Network{GatewaySubnet: "not-a-cidr"}, ""},
+		{"host route", Network{GatewaySubnet: "192.168.1.1/32"}, "192.168.1.1/32"},
+		{"wide subnet", Network{GatewaySubnet: "10.1.0.0/16"}, "10.1.0.0/16"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.n.CIDR(); got != tc.want {
+				t.Errorf("CIDR() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNetworkGateway(t *testing.T) {
+	cases := []struct {
+		name string
+		n    Network
+		want string
+	}{
+		{"standard", Network{GatewaySubnet: "10.0.10.1/24"}, "10.0.10.1"},
+		{"empty", Network{}, ""},
+		{"no prefix", Network{GatewaySubnet: "192.168.1.1"}, "192.168.1.1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.n.Gateway(); got != tc.want {
+				t.Errorf("Gateway() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestIsVersionSupported(t *testing.T) {
 	cases := []struct {
 		name string
