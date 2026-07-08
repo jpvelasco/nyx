@@ -4,17 +4,22 @@
 
 ```bash
 make build          # go build -o nyx ./cmd/nyx/
-make test           # go test ./...
+make test           # go test ./... (fast, no coverage — dev iteration)
+make coverage       # go test -coverprofile=coverage.out (with coverage)
 make vet            # go vet ./...
+make gosec          # run gosec static analysis
+make check          # full CI suite: gosec → vet → coverage → build
 make lint           # golangci-lint run ./...
 make release        # cross-compile linux/darwin/windows (amd64+arm64)
 ```
 
-CI order: `go vet ./...` → `go test ./...` → `go build`. `golangci-lint` is available locally but **not** in CI — use `make lint` for deeper checks.
+CI runs `make check` (gosec → vet → coverage → build). `golangci-lint` is available locally but **not** in CI — use `make lint` for deeper checks.
 
 ### Release flow
 
-Release workflow (`.github/workflows/release.yml`) runs `make vet && make test` then `make release VERSION=X.Y.Z`. Tag `vX.Y.Z` or use `workflow_dispatch` with the version input. The workflow builds all 6 binaries, generates SHA-256 checksums, extracts release notes from `CHANGELOG.md`, and creates the GitHub Release with attached artifacts.
+Release workflow (`.github/workflows/release.yml`) runs `make check` then GoReleaser. Tag `vX.Y.Z` or use `workflow_dispatch` with the version input. The workflow builds all 6 binaries, generates SHA-256 checksums, extracts release notes from `CHANGELOG.md`, and creates the GitHub Release with attached artifacts.
+
+Coverage data is uploaded to Codecov via OIDC (no token) after `make check` in CI.
 
 See CLAUDE.md under "Codacy CLI" for Codacy tool details (WSL2, config reset, etc.).
 

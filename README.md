@@ -327,9 +327,11 @@ nyx/
 
 ```bash
 make build    # Build binary
-make test     # Run tests
+make test     # Run tests (fast, no coverage)
+make coverage # Run tests with coverage output
+make check    # Full CI suite: gosec → vet → coverage → build
 make vet      # Run go vet
-make clean    # Remove built binaries
+make clean    # Remove built binaries and coverage.out
 make release  # Cross-compile for all platforms
 ```
 
