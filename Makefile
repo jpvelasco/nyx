@@ -1,4 +1,4 @@
-.PHONY: build test vet clean release lint gosec check
+.PHONY: build test coverage vet clean release lint gosec check
 
 BINARY = nyx
 
@@ -8,16 +8,19 @@ build:
 test:
 	go test ./...
 
+coverage:
+	go test -coverprofile=coverage.out -covermode=atomic ./...
+
 vet:
 	go vet ./...
 
 gosec:
 	go run github.com/securego/gosec/v2/cmd/gosec@latest ./...
 
-check: gosec vet test build
+check: gosec vet coverage build
 
 clean:
-	rm -f $(BINARY) nyx-* nyx.exe
+	rm -f $(BINARY) nyx-* nyx.exe coverage.out
 
 lint:
 	golangci-lint run ./...
