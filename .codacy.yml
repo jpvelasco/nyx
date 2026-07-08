@@ -4,6 +4,9 @@ engines:
     enabled: true
   staticcheck:
     enabled: true
+plugin_analysis:
+  trivy:
+    enabled: false
 exclude_paths:
   - npm/scripts/install.js
   - npm/install.js
