@@ -19,7 +19,7 @@ func TestRenderJSON_AllPass(t *testing.T) {
 	report := &models.AuditReport{
 		Audit: "homelab", Status: models.StatusPass,
 		Summary: models.ReportSummary{Pass: 3, Fail: 0, Warn: 0, Error: 0, Skip: 0},
-		Runner: models.RunnerContext{LocalIPs: []string{"192.168.1.5"}, Networks: []string{"lan"}},
+		Runner:  models.RunnerContext{LocalIPs: []string{"192.168.1.5"}, Networks: []string{"lan"}},
 		Findings: []models.CheckResult{
 			{CheckType: "subnet_discovery", Target: "lan", Status: models.StatusPass, Summary: "5 hosts found"},
 			{CheckType: "dns_check", Target: "ns1", Status: models.StatusPass, Summary: "resolved ok"},
@@ -160,7 +160,7 @@ func TestRenderJSON_AllStatuses(t *testing.T) {
 func TestRenderJSON_WithRecommendations(t *testing.T) {
 	var buf bytes.Buffer
 	report := &models.AuditReport{
-		Audit:  "lab", Status: models.StatusWarn,
+		Audit: "lab", Status: models.StatusWarn,
 		Findings: []models.CheckResult{{CheckType: "subnet_discovery", Status: models.StatusWarn}},
 		Recommendations: []models.Recommendation{
 			{Priority: 1, Category: "vantage_point", Title: "Wrong vantage point",
@@ -494,9 +494,9 @@ func TestRenderResultJSON_WithViolations(t *testing.T) {
 	var buf bytes.Buffer
 	result := &models.CheckResult{
 		Tool: "nmap", CheckType: "isolation", Status: models.StatusFail,
-		Summary: "isolation violation",
+		Summary:    "isolation violation",
 		Violations: []string{"expected deny, got reachable"},
-		Evidence: []string{"ping 10.0.1.1: 64 bytes"},
+		Evidence:   []string{"ping 10.0.1.1: 64 bytes"},
 	}
 	err := RenderResultJSON(&buf, result)
 	if err != nil {
@@ -555,7 +555,7 @@ func TestRenderResultHuman_WithViolations(t *testing.T) {
 	var buf bytes.Buffer
 	result := &models.CheckResult{
 		Tool: "nmap", CheckType: "port_check", Status: models.StatusFail,
-		Summary: "port 443 not open",
+		Summary:    "port 443 not open",
 		Violations: []string{"port 443: expected open, got closed"},
 	}
 	RenderResultHuman(&buf, result)
@@ -573,7 +573,7 @@ func TestRenderResultHuman_WithEvidence(t *testing.T) {
 	var buf bytes.Buffer
 	result := &models.CheckResult{
 		Tool: "dig", CheckType: "dns_check", Status: models.StatusPass,
-		Summary: "resolved ok",
+		Summary:  "resolved ok",
 		Evidence: []string{"nslookup: example.com -> 93.184.216.34"},
 	}
 	RenderResultHuman(&buf, result)
@@ -846,7 +846,7 @@ func TestRenderHuman_ComplexReport(t *testing.T) {
 			{
 				CheckType: "isolation", Status: models.StatusFail, Summary: "guest can reach corporate",
 				Violations: []string{"expected deny, got reachable"},
-				Evidence: []string{"ping 192.168.1.1: 64 bytes reply"},
+				Evidence:   []string{"ping 192.168.1.1: 64 bytes reply"},
 			},
 			{
 				CheckType: "dns_check", Status: models.StatusWarn, Summary: "slow DNS response",

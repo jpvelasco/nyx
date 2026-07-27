@@ -13,25 +13,15 @@ linters:
     - staticcheck
     - unused
     - misspell
-  fast: false
 
 formatters:
   enable:
     - gofmt
-  fast: false
 
 issues:
-  exclude-dirs:
-    - examples
-    - testdata
-    - specs
-  exclude-rules:
-    # Documented intentional for homelab (no real security boundary)
-    - path: 'internal/probe/probe.go'
-      linters:
-        - gosec
-    - path: 'internal/backends/omada/.*\.go'
-      linters:
-        - gosec
   max-issues-per-linter: 0
   max-same-issues: 0
+
+output:
+  sort-order: ["file"]
+

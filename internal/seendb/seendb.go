@@ -118,4 +118,3 @@ func (db *SeenDB) save() error {
 	//nolint:gosec
 	return os.WriteFile(db.path, data, 0600) // nosemgrep
 }
-

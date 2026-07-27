@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-func ptrInt(v int) *int {
-	return &v
-}
-
 // --- ParseSpec ---
 
 func TestParseSpec_Valid(t *testing.T) {

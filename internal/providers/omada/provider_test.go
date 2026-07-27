@@ -18,8 +18,8 @@ func TestParseAPIResponse(t *testing.T) {
 
 	var response struct {
 		Networks []struct {
-			Name  string `json:"name"`
-			Cidr  string `json:"cidr"`
+			Name string `json:"name"`
+			Cidr string `json:"cidr"`
 		} `json:"networks"`
 		Policies []struct {
 			Name   string `json:"name"`

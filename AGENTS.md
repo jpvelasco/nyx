@@ -13,13 +13,13 @@ make lint           # golangci-lint run ./...
 make release        # cross-compile linux/darwin/windows (amd64+arm64)
 ```
 
-CI runs `make check` (gosec → vet → coverage → build). `golangci-lint` is available locally but **not** in CI — use `make lint` for deeper checks.
+CI runs a matrix of jobs: `lint` (golangci-lint v2), `vuln` (govulncheck, informational), `build` (3-OS matrix on push, 2-OS on PR), `test` (race + coverage + Codecov upload), `goreleaser` (snapshot build + smoke test), `lint-windows`, `gosec`, and `trivy`. A separate `codacy-coverage.yml` workflow uploads coverage to Codacy via trusted handoff. CodeQL and Socket run on push/PR.
 
 ### Release flow
 
-Release workflow (`.github/workflows/release.yml`) runs `make check` then GoReleaser. Tag `vX.Y.Z` or use `workflow_dispatch` with the version input. The workflow builds all 6 binaries, generates SHA-256 checksums, extracts release notes from `CHANGELOG.md`, and creates the GitHub Release with attached artifacts.
+Release workflow (`.github/workflows/release.yml`) runs GoReleaser. Tag `vX.Y.Z` or use `workflow_dispatch` with the version input. The workflow builds all 6 binaries, generates SHA-256 checksums, extracts release notes from `CHANGELOG.md`, and creates the GitHub Release with attached artifacts.
 
-Coverage data is uploaded to Codecov via OIDC (no token) after `make check` in CI.
+Coverage data is uploaded to Codecov via OIDC (no token) after tests in CI.
 
 See CLAUDE.md under "Codacy CLI" for Codacy tool details (WSL2, config reset, etc.).
 

@@ -59,8 +59,8 @@ func TestParseIsolationTarget(t *testing.T) {
 		name     string
 		input    string
 		expected struct {
-			from   string
-			to     string
+			from string
+			to   string
 		}
 	}{
 		{"valid_from_to", "personal -> gaming", struct{ from, to string }{from: "personal", to: "gaming"}},
@@ -88,8 +88,8 @@ func TestParseIsolationFromSummary(t *testing.T) {
 		name     string
 		input    string
 		expected struct {
-			from   string
-			to     string
+			from string
+			to   string
 		}
 	}{
 		{"valid_summary", "isolation violation: personal can reach gaming", struct{ from, to string }{from: "personal", to: "gaming"}},

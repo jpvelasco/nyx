@@ -1030,7 +1030,7 @@ func TestRecommendDNSFailure_WithObservedIP(t *testing.T) {
 		failures: []models.CheckResult{
 			{
 				CheckType: "dns_check", Target: "nas.home.lan", Status: models.StatusFail,
-				Summary: "resolved to wrong IP",
+				Summary:  "resolved to wrong IP",
 				Observed: map[string]interface{}{"resolved_ip": "10.0.0.5"},
 				Expected: map[string]interface{}{"expect_ip": "10.0.0.10"},
 			},
@@ -1081,7 +1081,7 @@ func TestRecommendServiceDown_WithObservedPorts(t *testing.T) {
 		failures: []models.CheckResult{
 			{
 				CheckType: "port_check", Target: "10.0.50.55", Status: models.StatusFail,
-				Summary: "port check failed",
+				Summary:  "port check failed",
 				Observed: map[string]interface{}{"ports": "8096 closed"},
 			},
 		},
@@ -1131,7 +1131,7 @@ func TestRecommendNetworkDegraded_WithObservedValues(t *testing.T) {
 		failures: []models.CheckResult{
 			{
 				CheckType: "network_health", Target: "10.0.20.254", Status: models.StatusFail,
-				Summary: "latency and loss",
+				Summary:  "latency and loss",
 				Observed: map[string]interface{}{"latency_ms": 500, "loss_pct": 15},
 				Expected: map[string]interface{}{"expect_latency_ms": 100, "expect_loss_pct": 5},
 			},
@@ -1458,10 +1458,10 @@ func TestVantagePoint_MixedFailureTypes(t *testing.T) {
 
 func TestParseIsolationFromSummary_AdditionalPatterns(t *testing.T) {
 	tests := []struct {
-		name string
-		input string
+		name     string
+		input    string
 		wantFrom string
-		wantTo string
+		wantTo   string
 	}{
 		{"isolation confirmed", "isolation confirmed: iot can reach lan", "iot", "lan"},
 		{"connectivity confirmed", "connectivity confirmed: a can reach b", "a", "b"},
@@ -1484,9 +1484,9 @@ func TestParseIsolationFromSummary_AdditionalPatterns(t *testing.T) {
 
 func TestParseIsolationTarget_EdgeCases(t *testing.T) {
 	tests := []struct {
-		input string
+		input    string
 		wantFrom string
-		wantTo string
+		wantTo   string
 	}{
 		{"personal -> gaming", "personal", "gaming"},
 		{"a->b", "", ""},

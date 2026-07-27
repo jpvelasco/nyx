@@ -821,13 +821,13 @@ func TestRunPingCancelled(t *testing.T) {
 
 func TestPingStatsJSON(t *testing.T) {
 	stats := &PingStats{
-		Target:     "10.0.0.1",
-		Sent:       10,
-		Received:   8,
-		LossPct:    20.0,
-		AvgRTTMs:   1.5,
-		MinRTTMs:   0.5,
-		MaxRTTMs:   3.0,
+		Target:   "10.0.0.1",
+		Sent:     10,
+		Received: 8,
+		LossPct:  20.0,
+		AvgRTTMs: 1.5,
+		MinRTTMs: 0.5,
+		MaxRTTMs: 3.0,
 	}
 	data, err := json.Marshal(stats)
 	if err != nil {

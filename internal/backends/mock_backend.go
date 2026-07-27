@@ -15,10 +15,11 @@ import (
 // Set the fields before assigning to Engine.Backend.
 type MockBackend struct {
 	// --- Nmap ---
-	DiscoverResult *models.CheckResult
-	DiscoverErr    error
-	PortScanResult *models.CheckResult
-	PortScanErr    error
+	DiscoverResult     *models.CheckResult
+	DiscoverResultFunc func(cidr string) *models.CheckResult
+	DiscoverErr        error
+	PortScanResult     *models.CheckResult
+	PortScanErr        error
 
 	// --- System ---
 	PingResult         *system.PingResult
@@ -31,22 +32,22 @@ type MockBackend struct {
 	VPNInterfaceErr    error
 
 	// --- DNS ---
-	ResolveResult      *models.CheckResult
-	ResolveErr         error
+	ResolveResult       *models.CheckResult
+	ResolveErr          error
 	ResolveExpectResult *models.CheckResult
-	ResolveExpectErr   error
-	DNSSECResult       *models.CheckResult
-	DNSSECErr          error
-	DigAvailableResult bool
+	ResolveExpectErr    error
+	DNSSECResult        *models.CheckResult
+	DNSSECErr           error
+	DigAvailableResult  bool
 
 	// --- Health ---
-	PingCheckResult  *models.CheckResult
-	PingCheckStats   *health.PingStats
-	PingCheckErr     error
-	LatencyResult    *models.CheckResult
-	LatencyErr       error
-	MTUResult        *models.CheckResult
-	MTUErr           error
+	PingCheckResult *models.CheckResult
+	PingCheckStats  *health.PingStats
+	PingCheckErr    error
+	LatencyResult   *models.CheckResult
+	LatencyErr      error
+	MTUResult       *models.CheckResult
+	MTUErr          error
 
 	// --- Omada ---
 	OmadaClient *omada.Client
@@ -63,7 +64,10 @@ var _ Backend = (*MockBackend)(nil)
 // --- Nmap ---
 
 // Discover returns the pre-configured discovery result.
-func (m *MockBackend) Discover(_ context.Context, _ string, _ nmap.ScanOptions) (*models.CheckResult, error) {
+func (m *MockBackend) Discover(_ context.Context, cidr string, _ nmap.ScanOptions) (*models.CheckResult, error) {
+	if m.DiscoverResultFunc != nil {
+		return m.DiscoverResultFunc(cidr), m.DiscoverErr
+	}
 	return m.DiscoverResult, m.DiscoverErr
 }
 

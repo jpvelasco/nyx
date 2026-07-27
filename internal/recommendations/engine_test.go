@@ -90,16 +90,16 @@ func TestGenerateRecommendations_ACLNotEnforced(t *testing.T) {
 func TestGenerateRecommendations_NetworkUnreachable(t *testing.T) {
 	failures := []models.CheckResult{
 		{
-			CheckType:  "subnet_discovery",
-			Target:     "media",
-			Status:     models.StatusError,
-			Summary:    "subnet_discovery timed out",
+			CheckType: "subnet_discovery",
+			Target:    "media",
+			Status:    models.StatusError,
+			Summary:   "subnet_discovery timed out",
 		},
 		{
-			CheckType:  "dns_check",
-			Target:     "nas.home.example",
-			Status:     models.StatusError,
-			Summary:    "failed to resolve nas.home.example",
+			CheckType: "dns_check",
+			Target:    "nas.home.example",
+			Status:    models.StatusError,
+			Summary:   "failed to resolve nas.home.example",
 		},
 	}
 
@@ -343,10 +343,10 @@ func TestGenerateRecommendations_EmptyOrAllPass(t *testing.T) {
 func TestGenerateRecommendations_NetworkUnreachable_SingleNetwork(t *testing.T) {
 	failures := []models.CheckResult{
 		{
-			CheckType:  "subnet_discovery",
-			Target:     "personal",
-			Status:     models.StatusError,
-			Summary:    "subnet_discovery timed out",
+			CheckType: "subnet_discovery",
+			Target:    "personal",
+			Status:    models.StatusError,
+			Summary:   "subnet_discovery timed out",
 		},
 	}
 
@@ -374,16 +374,16 @@ func TestGenerateRecommendations_NetworkUnreachable_SingleNetwork(t *testing.T) 
 func TestGenerateRecommendations_NetworkUnreachable_MultipleNetworks(t *testing.T) {
 	failures := []models.CheckResult{
 		{
-			CheckType:  "subnet_discovery",
-			Target:     "personal",
-			Status:     models.StatusError,
-			Summary:    "subnet_discovery timed out",
+			CheckType: "subnet_discovery",
+			Target:    "personal",
+			Status:    models.StatusError,
+			Summary:   "subnet_discovery timed out",
 		},
 		{
-			CheckType:  "subnet_discovery",
-			Target:     "gaming",
-			Status:     models.StatusError,
-			Summary:    "subnet_discovery timed out",
+			CheckType: "subnet_discovery",
+			Target:    "gaming",
+			Status:    models.StatusError,
+			Summary:   "subnet_discovery timed out",
 		},
 	}
 
@@ -411,10 +411,10 @@ func TestGenerateRecommendations_NetworkUnreachable_MultipleNetworks(t *testing.
 func TestGenerateRecommendations_DNSFailure_NoIP(t *testing.T) {
 	failures := []models.CheckResult{
 		{
-			CheckType:  "dns_check",
-			Target:     "nas.home.example",
-			Status:     models.StatusFail,
-			Summary:    "failed to resolve nas.home.example",
+			CheckType: "dns_check",
+			Target:    "nas.home.example",
+			Status:    models.StatusFail,
+			Summary:   "failed to resolve nas.home.example",
 		},
 	}
 

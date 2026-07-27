@@ -736,15 +736,15 @@ func TestComputeDrift_NoChange(t *testing.T) {
 	}
 
 	base := &Snapshot{
-		RunAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-		Status:  models.StatusPass,
-		Summary: models.ReportSummary{Pass: 1, Fail: 0, Warn: 0},
+		RunAt:    time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Status:   models.StatusPass,
+		Summary:  models.ReportSummary{Pass: 1, Fail: 0, Warn: 0},
 		Findings: []models.CheckResult{finding},
 	}
 	current := &Snapshot{
-		RunAt:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
-		Status:  models.StatusPass,
-		Summary: models.ReportSummary{Pass: 1, Fail: 0, Warn: 0},
+		RunAt:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Status:   models.StatusPass,
+		Summary:  models.ReportSummary{Pass: 1, Fail: 0, Warn: 0},
 		Findings: []models.CheckResult{finding},
 	}
 
@@ -913,9 +913,9 @@ func TestComputeDrift_GoneEntirely(t *testing.T) {
 		},
 	}
 	current := &Snapshot{
-		RunAt:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
-		Status:  models.StatusPass,
-		Summary: models.ReportSummary{Pass: 0, Fail: 0},
+		RunAt:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Status:   models.StatusPass,
+		Summary:  models.ReportSummary{Pass: 0, Fail: 0},
 		Findings: []models.CheckResult{},
 	}
 
@@ -930,15 +930,15 @@ func TestComputeDrift_GoneEntirely(t *testing.T) {
 
 func TestComputeDrift_EmptySnapshots(t *testing.T) {
 	base := &Snapshot{
-		RunAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-		Status:  models.StatusPass,
-		Summary: models.ReportSummary{},
+		RunAt:    time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Status:   models.StatusPass,
+		Summary:  models.ReportSummary{},
 		Findings: []models.CheckResult{},
 	}
 	current := &Snapshot{
-		RunAt:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
-		Status:  models.StatusPass,
-		Summary: models.ReportSummary{},
+		RunAt:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Status:   models.StatusPass,
+		Summary:  models.ReportSummary{},
 		Findings: []models.CheckResult{},
 	}
 
@@ -953,15 +953,15 @@ func TestComputeDrift_EmptySnapshots(t *testing.T) {
 
 func TestComputeDrift_SummaryFields(t *testing.T) {
 	base := &Snapshot{
-		RunAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-		Status:  models.StatusFail,
-		Summary: models.ReportSummary{Pass: 10, Fail: 3, Warn: 2, Error: 1},
+		RunAt:    time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Status:   models.StatusFail,
+		Summary:  models.ReportSummary{Pass: 10, Fail: 3, Warn: 2, Error: 1},
 		Findings: []models.CheckResult{},
 	}
 	current := &Snapshot{
-		RunAt:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
-		Status:  models.StatusWarn,
-		Summary: models.ReportSummary{Pass: 12, Fail: 1, Warn: 3, Error: 0},
+		RunAt:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Status:   models.StatusWarn,
+		Summary:  models.ReportSummary{Pass: 12, Fail: 1, Warn: 3, Error: 0},
 		Findings: []models.CheckResult{},
 	}
 

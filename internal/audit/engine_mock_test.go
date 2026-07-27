@@ -6,7 +6,7 @@ import (
 
 	"github.com/jpvelasco/nyx/internal/backends"
 	"github.com/jpvelasco/nyx/internal/backends/health"
-	
+
 	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
@@ -19,19 +19,6 @@ func mockDiscoverResult(hostCount int, cidr string) *models.CheckResult {
 	r.Status = models.StatusPass
 	r.Observed = map[string]interface{}{
 		"total": hostCount,
-		"hosts": []interface{}{},
-	}
-	r.Summary = cidr
-	r.Evidence = []string{"mock output"}
-	r.Finish()
-	return r
-}
-
-func mockDiscoverWarnResult(cidr string) *models.CheckResult {
-	r := models.NewCheckResult("nmap", "subnet_discovery", "nmap", cidr)
-	r.Status = models.StatusWarn
-	r.Observed = map[string]interface{}{
-		"total": 0,
 		"hosts": []interface{}{},
 	}
 	r.Summary = cidr
@@ -106,10 +93,19 @@ func TestEngine_RunPreservesAssertionOrder(t *testing.T) {
 	}
 
 	mock := &backends.MockBackend{
-		DiscoverResult: mockDiscoverResult(1, "10.0.0.0/24"),
+		// Return a fresh result per call so concurrent goroutines don't race on the same pointer.
+		DiscoverResultFunc: func(cidr string) *models.CheckResult {
+			r := models.NewCheckResult("nmap", "subnet_discovery", "nmap", cidr)
+			r.Status = models.StatusPass
+			r.Observed = map[string]interface{}{"total": 1, "hosts": []interface{}{}}
+			r.Summary = cidr
+			r.Finish()
+			return r
+		},
 	}
 
 	eng := NewEngine(spec)
+	eng.Interface = "eth0" // pin interface to avoid CI runner ambiguity
 	eng.Backend = mock
 	report, err := eng.Run(context.Background())
 	if err != nil {
@@ -623,7 +619,7 @@ func TestRunNetworkHealth_MTUFail(t *testing.T) {
 func TestRunVPNRoute_ViaTunnel(t *testing.T) {
 	spec := &intent.Spec{
 		Version: 1, Site: "test",
-		VPN: []intent.VPNConfig{{Name: "work", Type: "wireguard", Interface: "wg0"}},
+		VPN:        []intent.VPNConfig{{Name: "work", Type: "wireguard", Interface: "wg0"}},
 		Assertions: []intent.Assertion{{Type: "vpn_route", VPN: "work", Target: "10.0.0.1", ExpectTunnel: ptrBool(true)}},
 	}
 	mock := &backends.MockBackend{
@@ -643,7 +639,7 @@ func TestRunVPNRoute_ViaTunnel(t *testing.T) {
 func TestRunVPNRoute_NotViaTunnel(t *testing.T) {
 	spec := &intent.Spec{
 		Version: 1, Site: "test",
-		VPN: []intent.VPNConfig{{Name: "work", Type: "wireguard", Interface: "wg0"}},
+		VPN:        []intent.VPNConfig{{Name: "work", Type: "wireguard", Interface: "wg0"}},
 		Assertions: []intent.Assertion{{Type: "vpn_route", VPN: "work", Target: "10.0.0.1", ExpectTunnel: ptrBool(true)}},
 	}
 	mock := &backends.MockBackend{
@@ -737,11 +733,11 @@ func TestRunAssertion_DispatchAllTypes(t *testing.T) {
 	}
 
 	mock := &backends.MockBackend{
-		DiscoverResult:      mockDiscoverResult(5, "10.0.0.0/24"),
-		PingResult:          &system.PingResult{Reachable: true},
-		RouteResult:         &system.Route{Device: "eth0", Gateway: "10.0.0.1"},
-		ResolveResult:       makePassResult("dns", "dns_check"),
-		PingCheckResult:     makePassResult("ping", "network_health"),
+		DiscoverResult:  mockDiscoverResult(5, "10.0.0.0/24"),
+		PingResult:      &system.PingResult{Reachable: true},
+		RouteResult:     &system.Route{Device: "eth0", Gateway: "10.0.0.1"},
+		ResolveResult:   makePassResult("dns", "dns_check"),
+		PingCheckResult: makePassResult("ping", "network_health"),
 	}
 	eng := NewEngine(spec)
 	eng.Backend = mock
