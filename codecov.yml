@@ -1,18 +1,48 @@
-codecov:
-  require_ci_to_pass: true
-
+# Codecov configuration. See https://docs.codecov.com/docs/codecov-yaml
+#
+# Coverage is uploaded from the Linux leg of the test matrix via OIDC,
+# so platform-specific code (Windows PowerShell paths) is counted.
+# Both gates block PRs:
+#   - project: overall coverage must stay at 80% or above
+#   - patch:   new/changed lines in a PR must meet the target coverage
 coverage:
   status:
+
     project:
       default:
-        target: 60%
-        threshold: 5%
+        target: 80%         # hard floor - blocks merge if below
+        threshold: 0%       # zero tolerance - any drop below 80% fails
     patch:
-      default:
-        target: 80%
-        threshold: 10%
 
+      default:
+        target: 80%         # new/changed lines must be >=80% covered
+
+# Virtual coverage groupings by path - no upload changes required.
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: auto
+        threshold: 1%
+
+  individual_components:
+    - component_id: cmd
+      name: cmd (CLI layer)
+      paths:
+        - cmd/**
+    - component_id: internal
+      name: internal (core packages)
+      paths:
+        - internal/**
+
+comment:
+  layout: "reach, diff, files"
+  behavior: default
+  require_changes: false
+
+# Paths excluded from coverage math.
 ignore:
-  - "cmd/**"
   - "**/*_test.go"
-  - "**/mock_*.go"
+  - "main.go"          # thin entry point
+  - "npm/**"           # JS shim, not part of Go coverage
+  - "scripts/**"
