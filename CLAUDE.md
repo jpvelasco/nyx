@@ -1,4 +1,6 @@
-# Claude Code Guidance
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Tools
 Document available tools, application programming interfaces (APIs), and usage patterns here or in TOOLS.md, including the Codacy command-line interface (CLI), GitHub CLI, and **MCP (Model Context Protocol)** integrations.
@@ -83,15 +85,17 @@ For uploading SARIF or other advanced flows, see the bundled README (upload, con
 
 **History note:** Earlier manual runs of `config reset` + small follow-up PRs (#27, #28) were used to pull the current rule set and make the npm shim produce fewer false positives under the generated eslint/pmd configs while preserving the semgrep `nosemgrep` annotations. All checks (including Codacy's own "Static Code Analysis" and the various Analyze jobs) were green before the squash merges.
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Build & Test
 
 ```bash
 make build        # go build -o nyx ./cmd/nyx/
-make test         # go test ./...
+make test         # go test ./... (fast, no coverage — dev iteration)
+make coverage     # go test -coverprofile=coverage.out -covermode=atomic ./...
 make vet          # go vet ./...
-make clean        # remove built binaries
+make gosec        # run gosec static analysis
+make check        # full CI suite: gosec → vet → coverage → build
+make lint         # golangci-lint run ./...
+make clean        # remove built binaries and coverage.out
 make release      # cross-compile linux/darwin/windows (amd64+arm64)
 
 # Run a single test package
@@ -103,7 +107,13 @@ go test -run TestParseSpec ./internal/intent/...
 go test -run TestDiscoveryWarnPreserved ./internal/audit/...
 ```
 
-CI runs `go vet ./...` → `go test ./...` → `go build` on every push to main and all PRs.
+CI (`.github/workflows/ci.yml`) runs a matrix of jobs on push to `main` and PRs: `lint` (golangci-lint v2), `vuln` (govulncheck, informational — `continue-on-error`), `build` (3-OS matrix on push, 2-OS on PR), `test` (race + coverage + Codecov upload via OIDC, JUnit XML via gotestsum on Linux for Codecov Test Analytics), `goreleaser` (snapshot build + smoke test + npm shim tests), `lint-windows`, `gosec`, `trivy` (filesystem scan, fails on CRITICAL/HIGH), and `codacy-analysis` (push-to-main only, since PR-level Codacy checks come from the GitHub webhook integration). Separate workflows: `codacy-coverage.yml` (uploads the `test` job's coverage artifact to Codacy via `workflow_run`), `socket.yml` (dependency security on PRs), `octopus.yml` (PR review bot), `release.yml` (GoReleaser on `v*` tags).
+
+`.golangci.yml` enables only `govet`, `ineffassign`, `staticcheck`, `unused`, `misspell` (+ `gofmt` formatter) — revive is intentionally disabled to avoid pre-existing style churn.
+
+### Release flow
+
+`.github/workflows/release.yml` runs GoReleaser. Tag `vX.Y.Z` or use `workflow_dispatch` with a version input. Builds all 6 binaries (linux/darwin/windows × amd64/arm64), generates SHA-256 checksums, extracts release notes from `CHANGELOG.md`, and creates the GitHub Release with attached artifacts. The npm package (`nyx-audit-cli`) is a thin platform-aware wrapper (`npm/`) that downloads the matching prebuilt binary from the GitHub Release on `postinstall`.
 
 ## Architecture
 
@@ -113,56 +123,62 @@ nyx is a CLI tool that validates live network behavior against a declared YAML i
 YAML spec → intent.LoadSpec → audit.Engine.Run → []CheckResult → report.Render
 ```
 
+`cmd/nyx/main.go` calls `cli.Execute()`. If it returns an error, `os.Exit(2)`. Exit code 1 is set inside the audit command when status is `StatusFail`.
+
 **Key packages:**
 
-- `internal/intent` — YAML spec types and validation. `LoadSpec`/`ParseSpec`/`ValidateSpec` are the entry points. Per-type required field validation is enforced at load time.
+- `internal/intent` — YAML spec types and validation. `LoadSpec`/`ParseSpec`/`ValidateSpec` are the entry points. `ValidateSpec` (`internal/intent/spec.go`) enforces required fields per assertion type at load time (e.g. `isolation` requires `from`/`to`/`expect`; `port_check` requires `target`/`ports`/`expect`). `runner:` references must be declared in the `probes` section or be `"local"`.
 
-- `internal/models` — The `CheckResult` envelope used by every backend and assertion. All checks produce a `CheckResult` with `Status`, `Summary`, `Observed`, `Expected`, `Violations`, and `Evidence`. `AuditReport` aggregates them.
+- `internal/models` — The `CheckResult` envelope used by every backend and assertion. All checks produce a `CheckResult` with `Status`, `Summary`, `Observed`, `Expected`, `Violations`, and `Evidence`. Callers must call `result.Finish()` before rendering. `AuditReport` aggregates them.
 
-- `internal/audit` — Assertion engine. `Engine.Run` executes all assertions concurrently with per-assertion timeouts (30s default, 90s for `subnet_discovery`). Results preserve spec order.
+- `internal/audit` — Assertion engine (`engine.go`, ~1100 lines). `Engine.Run` executes all assertions concurrently with per-assertion timeouts (30s default, 90s for `subnet_discovery` — hardcoded constants, no per-spec override). Results **preserve spec order** despite concurrent execution. Runner context (`runnerCtx`) and the `SeenDB` are both populated once at the start of `Run()`, not per-assertion. Assertions with `runner: <probe>` are dispatched to `runViaProbe` instead of running against the local host directly.
 
-- `internal/backends/nmap` — Wraps `nmap -sn` subprocess. `DiscoverWithOptions` accepts `ScanOptions`. Upstream `StatusWarn` (e.g. 0 hosts) is preserved — the engine does not overwrite it to pass.
+- `internal/probe` — SSH execution of assertions from a remote vantage point (for multi-VLAN checks). `Run` dials the probe host, authenticates via private key and/or ssh-agent, shell-quotes args, and returns combined output. Supported assertion types over SSH: `isolation` and `network_health` (`ping -c 3 -W 3`), `port_check` (`nc -z -w 3`, first port only), `dns_check` (`nslookup`). Any other type returns an error if a runner is set. Uses `InsecureIgnoreHostKey()` when `skip_host_key_verify` is set — homelab trust model, not a security boundary.
 
-- `internal/backends/system` — Platform-specific implementations (`system_linux.go`, `system_darwin.go`, `system_windows.go`) selected via Go build tags.
+- `internal/service` — Shared check operations (`CheckService`) used by both the CLI and the MCP server, so behavior can't drift between the two entry points. Also home to `doctor.go`'s standalone checks (`NmapCheck`, `SpecFileCheck`, `SpecValidCheck`).
 
-- `internal/backends/omada` — Read-only REST client for Omada **Software Defined Networking (SDN)** 6.x. `NewClient` calls `/api/info` unauthenticated. All authenticated calls use `/{omadaCID}/api/v2/...` with `Csrf-Token`. TLS verification intentionally skipped (self-signed cert). Not concurrency-safe.
+- `internal/backends` — Low-level network check implementations, selected via the `Backend` interface (`backends.NewDefaultBackend()`):
+  - `nmap/` — wraps `nmap -sn` subprocess for discovery; `nmap.PortScan` for port checks. Upstream `StatusWarn` (e.g. 0 hosts) is **preserved** — the engine does not overwrite it to pass.
+  - `system/` — platform-specific implementations (`system_linux.go`, `system_darwin.go`, `system_windows.go`) selected via Go build tags; only `system.go` is shared. When adding system calls, provide all three platform files.
+  - `dns/` — `dns_check` assertion implementation, via system resolver or a custom UDP resolver, with optional DNSSEC validation.
+  - `health/` — latency, packet loss, and MTU probing for `network_health`.
+  - `omada/` — read-only REST client for Omada **Software Defined Networking (SDN)** 6.x. `NewClient` calls `/api/info` unauthenticated. Authenticated calls use `/{omadaCID}/api/v2/...` with `Csrf-Token`. TLS verification intentionally skipped (self-signed cert). **Not concurrency-safe** — do not call from multiple goroutines.
+  - `batfish/` — stub returning `ErrNotImplemented`; `Available()` returns `false`. Planned for v2.
 
-- `internal/providers` — Provider interface (`Provider`) and registry (`Register`/`Get`/`List`/`Reset`). Providers self-register via `init()` blank imports in `cmd/nyx/main.go`. CLI vendor subcommands (`nyx omada ...`) are built dynamically in `Execute()` via `BuildProviderSubcommands`.
+- `internal/providers` — Provider interface and registry (`Register`/`Get`/`List`/`Reset`, guarded by a `sync.RWMutex`). Providers self-register via `init()` blank imports in `cmd/nyx/main.go`. CLI vendor subcommands (`nyx <vendor> info|import|check`) are built dynamically from the provider's `Capabilities()` in `Execute()` via `BuildProviderSubcommands` — no separate CLI wiring needed per vendor. **Adding a new provider requires two changes**: (1) create the package with an `init()` calling `providers.Register()`, (2) add the blank import in `main.go` — omitting the import means the provider is silently absent at runtime.
+  - `providers/omada` — wraps `backends/omada`. Supports info, import, check.
+  - `providers/opnsense` — fully implements `Info`, `ImportSpec`, `Check`. Uses API key/secret auth (not username/password). TLS verification disabled (self-signed cert). `ImportSpec` builds networks from interfaces, policies from deny/block/reject firewall rules, and estimates host counts from **DHCP** leases only.
 
-- `internal/providers/omada` — OmadaProvider wrapping `backends/omada`. Supports info, import, check.
+- `internal/recommendations` — `engine.go` analyzes `[]CheckResult` failures and produces prioritized `Recommendation` structs, called by `audit` in human mode only (not JSON). Two-pass: classify failures into 10 categories, then generate one recommendation per category. `SpecPatch` output is diff-style (`+`/`-`) with real values from the spec. Capped at 8 recommendations per run. Pure config/credential errors (e.g. missing Omada credentials) are excluded.
 
-- `internal/providers/opnsense` — OPNsenseProvider fully implemented (Info + ImportSpec + Check). Uses API key/secret auth.
+- `internal/snapshot` — persists audit results to `~/.nyx/snapshots/` with rotation at 50 snapshots. Baseline is stored as `baseline.json` and is **not** rotated. `nyx drift status` falls back to the most recent saved snapshot when no fresh audit is available. Drift comparison uses a `check_type:target` key for cross-run matching.
 
-- `internal/recommendations`
-  - Analyzes `[]CheckResult` failures and produces prioritized `Recommendation` structs.
-  - Called by `audit` in human mode only (not JSON).
+- `internal/seendb` — persists virtual-network acknowledgements to `~/.nyx/seen.json`, used to suppress repeat `subnet_discovery` WARNs on virtual subnets (VMware, Hyper-V, WSL2) that always return 0 hosts. `seendb.Load()` never returns nil — on error it falls back to an in-memory-only DB. Concurrency-safe (`sync.Mutex`) so concurrent `subnet_discovery` assertions can ack different CIDRs simultaneously. `--warn-virtual` bypasses it to always emit WARN.
 
-- `internal/logger` — JSON-lines append logger with file rotation. Writes to `~/.nyx/nyx.log`. 5MB max size, 3 rotated files. Best-effort — never fails a command (unless the user explicitly requests it).
+- `internal/logger` — JSON-lines append logger with file rotation, writes to `~/.nyx/nyx.log`. 5MB max size, 3 rotated files. Best-effort — never fails a command.
 
-- `internal/mcp` — **Model Context Protocol (MCP)** stdio server. All tools return `CheckResult`-shaped JSON consistent with CLI `--json` output.
+- `internal/mcp` — **MCP** stdio server (`server.go`). All tools return `CheckResult`-shaped JSON consistent with CLI `--json` output. Only the stdio transport is implemented; HTTP transport is stubbed.
 
 - `internal/report` — `RenderJSON`, `RenderHuman`, `RenderRecommendations` output renderers.
 
-- `internal/version` — Single-source version constant. Read by `nyx version` and MCP `serverInfo.Version`.
+- `internal/version` — Single-source version constant, injected via `-ldflags` at release build time. Read by `nyx version` and MCP `serverInfo.Version`.
 
-- `internal/cli` — Cobra command definitions. Global flags (`--json`, `--output`, `--spec`, `--verbose`, `--timeout`) in `root.go`. `Execute()` calls `BuildProviderSubcommands(rootCmd)` before dispatch.
+- `internal/cli` — Cobra command definitions. Global flags (`--json`, `--output`, `--spec`, `--verbose`, `--timeout`) in `root.go`. `nyx init` (`init.go`) auto-detects RFC1918 interfaces + gateways via the routing table (not `.1` guessing), skips loopback/virtual/non-RFC1918 adapters, and generates a starter spec via polite nmap scans; it hard-requires nmap and fails fast if missing. `nyx doctor --spec <file>` and `nyx interfaces --spec <file>` both validate/match against a spec.
 
 ## Spec Format
 
 Version 1 intent spec: `networks`, `vpn`, `probes`, `policies`, `assertions`.
 Eight assertion types: `subnet_discovery`, `isolation`, `vpn_route`, `route_check`, `port_check`, `dns_check`, `network_health`, `acl_check`.
 `ValidateSpec` enforces required fields per type. Probes declare SSH nodes for remote checks.
-See `examples/homelab.yaml` (a realistic seven-network **VLAN (Virtual Local Area Network)** example) and `testdata/valid_spec.yaml`.
-The authoritative spec reference is now `docs/spec.html`.
+See `examples/homelab.yaml` (a realistic seven-network **VLAN** example) and `testdata/valid_spec.yaml`.
+The authoritative spec reference is `docs/spec.html`; narrative walkthrough is `docs/walkthrough.md`.
 Assertions can use `runner: <probe-name>` to execute checks remotely via SSH from a different VLAN.
 
-## Provider System
+`acl_check` assertions read Omada credentials from env vars (`OMADA_HOST`, `OMADA_USERNAME`, `OMADA_PASSWORD`, `OMADA_SITE`), not from the spec or flags.
 
-Vendors register as providers via `init()` blank imports in `cmd/nyx/main.go`. The CLI builds `nyx omada` / `nyx opnsense` subcommands dynamically from the registry. Missing providers produce a clear error. `nyx provider list` shows all registered providers and capabilities.
+## Generated Specs
 
-## Omada Backend
-
-Pass credentials via flags (`--host`, `--username`, `--password`) or env vars (`OMADA_HOST`, `OMADA_USERNAME`, `OMADA_PASSWORD`). `nyx omada import` generates a spec YAML; `nyx omada check` imports and audits; `nyx omada info` needs no credentials.
+Put specs generated by `nyx init` (or manually) in `specs/` — the directory is fully gitignored except `.gitignore`/`.gitkeep`. Do not commit scratch or machine-specific specs at the repo root. All personal/homelab-specific data has been removed from the repository itself (tests, docs, examples, Omada heuristics) for external viewer/collaborator readiness; personal specs must live outside source control.
 
 ## Exit Codes
 
@@ -177,11 +193,3 @@ Pass credentials via flags (`--host`, `--username`, `--password`) or env vars (`
 
 - `internal/backends/batfish` — returns `ErrNotImplemented`, planned for v2
 - HTTP MCP transport — only stdio is implemented
-
-## Documentation
-
-- Primary spec reference: `docs/spec.html` (modern, with diagram and light/dark support)
-- Narrative walkthrough: `docs/walkthrough.md`
-- The old `docs/spec.md` has been removed.
-
-All personal/homelab-specific data has been removed from source, tests, docs, and examples for guest/viewer readiness. Personal specs belong in `specs/` (gitignored) or outside the repo.

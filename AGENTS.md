@@ -13,6 +13,8 @@ make lint           # golangci-lint run ./...
 make release        # cross-compile linux/darwin/windows (amd64+arm64)
 ```
 
+Go toolchain: `go.mod` declares `go 1.25.11` — do not assume the README's "Go 1.22+" is sufficient to build here.
+
 CI runs a matrix of jobs: `lint` (golangci-lint v2), `vuln` (govulncheck, informational), `build` (3-OS matrix on push, 2-OS on PR), `test` (race + coverage + Codecov upload), `goreleaser` (snapshot build + smoke test), `lint-windows`, `gosec`, and `trivy`. A separate `codacy-coverage.yml` workflow uploads coverage to Codacy via trusted handoff. CodeQL and Socket run on push/PR.
 
 ### Release flow
@@ -28,6 +30,8 @@ See CLAUDE.md under "Codacy CLI" for Codacy tool details (WSL2, config reset, et
 `cmd/nyx/main.go` calls `cli.Execute()`. If it returns an error, `os.Exit(2)`. Exit code 1 is set inside the audit command when status is `StatusFail`.
 
 Audit flow: `YAML spec → intent.LoadSpec → audit.Engine.Run → []CheckResult → report.Render`.
+
+`internal/service` (`CheckService`) wraps the default backend and exposes the single-command checks (`route_check`, `vpn_route`, `ping`, `interfaces`) shared by both the CLI and the MCP server. Add new such checks here, not in `internal/mcp/`.
 
 ## Provider Registration
 
@@ -69,13 +73,19 @@ The `nmap` backend spawns `nmap` as a subprocess. Tests in `backends/nmap` call 
 
 ## Probe System
 
-Assertions with `runner: <probe-name>` execute remotely via SSH. Supported assertion types over SSH:
-- `isolation` — runs `ping -c 3 -W 3 <target>`
+Assertions with `runner: <probe-name>` execute remotely via SSH from a declared probe host (`internal/probe`, built on `golang.org/x/crypto/ssh`). Supported assertion types over SSH:
+- `isolation` — runs `ping -c 3 -W 3 <target>` against every gateway in the destination zone
 - `network_health` — runs `ping -c 3 -W 3 <target>`
 - `port_check` — runs `nc -z -w 3 <target> <port>` (first port only)
 - `dns_check` — runs `nslookup <query> [server]`
 
-All other assertion types return an error if a runner is set. SSH uses `InsecureIgnoreHostKey()` — homelab, not a security boundary.
+All other assertion types return an error if a runner is set.
+
+Auth is **public key + SSH agent only — no password auth.** The `key:` probe field accepts a private-key path (relative to home when prefixed with `~/`); falling back to the agent via `SSH_AUTH_SOCK`.
+
+**Host key verification is ON by default.** `probe.Run` fails if the host key isn't trusted (message tells the user). Bypass per-run via the `--skip-host-key-verify` flag or per-probe via `skip_host_key_verify: true` in the spec. This is an intentional improvement over blind `InsecureIgnoreHostKey()`.
+
+Local (non-probe) `isolation` results are only **definitive** when the runner is inside the source zone. Otherwise the engine emits "unverifiable"/"unconfirmed" instead of a hard violation, and the message suggests `runner: <probe>` from the source zone.
 
 ## nyx init
 
@@ -108,7 +118,8 @@ All personal/homelab-specific data has been removed from the repository (tests, 
 ## Recommendations Engine
 
 `internal/recommendations/engine.go`
-- Uses a two-pass approach: classify failures into 10 categories, then generate one recommendation per category.
+- Two-pass: `classifyFailures` groups failures, then `generateFromGroups` emits one recommendation per category in priority order.
+- 10 categories: `vantage_point`, `isolation_breach`, `acl_not_enforced`, `network_unreachable`, `vpn_misconfigured`, `discovery_count`, `dns_failure`, `service_down`, `network_degraded`, `host_down_or_filtered`.
 - SpecPatch output is diff-style (`+`/`-`) with real values extracted from the spec.
 - Capped at 8 recommendations per run.
 - Pure config/credential errors (e.g. missing Omada credentials) are excluded from recommendations.
