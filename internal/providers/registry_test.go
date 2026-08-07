@@ -2,6 +2,7 @@ package providers_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/models"
@@ -71,5 +72,29 @@ func TestRegisterDuplicate(t *testing.T) {
 	}
 	if err := providers.Register(p); err == nil {
 		t.Fatal("expected error on duplicate registration")
+	}
+}
+
+func TestErrCapabilityUnsupported(t *testing.T) {
+	providers.Reset()
+	p := &mockProvider{name: "test"}
+	ctx := context.Background()
+
+	_, err := p.ImportSpec(ctx, providers.ImportOptions{})
+	if err == nil {
+		t.Fatal("expected error from ImportSpec")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "test") || !strings.Contains(msg, "import") {
+		t.Errorf("unexpected error message: %q", msg)
+	}
+
+	_, err = p.Check(ctx, providers.ImportOptions{})
+	if err == nil {
+		t.Fatal("expected error from Check")
+	}
+	msg = err.Error()
+	if !strings.Contains(msg, "test") || !strings.Contains(msg, "check") {
+		t.Errorf("unexpected error message: %q", msg)
 	}
 }

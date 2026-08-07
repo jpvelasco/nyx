@@ -625,3 +625,63 @@ func TestNew_ReturnsValidDB(t *testing.T) {
 		t.Error("New must return an empty DB")
 	}
 }
+
+// --- Load() error paths ---
+
+// TestLoad_NoHomeDirError tests that Load returns an in-memory DB when UserHomeDir fails.
+func TestLoad_NoHomeDirError(t *testing.T) {
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+
+	db := Load()
+	if db == nil {
+		t.Fatal("Load must never return nil")
+	}
+	if db.VirtualNetworks == nil {
+		t.Fatal("Load must return a DB with initialized map")
+	}
+}
+
+// TestLoad_LoadFromError tests that Load returns an in-memory DB when LoadFrom errors.
+// We force LoadFrom to fail by creating ~/.nyx/seen.json as a directory (not a file),
+// which causes os.ReadFile to return a non-IsNotExist error.
+func TestLoad_LoadFromError(t *testing.T) {
+	dir := t.TempDir()
+	nyxDir := filepath.Join(dir, ".nyx")
+	if err := os.MkdirAll(nyxDir, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(nyxDir, "seen.json"), 0700); err != nil {
+		t.Fatalf("mkdir seen.json: %v", err)
+	}
+	t.Setenv("USERPROFILE", dir)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+
+	db := Load()
+	if db == nil {
+		t.Fatal("Load must never return nil")
+	}
+	if db.VirtualNetworks == nil {
+		t.Fatal("Load must return a DB with initialized map")
+	}
+}
+
+// TestSave_MkdirAllError tests that save returns an error when MkdirAll fails.
+// We create a regular file where the parent directory should be, causing MkdirAll to error.
+func TestSave_MkdirAllError(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	db := &SeenDB{
+		VirtualNetworks: map[string]Entry{},
+		path:            filepath.Join(blocker, "seen.json"),
+	}
+	err := db.AckVirtual("10.0.0.0/8")
+	if err == nil {
+		t.Fatal("expected AckVirtual to fail when MkdirAll cannot create the directory")
+	}
+}

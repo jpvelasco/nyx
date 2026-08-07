@@ -1,6 +1,8 @@
 package intent
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -486,6 +488,129 @@ assertions:
 	a2 := spec.Assertions[1]
 	if a2.Runner != "jumpbox" {
 		t.Errorf("expected runner 'jumpbox', got %q", a2.Runner)
+	}
+}
+
+// --- Probe validation edge cases ---
+
+func TestValidateSpec_ProbeMissingHost(t *testing.T) {
+	spec := &Spec{Version: 1, Site: "test", Probes: []Probe{{Name: "p1", User: "u"}}}
+	err := ValidateSpec(spec)
+	if err == nil {
+		t.Fatal("expected error for probe without host")
+	}
+	if !contains(err.Error(), "'host' is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateSpec_ProbeMissingUser(t *testing.T) {
+	spec := &Spec{Version: 1, Site: "test", Probes: []Probe{{Name: "p1", Host: "1.2.3.4"}}}
+	err := ValidateSpec(spec)
+	if err == nil {
+		t.Fatal("expected error for probe without user")
+	}
+	if !contains(err.Error(), "'user' is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- acl_check validation edge cases ---
+
+func TestValidateSpec_ACLCheckMissingPolicy(t *testing.T) {
+	spec := &Spec{Version: 1, Site: "test",
+		Policies:   []Policy{{Name: "p1", Action: "deny"}},
+		Assertions: []Assertion{{Type: "acl_check", Provider: "omada", Expect: "enforced"}},
+	}
+	err := ValidateSpec(spec)
+	if err == nil {
+		t.Fatal("expected error for missing policy")
+	}
+	if !contains(err.Error(), "policy") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateSpec_ACLCheckMissingExpect(t *testing.T) {
+	spec := &Spec{Version: 1, Site: "test",
+		Policies:   []Policy{{Name: "p1", Action: "deny"}},
+		Assertions: []Assertion{{Type: "acl_check", Provider: "omada", Policy: "p1"}},
+	}
+	err := ValidateSpec(spec)
+	if err == nil {
+		t.Fatal("expected error for missing expect")
+	}
+	if !contains(err.Error(), "expect") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- ParseSpec: validation error after successful YAML parse ---
+
+func TestParseSpec_ValidationError(t *testing.T) {
+	yaml := `
+version: 99
+site: test
+`
+	_, err := ParseSpec([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected validation error for bad version")
+	}
+}
+
+// --- LoadSpec ---
+
+func TestLoadSpec_Success(t *testing.T) {
+	yaml := `
+version: 1
+site: test-site
+networks:
+  - name: lan
+    cidr: 192.168.1.0/24
+    gateway: 192.168.1.1
+    zone: internal
+assertions:
+  - type: subnet_discovery
+    network: lan
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "spec.yml")
+	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+		t.Fatalf("failed to write temp spec: %v", err)
+	}
+	spec, err := LoadSpec(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if spec.Site != "test-site" {
+		t.Errorf("expected site 'test-site', got %q", spec.Site)
+	}
+}
+
+func TestLoadSpec_FileNotFound(t *testing.T) {
+	_, err := LoadSpec(filepath.Join(os.TempDir(), "nonexistent_file_12345.yml"))
+	if err == nil {
+		t.Fatal("expected error for non-existent file")
+	}
+}
+
+// --- Spec helper methods: not-found cases ---
+
+func TestSpec_VPNByName_NotFound(t *testing.T) {
+	spec := &Spec{VPN: []VPNConfig{
+		{Name: "work", Type: "wireguard"},
+	}}
+	if spec.VPNByName("nonexistent") != nil {
+		t.Error("expected nil for missing VPN")
+	}
+}
+
+func TestSpec_ProbeByName_NotFound(t *testing.T) {
+	spec := &Spec{Probes: []Probe{
+		{Name: "probe1", Host: "10.0.0.1", User: "admin"},
+	}}
+	if spec.ProbeByName("nonexistent") != nil {
+		t.Error("expected nil for missing probe")
 	}
 }
 
