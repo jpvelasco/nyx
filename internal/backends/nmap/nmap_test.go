@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jpvelasco/nyx/internal/models"
 )
 
 func TestPoliteScanOptionsDefaults(t *testing.T) {
@@ -342,6 +345,38 @@ MAC Address: aa:bb:cc:dd:ee:ff (Test)`
 	}
 	if h.MAC != "AA:BB:CC:DD:EE:FF" {
 		t.Errorf("expected uppercased MAC AA:BB:CC:DD:EE:FF, got %s", h.MAC)
+	}
+}
+
+// ─── discoveryVerdict / discoverySummary tests (#127) ───
+
+func TestDiscoveryVerdict(t *testing.T) {
+	tests := []struct {
+		name      string
+		hostCount int
+		scanErr   error
+		want      models.Status
+	}{
+		{"clean scan with hosts passes", 5, nil, models.StatusPass},
+		{"empty clean scan warns", 0, nil, models.StatusWarn},
+		{"partial scan with nonzero exit keeps warn", 5, fmt.Errorf("nmap exited with warning: exit status 1"), models.StatusWarn},
+		{"failed empty scan warns", 0, fmt.Errorf("boom"), models.StatusWarn},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := discoveryVerdict(tt.hostCount, tt.scanErr); got != tt.want {
+				t.Errorf("discoveryVerdict(%d, %v) = %s, want %s", tt.hostCount, tt.scanErr, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiscoverySummary(t *testing.T) {
+	if got := discoverySummary(0, "10.0.0.0/24"); got != "no hosts discovered in 10.0.0.0/24" {
+		t.Errorf("empty summary = %q", got)
+	}
+	if got := discoverySummary(3, "10.0.0.0/24"); got != "discovered 3 host(s) in 10.0.0.0/24" {
+		t.Errorf("hosts summary = %q", got)
 	}
 }
 

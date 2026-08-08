@@ -155,19 +155,33 @@ func DiscoverWithOptions(ctx context.Context, cidr string, opts ScanOptions) (*m
 		"total": dr.Total,
 	}
 
-	result.Summary = fmt.Sprintf("discovered %d host(s) in %s", len(hosts), cidr)
-	if len(hosts) == 0 {
-		result.Status = models.StatusWarn
-		result.Summary = fmt.Sprintf("no hosts discovered in %s", cidr)
-	} else {
-		result.Status = models.StatusPass
-	}
+	result.Status = discoveryVerdict(len(hosts), err)
+	result.Summary = discoverySummary(len(hosts), cidr)
 
 	// Attach raw nmap output as evidence
 	result.Evidence = append(result.Evidence, strings.TrimSpace(string(out)))
 
 	result.Finish()
 	return result, nil
+}
+
+// discoveryVerdict decides the final status of a discovery scan after
+// parsing. A nonzero nmap exit leaves the WARN already set for the failed
+// run — a partial scan must not upgrade to pass — while an empty-but-
+// successful scan stays a warning. Only a clean scan with hosts passes.
+func discoveryVerdict(hostCount int, scanErr error) models.Status {
+	if scanErr != nil || hostCount == 0 {
+		return models.StatusWarn
+	}
+	return models.StatusPass
+}
+
+// discoverySummary renders the human summary line for a discovery result.
+func discoverySummary(hostCount int, cidr string) string {
+	if hostCount == 0 {
+		return fmt.Sprintf("no hosts discovered in %s", cidr)
+	}
+	return fmt.Sprintf("discovered %d host(s) in %s", hostCount, cidr)
 }
 
 // parseNmapOutput converts raw nmap -sn text into a slice of Host records.

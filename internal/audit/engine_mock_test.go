@@ -852,3 +852,85 @@ func makePassResult(backend, atype string) *models.CheckResult {
 	r.Finish()
 	return r
 }
+
+// --- runPortCheck closed/filtered semantics (#116) ---
+
+func TestRunPortCheck_ClosedAcceptsFiltered(t *testing.T) {
+	// nmap scans with --open, so closed ports are absent from the output and
+	// the parser tags them "filtered". expect: closed must PASS for a
+	// not-open port — previously it always failed with "got filtered".
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Assertions: []intent.Assertion{{Type: "port_check", Target: "10.0.0.1", Ports: []int{8080}, Expect: "closed"}},
+	}
+	mock := &backends.MockBackend{
+		PortScanResult: mockPortScanResult([]int{8080}, "filtered"),
+	}
+	eng := NewEngine(spec)
+	eng.Backend = mock
+	result, err := eng.runPortCheck(context.Background(), spec.Assertions[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusPass {
+		t.Errorf("expected pass (not-open port with expect closed), got %s: %s", result.Status, result.Summary)
+	}
+}
+
+func TestRunPortCheck_ClosedViolatedWhenOpen(t *testing.T) {
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Assertions: []intent.Assertion{{Type: "port_check", Target: "10.0.0.1", Ports: []int{8080}, Expect: "closed"}},
+	}
+	mock := &backends.MockBackend{
+		PortScanResult: mockPortScanResult([]int{8080}, "open"),
+	}
+	eng := NewEngine(spec)
+	eng.Backend = mock
+	result, err := eng.runPortCheck(context.Background(), spec.Assertions[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusFail {
+		t.Errorf("expected fail (open port with expect closed), got %s: %s", result.Status, result.Summary)
+	}
+}
+
+func TestRunPortCheck_OpenFailsWhenFiltered(t *testing.T) {
+	// A port absent from --open output must not satisfy expect: open.
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Assertions: []intent.Assertion{{Type: "port_check", Target: "10.0.0.1", Ports: []int{8080}, Expect: "open"}},
+	}
+	mock := &backends.MockBackend{
+		PortScanResult: mockPortScanResult([]int{8080}, "filtered"),
+	}
+	eng := NewEngine(spec)
+	eng.Backend = mock
+	result, err := eng.runPortCheck(context.Background(), spec.Assertions[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusFail {
+		t.Errorf("expected fail (filtered port with expect open), got %s: %s", result.Status, result.Summary)
+	}
+}
+
+func TestRunPortCheck_OpenPassesWhenOpen(t *testing.T) {
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Assertions: []intent.Assertion{{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}, Expect: "open"}},
+	}
+	mock := &backends.MockBackend{
+		PortScanResult: mockPortScanResult([]int{80}, "open"),
+	}
+	eng := NewEngine(spec)
+	eng.Backend = mock
+	result, err := eng.runPortCheck(context.Background(), spec.Assertions[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusPass {
+		t.Errorf("expected pass (open port with expect open), got %s: %s", result.Status, result.Summary)
+	}
+}

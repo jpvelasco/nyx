@@ -636,8 +636,12 @@ func (e *Engine) runPortCheck(ctx context.Context, a intent.Assertion) (*models.
 		return nil, fmt.Errorf("port scan failed: %w", err)
 	}
 
-	// Evaluate pass/fail: all ports must match expect
-	expect := a.Expect // "open" or "closed"
+	// Evaluate pass/fail: all ports must match expect.
+	// The nmap backend scans with --open, so ports absent from the output
+	// are reported as "filtered" — nmap cannot distinguish closed from
+	// filtered there. The meaningful verdict is therefore open vs not-open:
+	// expect "closed" passes whenever the port is NOT open.
+	expectOpen := a.Expect == "open"
 	var violations []string
 	if portData, ok := result.Observed["ports"]; ok {
 		if ports, ok := portData.([]interface{}); ok {
@@ -645,8 +649,11 @@ func (e *Engine) runPortCheck(ctx context.Context, a intent.Assertion) (*models.
 				if pm, ok := p.(map[string]interface{}); ok {
 					state, _ := pm["state"].(string)
 					port, _ := pm["port"].(float64)
-					if state != expect {
-						violations = append(violations, fmt.Sprintf("port %.0f: expected %s, got %s", port, expect, state))
+					isOpen := state == "open"
+					if expectOpen && !isOpen {
+						violations = append(violations, fmt.Sprintf("port %.0f: expected open, got %s", port, state))
+					} else if !expectOpen && isOpen {
+						violations = append(violations, fmt.Sprintf("port %.0f: expected closed, got open", port))
 					}
 				}
 			}
@@ -657,7 +664,7 @@ func (e *Engine) runPortCheck(ctx context.Context, a intent.Assertion) (*models.
 		result.Violations = violations
 		result.Summary = fmt.Sprintf("port check failed on %s: %s", a.Target, strings.Join(violations, "; "))
 	}
-	result.Expected["expect"] = expect
+	result.Expected["expect"] = a.Expect
 	return result, nil
 }
 
