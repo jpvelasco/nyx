@@ -268,6 +268,75 @@ func TestCheckLatencyAndLossExpectedFields(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------
+// classifyLatencyLoss tests (pure threshold logic)
+// -----------------------------------------------------------------------
+
+func TestClassifyLatencyLoss(t *testing.T) {
+	tests := []struct {
+		name         string
+		stats        *PingStats
+		maxLatencyMs float64
+		maxLossPct   float64
+		wantStatus   string
+		wantViolated bool
+	}{
+		{"no violations", &PingStats{LossPct: 0, AvgRTTMs: 5}, 100, 10, "pass", false},
+		{"loss violation", &PingStats{LossPct: 50, AvgRTTMs: 5}, 100, 10, "fail", true},
+		{"latency violation", &PingStats{LossPct: 0, AvgRTTMs: 500}, 100, 10, "fail", true},
+		{"both violations", &PingStats{LossPct: 50, AvgRTTMs: 500}, 100, 10, "fail", true},
+		{"zero thresholds skip checks", &PingStats{LossPct: 50, AvgRTTMs: 500}, 0, 0, "pass", false},
+		{"threshold boundary not a violation", &PingStats{LossPct: 10, AvgRTTMs: 100}, 100, 10, "pass", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			status, violations, summary := classifyLatencyLoss(tc.stats, tc.maxLatencyMs, tc.maxLossPct)
+			if string(status) != tc.wantStatus {
+				t.Errorf("expected status %s, got %s", tc.wantStatus, status)
+			}
+			if tc.wantViolated {
+				if len(violations) == 0 {
+					t.Error("expected violations, got none")
+				}
+				if !strings.Contains(summary, "health check failed") {
+					t.Errorf("expected summary to mention failure, got: %s", summary)
+				}
+			} else {
+				if len(violations) != 0 {
+					t.Errorf("expected no violations, got %v", violations)
+				}
+				if summary != "" {
+					t.Errorf("expected empty summary, got: %s", summary)
+				}
+			}
+		})
+	}
+}
+
+func TestPingCheckUnreachable(t *testing.T) {
+	// TEST-NET address — unreachable without cancelling the context, so
+	// PingCheck should report StatusError via the ping error path.
+	result, stats, err := PingCheck(context.Background(), "192.0.2.1", 1)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if err == nil {
+		t.Skipf("unexpected success pinging TEST-NET: %s", result.Summary)
+	}
+	if result.Status != "error" {
+		t.Errorf("expected status 'error', got %s", result.Status)
+	}
+	if !strings.Contains(result.Summary, "ping error") {
+		t.Errorf("expected summary to mention ping error, got: %s", result.Summary)
+	}
+	if stats == nil {
+		t.Fatal("expected non-nil stats on error path")
+	}
+	if stats.Sent != 1 {
+		t.Errorf("expected sent 1, got %d", stats.Sent)
+	}
+}
+
+// -----------------------------------------------------------------------
 // ProbeMTU tests
 // -----------------------------------------------------------------------
 
@@ -348,6 +417,24 @@ func TestProbeMTUEvidence(t *testing.T) {
 	}
 	if mtuRes.RequestedMTU != 1500 {
 		t.Errorf("expected MTUResult requested 1500, got %d", mtuRes.RequestedMTU)
+	}
+}
+
+func TestProbeMTUWarnStatus(t *testing.T) {
+	// Expected slightly above the loopback MTU (1500) — discovered 1500 is
+	// within 10% of 1600, so the warn path should trigger.
+	result, err := ProbeMTU(context.Background(), "127.0.0.1", 1600)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status == "error" {
+		t.Skipf("ping not available: %s", result.Summary)
+	}
+	if result.Status == "fail" {
+		t.Skipf("loopback MTU below 90%% of 1600 on this host: %s", result.Summary)
+	}
+	if result.Status != "warn" {
+		t.Errorf("expected warn for MTU 1600 with 1500 discovered, got %s: %s", result.Status, result.Summary)
 	}
 }
 
@@ -648,6 +735,38 @@ func TestParsePingOutputWindowsNoStats(t *testing.T) {
 // parsePingOutput dispatch test (runtime platform)
 // -----------------------------------------------------------------------
 
+func TestParseLinuxPingOutputNoLossLine(t *testing.T) {
+	// Output without a packet-loss line — received should default to sent.
+	output := `PING 127.0.0.1 (127.0.0.1) 56(84) bytes of data.
+rtt min/avg/max/mdev = 0.038/0.040/0.042/0.002 ms
+`
+	stats := &PingStats{Sent: 4}
+	parseLinuxPingOutput(output, stats)
+	if stats.Received != 4 {
+		t.Errorf("expected received == sent (4) when no loss line, got %d", stats.Received)
+	}
+	if stats.LossPct != 0 {
+		t.Errorf("expected 0%% loss, got %.1f%%", stats.LossPct)
+	}
+	if stats.AvgRTTMs != 0.040 {
+		t.Errorf("expected avg RTT 0.040, got %.3f", stats.AvgRTTMs)
+	}
+}
+
+func TestParsePingOutputDarwinNoLossLine(t *testing.T) {
+	// Output without a packet-loss line — received should default to sent.
+	output := `round-trip min/avg/max/stddev = 0.100/0.250/0.500/0.150 ms
+`
+	stats := &PingStats{Sent: 3}
+	parseDarwinPingOutput(output, stats)
+	if stats.Received != 3 {
+		t.Errorf("expected received == sent (3) when no loss line, got %d", stats.Received)
+	}
+	if stats.LossPct != 0 {
+		t.Errorf("expected 0%% loss, got %.1f%%", stats.LossPct)
+	}
+}
+
 func TestParsePingOutputDispatchesCorrectPlatform(t *testing.T) {
 	// Verify the dispatch routes to the right parser based on runtime.GOOS.
 	// We can't change runtime.GOOS, so we test the current platform.
@@ -686,6 +805,79 @@ rtt min/avg/max/mdev = 1.000/2.000/3.000/0.500 ms
 	}
 	if stats.AvgRTTMs != 2.0 {
 		t.Errorf("expected avg RTT 2.0, got %.3f", stats.AvgRTTMs)
+	}
+}
+
+// -----------------------------------------------------------------------
+// mtuBinarySearch tests (pure search logic)
+// -----------------------------------------------------------------------
+
+func TestMTUBinarySearch_AllSizesSucceed(t *testing.T) {
+	mtu, evidence := mtuBinarySearch(func(int) bool { return true })
+	if mtu != 1500 {
+		t.Errorf("expected MTU 1500 when all sizes succeed, got %d", mtu)
+	}
+	if len(evidence) != 1 || !strings.Contains(evidence[0], "1500 successful") {
+		t.Errorf("expected single 1500-successful evidence entry, got %v", evidence)
+	}
+}
+
+func TestMTUBinarySearch_NoSizesSucceed(t *testing.T) {
+	mtu, evidence := mtuBinarySearch(func(int) bool { return false })
+	if mtu != 576 {
+		t.Errorf("expected MTU 576 when no sizes succeed, got %d", mtu)
+	}
+	if len(evidence) == 0 {
+		t.Error("expected evidence from failed probes")
+	}
+}
+
+func TestMTUBinarySearch_PartialSizesSucceed(t *testing.T) {
+	// Sizes up to 1200 work — search should converge on 1200 and produce
+	// mixed success/failure evidence covering both loop branches.
+	mtu, evidence := mtuBinarySearch(func(size int) bool { return size <= 1200 })
+	if mtu != 1200 {
+		t.Errorf("expected MTU 1200, got %d", mtu)
+	}
+	successful, failed := 0, 0
+	for _, e := range evidence {
+		if strings.Contains(e, "successful") {
+			successful++
+		}
+		if strings.Contains(e, "failed") {
+			failed++
+		}
+	}
+	if successful == 0 || failed == 0 {
+		t.Errorf("expected mixed evidence, got successful=%d failed=%d", successful, failed)
+	}
+}
+
+// -----------------------------------------------------------------------
+// isFragmentationError tests (pure output classification)
+// -----------------------------------------------------------------------
+
+func TestIsFragmentationError(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{"frag needed", "Frag needed and DF set", true},
+		{"message too long", "Message too long", true},
+		{"no answer", "no answer yet for icmp_seq=1", true},
+		{"destination unreachable", "Destination Host Unreachable", true},
+		{"100 percent loss", "Packets: Sent = 4, Received = 0, Lost = 4 (100% loss),", true},
+		{"100.0 percent loss", "Packets: Sent = 4, Received = 0, Lost = 4 (100.0% loss),", true},
+		{"normal reply", "64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.042 ms", false},
+		{"empty output", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isFragmentationError(tc.output); got != tc.want {
+				t.Errorf("isFragmentationError(%q) = %v, want %v", tc.output, got, tc.want)
+			}
+		})
 	}
 }
 

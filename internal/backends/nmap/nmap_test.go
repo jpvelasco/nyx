@@ -3,6 +3,7 @@ package nmap
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -728,6 +729,167 @@ func TestInstallCmd_ContainsNmap(t *testing.T) {
 	cmd := installCmd()
 	if !strings.Contains(cmd, "nmap") {
 		t.Errorf("expected install command to mention 'nmap', got: %s", cmd)
+	}
+}
+
+func TestInstallCmdFor(t *testing.T) {
+	notFound := func(string) error { return errors.New("not found") }
+	tests := []struct {
+		name   string
+		goos   string
+		lookup func(bin string) error
+		want   string
+	}{
+		{"windows", "windows", notFound, "winget install nmap"},
+		{"darwin", "darwin", notFound, "brew install nmap"},
+		{"linux apt-get", "linux", only("apt-get"), "sudo apt-get install -y nmap"},
+		{"linux apt", "linux", only("apt"), "sudo apt install -y nmap"},
+		{"linux dnf", "linux", only("dnf"), "sudo dnf install -y nmap"},
+		{"linux yum", "linux", only("yum"), "sudo yum install -y nmap"},
+		{"linux pacman", "linux", only("pacman"), "sudo pacman -S nmap"},
+		{"linux apk", "linux", only("apk"), "sudo apk add nmap"},
+		{"linux none", "linux", notFound, "sudo <your-package-manager> install nmap"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := installCmdFor(tc.goos, tc.lookup); got != tc.want {
+				t.Errorf("installCmdFor(%q) = %q, want %q", tc.goos, got, tc.want)
+			}
+		})
+	}
+}
+
+func only(bin string) func(string) error {
+	return func(b string) error {
+		if b == bin {
+			return nil
+		}
+		return errors.New("not found")
+	}
+}
+
+func TestDiscoverWithOptions_NmapNotFound(t *testing.T) {
+	t.Setenv("PATH", "")
+	result, err := DiscoverWithOptions(context.Background(), "10.0.0.0/8", DefaultScanOptions)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if err == nil {
+		t.Fatal("expected error when nmap is not installed")
+	}
+	if result.Status != "error" {
+		t.Errorf("expected status 'error', got %s", result.Status)
+	}
+	if !strings.Contains(result.Summary, "not installed") {
+		t.Errorf("expected summary to mention nmap not installed, got: %s", result.Summary)
+	}
+	if !strings.Contains(err.Error(), "Install it with") {
+		t.Errorf("expected error to include install instructions, got: %s", err.Error())
+	}
+}
+
+func TestPortScan_NmapNotFound(t *testing.T) {
+	t.Setenv("PATH", "")
+	result, err := PortScan(context.Background(), "127.0.0.1", []int{80}, "tcp", PoliteScanOptions)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if err == nil {
+		t.Fatal("expected error when nmap is not installed")
+	}
+	if result.Status != "error" {
+		t.Errorf("expected status 'error', got %s", result.Status)
+	}
+}
+
+func TestCheckAvailable_NmapNotFound(t *testing.T) {
+	t.Setenv("PATH", "")
+	err := CheckAvailable()
+	if err == nil {
+		t.Fatal("expected error when nmap is not in PATH")
+	}
+	if !strings.Contains(err.Error(), "Install it with") {
+		t.Errorf("expected error to include install instructions, got: %s", err.Error())
+	}
+}
+
+func TestDiscoverWithOptions_ZeroOptions(t *testing.T) {
+	if !Available() {
+		t.Skip("nmap not available")
+	}
+	result, err := DiscoverWithOptions(context.Background(), "127.0.0.1/32", ScanOptions{})
+	if err != nil {
+		t.Fatalf("DiscoverWithOptions with zero options failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Status != "pass" {
+		t.Errorf("expected status 'pass', got %s", result.Status)
+	}
+}
+
+func TestPortScan_EmptyPorts(t *testing.T) {
+	if !Available() {
+		t.Skip("nmap not available")
+	}
+	result, err := PortScan(context.Background(), "127.0.0.1", []int{}, "tcp", PoliteScanOptions)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if err == nil {
+		t.Fatal("expected error for empty ports")
+	}
+	if result.Status != "error" {
+		t.Errorf("expected status 'error', got %s", result.Status)
+	}
+	if !strings.Contains(result.Summary, "no ports") {
+		t.Errorf("expected summary to mention empty ports, got: %s", result.Summary)
+	}
+}
+
+func TestPortScan_UDP(t *testing.T) {
+	if !Available() {
+		t.Skip("nmap not available")
+	}
+	result, err := PortScan(context.Background(), "127.0.0.1", []int{53}, "udp", PoliteScanOptions)
+	if err != nil {
+		t.Fatalf("PortScan udp failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestPortScan_ZeroOptions(t *testing.T) {
+	if !Available() {
+		t.Skip("nmap not available")
+	}
+	result, err := PortScan(context.Background(), "127.0.0.1", []int{22}, "tcp", ScanOptions{})
+	if err != nil {
+		t.Fatalf("PortScan with zero options failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestParsePortScanOutput_OverflowPortIgnored(t *testing.T) {
+	output := `Nmap scan report for 10.0.0.1
+Host is up.
+PORT     STATE  SERVICE
+99999999999999/tcp   open   http
+22/tcp   open   ssh`
+
+	states := parsePortScanOutput(output, []int{22, 80}, "tcp")
+	if len(states) != 2 {
+		t.Fatalf("expected 2 port states, got %d", len(states))
+	}
+	if states[0].State != "open" {
+		t.Errorf("port 22: expected 'open', got %s", states[0].State)
+	}
+	if states[1].State != "filtered" {
+		t.Errorf("port 80: expected 'filtered' (overflow line ignored), got %s", states[1].State)
 	}
 }
 

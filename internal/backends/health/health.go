@@ -107,7 +107,21 @@ func CheckLatencyAndLoss(ctx context.Context, target string, maxLatencyMs float6
 		return result, err
 	}
 
-	// Check thresholds
+	status, violations, summary := classifyLatencyLoss(stats, maxLatencyMs, maxLossPct)
+	result.Status = status
+	result.Violations = violations
+	if summary != "" {
+		result.Summary = summary
+	}
+
+	result.Finish()
+	return result, nil
+}
+
+// classifyLatencyLoss compares observed ping stats against thresholds.
+// Thresholds <= 0 mean "don't check". Returns the resulting status, violations,
+// and a summary (empty when no violations).
+func classifyLatencyLoss(stats *PingStats, maxLatencyMs float64, maxLossPct float64) (models.Status, []string, string) {
 	var violations []string
 
 	// Check loss percentage
@@ -121,13 +135,9 @@ func CheckLatencyAndLoss(ctx context.Context, target string, maxLatencyMs float6
 	}
 
 	if len(violations) > 0 {
-		result.Status = models.StatusFail
-		result.Violations = violations
-		result.Summary = fmt.Sprintf("health check failed: %s", strings.Join(violations, "; "))
+		return models.StatusFail, violations, fmt.Sprintf("health check failed: %s", strings.Join(violations, "; "))
 	}
-
-	result.Finish()
-	return result, nil
+	return models.StatusPass, nil, ""
 }
 
 // ProbeMTU performs binary search to find the maximum MTU to a target.
@@ -285,12 +295,17 @@ func parseDarwinPingOutput(output string, stats *PingStats) {
 
 // probeMTUBinarySearch performs binary search to find max MTU
 func probeMTUBinarySearch(ctx context.Context, target string) (int, []string) {
+	return mtuBinarySearch(func(size int) bool { return canPing(ctx, target, size) })
+}
+
+// mtuBinarySearch finds the largest size in [576, 1500] that canPingFn accepts.
+func mtuBinarySearch(canPingFn func(size int) bool) (int, []string) {
 	var evidence []string
 	low := 576
 	high := 1500
 
 	// Sanity check with max size first
-	if canPing(ctx, target, high) {
+	if canPingFn(high) {
 		evidence = append(evidence, fmt.Sprintf("MTU probe: %d successful", high))
 		return high, evidence
 	}
@@ -299,7 +314,7 @@ func probeMTUBinarySearch(ctx context.Context, target string) (int, []string) {
 	result := low
 	for low <= high {
 		mid := (low + high) / 2
-		if canPing(ctx, target, mid) {
+		if canPingFn(mid) {
 			result = mid
 			evidence = append(evidence, fmt.Sprintf("MTU probe: %d successful", mid))
 			low = mid + 1
@@ -346,12 +361,14 @@ func canPing(ctx context.Context, target string, size int) bool {
 		return false
 	}
 
-	// Check for fragmentation needed errors or timeouts
-	if strings.Contains(outStr, "Frag needed") || strings.Contains(outStr, "Message too long") ||
-		strings.Contains(outStr, "no answer") || strings.Contains(outStr, "Destination Host Unreachable") ||
-		strings.Contains(outStr, "100% loss") || strings.Contains(outStr, "100.0% loss") {
-		return false
-	}
+	return !isFragmentationError(outStr)
+}
 
-	return true
+// isFragmentationError reports whether ping output indicates the packet could
+// not be sent at the requested size (fragmentation needed, overlong, or total
+// loss), which means the MTU is too large for the path.
+func isFragmentationError(output string) bool {
+	return strings.Contains(output, "Frag needed") || strings.Contains(output, "Message too long") ||
+		strings.Contains(output, "no answer") || strings.Contains(output, "Destination Host Unreachable") ||
+		strings.Contains(output, "100% loss") || strings.Contains(output, "100.0% loss")
 }

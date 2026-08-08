@@ -8,7 +8,16 @@ import (
 
 // installCmd returns the recommended install command for nmap on the current OS.
 func installCmd() string {
-	switch runtime.GOOS {
+	return installCmdFor(runtime.GOOS, func(bin string) error {
+		_, err := exec.LookPath(bin)
+		return err
+	})
+}
+
+// installCmdFor returns the recommended install command for nmap on the given
+// OS, using lookup to detect available package managers on Linux.
+func installCmdFor(goos string, lookup func(bin string) error) string {
+	switch goos {
 	case "windows":
 		return "winget install nmap"
 	case "darwin":
@@ -23,7 +32,7 @@ func installCmd() string {
 			{"pacman", "sudo pacman -S nmap"},
 			{"apk", "sudo apk add nmap"},
 		} {
-			if _, err := exec.LookPath(pm.bin); err == nil {
+			if lookup(pm.bin) == nil {
 				return pm.cmd
 			}
 		}
