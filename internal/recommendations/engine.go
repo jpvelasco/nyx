@@ -95,6 +95,8 @@ func classifyFailures(failures []models.CheckResult, spec *intent.Spec, runner m
 			groups["vpn_misconfigured"].failures = append(groups["vpn_misconfigured"].failures, f)
 		case "port_check":
 			classifyServiceCheck(f, groups)
+		case "route_check":
+			classifyRouteCheck(f, groups)
 		case "dns_check":
 			classifyDNSCheck(f, groups)
 		case "network_health":
@@ -237,21 +239,30 @@ func buildIsolationContext(from, to string, spec *intent.Spec, runner models.Run
 }
 
 // classifyDiscovery handles subnet_discovery failures.
+// The result Target is the scanned CIDR (nmap sets it), so network lookups
+// must resolve CIDR strings against the spec, not just names.
 func classifyDiscovery(f models.CheckResult, groups map[string]*failureGroup, spec *intent.Spec, runner models.RunnerContext) {
 	if f.Status == models.StatusError {
 		summary := strings.ToLower(f.Summary)
 
 		// Timeouts or unreachable errors from the wrong vantage point are
 		// extremely common and should be treated as vantage-point issues
-		// when the runner is clearly not in the target network.
+		// when the runner is clearly not in the target network. A spec is
+		// required to determine the runner's position relative to the target.
 		isTimeout := strings.Contains(summary, "timed out") || strings.Contains(summary, "deadline exceeded")
-		if isTimeout || strings.Contains(summary, "unreachable") {
-			if spec != nil && f.Target != "" && !runnerInNetwork(runner, f.Target, spec) {
-				// Route to vantage_point so it can be aggregated with isolation failures
-				// that have the same root cause.
-				groups["vantage_point"].failures = append(groups["vantage_point"].failures, f)
-				return
-			}
+		if spec != nil && f.Target != "" &&
+			(isTimeout || strings.Contains(summary, "unreachable")) && !runnerInNetwork(runner, f.Target, spec) {
+			// Route to vantage_point so it can be aggregated with isolation failures
+			// that have the same root cause.
+			groups["vantage_point"].failures = append(groups["vantage_point"].failures, f)
+			return
+		}
+
+		// Runner IS inside the target network but the scan still failed —
+		// the network is not responding, so hosts are down or filtered.
+		if runnerInNetwork(runner, f.Target, spec) {
+			groups["host_down_or_filtered"].failures = append(groups["host_down_or_filtered"].failures, f)
+			return
 		}
 
 		// Fallback: treat as generic network reachability problem
@@ -297,6 +308,12 @@ func classifyServiceCheck(f models.CheckResult, groups map[string]*failureGroup)
 	groups["service_down"].failures = append(groups["service_down"].failures, f)
 }
 
+// classifyRouteCheck handles route_check failures. A failed route lookup means
+// the target network is not reachable from the runner's vantage point.
+func classifyRouteCheck(f models.CheckResult, groups map[string]*failureGroup) {
+	groups["network_unreachable"].failures = append(groups["network_unreachable"].failures, f)
+}
+
 // classifyDNSCheck handles dns_check failures.
 func classifyDNSCheck(f models.CheckResult, groups map[string]*failureGroup) {
 	if f.Status == models.StatusError {
@@ -318,20 +335,48 @@ func classifyHealthCheck(f models.CheckResult, groups map[string]*failureGroup) 
 }
 
 // runnerInNetwork checks if the runner's IPs place it inside the named network.
+// networkName may be a network name OR its CIDR (subnet_discovery results carry
+// the CIDR as Target), so it is resolved via findNetwork first.
 func runnerInNetwork(runner models.RunnerContext, networkName string, spec *intent.Spec) bool {
 	if spec == nil {
 		return false
 	}
-	net := spec.NetworkByName(networkName)
+	net := findNetwork(spec, networkName)
 	if net == nil {
 		return false
 	}
 	for _, n := range runner.Networks {
-		if n == networkName {
+		if n == net.Name {
 			return true
 		}
 	}
 	return false
+}
+
+// findNetwork resolves a spec network by name, by CIDR, or by bare IP
+// containment. Discovery results carry the CIDR as Target while assertions
+// reference networks by name; route_check/port_check targets are bare IPs.
+func findNetwork(spec *intent.Spec, nameOrCIDR string) *intent.Network {
+	if spec == nil {
+		return nil
+	}
+	if n := spec.NetworkByName(nameOrCIDR); n != nil {
+		return n
+	}
+	for i := range spec.Networks {
+		if spec.Networks[i].CIDR == nameOrCIDR {
+			return &spec.Networks[i]
+		}
+	}
+	if ip := net.ParseIP(nameOrCIDR); ip != nil {
+		for i := range spec.Networks {
+			_, ipnet, err := net.ParseCIDR(spec.Networks[i].CIDR)
+			if err == nil && ipnet.Contains(ip) {
+				return &spec.Networks[i]
+			}
+		}
+	}
+	return nil
 }
 
 // generateFromGroups produces one recommendation per failure group.
@@ -417,7 +462,7 @@ func recommendVantagePoint(g failureGroup, spec *intent.Spec, runner models.Runn
 
 		// From discovery / other network-targeted checks (new for ERROR timeout cases)
 		if f.Target != "" && spec != nil {
-			if net := spec.NetworkByName(f.Target); net != nil && net.Zone != "" {
+			if net := findNetwork(spec, f.Target); net != nil && net.Zone != "" {
 				neededZones[net.Zone] = struct{}{}
 			} else if net != nil {
 				neededZones[net.Name] = struct{}{}
@@ -662,7 +707,7 @@ func recommendNetworkUnreachable(g failureGroup, spec *intent.Spec, runner model
 		// Find networks for each affected target
 		seenZones := map[string]bool{}
 		for _, target := range affected {
-			net := spec.NetworkByName(target)
+			net := findNetwork(spec, target)
 			if net == nil {
 				continue
 			}
@@ -900,7 +945,14 @@ func recommendHostDown(g failureGroup, spec *intent.Spec, runner models.RunnerCo
 	if spec != nil && len(affected) > 0 {
 		var patchLines []string
 		for _, target := range affected {
-			a := lookupAssertion(spec, target, "", "subnet_discovery")
+			// Discovery results carry the CIDR while assertions reference the
+			// network by name — resolve before matching assertions.
+			net := findNetwork(spec, target)
+			netName := target
+			if net != nil {
+				netName = net.Name
+			}
+			a := lookupAssertion(spec, netName, "", "subnet_discovery")
 			if a == nil {
 				continue
 			}
@@ -952,14 +1004,15 @@ func recommendDNSFailure(g failureGroup, spec *intent.Spec, runner models.Runner
 	if spec != nil && len(g.failures) > 0 {
 		var patchLines []string
 		for _, f := range g.failures {
-			if f.Observed["resolved_ip"] == nil {
-				continue
-			}
 			observedIP, _ := f.Observed["resolved_ip"].(string)
 			if observedIP == "" {
 				continue
 			}
-			oldIP, _ := f.Expected["expect_ip"].(string)
+			// The resolver stores the expected IP under Expected["ip"].
+			oldIP, _ := f.Expected["ip"].(string)
+			if oldIP == "" {
+				continue
+			}
 			patchLines = append(patchLines, "# Update dns_check for "+f.Target+" under 'assertions':")
 			patchLines = append(patchLines, "-    expect_ip: "+oldIP)
 			patchLines = append(patchLines, "+    expect_ip: "+observedIP+"  # observed resolved IP")

@@ -377,13 +377,113 @@ func TestClassifyDiscovery_TimeoutRunnerInNetwork(t *testing.T) {
 	}
 	found := false
 	for _, r := range recs {
-		if r.Category == "network_unreachable" {
+		if r.Category == "host_down_or_filtered" {
 			found = true
 		}
 	}
-	// Runner IS in the network and timeout → network_unreachable
+	// Runner IS in the network and timeout → hosts down or filtered
 	if !found {
-		t.Error("expected network_unreachable when runner in network with timeout")
+		t.Error("expected host_down_or_filtered when runner in network with timeout")
+	}
+}
+
+// TestClassifyDiscovery_TimeoutRunnerInNetworkCIDR covers production data:
+// subnet_discovery results carry the CIDR (not the network name) as Target.
+func TestClassifyDiscovery_TimeoutRunnerInNetworkCIDR(t *testing.T) {
+	failures := []models.CheckResult{
+		{
+			CheckType: "subnet_discovery",
+			Target:    "10.0.20.0/24",
+			Status:    models.StatusError,
+			Summary:   "subnet_discovery timed out",
+		},
+	}
+	spec := &intent.Spec{
+		Networks: []intent.Network{
+			{Name: "personal", CIDR: "10.0.20.0/24", Zone: "personal"},
+		},
+	}
+	runner := models.RunnerContext{Networks: []string{"personal"}}
+	recs, err := GenerateRecommendations(failures, spec, runner)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, r := range recs {
+		if r.Category == "host_down_or_filtered" {
+			found = true
+		}
+	}
+	// CIDR Target must resolve to the "personal" network so the runner is
+	// detected as being inside it.
+	if !found {
+		t.Error("expected host_down_or_filtered when runner in network (CIDR Target) with timeout")
+	}
+}
+
+// TestClassifyDiscovery_ZeroHostsRunnerInNetworkCIDR covers the production
+// shape where 0 hosts are discovered on a LAN the runner itself is attached to.
+func TestClassifyDiscovery_ZeroHostsRunnerInNetworkCIDR(t *testing.T) {
+	failures := []models.CheckResult{
+		{
+			CheckType: "subnet_discovery",
+			Target:    "10.0.20.0/24",
+			Status:    models.StatusWarn,
+			Summary:   "0 hosts discovered in 10.0.20.0/24",
+			Observed:  map[string]interface{}{"total": 0},
+		},
+	}
+	spec := &intent.Spec{
+		Networks: []intent.Network{
+			{Name: "personal", CIDR: "10.0.20.0/24", Zone: "personal"},
+		},
+	}
+	runner := models.RunnerContext{Networks: []string{"personal"}}
+	recs, err := GenerateRecommendations(failures, spec, runner)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, r := range recs {
+		if r.Category == "host_down_or_filtered" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected host_down_or_filtered when runner is in network (CIDR Target) with 0 hosts")
+	}
+}
+
+// TestClassifyDiscovery_TimeoutRunnerNotInNetworkCIDR covers the production
+// shape for the vantage_point case.
+func TestClassifyDiscovery_TimeoutRunnerNotInNetworkCIDR(t *testing.T) {
+	failures := []models.CheckResult{
+		{
+			CheckType: "subnet_discovery",
+			Target:    "10.0.40.0/24",
+			Status:    models.StatusError,
+			Summary:   "subnet_discovery timed out",
+		},
+	}
+	spec := &intent.Spec{
+		Networks: []intent.Network{
+			{Name: "media", CIDR: "10.0.40.0/24", Zone: "media"},
+			{Name: "personal", CIDR: "10.0.20.0/24", Zone: "personal"},
+		},
+	}
+	runner := models.RunnerContext{Networks: []string{"personal"}}
+	recs, err := GenerateRecommendations(failures, spec, runner)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, r := range recs {
+		if r.Category == "vantage_point" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected vantage_point for timeout when runner not in target network (CIDR Target)")
 	}
 }
 
@@ -1032,7 +1132,7 @@ func TestRecommendDNSFailure_WithObservedIP(t *testing.T) {
 				CheckType: "dns_check", Target: "nas.home.lan", Status: models.StatusFail,
 				Summary:  "resolved to wrong IP",
 				Observed: map[string]interface{}{"resolved_ip": "10.0.0.5"},
-				Expected: map[string]interface{}{"expect_ip": "10.0.0.10"},
+				Expected: map[string]interface{}{"ip": "10.0.0.10"},
 			},
 		},
 	}
@@ -1047,6 +1147,36 @@ func TestRecommendDNSFailure_WithObservedIP(t *testing.T) {
 	r := recs[0]
 	if !strings.Contains(r.SpecPatch, "10.0.0.5") {
 		t.Errorf("expected observed IP in SpecPatch, got: %s", r.SpecPatch)
+	}
+	// The removed line must carry the real expected IP (not an empty line).
+	if !strings.Contains(r.SpecPatch, "-    expect_ip: 10.0.0.10") {
+		t.Errorf("expected removed expect_ip line with real IP, got: %s", r.SpecPatch)
+	}
+}
+
+func TestRecommendDNSFailure_NoExpectedIP(t *testing.T) {
+	g := failureGroup{
+		category: "dns_failure",
+		failures: []models.CheckResult{
+			{
+				CheckType: "dns_check", Target: "nas.home.lan", Status: models.StatusFail,
+				Summary:  "resolved to wrong IP",
+				Observed: map[string]interface{}{"resolved_ip": "10.0.0.5"},
+				Expected: map[string]interface{}{"ip": ""},
+			},
+		},
+	}
+	spec := &intent.Spec{
+		Networks: []intent.Network{{Name: "personal", CIDR: "10.0.20.0/24", Zone: "personal"}},
+	}
+	runner := models.RunnerContext{Networks: []string{"personal"}}
+	recs := recommendDNSFailure(g, spec, runner, 1)
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 recommendation, got %d", len(recs))
+	}
+	// No expect_ip in the spec — a "- expect_ip:" line would not match anything.
+	if recs[0].SpecPatch != "" {
+		t.Errorf("expected empty SpecPatch when no expected IP, got %q", recs[0].SpecPatch)
 	}
 }
 
@@ -1259,9 +1389,91 @@ func TestClassifyHealthCheck_ErrorStatus(t *testing.T) {
 }
 
 // =============================================================================
-// ipInCIDR edge cases
+// classifyRouteCheck — failed route lookups must produce recommendations (#130)
 // =============================================================================
 
+func TestClassifyRouteCheck_ErrorStatus(t *testing.T) {
+	failures := []models.CheckResult{
+		{CheckType: "route_check", Target: "10.99.0.1", Status: models.StatusError, Summary: "failed to get route to 10.99.0.1: no route"},
+	}
+	recs, err := GenerateRecommendations(failures, nil, models.RunnerContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, r := range recs {
+		if r.Category == "network_unreachable" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected network_unreachable for route_check ERROR status")
+	}
+}
+
+func TestClassifyRouteCheck_WithSpecGeneratesPatch(t *testing.T) {
+	failures := []models.CheckResult{
+		{CheckType: "route_check", Target: "10.99.0.1", Status: models.StatusError, Summary: "failed to get route to 10.99.0.1: no route"},
+	}
+	spec := &intent.Spec{
+		Networks: []intent.Network{
+			{Name: "lab", CIDR: "10.99.0.0/24", Zone: "lab"},
+		},
+	}
+	runner := models.RunnerContext{Networks: []string{"personal"}}
+	recs, err := GenerateRecommendations(failures, spec, runner)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(recs) == 0 {
+		t.Fatal("expected at least 1 recommendation for route_check failure")
+	}
+	if recs[0].Category != "network_unreachable" {
+		t.Errorf("expected network_unreachable category, got %s", recs[0].Category)
+	}
+	if recs[0].SpecPatch == "" {
+		t.Error("expected SpecPatch suggesting a probe in the target network")
+	}
+}
+
+// =============================================================================
+// findNetwork — name, CIDR, and bare-IP resolution (#128)
+// =============================================================================
+func TestFindNetwork(t *testing.T) {
+	spec := &intent.Spec{
+		Networks: []intent.Network{
+			{Name: "personal", CIDR: "10.0.20.0/24", Zone: "personal"},
+			{Name: "media", CIDR: "10.0.40.0/24", Zone: "media"},
+		},
+	}
+	tests := []struct {
+		key  string
+		want string
+	}{
+		{"personal", "personal"},   // by name
+		{"10.0.40.0/24", "media"},  // by CIDR
+		{"10.0.20.77", "personal"}, // by IP containment
+		{"192.168.99.1", ""},       // no match
+		{"", ""},                   // empty
+	}
+	for _, tt := range tests {
+		net := findNetwork(spec, tt.key)
+		got := ""
+		if net != nil {
+			got = net.Name
+		}
+		if got != tt.want {
+			t.Errorf("findNetwork(%q) = %q, want %q", tt.key, got, tt.want)
+		}
+	}
+	if findNetwork(nil, "personal") != nil {
+		t.Error("expected nil for nil spec")
+	}
+}
+
+// =============================================================================
+// ipInCIDR edge cases
+// =============================================================================
 func TestIpInCidr_EmptyCIDR(t *testing.T) {
 	if ipInCIDR("192.168.1.1", "") {
 		t.Error("expected false for empty CIDR")

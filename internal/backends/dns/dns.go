@@ -76,6 +76,9 @@ func resolve(ctx context.Context, query, server string) (*models.CheckResult, []
 	result.Observed["ips"] = ips
 	result.Observed["query"] = query
 	result.Observed["server"] = server
+	if len(ips) > 0 {
+		result.Observed["resolved_ip"] = ips[0]
+	}
 
 	result.Evidence = append(result.Evidence, result.Summary)
 

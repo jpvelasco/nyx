@@ -577,6 +577,9 @@ func TestResolve_TruncatedResponse_TCPFallback(t *testing.T) {
 	if len(ips) != 1 || ips[0] != "192.0.2.77" {
 		t.Errorf("expected TCP-fallback answer 192.0.2.77, got %v", ips)
 	}
+	if got, ok := result.Observed["resolved_ip"].(string); !ok || got != "192.0.2.77" {
+		t.Errorf("expected Observed['resolved_ip'] = 192.0.2.77, got %v", result.Observed["resolved_ip"])
+	}
 }
 
 // dnsMessageWithTC takes a query packet and echoes it back with the TC bit set
