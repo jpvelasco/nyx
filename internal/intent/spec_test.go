@@ -515,6 +515,17 @@ func TestValidateSpec_ProbeMissingUser(t *testing.T) {
 	}
 }
 
+func TestValidateSpec_ProbeBadPort(t *testing.T) {
+	spec := &Spec{Version: 1, Site: "test", Probes: []Probe{{Name: "p1", Host: "1.2.3.4", User: "u", Port: 70000}}}
+	err := ValidateSpec(spec)
+	if err == nil {
+		t.Fatal("expected error for probe port out of range")
+	}
+	if !contains(err.Error(), "'port' must be 1-65535") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 // --- acl_check validation edge cases ---
 
 func TestValidateSpec_ACLCheckMissingPolicy(t *testing.T) {

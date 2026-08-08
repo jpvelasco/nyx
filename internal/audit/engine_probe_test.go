@@ -286,7 +286,7 @@ func TestIsPingBlocked(t *testing.T) {
 func TestParseProbeOutput_IsolationBlocked(t *testing.T) {
 	result := models.NewCheckResult("probe", "isolation", "probe1", "10.0.0.1")
 	a := intent.Assertion{Type: "isolation", From: "zone1", To: "zone2", Expect: "deny", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "100% packet loss")
+	got := parseProbeOutput(result, a, "100% packet loss", false)
 	if got.Status != models.StatusPass {
 		t.Errorf("expected pass (deny+blocked), got %s: %s", got.Status, got.Summary)
 	}
@@ -295,7 +295,7 @@ func TestParseProbeOutput_IsolationBlocked(t *testing.T) {
 func TestParseProbeOutput_IsolationReachable(t *testing.T) {
 	result := models.NewCheckResult("probe", "isolation", "probe1", "10.0.0.1")
 	a := intent.Assertion{Type: "isolation", From: "zone1", To: "zone2", Expect: "deny", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "3 packets received")
+	got := parseProbeOutput(result, a, "3 packets received", false)
 	if got.Status != models.StatusFail {
 		t.Errorf("expected fail (deny+reachable), got %s: %s", got.Status, got.Summary)
 	}
@@ -304,7 +304,7 @@ func TestParseProbeOutput_IsolationReachable(t *testing.T) {
 func TestParseProbeOutput_IsolationAllowReachable(t *testing.T) {
 	result := models.NewCheckResult("probe", "isolation", "probe1", "10.0.0.1")
 	a := intent.Assertion{Type: "isolation", From: "zone1", To: "zone2", Expect: "allow", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "3 packets received")
+	got := parseProbeOutput(result, a, "3 packets received", false)
 	if got.Status != models.StatusPass {
 		t.Errorf("expected pass (allow+reachable), got %s: %s", got.Status, got.Summary)
 	}
@@ -313,7 +313,7 @@ func TestParseProbeOutput_IsolationAllowReachable(t *testing.T) {
 func TestParseProbeOutput_IsolationAllowBlocked(t *testing.T) {
 	result := models.NewCheckResult("probe", "isolation", "probe1", "10.0.0.1")
 	a := intent.Assertion{Type: "isolation", From: "zone1", To: "zone2", Expect: "allow", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "100% packet loss")
+	got := parseProbeOutput(result, a, "100% packet loss", false)
 	if got.Status != models.StatusFail {
 		t.Errorf("expected fail (allow+blocked), got %s: %s", got.Status, got.Summary)
 	}
@@ -322,28 +322,49 @@ func TestParseProbeOutput_IsolationAllowBlocked(t *testing.T) {
 func TestParseProbeOutput_PortCheckOpen(t *testing.T) {
 	result := models.NewCheckResult("probe", "port_check", "probe1", "10.0.0.1")
 	a := intent.Assertion{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}, Expect: "open", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "some output")
+	got := parseProbeOutput(result, a, "some output", false)
 	if got.Status != models.StatusPass {
 		t.Errorf("expected pass (open), got %s: %s", got.Status, got.Summary)
 	}
 }
 
-func TestParseProbeOutput_PortCheckClosed(t *testing.T) {
+func TestParseProbeOutput_PortCheckOpenExpectedButRemoteClosed(t *testing.T) {
 	result := models.NewCheckResult("probe", "port_check", "probe1", "10.0.0.1")
-	a := intent.Assertion{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}, Expect: "closed", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "some output")
+	a := intent.Assertion{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}, Expect: "open", Runner: "probe1"}
+	got := parseProbeOutput(result, a, "", true)
 	if got.Status != models.StatusFail {
-		t.Errorf("expected fail (expect closed but port is open), got %s: %s", got.Status, got.Summary)
+		t.Errorf("expected fail (nc closed a port expected open), got %s: %s", got.Status, got.Summary)
 	}
 	if len(got.Violations) == 0 {
 		t.Error("expected violations")
 	}
 }
 
+func TestParseProbeOutput_PortCheckClosedWhenOpen(t *testing.T) {
+	result := models.NewCheckResult("probe", "port_check", "probe1", "10.0.0.1")
+	a := intent.Assertion{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}, Expect: "closed", Runner: "probe1"}
+	got := parseProbeOutput(result, a, "some output", false)
+	if got.Status != models.StatusFail {
+		t.Fatalf("expected fail (expect closed but port is open), got %s: %s", got.Status, got.Summary)
+	}
+	if len(got.Violations) == 0 {
+		t.Error("expected violations")
+	}
+}
+
+func TestParseProbeOutput_PortCheckClosedWhenRemoteClosed(t *testing.T) {
+	result := models.NewCheckResult("probe", "port_check", "probe1", "10.0.0.1")
+	a := intent.Assertion{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}, Expect: "closed", Runner: "probe1"}
+	got := parseProbeOutput(result, a, "", true)
+	if got.Status != models.StatusPass {
+		t.Errorf("expected pass (nc reported closed), got %s: %s", got.Status, got.Summary)
+	}
+}
+
 func TestParseProbeOutput_NetworkHealthUnreachable(t *testing.T) {
 	result := models.NewCheckResult("probe", "network_health", "probe1", "10.0.0.1")
 	a := intent.Assertion{Type: "network_health", Target: "10.0.0.1", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "100% packet loss")
+	got := parseProbeOutput(result, a, "100% packet loss", false)
 	if got.Status != models.StatusFail {
 		t.Errorf("expected fail (100%% loss), got %s: %s", got.Status, got.Summary)
 	}
@@ -352,16 +373,25 @@ func TestParseProbeOutput_NetworkHealthUnreachable(t *testing.T) {
 func TestParseProbeOutput_NetworkHealthReachable(t *testing.T) {
 	result := models.NewCheckResult("probe", "network_health", "probe1", "10.0.0.1")
 	a := intent.Assertion{Type: "network_health", Target: "10.0.0.1", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "3 packets received")
+	got := parseProbeOutput(result, a, "3 packets received", false)
 	if got.Status != models.StatusPass {
 		t.Errorf("expected pass, got %s: %s", got.Status, got.Summary)
+	}
+}
+
+func TestParseProbeOutput_NetworkHealthRemoteNoReplies(t *testing.T) {
+	result := models.NewCheckResult("probe", "network_health", "probe1", "10.0.0.1")
+	a := intent.Assertion{Type: "network_health", Target: "10.0.0.1", Runner: "probe1"}
+	got := parseProbeOutput(result, a, "", true)
+	if got.Status != models.StatusFail {
+		t.Errorf("expected fail (remote ping exited non-zero), got %s: %s", got.Status, got.Summary)
 	}
 }
 
 func TestParseProbeOutput_DNSCheckExpectIPNotFound(t *testing.T) {
 	result := models.NewCheckResult("probe", "dns_check", "probe1", "example.com")
 	a := intent.Assertion{Type: "dns_check", Query: "example.com", ExpectIP: "93.184.216.34", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "different IP returned")
+	got := parseProbeOutput(result, a, "different IP returned", false)
 	if got.Status != models.StatusFail {
 		t.Errorf("expected fail (expected IP not found), got %s: %s", got.Status, got.Summary)
 	}
@@ -370,16 +400,61 @@ func TestParseProbeOutput_DNSCheckExpectIPNotFound(t *testing.T) {
 func TestParseProbeOutput_DNSCheckExpectIPFound(t *testing.T) {
 	result := models.NewCheckResult("probe", "dns_check", "probe1", "example.com")
 	a := intent.Assertion{Type: "dns_check", Query: "example.com", ExpectIP: "93.184.216.34", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "Address: 93.184.216.34")
+	got := parseProbeOutput(result, a, "Address: 93.184.216.34", false)
 	if got.Status != models.StatusPass {
 		t.Errorf("expected pass (expected IP found), got %s: %s", got.Status, got.Summary)
+	}
+}
+
+func TestParseProbeOutput_DNSCheckServerAddressDoesNotWin(t *testing.T) {
+	// The resolver's own address always appears in nslookup output ("Server:" /
+	// "Address:" preamble). The check must not pass on it (regression: substring
+	// matching against the whole output did).
+	output := "Server:  10.0.0.1\nAddress: 10.0.0.1#53\n\nName:    vpn.home\nAddress: 10.0.0.20"
+	result := models.NewCheckResult("probe", "dns_check", "probe1", "vpn.home")
+	a := intent.Assertion{Type: "dns_check", Query: "vpn.home", Server: "10.0.0.1", ExpectIP: "10.0.0.1", Runner: "probe1"}
+	got := parseProbeOutput(result, a, output, false)
+	if got.Status != models.StatusFail {
+		t.Errorf("expected fail (resolver address must not satisfy expect_ip), got %s: %s", got.Status, got.Summary)
+	}
+}
+
+func TestParseProbeOutput_DNSCheckAnswerExactMatch(t *testing.T) {
+	// A real answer (10.0.0.20) must pass even though the resolver preamble
+	// lists a different address.
+	output := "Server:  10.0.0.1\nAddress: 10.0.0.1#53\n\n\tName: vpn.home\nAddress: 10.0.0.20"
+	result := models.NewCheckResult("probe", "dns_check", "probe1", "vpn.home")
+	a := intent.Assertion{Type: "dns_check", Query: "vpn.home", Server: "10.0.0.1", ExpectIP: "10.0.0.20", Runner: "probe1"}
+	got := parseProbeOutput(result, a, output, false)
+	if got.Status != models.StatusPass {
+		t.Errorf("expected pass (answer matched), got %s: %s", got.Status, got.Summary)
+	}
+}
+
+func TestParseProbeOutput_DNSCheckExpectIPNoSubstringPrefix(t *testing.T) {
+	// 10.0.0.1 must not match answer 10.0.0.10 (substring trap).
+	output := "Server:  8.8.8.8\nAddress: 8.8.8.8#53\n\nName: host.lan\nAddress: 10.0.0.10"
+	result := models.NewCheckResult("probe", "dns_check", "probe1", "host.lan")
+	a := intent.Assertion{Type: "dns_check", Query: "host.lan", Server: "8.8.8.8", ExpectIP: "10.0.0.1", Runner: "probe1"}
+	got := parseProbeOutput(result, a, output, false)
+	if got.Status != models.StatusFail {
+		t.Errorf("expected fail (substring false positive), got %s: %s", got.Status, got.Summary)
+	}
+}
+
+func TestParseProbeOutput_DNSCheckRemoteFailure(t *testing.T) {
+	result := models.NewCheckResult("probe", "dns_check", "probe1", "example.com")
+	a := intent.Assertion{Type: "dns_check", Query: "nxdomain.example", ExpectIP: "93.184.216.34", Runner: "probe1"}
+	got := parseProbeOutput(result, a, "Server: 8.8.8.8\nAddress: 8.8.8.8#53", true)
+	if got.Status != models.StatusFail {
+		t.Errorf("expected fail (nslookup NXDOMAIN), got %s: %s", got.Status, got.Summary)
 	}
 }
 
 func TestParseProbeOutput_DNSCheckNoExpectIP(t *testing.T) {
 	result := models.NewCheckResult("probe", "dns_check", "probe1", "example.com")
 	a := intent.Assertion{Type: "dns_check", Query: "example.com", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "Address: 1.2.3.4")
+	got := parseProbeOutput(result, a, "Address: 1.2.3.4", false)
 	if got.Status != models.StatusPass {
 		t.Errorf("expected pass (no expect IP), got %s: %s", got.Status, got.Summary)
 	}
@@ -388,9 +463,34 @@ func TestParseProbeOutput_DNSCheckNoExpectIP(t *testing.T) {
 func TestParseProbeOutput_DefaultBranch(t *testing.T) {
 	result := models.NewCheckResult("probe", "unknown", "probe1", "target")
 	a := intent.Assertion{Type: "vlan_check", Target: "10.0.0.1", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "some output")
+	got := parseProbeOutput(result, a, "some output", false)
 	if got.Status != models.StatusWarn {
 		t.Errorf("expected warn for unhandled type, got %s: %s", got.Status, got.Summary)
+	}
+}
+
+func TestProbeDNSAnswers_ExcludesServerAddress(t *testing.T) {
+	output := "Server:  10.0.0.1\nAddress: 10.0.0.1#53\n\n\tName: vpn.home\nAddress: 10.0.0.20"
+	got := probeDNSAnswers(output, "10.0.0.1")
+	if len(got) != 1 || got[0] != "10.0.0.20" {
+		t.Errorf("expected only the answer address, got %v", got)
+	}
+}
+
+func TestProbeDNSAnswers_NoAnswer(t *testing.T) {
+	output := "Server:  8.8.8.8\nAddress: 8.8.8.8#53\n\n** server can't find foo: NXDOMAIN"
+	if got := probeDNSAnswers(output, "8.8.8.8"); len(got) != 0 {
+		t.Errorf("expected no answers for NXDOMAIN, got %v", got)
+	}
+}
+
+func TestProbeDNSAnswers_Deduplicates(t *testing.T) {
+	// The same address repeated in the output (e.g. multiple names for one
+	// record) must be reported once.
+	output := "Server:  10.0.0.1\nAddress: 10.0.0.1#53\n\nName: db.example.com\nAddress: 192.0.2.10\nAddress: 192.0.2.10\n"
+	got := probeDNSAnswers(output, "10.0.0.1")
+	if len(got) != 1 || got[0] != "192.0.2.10" {
+		t.Errorf("expected single deduplicated answer, got %v", got)
 	}
 }
 
@@ -537,9 +637,10 @@ func TestRunViaProbe_IsolationSSHFailure_DenyExpect(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected result")
 	}
-	// SSH failed → allBlocked=true, anyTested=true, expectDeny=true → Pass
-	if result.Status != models.StatusPass {
-		t.Errorf("expected pass (deny + all blocked), got %s: %s", result.Status, result.Summary)
+	// SSH transport failure means the probe never tested anything — the
+	// check must NOT confirm isolation (regression: it used to pass).
+	if result.Status != models.StatusWarn {
+		t.Errorf("expected warn (unverifiable), got %s: %s", result.Status, result.Summary)
 	}
 }
 
@@ -572,9 +673,9 @@ func TestRunViaProbe_IsolationSSHFailure_AllowExpect(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected result")
 	}
-	// SSH failed → allBlocked=true, anyTested=true, expectDeny=false → Fail
-	if result.Status != models.StatusFail {
-		t.Errorf("expected fail (allow but all blocked), got %s: %s", result.Status, result.Summary)
+	// SSH failure must not produce a definitive verdict for allow either.
+	if result.Status != models.StatusWarn {
+		t.Errorf("expected warn (unverifiable), got %s: %s", result.Status, result.Summary)
 	}
 }
 
@@ -1943,7 +2044,7 @@ func TestRunAssertion_SubnetDiscoveryThroughAssertion(t *testing.T) {
 	}
 }
 
-// --- runIsolationViaProbe: zone with no matching networks (gateways fallback) ---
+// --- runIsolationViaProbe: zone with no matching networks ---
 
 func TestRunViaProbe_IsolationNoGatewaysFound(t *testing.T) {
 	spec := &intent.Spec{
@@ -1963,14 +2064,15 @@ func TestRunViaProbe_IsolationNoGatewaysFound(t *testing.T) {
 	eng.SkipHostKeyVerify = true
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	// To zone has no matching network → gateways fallback to [a.To] (line 828-830)
-	// SSH fails → gateway unreachable = blocked → expect deny → Pass (isolation confirmed)
+	// An unresolvable target zone must be reported, not silently treated as
+	// an unreachable gateway (regression: it used to ping the literal zone
+	// name and confirm isolation).
 	result, err := eng.runViaProbe(ctx, spec.Assertions[0])
 	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
+		t.Fatalf("expected result, not error: %v", err)
 	}
-	if result.Status != models.StatusPass {
-		t.Errorf("expected pass (deny + unreachable = isolated), got %s: %s", result.Status, result.Summary)
+	if result.Status != models.StatusError {
+		t.Errorf("expected error (unresolvable zone), got %s: %s", result.Status, result.Summary)
 	}
 }
 

@@ -3,6 +3,7 @@ package probe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -14,14 +15,40 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
+// TransportError indicates the probe itself could not be reached,
+// authenticated, or handed a session — the remote command never ran.
+// Callers must distinguish this from a remote command that ran and
+// failed (see RemoteError).
+type TransportError struct{ err error }
+
+func (e *TransportError) Error() string { return e.err.Error() }
+func (e *TransportError) Unwrap() error { return e.err }
+
+// RemoteError indicates the remote command executed but exited non-zero
+// (e.g. nc -z on a closed port, or ping with 100% packet loss).
+type RemoteError struct{ err error }
+
+func (e *RemoteError) Error() string { return e.err.Error() }
+func (e *RemoteError) Unwrap() error { return e.err }
+
 // Probe represents a remote node that can execute commands via SSH.
 type Probe struct {
 	Name              string // probe name
 	Host              string // IP or hostname
 	User              string // SSH username
+	Port              int    // SSH port; 0 means 22
 	Key               string // path to private key; empty = ssh-agent only
 	VLAN              string // informational label
 	SkipHostKeyVerify bool   // skip SSH host key verification (like ssh -o StrictHostKeyChecking=no)
+}
+
+// addr returns the host:port endpoint, defaulting to port 22.
+func (p Probe) addr() string {
+	port := p.Port
+	if port == 0 {
+		port = 22
+	}
+	return fmt.Sprintf("%s:%d", p.Host, port)
 }
 
 // Run executes a command on the probe and returns combined stdout+stderr output.
@@ -33,14 +60,30 @@ type Probe struct {
 func Run(ctx context.Context, p Probe, cmd []string, skipHostKeyVerify bool) (string, error) {
 	conn, err := dialWithContext(ctx, p)
 	if err != nil {
-		return "", fmt.Errorf("probe %q unreachable at %s:22 — is the host on VLAN %s and SSH running?", p.Name, p.Host, p.VLAN)
+		return "", &TransportError{fmt.Errorf("probe %q unreachable at %s:22 — is the host on VLAN %s and SSH running? (%w)", p.Name, p.Host, p.VLAN, err)}
 	}
 	defer conn.Close()
 
+	// The SSH session itself has no context binding, so a cancelled or
+	// expired context (e.g. the per-assertion timeout) must abort an
+	// in-flight remote command by closing the connection.
+	abort := make(chan struct{})
+	defer close(abort)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close() // #nosec G104 — best-effort abort of a hung remote command
+		case <-abort:
+		}
+	}()
+
 	// Build auth methods; agentConn (if any) must stay open until the session ends.
-	methods, agentConn := authMethods(p.Key)
+	methods, agentConn, err := authMethods(p.Key)
 	if agentConn != nil {
 		defer agentConn.Close()
+	}
+	if err != nil {
+		return "", fmt.Errorf("probe %q: %w", p.Name, err)
 	}
 	if len(methods) == 0 {
 		return "", fmt.Errorf("probe %q: no authentication methods available", p.Name)
@@ -60,9 +103,9 @@ func Run(ctx context.Context, p Probe, cmd []string, skipHostKeyVerify bool) (st
 		Timeout:         10 * time.Second,
 	}
 
-	sshConn, chans, reqs, err := ssh.NewClientConn(conn, p.Host+":22", cfg)
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, p.addr(), cfg)
 	if err != nil {
-		return "", fmt.Errorf("probe %q unreachable at %s:22 — is the host on VLAN %s and SSH running?", p.Name, p.Host, p.VLAN)
+		return "", &TransportError{fmt.Errorf("probe %q unreachable at %s:22 — is the host on VLAN %s and SSH running? (%w)", p.Name, p.Host, p.VLAN, err)}
 	}
 	defer sshConn.Close()
 
@@ -71,7 +114,7 @@ func Run(ctx context.Context, p Probe, cmd []string, skipHostKeyVerify bool) (st
 
 	session, err := client.NewSession()
 	if err != nil {
-		return "", fmt.Errorf("probe %q: failed to create SSH session: %w", p.Name, err)
+		return "", &TransportError{fmt.Errorf("probe %q: failed to create SSH session: %w", p.Name, err)}
 	}
 	defer session.Close()
 
@@ -82,7 +125,18 @@ func Run(ctx context.Context, p Probe, cmd []string, skipHostKeyVerify bool) (st
 		quoted[i] = shellQuote(arg)
 	}
 	output, err := session.CombinedOutput(strings.Join(quoted, " "))
-	return string(output), err
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return string(output), ctxErr
+		}
+		var exitErr *ssh.ExitError
+		if errors.As(err, &exitErr) {
+			//nolint:staticcheck // SA1019 — ExitError.Waitmsg is deprecated; status is what callers need
+			return string(output), &RemoteError{fmt.Errorf("remote command failed with status %d: %w", exitErr.ExitStatus(), err)}
+		}
+		return string(output), err
+	}
+	return string(output), nil
 }
 
 // shellQuote wraps a string in single quotes, escaping any embedded single quotes.
@@ -113,13 +167,13 @@ func dialWithContext(ctx context.Context, p Probe) (net.Conn, error) {
 		return nil, fmt.Errorf("context deadline exceeded")
 	}
 
-	return net.DialTimeout("tcp", p.Host+":22", timeout)
+	return net.DialTimeout("tcp", p.addr(), timeout)
 }
 
 // authMethods builds the SSH auth method chain: private key (if provided) then ssh-agent.
 // Returns the agent connection if one was opened — the caller must close it after the
 // SSH session ends (closing it too early would break agent-based auth mid-handshake).
-func authMethods(keyPath string) ([]ssh.AuthMethod, net.Conn) {
+func authMethods(keyPath string) ([]ssh.AuthMethod, net.Conn, error) {
 	var methods []ssh.AuthMethod
 
 	if keyPath != "" {
@@ -132,12 +186,14 @@ func authMethods(keyPath string) ([]ssh.AuthMethod, net.Conn) {
 		}
 		// #nosec G304 — path from spec, resolves to home dir
 		keyBytes, err := os.ReadFile(keyPath) // nosemgrep
-		if err == nil {
-			signer, err := ssh.ParsePrivateKey(keyBytes)
-			if err == nil {
-				methods = append(methods, ssh.PublicKeys(signer))
-			}
+		if err != nil {
+			return nil, nil, fmt.Errorf("reading key file: %w", err)
 		}
+		signer, err := ssh.ParsePrivateKey(keyBytes)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parsing key file %s: %w", keyPath, err)
+		}
+		methods = append(methods, ssh.PublicKeys(signer))
 	}
 
 	agentConn := connectAgent()
@@ -146,7 +202,7 @@ func authMethods(keyPath string) ([]ssh.AuthMethod, net.Conn) {
 		methods = append(methods, ssh.PublicKeysCallback(agentClient.Signers))
 	}
 
-	return methods, agentConn
+	return methods, agentConn, nil
 }
 
 // connectAgent attempts to connect to the SSH agent via SSH_AUTH_SOCK.

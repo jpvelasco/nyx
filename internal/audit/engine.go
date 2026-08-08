@@ -3,10 +3,13 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -303,19 +306,22 @@ func pickBestInterface(ifaces []net.Interface, spec *intent.Spec) string {
 }
 
 func (e *Engine) runAssertion(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
-	// Dispatch to probe if runner is set
-	if a.Runner != "" && a.Runner != "local" {
-		return e.runViaProbe(ctx, a)
-	}
-
 	// Give each assertion its own deadline so a single slow check
 	// (e.g. a large nmap sweep) cannot starve the rest of the audit.
+	// Probe assertions get the same budget — remote commands can hang
+	// (black-holed DNS server, stalled shell) unless the deadline is
+	// enforced on the SSH session as well.
 	timeout := assertionTimeoutDefault
 	if a.Type == "subnet_discovery" {
 		timeout = assertionTimeoutDiscovery
 	}
 	assertCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	// Dispatch to probe if runner is set
+	if a.Runner != "" && a.Runner != "local" {
+		return e.runViaProbe(assertCtx, a)
+	}
 
 	switch a.Type {
 	case "subnet_discovery":
@@ -791,6 +797,7 @@ func (e *Engine) runViaProbe(ctx context.Context, a intent.Assertion) (*models.C
 		Name:              p.Name,
 		Host:              p.Host,
 		User:              p.User,
+		Port:              p.Port,
 		Key:               p.Key,
 		VLAN:              p.VLAN,
 		SkipHostKeyVerify: p.SkipHostKeyVerify,
@@ -813,20 +820,39 @@ func (e *Engine) runViaProbe(ctx context.Context, a intent.Assertion) (*models.C
 	result.Evidence = append(result.Evidence, output)
 
 	if err != nil {
-		result.Status = models.StatusError
-		result.Summary = fmt.Sprintf("probe %q: command failed: %v", a.Runner, err)
+		var remoteErr *probe.RemoteError
+		switch {
+		case errors.As(err, &remoteErr):
+			// The remote command ran but exited non-zero (e.g. nc -z on a
+			// closed port). That is a value signal — evaluate it against
+			// the assertion, not as an execution failure.
+			result.Finish()
+			return parseProbeOutput(result, a, output, true), nil
+		case ctx.Err() != nil:
+			result.Status = models.StatusError
+			result.Summary = fmt.Sprintf("probe %q: command timed out: %v", a.Runner, ctx.Err())
+		default:
+			// Transport failures (dial/auth/host-key/session) or any other
+			// error — the remote command never produced a usable result.
+			result.Status = models.StatusError
+			result.Summary = fmt.Sprintf("probe %q: command failed: %v", a.Runner, err)
+		}
 		result.Finish()
 		return result, nil
 	}
 
-	return parseProbeOutput(result, a, output), nil
+	return parseProbeOutput(result, a, output, false), nil
 }
 
 // runIsolationViaProbe runs isolation checks against all gateways in the destination zone.
 func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, probeP probe.Probe) (*models.CheckResult, error) {
 	gateways := resolveZoneToGateways(a.To, e.Spec)
 	if len(gateways) == 0 {
-		gateways = []string{a.To}
+		result := models.NewCheckResult("probe", "isolation", a.Runner, fmt.Sprintf("%s -> %s", a.From, a.To))
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("could not resolve target %q to any network", a.To)
+		result.Finish()
+		return result, nil
 	}
 
 	result := models.NewCheckResult("probe", "isolation", a.Runner, fmt.Sprintf("%s -> %s", a.From, a.To))
@@ -834,6 +860,7 @@ func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, p
 
 	allBlocked := true
 	anyTested := false
+	unreached := 0
 
 	for _, gw := range gateways {
 		cmd := []string{"ping", "-c", "3", "-W", "3", gw}
@@ -842,15 +869,19 @@ func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, p
 		output, err := probe.Run(ctx, probeP, cmd, e.SkipHostKeyVerify)
 		result.Evidence = append(result.Evidence, output)
 
-		if err != nil {
-			// Ping failed — treat as blocked (unreachable)
-			anyTested = true
-			result.Evidence = append(result.Evidence, fmt.Sprintf("gateway %s: unreachable", gw))
+		var transErr *probe.TransportError
+		if errors.As(err, &transErr) || ctx.Err() != nil {
+			// The probe never executed the ping — SSH, auth, or session
+			// failure. This must NOT count as evidence that the gateway
+			// is blocked.
+			unreached++
+			result.Evidence = append(result.Evidence, fmt.Sprintf("gateway %s: probe unreachable (%v)", gw, err))
 			continue
 		}
-		anyTested = true
 
-		if isPingBlocked(output) {
+		anyTested = true
+		if err != nil || isPingBlocked(output) {
+			// Remote exit non-zero (e.g. 100% loss) or output confirms loss.
 			result.Evidence = append(result.Evidence, fmt.Sprintf("gateway %s: blocked", gw))
 		} else {
 			allBlocked = false
@@ -859,10 +890,27 @@ func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, p
 	}
 
 	expectDeny := a.Expect == "deny"
+
+	// If the probe was unreachable for every gateway, no verdict is possible —
+	// a probe outage must never be reported as confirmed isolation.
+	if !anyTested {
+		result.Status = models.StatusWarn
+		result.Summary = fmt.Sprintf("isolation unverifiable: probe %q was unreachable (%s → %s, %d gateway(s) untested)", a.Runner, a.From, a.To, len(gateways))
+		result.Finish()
+		return result, nil
+	}
+
 	status, summary, violations := EvalIsolationStatus(a.Runner, a.From, a.To, expectDeny, anyTested, allBlocked)
-	result.Status = status
-	result.Summary = summary
-	result.Violations = append(result.Violations, violations...)
+	if status == models.StatusPass && unreached > 0 {
+		// "All gateways blocked" is only conclusive when every gateway was
+		// actually tested — partial coverage degrades the verdict.
+		result.Status = models.StatusWarn
+		result.Summary = fmt.Sprintf("isolation partially verified: %d gateway(s) could not be tested from probe %q (%s → %s)", unreached, a.Runner, a.From, a.To)
+	} else {
+		result.Status = status
+		result.Summary = summary
+		result.Violations = append(result.Violations, violations...)
+	}
 
 	result.Finish()
 	return result, nil
@@ -976,7 +1024,10 @@ func EvalIsolationStatus(runner, from, to string, expectDeny, anyTested, allBloc
 }
 
 // parseProbeOutput interprets raw probe command output and updates result status.
-func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output string) *models.CheckResult {
+// remoteFailed reports that the remote command executed but exited non-zero
+// (e.g. nc -z on a closed port, nslookup on NXDOMAIN) — a value signal that
+// must be evaluated against the assertion rather than treated as an error.
+func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output string, remoteFailed bool) *models.CheckResult {
 	switch a.Type {
 	case "isolation":
 		// ping output — if contains "0 received" or "100% packet loss" → isolated (pass for deny)
@@ -987,22 +1038,29 @@ func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output str
 		result.Summary = summary
 		result.Violations = append(result.Violations, violations...)
 	case "port_check":
-		// nc -z exits 0 if open, non-zero if closed/filtered
-		// Since probe.Run returns err on non-zero exit, we handle this differently:
-		// If we got here (no error), port is open
-		expect := a.Expect
-		if expect == "open" {
+		// nc -z exits 0 when the port is open; a non-zero exit means closed
+		// or filtered. The verdict is the inverse of the expectation — a
+		// closed port is a value signal, never an execution error.
+		portOpen := !remoteFailed
+		switch {
+		case a.Expect == "open" && portOpen:
 			result.Status = models.StatusPass
 			result.Summary = fmt.Sprintf("port %d is open on %s (from probe %q)", a.Ports[0], a.Target, a.Runner)
-		} else {
+		case a.Expect == "open" && !portOpen:
+			result.Status = models.StatusFail
+			result.Summary = fmt.Sprintf("port %d is closed on %s but expected open (from probe %q)", a.Ports[0], a.Target, a.Runner)
+			result.Violations = append(result.Violations, fmt.Sprintf("expected open but port %d is closed", a.Ports[0]))
+		case portOpen:
 			result.Status = models.StatusFail
 			result.Summary = fmt.Sprintf("port %d is open on %s but expected closed (from probe %q)", a.Ports[0], a.Target, a.Runner)
 			result.Violations = append(result.Violations, fmt.Sprintf("expected closed but port %d is open", a.Ports[0]))
+		default:
+			result.Status = models.StatusPass
+			result.Summary = fmt.Sprintf("port %d is closed on %s (from probe %q)", a.Ports[0], a.Target, a.Runner)
 		}
 	case "network_health":
-		// ping output — parse loss
-		isBlocked := isPingBlocked(output)
-		if isBlocked {
+		// ping output — non-zero exit means no replies (100% loss)
+		if remoteFailed || isPingBlocked(output) {
 			result.Status = models.StatusFail
 			result.Summary = fmt.Sprintf("100%% packet loss to %s from probe %q", a.Target, a.Runner)
 			result.Violations = append(result.Violations, "100% packet loss")
@@ -1011,11 +1069,24 @@ func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output str
 			result.Summary = fmt.Sprintf("host %s is reachable from probe %q", a.Target, a.Runner)
 		}
 	case "dns_check":
-		// nslookup output — check for expected IP
-		if a.ExpectIP != "" && !strings.Contains(output, a.ExpectIP) {
+		// nslookup exits non-zero on NXDOMAIN / server failure — the query
+		// did not resolve, which is itself the answer to evaluate.
+		if remoteFailed {
 			result.Status = models.StatusFail
-			result.Summary = fmt.Sprintf("dns_check from probe %q: %s not resolved to %s", a.Runner, a.Query, a.ExpectIP)
-			result.Violations = append(result.Violations, fmt.Sprintf("expected IP %s not in probe DNS response", a.ExpectIP))
+			result.Summary = fmt.Sprintf("dns_check from probe %q: %s did not resolve", a.Runner, a.Query)
+			result.Violations = append(result.Violations, "query did not resolve on the probe")
+			break
+		}
+		if a.ExpectIP != "" {
+			resolved := probeDNSAnswers(output, a.Server)
+			if len(resolved) == 0 || !slices.Contains(resolved, a.ExpectIP) {
+				result.Status = models.StatusFail
+				result.Summary = fmt.Sprintf("dns_check from probe %q: %s not resolved to %s (got %v)", a.Runner, a.Query, a.ExpectIP, resolved)
+				result.Violations = append(result.Violations, fmt.Sprintf("expected IP %s not in probe DNS response", a.ExpectIP))
+			} else {
+				result.Status = models.StatusPass
+				result.Summary = fmt.Sprintf("dns_check from probe %q: resolved %s", a.Runner, a.Query)
+			}
 		} else {
 			result.Status = models.StatusPass
 			result.Summary = fmt.Sprintf("dns_check from probe %q: resolved %s", a.Runner, a.Query)
@@ -1027,6 +1098,37 @@ func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output str
 	result.Finish()
 	return result
 }
+
+// probeDNSAnswers extracts the answer addresses from nslookup output
+// without tripping on the resolver's own preamble lines ("Server:" —
+// "Address:"), which list the configured resolver, not the answer.
+// Only real IP tokens are kept, and a token equal to the resolver
+// address itself is discarded.
+func probeDNSAnswers(output, server string) []string {
+	var addrs []string
+	seen := make(map[string]struct{})
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(trimmed), "server:") {
+			continue
+		}
+		for _, tok := range strings.Fields(nonIPChars.ReplaceAllString(trimmed, " ")) {
+			if net.ParseIP(tok) == nil || tok == server {
+				continue
+			}
+			if _, ok := seen[tok]; ok {
+				continue
+			}
+			seen[tok] = struct{}{}
+			addrs = append(addrs, tok)
+		}
+	}
+	return addrs
+}
+
+// nonIPChars matches anything that is not an IPv4/IPv6 character; used to
+// split nslookup lines into candidate address tokens.
+var nonIPChars = regexp.MustCompile(`[^0-9a-fA-F:.%]+`)
 
 // isPingBlocked returns true if ping output indicates 100% packet loss.
 func isPingBlocked(output string) bool {

@@ -43,6 +43,7 @@ type Probe struct {
 	Name              string `yaml:"name" json:"name"`
 	Host              string `yaml:"host" json:"host"`
 	User              string `yaml:"user" json:"user"`
+	Port              int    `yaml:"port,omitempty" json:"port,omitempty"` // SSH port; default 22
 	Key               string `yaml:"key,omitempty" json:"key,omitempty"`
 	VLAN              string `yaml:"vlan,omitempty" json:"vlan,omitempty"`
 	SkipHostKeyVerify bool   `yaml:"skip_host_key_verify,omitempty" json:"skip_host_key_verify,omitempty"`
@@ -160,6 +161,9 @@ func ValidateSpec(spec *Spec) error {
 		}
 		if p.User == "" {
 			return fmt.Errorf("probe[%d]: 'user' is required", i)
+		}
+		if p.Port != 0 && (p.Port < 1 || p.Port > 65535) {
+			return fmt.Errorf("probe[%d]: 'port' must be 1-65535, got %d", i, p.Port)
 		}
 		if probeNames[p.Name] {
 			return fmt.Errorf("probe[%d]: duplicate probe name %q", i, p.Name)

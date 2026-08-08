@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"encoding/binary"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -24,6 +25,11 @@ import (
 
 const testSSHPassword = "testpass"
 
+// lastTestServerPort tracks the ephemeral port of the most recently started
+// test SSH server so testProbe can point Run/Check at it. Tests start their
+// server before building the probe, so the value is always the right one.
+var lastTestServerPort int
+
 // testSSHServer is an in-process SSH server used to exercise Run/Check
 // against a real handshake on 127.0.0.1:22 without external dependencies.
 type testSSHServer struct {
@@ -31,14 +37,17 @@ type testSSHServer struct {
 	ln             net.Listener
 	config         *ssh.ServerConfig
 	rejectSessions bool
+	hangExec       bool
 	execReply      bool
 	exitStatus     uint32
 	wg             sync.WaitGroup
 }
 
-// startTestSSHServer binds 127.0.0.1:22 (probe dials host:22 hardcoded) and
-// serves SSH in the background. Skips when the port is unavailable.
-func startTestSSHServer(t *testing.T, rejectSessions bool, execReply bool, exitStatus uint32) *testSSHServer {
+// startTestSSHServer binds an ephemeral loopback port and serves SSH in the
+// background. The bound port is recorded in lastTestServerPort so testProbe
+// points Run/Check at the running server. Ephemeral ports avoid privileged
+// port 22 so these tests also run on rootless CI runners.
+func startTestSSHServer(t *testing.T, hangExec bool, rejectSessions bool, execReply bool, exitStatus uint32) *testSSHServer {
 	t.Helper()
 	hostKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -61,12 +70,14 @@ func startTestSSHServer(t *testing.T, rejectSessions bool, execReply bool, exitS
 	}
 	config.AddHostKey(signer)
 
-	ln, err := net.Listen("tcp", "127.0.0.1:22")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Skipf("cannot bind 127.0.0.1:22 for SSH test server: %v", err)
+		t.Fatalf("cannot bind test SSH listener: %v", err)
 	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	lastTestServerPort = port
 
-	srv := &testSSHServer{t: t, ln: ln, config: config, rejectSessions: rejectSessions, execReply: execReply, exitStatus: exitStatus}
+	srv := &testSSHServer{t: t, ln: ln, config: config, hangExec: hangExec, rejectSessions: rejectSessions, execReply: execReply, exitStatus: exitStatus}
 	srv.wg.Add(1)
 	go srv.serve()
 	// Cleanup runs LIFO: close the listener first, then wait for the serve loop.
@@ -116,6 +127,10 @@ func (s *testSSHServer) handleSession(ch ssh.Channel, requests <-chan *ssh.Reque
 		if req.Type != "exec" {
 			continue
 		}
+		if s.hangExec {
+			// Never reply or close — the remote command "runs" forever.
+			continue
+		}
 		if !s.execReply {
 			req.Reply(false, nil)
 			return
@@ -159,11 +174,11 @@ func writeTestKey(t *testing.T, path string) {
 }
 
 func testProbe(host string) Probe {
-	return Probe{Name: "p1", Host: host, User: "testuser", VLAN: "iot"}
+	return Probe{Name: "p1", Host: host, User: "testuser", VLAN: "iot", Port: lastTestServerPort}
 }
 
 func TestRun_SuccessWithKeyAuth(t *testing.T) {
-	startTestSSHServer(t, false, true, 0)
+	startTestSSHServer(t, false, false, true, 0)
 	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
 	writeTestKey(t, keyPath)
 
@@ -179,7 +194,7 @@ func TestRun_SuccessWithKeyAuth(t *testing.T) {
 }
 
 func TestRun_HostKeyVerificationFailure(t *testing.T) {
-	startTestSSHServer(t, false, true, 0)
+	startTestSSHServer(t, false, false, true, 0)
 	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
 	writeTestKey(t, keyPath)
 
@@ -195,7 +210,7 @@ func TestRun_HostKeyVerificationFailure(t *testing.T) {
 }
 
 func TestRun_NoAuthMethods(t *testing.T) {
-	startTestSSHServer(t, false, true, 0)
+	startTestSSHServer(t, false, false, true, 0)
 	t.Setenv("SSH_AUTH_SOCK", "")
 
 	p := testProbe("127.0.0.1")
@@ -209,7 +224,7 @@ func TestRun_NoAuthMethods(t *testing.T) {
 }
 
 func TestRun_CommandError(t *testing.T) {
-	startTestSSHServer(t, false, true, 1)
+	startTestSSHServer(t, false, false, true, 1)
 	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
 	writeTestKey(t, keyPath)
 
@@ -225,7 +240,7 @@ func TestRun_CommandError(t *testing.T) {
 }
 
 func TestRun_ExecRequestDenied(t *testing.T) {
-	startTestSSHServer(t, false, false, 0)
+	startTestSSHServer(t, false, false, false, 0)
 	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
 	writeTestKey(t, keyPath)
 
@@ -237,7 +252,7 @@ func TestRun_ExecRequestDenied(t *testing.T) {
 }
 
 func TestRun_SessionRejected(t *testing.T) {
-	startTestSSHServer(t, true, true, 0)
+	startTestSSHServer(t, false, true, true, 0)
 	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
 	writeTestKey(t, keyPath)
 
@@ -253,7 +268,7 @@ func TestRun_SessionRejected(t *testing.T) {
 }
 
 func TestCheck_Reachable(t *testing.T) {
-	startTestSSHServer(t, false, true, 0)
+	startTestSSHServer(t, false, false, true, 0)
 	if err := Check(context.Background(), testProbe("127.0.0.1")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -316,8 +331,7 @@ func TestShellQuote(t *testing.T) {
 
 func TestDialWithContext_DefaultDeadline(t *testing.T) {
 	// RFC5737 TEST-NET is non-routable: the dial hangs and must hit the
-	// 10s default deadline imposed on a context without one. We can't use
-	// a refused loopback port here — CI runners run sshd on :22.
+	// 10s default deadline imposed on a context without one.
 	start := time.Now()
 	_, err := dialWithContext(context.Background(), testProbe("192.0.2.1"))
 	if err == nil {
@@ -347,9 +361,12 @@ func TestAuthMethods_KeyFromFile(t *testing.T) {
 	writeTestKey(t, keyPath)
 	t.Setenv("SSH_AUTH_SOCK", "")
 
-	methods, agentConn := authMethods(keyPath)
+	methods, agentConn, err := authMethods(keyPath)
 	if agentConn != nil {
 		agentConn.Close()
+	}
+	if err != nil {
+		t.Fatalf("unexpected error for valid key: %v", err)
 	}
 	if len(methods) != 1 {
 		t.Fatalf("expected 1 key method, got %d", len(methods))
@@ -370,9 +387,12 @@ func TestAuthMethods_TildeExpansion(t *testing.T) {
 	}
 	writeTestKey(t, keyPath)
 
-	methods, agentConn := authMethods("~/.ssh/id_ed25519")
+	methods, agentConn, err := authMethods("~/.ssh/id_ed25519")
 	if agentConn != nil {
 		agentConn.Close()
+	}
+	if err != nil {
+		t.Fatalf("unexpected error for tilde-expanded key: %v", err)
 	}
 	if len(methods) != 1 {
 		t.Fatalf("expected 1 key method via ~ expansion, got %d", len(methods))
@@ -386,31 +406,26 @@ func TestAuthMethods_InvalidKeyFile(t *testing.T) {
 	}
 	t.Setenv("SSH_AUTH_SOCK", "")
 
-	methods, agentConn := authMethods(keyPath)
-	if agentConn != nil {
-		agentConn.Close()
-	}
-	if len(methods) != 0 {
-		t.Fatalf("expected 0 methods for unparsable key, got %d", len(methods))
+	if _, _, err := authMethods(keyPath); err == nil {
+		t.Fatal("expected error for unparsable key file")
 	}
 }
 
 func TestAuthMethods_MissingKeyFile(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
-	methods, agentConn := authMethods(filepath.Join(t.TempDir(), "missing"))
-	if agentConn != nil {
-		agentConn.Close()
-	}
-	if len(methods) != 0 {
-		t.Fatalf("expected 0 methods for missing key, got %d", len(methods))
+	if _, _, err := authMethods(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("expected error for missing key file")
 	}
 }
 
 func TestAuthMethods_EmptyKeyPath(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
-	methods, agentConn := authMethods("")
+	methods, agentConn, err := authMethods("")
 	if agentConn != nil {
 		agentConn.Close()
+	}
+	if err != nil {
+		t.Fatalf("unexpected error without key: %v", err)
 	}
 	if len(methods) != 0 {
 		t.Fatalf("expected 0 methods without key, got %d", len(methods))
@@ -469,11 +484,14 @@ func TestAuthMethods_WithAgent(t *testing.T) {
 	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
 	writeTestKey(t, keyPath)
 
-	methods, agentConn := authMethods(keyPath)
+	methods, agentConn, err := authMethods(keyPath)
 	if agentConn == nil {
 		t.Fatal("expected agent connection")
 	}
 	defer agentConn.Close()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(methods) != 2 {
 		t.Fatalf("expected key + agent methods, got %d", len(methods))
 	}
@@ -491,5 +509,81 @@ func TestCommandFromExecPayload(t *testing.T) {
 	}
 	if got := commandFromExecPayload([]byte{0, 0, 0, 99, 'a'}); got != "a" {
 		t.Errorf("oversized length should fall back, got %q", got)
+	}
+}
+
+func TestRun_CancellationAbortsHangingCommand(t *testing.T) {
+	// The remote server never replies to exec — the command hangs. The
+	// context deadline must abort it by closing the connection.
+	startTestSSHServer(t, true, false, false, 0)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+
+	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := Run(ctx, p, []string{"sleep", "999"}, true)
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("expected ctx cancellation to abort the hanging command quickly, took %v", elapsed)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("expected a context deadline error, got: %v", err)
+	}
+}
+
+func TestRun_RemoteErrorTyped(t *testing.T) {
+	startTestSSHServer(t, false, false, true, 3)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+	_, err := Run(context.Background(), p, []string{"false"}, true)
+	if err == nil {
+		t.Fatal("expected remote error")
+	}
+	var remoteErr *RemoteError
+	if !errors.As(err, &remoteErr) {
+		t.Fatalf("expected *RemoteError, got %T: %v", err, err)
+	}
+}
+
+func TestRun_TransportErrorTyped(t *testing.T) {
+	// Host key verification fails → transport error, not remote error.
+	startTestSSHServer(t, false, false, true, 0)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+	_, err := Run(context.Background(), p, []string{"echo", "hi"}, false)
+	if err == nil {
+		t.Fatal("expected transport failure")
+	}
+	var transErr *TransportError
+	if !errors.As(err, &transErr) {
+		t.Fatalf("expected *TransportError, got %T: %v", err, err)
+	}
+}
+
+func TestRun_AuthMethodsError(t *testing.T) {
+	// An unreadable key must fail with the key detail after a successful
+	// dial — Run must surface it rather than hand an empty method chain
+	// to the SSH handshake.
+	startTestSSHServer(t, false, false, true, 0)
+	t.Setenv("SSH_AUTH_SOCK", "")
+	p := testProbe("127.0.0.1")
+	p.Key = filepath.Join(t.TempDir(), "missing-key")
+
+	_, err := Run(context.Background(), p, []string{"echo", "hi"}, true)
+	if err == nil {
+		t.Fatal("expected error for unreadable key")
+	}
+	if !strings.Contains(err.Error(), "reading key file") {
+		t.Errorf("expected key-reading detail in error, got: %v", err)
 	}
 }
