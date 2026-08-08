@@ -130,6 +130,28 @@ func Available() bool {
 	return CheckAvailable() == nil
 }
 
+// dnssecStatus classifies dig +dnssec output into a status and summary.
+// Pattern-independent so the classification branches are testable without
+// spawning dig.
+func dnssecStatus(output string) (models.Status, string) {
+	isValidated := reDigValidated.MatchString(output)
+	isNoError := reDigNoError.MatchString(output)
+	hasRRSIG := reRRSIG.MatchString(output)
+	isBogus := reDigBogus.MatchString(output)
+	isServFail := reDigServFail.MatchString(output)
+
+	switch {
+	case isBogus || isServFail:
+		return models.StatusFail, "DNSSEC validation failed - broken chain or unsigned response"
+	case isValidated || (isNoError && hasRRSIG):
+		return models.StatusPass, "DNSSEC validation successful"
+	case hasRRSIG:
+		return models.StatusPass, "DNSSEC signature records present"
+	default:
+		return models.StatusWarn, "DNSSEC status could not be determined from dig output"
+	}
+}
+
 // CheckDNSSEC validates the DNSSEC chain for a hostname.
 // Uses dig +dnssec +sigchase to check DNSSEC validation.
 func CheckDNSSEC(ctx context.Context, query, server string) (*models.CheckResult, error) {
@@ -158,27 +180,12 @@ func CheckDNSSEC(ctx context.Context, query, server string) (*models.CheckResult
 
 	// Parse output for DNSSEC validation indicators using header-anchored patterns
 	// to avoid false matches on domain names or record content.
-	isValidated := reDigValidated.MatchString(outputStr)
-	isNoError := reDigNoError.MatchString(outputStr)
-	hasRRSIG := reRRSIG.MatchString(outputStr)
-	isBogus := reDigBogus.MatchString(outputStr)
-	isServFail := reDigServFail.MatchString(outputStr)
+	status, summary := dnssecStatus(outputStr)
 
-	// Determine result status
-	if isBogus || isServFail {
-		result.Status = models.StatusFail
-		result.Summary = "DNSSEC validation failed - broken chain or unsigned response"
+	result.Status = status
+	result.Summary = summary
+	if status == models.StatusFail {
 		result.Violations = append(result.Violations, "DNSSEC chain is broken or response is not properly signed")
-	} else if isValidated || (isNoError && hasRRSIG) {
-		result.Status = models.StatusPass
-		result.Summary = "DNSSEC validation successful"
-	} else if hasRRSIG {
-		// Has signature records but no explicit validation
-		result.Status = models.StatusPass
-		result.Summary = "DNSSEC signature records present"
-	} else {
-		result.Status = models.StatusWarn
-		result.Summary = "DNSSEC status could not be determined from dig output"
 	}
 
 	result.Observed["query"] = query

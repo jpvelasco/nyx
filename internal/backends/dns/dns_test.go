@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,6 +124,22 @@ func TestResolve_ContextCancelled(t *testing.T) {
 	}
 }
 
+func TestResolve_CustomResolver_IPv6Server(t *testing.T) {
+	// Exercises the IPv6 bracket-wrapping branch in the resolver Dial func.
+	// The .invalid TLD never resolves, so this is deterministic: either the
+	// dial fails (no listener on [::1]:53) or the query is NXDOMAIN.
+	result, ips, err := resolve(dnsCtx(), "never-resolves.invalid", "::1")
+	if err != nil {
+		t.Fatalf("resolve returned error: %v", err)
+	}
+	if result.Status != models.StatusError {
+		t.Errorf("expected error for unreachable IPv6 resolver, got %s: %s", result.Status, result.Summary)
+	}
+	if len(ips) != 0 {
+		t.Error("expected no IPs for failed resolution")
+	}
+}
+
 // =====================================================================
 // Resolve — public wrapper
 // =====================================================================
@@ -195,6 +212,37 @@ func TestResolveExpect_ResolutionError(t *testing.T) {
 	}
 	if result.Status != models.StatusError {
 		t.Errorf("expected error when resolution fails, got %s: %s", result.Status, result.Summary)
+	}
+}
+
+// =====================================================================
+// dnssecStatus — hermetic classification of dig output
+// =====================================================================
+
+func TestDNSSECStatus(t *testing.T) {
+	cases := []struct {
+		name    string
+		output  string
+		status  models.Status
+		summary string
+	}{
+		{"bogus", ";  status: BOGUS", models.StatusFail, "broken chain"},
+		{"servfail", ";  status: SERVFAIL", models.StatusFail, "broken chain"},
+		{"validated", ";  status: VALIDATED", models.StatusPass, "validation successful"},
+		{"noerror with rrsig", ";  status: NOERROR\nexample.com. 300 IN RRSIG A 8 0 300", models.StatusPass, "validation successful"},
+		{"rrsig only", "example.com. 300 IN RRSIG A 8 0 300", models.StatusPass, "signature records present"},
+		{"undetermined", "no useful markers here", models.StatusWarn, "could not be determined"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, summary := dnssecStatus(tc.output)
+			if status != tc.status {
+				t.Errorf("status = %s, want %s", status, tc.status)
+			}
+			if !strings.Contains(summary, tc.summary) {
+				t.Errorf("summary = %q, want substring %q", summary, tc.summary)
+			}
+		})
 	}
 }
 
