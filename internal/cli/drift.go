@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -63,7 +62,7 @@ fresh audit is available, falls back to the most recent saved snapshot.`,
 		// Set exit code based on drift (fail on new problems or regression to error state)
 		if len(drift.NewFailures) > 0 || len(drift.Degraded) > 0 ||
 			(drift.CurrentStatus == models.StatusError && drift.BaselineStatus != models.StatusError) {
-			os.Exit(1)
+			return &ExitError{Code: 1}
 		}
 		return nil
 	},

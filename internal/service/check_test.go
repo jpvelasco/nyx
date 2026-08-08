@@ -100,6 +100,23 @@ func TestCheckVPN_RouteError(t *testing.T) {
 	}
 }
 
+func TestCheckVPN_InterfaceError(t *testing.T) {
+	mock := &backends.MockBackend{
+		RouteResult:     &system.Route{Device: "eth0", Gateway: "192.168.1.1", Destination: "0.0.0.0/0"},
+		VPNInterfaceErr: backends.BackendError("tunnel interface lookup unsupported"),
+	}
+	svc := &CheckService{Backend: mock}
+	result := svc.CheckVPN(context.Background(), "8.8.8.8")
+	result.Finish()
+
+	if result.Status != models.StatusError {
+		t.Errorf("expected error, got %s", result.Status)
+	}
+	if result.Observed["via_tunnel"] != nil {
+		t.Errorf("via_tunnel should be unset on error, got %v", result.Observed["via_tunnel"])
+	}
+}
+
 // --- Ping ---
 
 func TestPing_Reachable(t *testing.T) {

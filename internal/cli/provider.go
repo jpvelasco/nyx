@@ -139,7 +139,10 @@ func buildImportCmd(p providers.Provider) *cobra.Command {
 		Use:   "import",
 		Short: fmt.Sprintf("Import network topology from %s and generate a spec", p.Name()),
 		RunE: func(_ *cobra.Command, _ []string) error {
-			dur, _ := time.ParseDuration(timeout)
+			dur, err := parseTimeoutFlag(timeout)
+			if err != nil {
+				return err
+			}
 			if dur == 0 {
 				dur = 60 * time.Second
 			}
@@ -192,7 +195,10 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 		Use:   "check",
 		Short: fmt.Sprintf("Import from %s and immediately run a live audit", p.Name()),
 		RunE: func(_ *cobra.Command, _ []string) error {
-			dur, _ := time.ParseDuration(timeout)
+			dur, err := parseTimeoutFlag(timeout)
+			if err != nil {
+				return err
+			}
 			if dur == 0 {
 				dur = 300 * time.Second
 			}
@@ -223,10 +229,10 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 				defer w.Close()
 			}
 			if jsonOutput {
-				return report.RenderJSON(w, result.Report)
+				return renderAuditReport(w, result.Report)
 			}
 			report.RenderHuman(w, result.Report)
-			return nil
+			return statusExitError(result.Report.Status)
 		},
 	}
 	addProviderFlags(cmd)

@@ -14,7 +14,6 @@ import (
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/logger"
 	"github.com/jpvelasco/nyx/internal/models"
-	"github.com/jpvelasco/nyx/internal/report"
 	"github.com/spf13/cobra"
 )
 
@@ -148,7 +147,7 @@ var doctorCmd = &cobra.Command{
 				Summary:  models.Tally(checks),
 				Findings: checks,
 			}
-			return report.RenderJSON(w, r)
+			return renderAuditReport(w, r)
 		}
 
 		for _, c := range checks {
@@ -173,7 +172,7 @@ var doctorCmd = &cobra.Command{
 			}
 		} else {
 			fmt.Fprintln(w, "\nThere are issues above. Fix them and try again.")
-			os.Exit(2)
+			return &ExitError{Code: 2}
 		}
 		return nil
 	},

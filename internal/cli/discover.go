@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/report"
@@ -32,9 +31,9 @@ var discoverCmd = &cobra.Command{
 			return err
 		}
 
-		dur, err := time.ParseDuration(timeout)
+		dur, err := parseTimeoutFlag(timeout)
 		if err != nil {
-			dur = 90 * time.Second
+			return err
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), dur)
 		defer cancel()

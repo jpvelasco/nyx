@@ -51,7 +51,12 @@ func (s *CheckService) CheckVPN(ctx context.Context, target string) *models.Chec
 	}
 	result.Observed["device"] = route.Device
 	result.Observed["gateway"] = route.Gateway
-	isVPN, _ := s.Backend.CheckVPNInterface(ctx, route.Device)
+	isVPN, err := s.Backend.CheckVPNInterface(ctx, route.Device)
+	if err != nil {
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("failed to classify interface %s as tunnel: %v", route.Device, err)
+		return result
+	}
 	result.Observed["via_tunnel"] = isVPN
 	if isVPN {
 		result.Status = models.StatusPass

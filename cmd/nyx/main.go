@@ -2,6 +2,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 
 	"github.com/jpvelasco/nyx/internal/cli"
@@ -14,8 +15,14 @@ func main() {
 }
 
 // run executes the CLI and returns the process exit code.
+// cli.ExitError codes (1/2/3 from check statuses) pass through unchanged;
+// any other error maps to the execution-error code 2.
 func run() int {
 	if err := cli.Execute(); err != nil {
+		var ee *cli.ExitError
+		if errors.As(err, &ee) {
+			return ee.Code
+		}
 		return 2
 	}
 	return 0

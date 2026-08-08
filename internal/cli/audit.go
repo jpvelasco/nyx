@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/jpvelasco/nyx/internal/audit"
 	"github.com/jpvelasco/nyx/internal/intent"
@@ -43,9 +42,9 @@ var auditCmd = &cobra.Command{
 			return fmt.Errorf("loading spec: %w", err)
 		}
 
-		dur, parseErr := time.ParseDuration(timeout)
-		if parseErr != nil {
-			dur = 300 * time.Second
+		dur, err := parseTimeoutFlag(timeout)
+		if err != nil {
+			return err
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), dur)
 		defer cancel()
@@ -91,7 +90,7 @@ var auditCmd = &cobra.Command{
 		}
 
 		if jsonOutput {
-			return report.RenderJSON(w, auditReport)
+			return renderAuditReport(w, auditReport)
 		}
 		report.RenderHuman(w, auditReport)
 
@@ -142,16 +141,6 @@ var auditCmd = &cobra.Command{
 			}
 		}
 
-		// Set exit code based on audit status
-		switch auditReport.Status {
-		case models.StatusFail:
-			os.Exit(1)
-		case models.StatusError:
-			os.Exit(2)
-		case models.StatusWarn:
-			os.Exit(3)
-		}
-
 		// Long-term value encouragement (helps users build the "sleep at night" habit)
 		if specFile != "" {
 			fmt.Fprintln(w, "\nFor history, trend analysis, and drift detection over time:")
@@ -159,6 +148,6 @@ var auditCmd = &cobra.Command{
 			fmt.Fprintln(w, "  nyx drift status        # compare future runs against it")
 		}
 
-		return nil
+		return statusExitError(auditReport.Status)
 	},
 }

@@ -729,9 +729,11 @@ func TestBuildImportCmd_InvalidTimeout(t *testing.T) {
 	saveRestoreGlobals(t)
 	cmd := buildImportCmd(&fakeProvider{name: "fake"})
 	providerHost = "10.0.0.5"
-	timeout = "not-a-duration" // exercise 60s fallback
-	if err := cmd.RunE(cmd, nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	timeout = "not-a-duration" // must error, not fall back (#132)
+	if err := cmd.RunE(cmd, nil); err == nil {
+		t.Fatal("expected invalid --timeout error")
+	} else if !strings.Contains(err.Error(), "invalid --timeout") {
+		t.Errorf("expected invalid --timeout error, got: %v", err)
 	}
 }
 
@@ -815,7 +817,7 @@ func TestCheckRoutesCmd_LocalTarget(t *testing.T) {
 func TestCheckRoutesCmd_JSONVerbose(t *testing.T) {
 	saveRestoreGlobals(t)
 	routeTarget = "127.0.0.1"
-	timeout = "not-a-duration" // exercise fallback
+	timeout = "10s"
 	jsonOutput = true
 	verbose = true
 	outputPath = filepath.Join(t.TempDir(), "out.json")
@@ -836,9 +838,8 @@ func TestCheckVPNCmd_LocalTarget(t *testing.T) {
 	saveRestoreGlobals(t)
 	vpnTarget = "127.0.0.1"
 	timeout = "10s"
-	if err := checkVPNCmd.RunE(checkVPNCmd, nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := checkVPNCmd.RunE(checkVPNCmd, nil)
+	requireExitCode(t, err, 3) // loopback is not a tunnel interface => warn
 }
 
 func TestCheckVPNCmd_ExpectOverride(t *testing.T) {
@@ -846,9 +847,8 @@ func TestCheckVPNCmd_ExpectOverride(t *testing.T) {
 	vpnTarget = "127.0.0.1"
 	vpnExpect = "full-tunnel"
 	timeout = "10s"
-	if err := checkVPNCmd.RunE(checkVPNCmd, nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := checkVPNCmd.RunE(checkVPNCmd, nil)
+	requireExitCode(t, err, 1) // full-tunnel expected, loopback not via tunnel => fail
 }
 
 func TestVerifyIsolationCmd_MissingTo(t *testing.T) {
@@ -866,9 +866,8 @@ func TestVerifyIsolationCmd_Loopback(t *testing.T) {
 	timeout = "10s"
 	jsonOutput = true
 	outputPath = filepath.Join(t.TempDir(), "out.json")
-	if err := verifyIsolationCmd.RunE(verifyIsolationCmd, nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := verifyIsolationCmd.RunE(verifyIsolationCmd, nil)
+	requireExitCode(t, err, 1) // loopback reachable => isolation violated
 }
 
 func TestVerifyIsolationCmd_LoopbackHuman(t *testing.T) {
@@ -876,9 +875,8 @@ func TestVerifyIsolationCmd_LoopbackHuman(t *testing.T) {
 	isolationFrom = "lan"
 	isolationTo = "127.0.0.1"
 	timeout = "10s"
-	if err := verifyIsolationCmd.RunE(verifyIsolationCmd, nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := verifyIsolationCmd.RunE(verifyIsolationCmd, nil)
+	requireExitCode(t, err, 1)
 }
 
 func TestVerifyIsolationCmd_PingError(t *testing.T) {
@@ -886,9 +884,8 @@ func TestVerifyIsolationCmd_PingError(t *testing.T) {
 	isolationFrom = "lan"
 	isolationTo = "10.255.255.1"
 	timeout = "1ms" // context cancels mid-ping => warn branch
-	if err := verifyIsolationCmd.RunE(verifyIsolationCmd, nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := verifyIsolationCmd.RunE(verifyIsolationCmd, nil)
+	requireExitCode(t, err, 3)
 }
 
 func TestDiscoverCmd_MissingSubnet(t *testing.T) {
@@ -935,11 +932,40 @@ func TestDoctorCmd_JSON(t *testing.T) {
 	}
 }
 
+func TestDoctorCmd_JSON_FailingChecks(t *testing.T) {
+	if nmap.Available() {
+		t.Skip("nmap present — this test exercises the failing-doctor path")
+	}
+	saveRestoreGlobals(t)
+	jsonOutput = true
+	outputPath = filepath.Join(t.TempDir(), "doctor.json")
+	err := doctorCmd.RunE(doctorCmd, nil)
+	requireExitCode(t, err, 1) // missing nmap => fail
+}
+
+func TestDoctorCmd_Human_FailingChecks(t *testing.T) {
+	if nmap.Available() {
+		t.Skip("nmap present — this test exercises the failing-doctor path")
+	}
+	saveRestoreGlobals(t)
+	outputPath = filepath.Join(t.TempDir(), "doctor.txt")
+	err := doctorCmd.RunE(doctorCmd, nil)
+	requireExitCode(t, err, 2) // missing nmap => issues found
+}
+
 func TestInitCmd_BadInterface(t *testing.T) {
 	saveRestoreGlobals(t)
 	interfaceOpt = "__bogus_iface__"
 	if err := initCmd.RunE(initCmd, nil); err == nil {
 		t.Fatal("expected error for unknown interface (or missing nmap in CI)")
+	}
+}
+
+func TestInitCmd_InvalidTimeout(t *testing.T) {
+	saveRestoreGlobals(t)
+	timeout = "not-a-duration"
+	if err := initCmd.RunE(initCmd, nil); err == nil {
+		t.Fatal("expected error for invalid --timeout (or missing nmap in CI)")
 	}
 }
 
@@ -986,6 +1012,41 @@ func TestAuditCmd_InvalidSpec(t *testing.T) {
 	err := auditCmd.RunE(auditCmd, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid spec")
+	}
+}
+
+func TestAuditCmd_InvalidTimeout(t *testing.T) {
+	saveRestoreGlobals(t)
+	specFile = writeSpec(t, "version: 1\nsite: test\n")
+	timeout = "not-a-duration"
+	err := auditCmd.RunE(auditCmd, nil)
+	if err == nil {
+		t.Fatal("expected invalid --timeout error")
+	} else if !strings.Contains(err.Error(), "invalid --timeout") {
+		t.Errorf("expected invalid --timeout error, got: %v", err)
+	}
+}
+
+func TestCheckVPNCmd_InvalidExpect(t *testing.T) {
+	saveRestoreGlobals(t)
+	vpnTarget = "127.0.0.1"
+	vpnExpect = "banana"
+	timeout = "10s"
+	err := checkVPNCmd.RunE(checkVPNCmd, nil)
+	if err == nil {
+		t.Fatal("expected invalid --expect error")
+	} else if !strings.Contains(err.Error(), "invalid --expect") {
+		t.Errorf("expected invalid --expect error, got: %v", err)
+	}
+}
+
+func TestDiscoverCmd_InvalidTimeout(t *testing.T) {
+	saveRestoreGlobals(t)
+	discoverSubnet = "192.0.2.0/24"
+	timeout = "not-a-duration"
+	// Fails either at nmap.CheckAvailable (CI: no nmap) or --timeout parse.
+	if err := discoverCmd.RunE(discoverCmd, nil); err == nil {
+		t.Fatal("expected error for invalid --timeout")
 	}
 }
 
@@ -1209,4 +1270,27 @@ func TestDriftStatusCmd_NoBaseline(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error without baseline")
 	}
+}
+
+func TestDriftStatusCmd_DriftDetected(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	saveRestoreGlobals(t)
+	specFile = "test.spec"
+	baseline := &models.AuditReport{
+		Status:   models.StatusPass,
+		Summary:  models.ReportSummary{Pass: 1},
+		Findings: []models.CheckResult{{CheckType: "route_check", Target: "127.0.0.1", Status: models.StatusPass, Summary: "ok"}},
+	}
+	if err := snapshot.SetBaseline(specFile, baseline); err != nil {
+		t.Fatalf("setting baseline: %v", err)
+	}
+	lastAuditReport = &models.AuditReport{
+		Status:   models.StatusFail,
+		Summary:  models.ReportSummary{Pass: 0, Fail: 1},
+		Findings: []models.CheckResult{{CheckType: "route_check", Target: "127.0.0.1", Status: models.StatusFail, Summary: "no route"}},
+	}
+	err := driftStatusCmd.RunE(driftStatusCmd, nil)
+	requireExitCode(t, err, 1) // new failure => drift => exit 1
 }

@@ -3,10 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/jpvelasco/nyx/internal/models"
-	"github.com/jpvelasco/nyx/internal/report"
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/spf13/cobra"
 )
@@ -25,10 +23,13 @@ var checkVPNCmd = &cobra.Command{
 		if vpnTarget == "" {
 			return fmt.Errorf("--target is required")
 		}
+		if vpnExpect != "" && vpnExpect != "full-tunnel" && vpnExpect != "split-tunnel" {
+			return fmt.Errorf("invalid --expect %q: must be split-tunnel or full-tunnel", vpnExpect)
+		}
 
-		dur, err := time.ParseDuration(timeout)
+		dur, err := parseTimeoutFlag(timeout)
 		if err != nil {
-			dur = 60 * time.Second
+			return err
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), dur)
 		defer cancel()
@@ -36,12 +37,7 @@ var checkVPNCmd = &cobra.Command{
 		checkSvc := service.NewCheckService()
 		result := checkSvc.CheckVPN(ctx, vpnTarget)
 
-		// Override with --expect flag if provided
-		if vpnExpect != "" && result.Status == models.StatusWarn {
-			result.Status = models.StatusFail
-			result.Summary = fmt.Sprintf("%s NOT routed via tunnel (using %s)", vpnTarget, result.Observed["device"])
-			result.Violations = append(result.Violations, "expected tunnel routing but traffic uses non-tunnel interface")
-		}
+		applyVPNExpect(result, vpnExpect)
 		result.Finish()
 
 		w, err := getWriter()
@@ -52,12 +48,36 @@ var checkVPNCmd = &cobra.Command{
 			defer w.Close()
 		}
 
-		if jsonOutput {
-			return report.RenderResultJSON(w, result)
-		}
-		report.RenderResultHuman(w, result)
-		return nil
+		return renderCheckResult(w, result)
 	},
+}
+
+// applyVPNExpect compares the observed tunnel state against --expect and
+// overrides the verdict accordingly. full-tunnel requires traffic through the
+// tunnel; split-tunnel requires traffic NOT forced through it. The comparison
+// is only meaningful when CheckVPN produced a definite routing verdict
+// (Pass or Warn) — errored lookups are left untouched.
+func applyVPNExpect(result *models.CheckResult, expect string) {
+	if expect == "" || (result.Status != models.StatusPass && result.Status != models.StatusWarn) {
+		return
+	}
+	viaTunnel, _ := result.Observed["via_tunnel"].(bool)
+	expectTunnel := expect == "full-tunnel"
+	if viaTunnel == expectTunnel {
+		if !viaTunnel {
+			result.Status = models.StatusPass
+			result.Summary = fmt.Sprintf("%s routes via %s (split-tunnel: not forced through tunnel)", result.Target, result.Observed["device"])
+		}
+		return
+	}
+	result.Status = models.StatusFail
+	if expectTunnel {
+		result.Summary = fmt.Sprintf("%s NOT routed via tunnel (using %s)", result.Target, result.Observed["device"])
+		result.Violations = append(result.Violations, "expected full-tunnel routing but traffic uses non-tunnel interface")
+	} else {
+		result.Summary = fmt.Sprintf("%s forced through tunnel despite split-tunnel expectation (using %s)", result.Target, result.Observed["device"])
+		result.Violations = append(result.Violations, "expected split-tunnel routing but traffic uses tunnel interface")
+	}
 }
 
 func init() {

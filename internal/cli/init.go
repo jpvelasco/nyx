@@ -72,7 +72,10 @@ then write a nyx.yaml spec you can customize.`,
 		}
 
 		var nets []initNet
-		dur, _ := time.ParseDuration(timeout)
+		dur, err := parseTimeoutFlag(timeout)
+		if err != nil {
+			return err
+		}
 		if dur == 0 {
 			dur = 300 * time.Second
 		}

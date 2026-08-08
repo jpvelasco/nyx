@@ -3,11 +3,9 @@ package cli
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/models"
-	"github.com/jpvelasco/nyx/internal/report"
 	"github.com/spf13/cobra"
 )
 
@@ -26,9 +24,9 @@ var verifyIsolationCmd = &cobra.Command{
 			return fmt.Errorf("--to is required")
 		}
 
-		dur, err := time.ParseDuration(timeout)
+		dur, err := parseTimeoutFlag(timeout)
 		if err != nil {
-			dur = 60 * time.Second
+			return err
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), dur)
 		defer cancel()
@@ -64,11 +62,7 @@ var verifyIsolationCmd = &cobra.Command{
 			defer w.Close()
 		}
 
-		if jsonOutput {
-			return report.RenderResultJSON(w, result)
-		}
-		report.RenderResultHuman(w, result)
-		return nil
+		return renderCheckResult(w, result)
 	},
 }
 
