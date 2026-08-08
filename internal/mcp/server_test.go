@@ -359,6 +359,42 @@ func TestDispatchVerifyIsolation_BadSpecFile(t *testing.T) {
 	}
 }
 
+func TestDispatchVerifyIsolation_WithSpecFile(t *testing.T) {
+	sp, err := os.CreateTemp(t.TempDir(), "spec-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sp.WriteString(`version: 1
+site: test
+networks:
+  - name: lan
+    cidr: 127.0.0.1/32
+  - name: iot
+    cidr: 127.0.0.2/32
+assertions:
+  - type: isolation
+    from: lan
+    to: iot
+    expect: deny
+`); err != nil {
+		t.Fatal(err)
+	}
+	if err := sp.Close(); err != nil {
+		t.Fatal(err)
+	}
+	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "verify_isolation", map[string]interface{}{
+		"from":      "lan",
+		"to":        "iot",
+		"spec_file": sp.Name(),
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, `"check_type": "isolation"`) {
+		t.Errorf("expected isolation finding, got: %s", text)
+	}
+}
+
 func TestDispatchRunAudit_MissingAndBadSpecs(t *testing.T) {
 	server := newTestServer()
 	if text, isErr := server.DispatchToolForTest(context.Background(), "run_audit", map[string]interface{}{}); !isErr || !strings.Contains(text, "spec_file parameter") {
