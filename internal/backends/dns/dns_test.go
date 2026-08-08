@@ -2,7 +2,6 @@ package dns
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"regexp"
 	"strings"
@@ -515,26 +514,27 @@ func TestResolve_TruncatedResponse_TCPFallback(t *testing.T) {
 
 	// TCP and UDP port spaces are independent, so the resolver dialing the
 	// same address over TCP can be served on the same numeric port. Windows
-	// reserves some ephemeral port ranges (Hyper-V), so retry with a fresh
-	// random port when the same-port TCP bind is refused.
+	// reserves wide ephemeral port ranges (Hyper-V/WSL2, GitHub runners), so
+	// bind the TCP listener first on a free port, then share that number with
+	// UDP; retry with a fresh port when either bind is refused.
 	var udpConn *net.UDPConn
 	var tcpLn net.Listener
 	for attempt := 0; attempt < 20; attempt++ {
 		var err error
-		udpConn, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+		tcpLn, err = net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
-			t.Fatalf("ListenUDP: %v", err)
+			t.Fatalf("Listen: %v", err)
 		}
-		udpPort := udpConn.LocalAddr().(*net.UDPAddr).Port
-		tcpLn, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", udpPort))
+		tcpPort := tcpLn.Addr().(*net.TCPAddr).Port
+		udpConn, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: tcpPort})
 		if err == nil {
 			break
 		}
-		udpConn.Close()
-		udpConn = nil
+		tcpLn.Close()
+		tcpLn = nil
 	}
 	if tcpLn == nil {
-		t.Fatal("could not bind TCP on any UDP peer port — excluded port ranges?")
+		t.Fatal("could not bind UDP on any free TCP port — excluded port ranges?")
 	}
 	defer udpConn.Close()
 	defer tcpLn.Close()
