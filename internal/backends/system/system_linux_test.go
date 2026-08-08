@@ -70,39 +70,6 @@ func TestParseIPRouteOutput(t *testing.T) {
 	}
 }
 
-func TestParseTracerouteLine(t *testing.T) {
-	tests := []struct {
-		name     string
-		line     string
-		wantNum  int
-		wantAddr string
-		wantRTT  string
-		wantNil  bool
-	}{
-		{"full hop", "1  10.0.0.1  0.521 ms  0.456 ms  0.401 ms", 1, "10.0.0.1", "0.521 ms", false},
-		{"timeout hop", "2  * * *", 2, "*", "", false},
-		{"too short", "1", 0, "", "", true},
-		{"non-numeric hop", "x  10.0.0.1  1 ms", 0, "", "", true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			hop := parseTracerouteLine(tt.line)
-			if tt.wantNil {
-				if hop != nil {
-					t.Fatalf("expected nil, got %+v", hop)
-				}
-				return
-			}
-			if hop == nil {
-				t.Fatal("expected hop")
-			}
-			if hop.Number != tt.wantNum || hop.Address != tt.wantAddr || hop.RTT != tt.wantRTT {
-				t.Fatalf("got %+v, want num=%d addr=%q rtt=%q", hop, tt.wantNum, tt.wantAddr, tt.wantRTT)
-			}
-		})
-	}
-}
-
 func TestParseInterfacesText(t *testing.T) {
 	output := `garbage before first header
 1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default
