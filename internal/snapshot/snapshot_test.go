@@ -77,12 +77,12 @@ func TestFilename(t *testing.T) {
 		t.Errorf("filename should end with '.json', got %q", name)
 	}
 
-	// Check format: snapshot-YYYYMMDD-HHMMSS.json
+	// Check format: snapshot-YYYYMMDD-HHMMSS.mmm.json
 	withoutPrefix := strings.TrimPrefix(name, "snapshot-")
 	withoutExt := strings.TrimSuffix(withoutPrefix, ".json")
-	_, err := time.Parse("20060102-150405", withoutExt)
+	_, err := time.Parse("20060102-150405.000", withoutExt)
 	if err != nil {
-		t.Errorf("filename date portion should parse as 20060102-150405, got %q: %v", withoutExt, err)
+		t.Errorf("filename date portion should parse as 20060102-150405.000, got %q: %v", withoutExt, err)
 	}
 }
 
@@ -93,6 +93,71 @@ func TestFilenameUniqueness(t *testing.T) {
 	name2 := Filename()
 	if name1 == name2 {
 		t.Errorf("expected unique filenames, got identical: %q", name1)
+	}
+}
+
+func TestSave_SameMillisecondCollision(t *testing.T) {
+	// Freeze the clock so Save must hit the O_EXCL collision-retry path.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	fixed := time.Date(2025, 6, 1, 14, 0, 0, 0, time.UTC)
+	origNow := filenameNow
+	filenameNow = func() time.Time { return fixed }
+	defer func() { filenameNow = origNow }()
+
+	report := makeReport(models.StatusPass, 1, 0, 0, 0)
+	dir, err := Dir()
+	if err != nil {
+		t.Fatalf("Dir(): %v", err)
+	}
+	blocked := filepath.Join(dir, "snapshot-20250601-140000.000.json")
+	if err := os.WriteFile(blocked, []byte("occupied"), 0600); err != nil {
+		t.Fatalf("seeding colliding file: %v", err)
+	}
+
+	path, err := Save("test.spec", report)
+	if err != nil {
+		t.Fatalf("Save() with collision should retry, got error: %v", err)
+	}
+	if path == blocked {
+		t.Errorf("Save must not overwrite the existing snapshot, wrote %s", path)
+	}
+	data, err := os.ReadFile(blocked)
+	if err != nil {
+		t.Fatalf("original snapshot replaced: %v", err)
+	}
+	if string(data) != "occupied" {
+		t.Errorf("original snapshot content changed: %q", data)
+	}
+}
+
+func TestSave_FilenameExhaustion(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	fixed := time.Date(2025, 6, 1, 14, 0, 0, 0, time.UTC)
+	origNow := filenameNow
+	filenameNow = func() time.Time { return fixed }
+	defer func() { filenameNow = origNow }()
+
+	report := makeReport(models.StatusPass, 1, 0, 0, 0)
+	dir, err := Dir()
+	if err != nil {
+		t.Fatalf("Dir(): %v", err)
+	}
+	// Occupy every name the retry loop will attempt: the base and 99 suffixes.
+	for i := 0; i < 100; i++ {
+		name := "snapshot-20250601-140000.000.json"
+		if i > 0 {
+			name = fmt.Sprintf("snapshot-20250601-140000.000-%d.json", i)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("occupied"), 0600); err != nil {
+			t.Fatalf("seeding: %v", err)
+		}
+	}
+	if _, err := Save("test.spec", report); err == nil {
+		t.Fatal("expected error when every filename attempt is occupied")
 	}
 }
 
@@ -819,17 +884,86 @@ func TestComputeDrift_NewWarning(t *testing.T) {
 	if dr == nil {
 		t.Fatal("expected non-nil drift result")
 	}
-	// A pass→warn on an existing check is a degradation, not a new warning
-	// (new warnings are checks that didn't exist in baseline)
-	// Degraded only captures non-fail→fail transitions, so pass→warn won't appear there
-	// This is an edge case: status worsened but not to fail — nothing captured
-	_ = len(dr.Degraded)
+	// A pass→warn on an existing check is neither a new warning (new warnings
+	// are checks that didn't exist in baseline) nor a hard degradation — the
+	// drift loops only capture fail/error degradations, so nothing lands here.
+	if len(dr.NewWarnings) != 0 {
+		t.Errorf("expected 0 new warnings, got %d", len(dr.NewWarnings))
+	}
+	if len(dr.Degraded) != 0 {
+		t.Errorf("expected 0 degraded, got %d", len(dr.Degraded))
+	}
 	// Let's verify the summary at least
 	if dr.Summary.BaselinePass != 1 {
 		t.Errorf("expected baseline pass 1, got %d", dr.Summary.BaselinePass)
 	}
 	if dr.Summary.CurrentWarn != 1 {
 		t.Errorf("expected current warn 1, got %d", dr.Summary.CurrentWarn)
+	}
+}
+
+func TestComputeDrift_FailToErrorDegradation(t *testing.T) {
+	base := &Snapshot{
+		RunAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Status:  models.StatusFail,
+		Summary: models.ReportSummary{Pass: 0, Fail: 1, Warn: 0},
+		Findings: []models.CheckResult{
+			{CheckType: "subnet_discovery", Target: "10.0.0.0/24", Status: models.StatusFail,
+				Expected: map[string]interface{}{"expect_hosts_min": 1}},
+		},
+	}
+	current := &Snapshot{
+		RunAt:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Status:  models.StatusError,
+		Summary: models.ReportSummary{Pass: 0, Fail: 0, Error: 1},
+		Findings: []models.CheckResult{
+			{CheckType: "subnet_discovery", Target: "10.0.0.0/24", Status: models.StatusError,
+				Expected: map[string]interface{}{"expect_hosts_min": 1}},
+		},
+	}
+
+	dr := ComputeDrift(base, current)
+	if dr == nil {
+		t.Fatal("expected non-nil drift result")
+	}
+	// FAIL -> ERROR must be visible as a degradation, not silently dropped.
+	if len(dr.Degraded) != 1 {
+		t.Errorf("expected 1 degraded check, got %d", len(dr.Degraded))
+	}
+	if dr.Degraded[0].Status != models.StatusError {
+		t.Errorf("expected degraded status error, got %s", dr.Degraded[0].Status)
+	}
+}
+
+func TestComputeDrift_PassToErrorDegradation(t *testing.T) {
+	base := &Snapshot{
+		RunAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Status:  models.StatusPass,
+		Summary: models.ReportSummary{Pass: 1, Fail: 0, Warn: 0},
+		Findings: []models.CheckResult{
+			{CheckType: "subnet_discovery", Target: "10.0.0.0/24", Status: models.StatusPass,
+				Expected: map[string]interface{}{"expect_hosts_min": 1}},
+		},
+	}
+	current := &Snapshot{
+		RunAt:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Status:  models.StatusError,
+		Summary: models.ReportSummary{Pass: 0, Fail: 0, Error: 1},
+		Findings: []models.CheckResult{
+			{CheckType: "subnet_discovery", Target: "10.0.0.0/24", Status: models.StatusError,
+				Expected: map[string]interface{}{"expect_hosts_min": 1}},
+		},
+	}
+
+	dr := ComputeDrift(base, current)
+	if dr == nil {
+		t.Fatal("expected non-nil drift result")
+	}
+	if len(dr.Degraded) != 1 {
+		t.Errorf("expected 1 degraded check, got %d", len(dr.Degraded))
+	}
+	if len(dr.NewFailures) != 0 {
+		t.Errorf("expected 0 new failures (exists in baseline), got %d", len(dr.NewFailures))
 	}
 }
 
@@ -863,8 +997,10 @@ func TestComputeDrift_FixedFailure(t *testing.T) {
 	if dr.FixedFailures[0].CheckType != "port_check" {
 		t.Errorf("expected fixed check to be port_check, got %q", dr.FixedFailures[0].CheckType)
 	}
-	if len(dr.Improved) != 1 {
-		t.Errorf("expected 1 improved check, got %d", len(dr.Improved))
+	// FAIL -> PASS is reported as a fixed failure only — it must not also
+	// appear under Improved (no double-reporting).
+	if len(dr.Improved) != 0 {
+		t.Errorf("expected 0 improved checks (fixed already reported), got %d", len(dr.Improved))
 	}
 }
 

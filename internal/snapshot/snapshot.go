@@ -18,6 +18,10 @@ const (
 	snapshotExt         = ".json"
 )
 
+// filenameNow is overridable in tests to make timestamped filenames
+// deterministic (collision handling).
+var filenameNow = time.Now
+
 // Snapshot wraps an audit report with metadata for persistence.
 type Snapshot struct {
 	SpecPath        string                  `json:"spec_path"`
@@ -42,9 +46,11 @@ func NewSnapshot(specPath string, report *models.AuditReport) *Snapshot {
 	}
 }
 
-// Filename generates a filename for a snapshot.
+// Filename generates a filename for a snapshot. Millisecond granularity keeps
+// consecutive audits from colliding; Save additionally retries with a numeric
+// suffix if the generated name already exists (see Save).
 func Filename() string {
-	return fmt.Sprintf("snapshot-%s%s", time.Now().Format("20060102-150405"), snapshotExt)
+	return fmt.Sprintf("snapshot-%s%s", filenameNow().Format("20060102-150405.000"), snapshotExt)
 }
 
 // Dir returns the path to the snapshots directory, creating it if needed.
@@ -62,14 +68,14 @@ func Dir() (string, error) {
 }
 
 // Save writes a snapshot to disk and rotates old snapshots.
+// Writes use O_EXCL so a concurrent audit producing the same millisecond
+// filename cannot silently overwrite the previous run; on collision the name
+// is retried with a numeric suffix.
 func Save(specPath string, report *models.AuditReport) (string, error) {
 	dir, err := Dir()
 	if err != nil {
 		return "", err
 	}
-
-	filename := Filename()
-	path := filepath.Join(dir, filename)
 
 	snap := NewSnapshot(specPath, report)
 	data, err := json.MarshalIndent(snap, "", "  ")
@@ -77,15 +83,33 @@ func Save(specPath string, report *models.AuditReport) (string, error) {
 		return "", fmt.Errorf("serializing snapshot: %w", err)
 	}
 
-	//nolint:gosec
-	if err := os.WriteFile(path, data, 0600); err != nil { // nosemgrep
-		return "", fmt.Errorf("writing snapshot: %w", err)
+	for attempt := 0; attempt < 100; attempt++ {
+		base := strings.TrimSuffix(Filename(), snapshotExt)
+		if attempt > 0 {
+			base = fmt.Sprintf("%s-%d", base, attempt)
+		}
+		path := filepath.Join(dir, base+snapshotExt)
+		// #nosec G304 — filename is generated from a timestamp, inside the user's snapshot dir
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600) // nosemgrep
+		if err != nil {
+			if os.IsExist(err) {
+				continue // same-millisecond collision — retry with a suffix
+			}
+			return "", fmt.Errorf("writing snapshot: %w", err)
+		}
+		if _, err := f.Write(data); err != nil {
+			f.Close() // #nosec G104 — best-effort cleanup
+			return "", fmt.Errorf("writing snapshot: %w", err)
+		}
+		if err := f.Close(); err != nil {
+			return "", fmt.Errorf("closing snapshot: %w", err)
+		}
+
+		// Rotate old snapshots
+		rotate(dir, defaultMaxSnapshots)
+		return path, nil
 	}
-
-	// Rotate old snapshots
-	rotate(dir, defaultMaxSnapshots)
-
-	return path, nil
+	return "", fmt.Errorf("writing snapshot: could not allocate a unique filename")
 }
 
 // BaselinePath returns the path to the baseline snapshot file.
@@ -242,15 +266,18 @@ func ComputeDrift(baseline, current *Snapshot) *DriftResult {
 			continue
 		}
 
-		// Check for degradation (preserve original behavior exactly)
-		if statusWorsened(base.Status, cur.Status) {
-			if cur.Status == models.StatusFail && base.Status != models.StatusFail {
-				dr.Degraded = append(dr.Degraded, cur)
-			}
+		// Check for degradation: fail or error states that got worse are
+		// surfaceable even when they were already failing (FAIL -> ERROR must
+		// not be invisible in the report).
+		if statusWorsened(base.Status, cur.Status) &&
+			(cur.Status == models.StatusFail || cur.Status == models.StatusError) {
+			dr.Degraded = append(dr.Degraded, cur)
 		}
 
-		// Track improvements separately (including non-failure regressions that got better)
-		if statusImproved(base.Status, cur.Status) {
+		// Track improvements separately. FAIL -> better is reported below as
+		// a fixed failure (and skipped here) so a single finding is never
+		// listed under both "Fixed" and "Improved".
+		if statusImproved(base.Status, cur.Status) && base.Status != models.StatusFail {
 			dr.Improved = append(dr.Improved, cur)
 		}
 	}

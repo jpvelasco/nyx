@@ -47,13 +47,36 @@ You can also point it at a previously saved snapshot file to restore an older ba
 			if err != nil {
 				return fmt.Errorf("loading snapshot %s: %w", args[0], err)
 			}
-			if err := snapshot.SetBaseline(snap.SpecPath, &models.AuditReport{
-				Runner:          snap.Runner,
-				Summary:         snap.Summary,
-				Status:          snap.Status,
-				Findings:        snap.Findings,
-				Recommendations: snap.Recommendations,
-			}); err != nil {
+			if err := snapshot.SetBaseline(snap.SpecPath, snapshotToReport(snap)); err != nil {
+				return fmt.Errorf("setting baseline: %w", err)
+			}
+			specPath = snap.SpecPath
+			auditTime = snap.RunAt
+			status = snap.Status
+			passed = snap.Summary.Pass
+			failed = snap.Summary.Fail
+			warned = snap.Summary.Warn
+			errored = snap.Summary.Error
+		} else if lastAuditReport == nil {
+			// Cross-process flow: a real `nyx audit` already saved a snapshot
+			// to disk in a separate invocation — fall back to the most recent
+			// one, same as drift status does.
+			snaps, err := snapshot.ListSnapshots()
+			if err != nil {
+				return fmt.Errorf("listing snapshots: %w", err)
+			}
+			if len(snaps) == 0 {
+				return fmt.Errorf("no recent audit result — run 'nyx audit --spec <file>' first, then 'nyx snapshot baseline'")
+			}
+			dir, err := snapshot.Dir()
+			if err != nil {
+				return err
+			}
+			snap, err := snapshot.LoadSnapshot(filepath.Join(dir, snaps[len(snaps)-1]))
+			if err != nil {
+				return fmt.Errorf("loading most recent snapshot: %w", err)
+			}
+			if err := snapshot.SetBaseline(snap.SpecPath, snapshotToReport(snap)); err != nil {
 				return fmt.Errorf("setting baseline: %w", err)
 			}
 			specPath = snap.SpecPath
@@ -64,9 +87,6 @@ You can also point it at a previously saved snapshot file to restore an older ba
 			warned = snap.Summary.Warn
 			errored = snap.Summary.Error
 		} else {
-			if lastAuditReport == nil {
-				return fmt.Errorf("no recent audit result — run 'nyx audit --spec <file>' first, then 'nyx snapshot baseline'")
-			}
 			if specFile == "" {
 				return fmt.Errorf("no spec provided — use 'nyx audit --spec <file>' first")
 			}
@@ -207,4 +227,16 @@ func init() {
 	snapshotCmd.AddCommand(snapshotDeleteCmd)
 	snapshotCmd.AddCommand(snapshotClearBaselineCmd)
 	rootCmd.AddCommand(snapshotCmd)
+}
+
+// snapshotToReport converts a saved snapshot back into an audit report for
+// reuse as a baseline.
+func snapshotToReport(snap *snapshot.Snapshot) *models.AuditReport {
+	return &models.AuditReport{
+		Runner:          snap.Runner,
+		Summary:         snap.Summary,
+		Status:          snap.Status,
+		Findings:        snap.Findings,
+		Recommendations: snap.Recommendations,
+	}
 }

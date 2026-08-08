@@ -1105,10 +1105,73 @@ func TestInterfacesCmd_BadSpec(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSnapshotBaselineCmd_NoAudit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	saveRestoreGlobals(t)
 	lastAuditReport = nil
 	if err := snapshotBaselineCmd.RunE(snapshotBaselineCmd, nil); err == nil {
-		t.Fatal("expected error without prior audit")
+		t.Fatal("expected error without prior audit or saved snapshots")
+	}
+}
+
+func TestSnapshotBaselineCmd_NoHome(t *testing.T) {
+	saveRestoreGlobals(t)
+	lastAuditReport = nil
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	if err := snapshotBaselineCmd.RunE(snapshotBaselineCmd, nil); err == nil {
+		t.Fatal("expected error without a resolvable home directory")
+	}
+}
+
+func TestSnapshotBaselineCmd_CorruptSnapshotFallback(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	saveRestoreGlobals(t)
+	lastAuditReport = nil
+	dir := filepath.Join(home, ".nyx", "snapshots")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// Newest snapshot is corrupt JSON — the fallback must surface the error.
+	if err := os.WriteFile(filepath.Join(dir, "snapshot-20250601-140000.001.json"), []byte("{not json"), 0600); err != nil {
+		t.Fatalf("writing corrupt snapshot: %v", err)
+	}
+	err := snapshotBaselineCmd.RunE(snapshotBaselineCmd, nil)
+	if err == nil {
+		t.Fatal("expected error loading corrupt snapshot")
+	}
+	if !strings.Contains(err.Error(), "loading most recent snapshot") {
+		t.Errorf("expected snapshot-loading error, got: %v", err)
+	}
+}
+
+func TestSnapshotBaselineCmd_FallsBackToSavedSnapshot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	saveRestoreGlobals(t)
+	lastAuditReport = nil
+	report := &models.AuditReport{Status: models.StatusPass, Summary: models.ReportSummary{Pass: 1}}
+	if _, err := snapshot.Save("test.spec", report); err != nil {
+		t.Fatalf("saving snapshot: %v", err)
+	}
+	// Cross-process flow: no in-memory audit, but a snapshot exists on disk —
+	// baseline must fall back to the most recent one instead of erroring.
+	if err := snapshotBaselineCmd.RunE(snapshotBaselineCmd, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	baseline, err := snapshot.LoadBaseline()
+	if err != nil {
+		t.Fatalf("loading baseline: %v", err)
+	}
+	if baseline.SpecPath != "test.spec" {
+		t.Errorf("expected baseline spec test.spec, got %q", baseline.SpecPath)
+	}
+	if baseline.Status != models.StatusPass {
+		t.Errorf("expected baseline status pass, got %s", baseline.Status)
 	}
 }
 
@@ -1293,4 +1356,31 @@ func TestDriftStatusCmd_DriftDetected(t *testing.T) {
 	}
 	err := driftStatusCmd.RunE(driftStatusCmd, nil)
 	requireExitCode(t, err, 1) // new failure => drift => exit 1
+}
+
+func TestDriftStatusCmd_WarningsOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	saveRestoreGlobals(t)
+	specFile = "test.spec"
+	baseline := &models.AuditReport{
+		Status:   models.StatusPass,
+		Summary:  models.ReportSummary{Pass: 1},
+		Findings: []models.CheckResult{{CheckType: "route_check", Target: "127.0.0.1", Status: models.StatusPass, Summary: "ok"}},
+	}
+	if err := snapshot.SetBaseline(specFile, baseline); err != nil {
+		t.Fatalf("setting baseline: %v", err)
+	}
+	// A warning on a brand-new check (key absent from baseline) is a new warning,
+	// which alone must exit 3.
+	lastAuditReport = &models.AuditReport{
+		Status:  models.StatusWarn,
+		Summary: models.ReportSummary{Pass: 0, Warn: 1},
+		Findings: []models.CheckResult{
+			{CheckType: "port_check", Target: "10.0.0.9", Status: models.StatusWarn, Summary: "no snmp"},
+		},
+	}
+	err := driftStatusCmd.RunE(driftStatusCmd, nil)
+	requireExitCode(t, err, 3) // new warnings only => exit 3
 }

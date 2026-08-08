@@ -59,10 +59,14 @@ fresh audit is available, falls back to the most recent saved snapshot.`,
 
 		renderDrift(drift)
 
-		// Set exit code based on drift (fail on new problems or regression to error state)
+		// Set exit code based on drift: new failures/degradations or a regression to
+		// error state exit 1; new warnings alone exit 3 (documented warn convention).
 		if len(drift.NewFailures) > 0 || len(drift.Degraded) > 0 ||
 			(drift.CurrentStatus == models.StatusError && drift.BaselineStatus != models.StatusError) {
 			return &ExitError{Code: 1}
+		}
+		if len(drift.NewWarnings) > 0 {
+			return &ExitError{Code: 3}
 		}
 		return nil
 	},
