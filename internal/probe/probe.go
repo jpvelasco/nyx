@@ -206,15 +206,14 @@ func authMethods(keyPath string) ([]ssh.AuthMethod, net.Conn, error) {
 }
 
 // connectAgent attempts to connect to the SSH agent via SSH_AUTH_SOCK.
-// Returns nil if unavailable.
+// Returns nil if unavailable. On Windows the socket is a named pipe.
 func connectAgent() net.Conn {
 	socket := os.Getenv("SSH_AUTH_SOCK")
 	if socket == "" {
 		return nil
 	}
 
-	// #nosec G704 — SSH agent socket from env, not user-controlled
-	conn, err := net.Dial("unix", socket)
+	conn, err := dialAgent(socket)
 	if err != nil {
 		return nil
 	}

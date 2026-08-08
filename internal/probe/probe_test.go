@@ -441,10 +441,13 @@ func TestConnectAgent_NoSocket(t *testing.T) {
 }
 
 func TestConnectAgent_UnreachableSocket(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("unix sockets unavailable on Windows")
+	// The named-pipe dial on Windows and the unix-socket dial elsewhere both
+	// fail fast for a nonexistent agent socket, so no platform skip needed.
+	socket := `\\.\pipe\nyx-agent-missing`
+	if runtime.GOOS != "windows" {
+		socket = filepath.Join(t.TempDir(), "agent.sock")
 	}
-	t.Setenv("SSH_AUTH_SOCK", filepath.Join(t.TempDir(), "agent.sock"))
+	t.Setenv("SSH_AUTH_SOCK", socket)
 	if conn := connectAgent(); conn != nil {
 		conn.Close()
 		t.Fatal("expected nil for missing socket")

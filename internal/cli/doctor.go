@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -63,7 +64,7 @@ var doctorCmd = &cobra.Command{
 
 		// 3. Log directory writable
 		logPath := logger.DefaultPath()
-		logDir := logPath[:len(logPath)-len("/nyx.log")]
+		logDir := filepath.Dir(logPath) // "." when home is unknown — never panics
 		logDirCheck := models.NewCheckResult("doctor", "log_directory", "local", logDir)
 		//nolint:gosec
 		if err := os.MkdirAll(logDir, 0700); err != nil { // nosemgrep

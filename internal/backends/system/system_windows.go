@@ -159,6 +159,21 @@ var (
 	reAvgRTTWindows  = regexp.MustCompile(`Average = (\d+)ms`)
 )
 
+// whatLoss derives the packet-loss figure from ping.exe output. The English
+// "% loss" pattern is unreliable on localized Windows (e.g. German "(0%
+// Verlust)"), so the locale-independent exit code carries reachability and the
+// regex only sharpens the numbers when English output is present.
+func whatLoss(out string, reachable bool) float64 {
+	if m := rePktLossWindows.FindStringSubmatch(out); m != nil {
+		loss, _ := strconv.ParseFloat(m[1], 64)
+		return loss
+	}
+	if reachable {
+		return 0
+	}
+	return 100
+}
+
 func Ping(ctx context.Context, target string) (*PingResult, error) {
 	out, err := runCmd(ctx, "ping", "-n", "3", "-w", "2000", target)
 	if err != nil && ctx.Err() != nil {
@@ -166,15 +181,9 @@ func Ping(ctx context.Context, target string) (*PingResult, error) {
 	}
 
 	pr := &PingResult{}
-	if m := rePktLossWindows.FindStringSubmatch(out); m != nil {
-		loss, _ := strconv.ParseFloat(m[1], 64)
-		pr.PacketLoss = loss
-		pr.Reachable = loss < 100
-	} else if err != nil {
-		pr.Reachable = false
-		pr.PacketLoss = 100
-		return pr, nil
-	}
+	// ping.exe's exit code is locale-independent: 0 = at least one reply.
+	pr.Reachable = err == nil
+	pr.PacketLoss = whatLoss(out, pr.Reachable)
 	if m := reAvgRTTWindows.FindStringSubmatch(out); m != nil {
 		pr.AvgLatency = m[1]
 	}

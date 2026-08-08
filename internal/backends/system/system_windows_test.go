@@ -146,6 +146,28 @@ func TestGetRouteToTarget(t *testing.T) {
 	})
 }
 
+func TestWhatLoss(t *testing.T) {
+	cases := []struct {
+		name      string
+		out       string
+		reachable bool
+		want      float64
+	}{
+		{"english loss present", "(0% loss)", true, 0},
+		{"english high loss", "(25% loss)", true, 25},
+		{"localized reachable defaults to 0", "(0% Verlust)", true, 0},
+		{"localized unreachable defaults to 100", "(0% Verlust)", false, 100},
+		{"no pattern unreachable", "no data received", false, 100},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := whatLoss(tc.out, tc.reachable); got != tc.want {
+				t.Errorf("whatLoss(%q, %v) = %v, want %v", tc.out, tc.reachable, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPing(t *testing.T) {
 	lookup(t, "ping")
 

@@ -953,6 +953,23 @@ func TestDoctorCmd_Human_FailingChecks(t *testing.T) {
 	requireExitCode(t, err, 2) // missing nmap => issues found
 }
 
+// TestDoctorCmd_NoHome_NoPanic ensures the log-directory check survives an
+// unset HOME/USERPROFILE (regression for #133: out-of-range slice panic).
+func TestDoctorCmd_NoHome_NoPanic(t *testing.T) {
+	saveRestoreGlobals(t)
+	outputPath = filepath.Join(t.TempDir(), "doctor.txt")
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	err := doctorCmd.RunE(doctorCmd, nil)
+	if nmap.Available() {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	} else {
+		requireExitCode(t, err, 2)
+	}
+}
+
 func TestInitCmd_BadInterface(t *testing.T) {
 	saveRestoreGlobals(t)
 	interfaceOpt = "__bogus_iface__"
