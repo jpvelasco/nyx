@@ -10,7 +10,13 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+// run executes the CLI and returns the process exit code.
+func run() int {
 	if err := cli.Execute(); err != nil {
-		os.Exit(2)
+		return 2
 	}
+	return 0
 }

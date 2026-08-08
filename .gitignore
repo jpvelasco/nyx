@@ -1,7 +1,7 @@
 # Binaries
 netaudit
 netaudit-*
-nyx
+/nyx
 nyx-*
 *.exe
 *.out

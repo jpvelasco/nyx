@@ -43,6 +43,6 @@ comment:
 # Paths excluded from coverage math.
 ignore:
   - "**/*_test.go"
-  - "main.go"          # thin entry point
+  - "**/main.go"        # thin entry point
   - "npm/**"           # JS shim, not part of Go coverage
   - "scripts/**"
