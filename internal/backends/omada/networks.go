@@ -2,7 +2,6 @@ package omada
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -59,52 +58,34 @@ func (n Network) Gateway() string {
 	return parts[0]
 }
 
-// GetSites returns all sites managed by the controller.
+// GetSites returns all sites managed by the controller, walking every page.
 func (c *Client) GetSites(ctx context.Context) ([]Site, error) {
-	var raw json.RawMessage
-	if err := c.get(ctx, "sites?currentPage=1&currentPageSize=100", &raw); err != nil {
+	sites, _, err := fetchPaged[Site](ctx, c, "sites", defaultPageSize)
+	if err != nil {
 		return nil, fmt.Errorf("getting sites: %w", err)
 	}
-
-	var paged struct {
-		TotalRows int    `json:"totalRows"`
-		Data      []Site `json:"data"`
+	if len(sites) > 0 {
+		return sites, nil
 	}
-	if err := json.Unmarshal(raw, &paged); err == nil && len(paged.Data) > 0 {
-		return paged.Data, nil
-	}
-
-	var direct []Site
-	if err := json.Unmarshal(raw, &direct); err == nil && len(direct) > 0 {
-		return direct, nil
-	}
-
-	return nil, fmt.Errorf("could not parse sites response: %s", string(raw))
+	return nil, fmt.Errorf("could not parse sites response")
 }
 
-// GetNetworks returns all LAN networks for the given site.
+// GetNetworks returns all LAN networks for the given site, walking every page
+// of the first candidate endpoint that responds with data.
 func (c *Client) GetNetworks(ctx context.Context, siteID string) ([]Network, error) {
 	paths := []string{
-		fmt.Sprintf("sites/%s/setting/lan/networks?currentPage=1&currentPageSize=100", siteID),
-		fmt.Sprintf("sites/%s/setting/networks?currentPage=1&currentPageSize=100", siteID),
-		fmt.Sprintf("sites/%s/networks?currentPage=1&currentPageSize=100", siteID),
+		fmt.Sprintf("sites/%s/setting/lan/networks", siteID),
+		fmt.Sprintf("sites/%s/setting/networks", siteID),
+		fmt.Sprintf("sites/%s/networks", siteID),
 	}
 
 	for _, path := range paths {
-		var raw json.RawMessage
-		if err := c.get(ctx, path, &raw); err != nil {
+		nets, _, err := fetchPaged[Network](ctx, c, path, defaultPageSize)
+		if err != nil {
 			continue
 		}
-		var paged struct {
-			TotalRows int       `json:"totalRows"`
-			Data      []Network `json:"data"`
-		}
-		if err := json.Unmarshal(raw, &paged); err == nil && len(paged.Data) > 0 {
-			return paged.Data, nil
-		}
-		var direct []Network
-		if err := json.Unmarshal(raw, &direct); err == nil && len(direct) > 0 {
-			return direct, nil
+		if len(nets) > 0 {
+			return nets, nil
 		}
 	}
 

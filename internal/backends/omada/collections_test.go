@@ -3,6 +3,7 @@ package omada
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -125,6 +126,101 @@ func TestGetGatewayACLRulesDirectArray(t *testing.T) {
 	}
 	if len(rules) != 1 || rules[0].ID != "g1" {
 		t.Errorf("rules = %+v, want one g1 rule", rules)
+	}
+}
+
+func TestGetNetworksPaginatesAllPages(t *testing.T) {
+	// pageSize is 200, so exercise >200 networks across two pages.
+	var pages []string
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages = append(pages, r.URL.RawQuery)
+		if r.URL.Query().Get("currentPage") == "1" {
+			var rows []string
+			for i := 0; i < 200; i++ {
+				rows = append(rows, `{"id":"n`+strconv.Itoa(i)+`","name":"Net `+strconv.Itoa(i)+`"}`)
+			}
+			writeEnvelope(w, 0, "", `{"totalRows":250,"data":[`+strings.Join(rows, ",")+`]}`)
+			return
+		}
+		var rows []string
+		for i := 200; i < 250; i++ {
+			rows = append(rows, `{"id":"n`+strconv.Itoa(i)+`","name":"Net `+strconv.Itoa(i)+`"}`)
+		}
+		writeEnvelope(w, 0, "", `{"totalRows":250,"data":[`+strings.Join(rows, ",")+`]}`)
+	}))
+	nets, err := c.GetNetworks(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("GetNetworks: %v", err)
+	}
+	if len(nets) != 250 || nets[249].ID != "n249" {
+		t.Errorf("networks = %d items, want 250 with last id n249", len(nets))
+	}
+	if len(pages) != 2 || pages[1] != "currentPage=2&currentPageSize=200" {
+		t.Errorf("pages = %v, want page 2 to be fetched", pages)
+	}
+}
+
+func TestGetSitesPaginatesAllPages(t *testing.T) {
+	var pages []string
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages = append(pages, r.URL.RawQuery)
+		if r.URL.Query().Get("currentPage") == "1" {
+			writeEnvelope(w, 0, "", `{"totalRows":3,"data":[{"id":"s1","name":"A"},{"id":"s2","name":"B"}]}`)
+			return
+		}
+		writeEnvelope(w, 0, "", `{"totalRows":3,"data":[{"id":"s3","name":"C"}]}`)
+	}))
+	sites, err := c.GetSites(context.Background())
+	if err != nil {
+		t.Fatalf("GetSites: %v", err)
+	}
+	if len(sites) != 3 || sites[2].Name != "C" {
+		t.Errorf("sites = %+v, want three sites", sites)
+	}
+	if len(pages) != 2 {
+		t.Errorf("pages = %v, want 2 pages fetched", pages)
+	}
+}
+
+func TestGetACLRulesPaginatesAllPages(t *testing.T) {
+	var pages []string
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages = append(pages, r.URL.RawQuery)
+		page := r.URL.Query().Get("currentPage")
+		if page == "1" {
+			writeEnvelope(w, 0, "", `{"totalRows":3,"data":[{"id":"a1"},{"id":"a2"}]}`)
+			return
+		}
+		writeEnvelope(w, 0, "", `{"totalRows":3,"data":[{"id":"a3"}]}`)
+	}))
+	rules, err := c.GetACLRules(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("GetACLRules: %v", err)
+	}
+	if len(rules) != 3 || rules[2].ID != "a3" {
+		t.Errorf("rules = %+v, want three rules", rules)
+	}
+}
+
+func TestGetClientsPaginatesAllPages(t *testing.T) {
+	var pages []string
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages = append(pages, r.URL.RawQuery)
+		if r.URL.Query().Get("currentPage") == "1" {
+			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[{"mac":"aa:11"}]}`)
+			return
+		}
+		writeEnvelope(w, 0, "", `{"totalRows":2,"data":[{"mac":"bb:22"}]}`)
+	}))
+	clients, err := c.GetClients(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("GetClients: %v", err)
+	}
+	if len(clients) != 2 || clients[1].MAC != "bb:22" {
+		t.Errorf("clients = %+v, want two clients", clients)
+	}
+	if len(pages) != 2 || pages[0] != "currentPage=1&currentPageSize=200&filters.active=true" {
+		t.Errorf("pages = %v, want active-client filter on every page", pages)
 	}
 }
 

@@ -105,29 +105,30 @@ func TestProviderInfo(t *testing.T) {
 	})
 }
 
-// opnsenseServer returns a test server serving a canned OPNsense API.
+// opnsenseServer returns a test server serving a canned OPNsense API
+// (real endpoint shapes: interfaces_info map, paged searchRule rows).
 func opnsenseServer(t *testing.T, leases string) *httptest.Server {
 	t.Helper()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/core/firmware/running":
 			w.Write([]byte(firmwareJSON))
-		case "/api/core/interfaces/status":
-			w.Write([]byte(`{"interfaces":[
-				{"name":"lan","ip":"10.0.0.1","subnet":24,"gateway":"10.0.0.254"},
-				{"name":"wan","ip":"203.0.113.1","subnet":24,"gateway":"203.0.113.254"},
-				{"name":"no-ip","subnet":24},
-				{"name":"bad-cidr","ip":"999.1.1.1","subnet":99}
+		case "/api/interfaces/overview/interfaces_info":
+			w.Write([]byte(`{"interfaces":{
+				"lan":{"description":"LAN","dhcp":false,"ipv4":"10.0.0.1/24","ipv4_gateway":"10.0.0.254"},
+				"wan":{"description":"WAN","dhcp":true,"ipv4":"203.0.113.1/24","ipv4_gateway":"203.0.113.254"},
+				"no-ip":{"description":"","dhcp":false,"ipv4":"","ipv4_gateway":""},
+				"bad-cidr":{"description":"","dhcp":false,"ipv4":"999.1.1.1/99","ipv4_gateway":""}
+			}}`))
+		case "/api/firewall/filter/searchRule":
+			w.Write([]byte(`{"total":5,"rows":[
+				{"uuid":"u1","enabled":"1","action":"block","description":"Deny LAN to IOT","interface":["lan"],"source_net":"10.0.0.5","destination_net":"203.0.113.9"},
+				{"uuid":"u2","enabled":"1","action":"reject","interface":["lan"],"source_net":"10.0.0.6","destination_net":"203.0.113.10"},
+				{"uuid":"u3","enabled":"1","action":"pass","description":"allow dns","interface":["lan"],"source_net":"any","destination_net":"any"},
+				{"uuid":"u4","enabled":"0","action":"block","interface":["lan"],"source_net":"10.0.0.7","destination_net":"203.0.113.11"},
+				{"uuid":"u5","enabled":"1","action":"block","description":"unresolvable endpoints","interface":["lan"],"source_net":"any","destination_net":"203.0.113.9"}
 			]}`))
-		case "/api/core/firewall/rules/lan":
-			w.Write([]byte(`{"rules":[
-				{"action":"block","label":"Deny LAN to IOT","source":{"address":"10.0.0.5"},"destination":{"address":"203.0.113.9"}},
-				{"action":"reject","source":{"address":"10.0.0.6"},"destination":{"address":"203.0.113.10"}},
-				{"action":"pass","label":"allow dns","source":{"address":"any"},"destination":{"address":"any"}},
-				{"action":"block","disabled":true,"source":{"address":"10.0.0.7"},"destination":{"address":"203.0.113.11"}},
-				{"action":"block","label":"unresolvable endpoints","source":{"address":"any"},"destination":{"address":"203.0.113.9"}}
-			]}`))
-		case "/api/core/dhcp/leases":
+		case "/api/dhcpd/leases":
 			w.Write([]byte(leases))
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -223,19 +224,16 @@ func TestProviderImportSpec(t *testing.T) {
 		}
 	})
 
-	t.Run("rules endpoints down then leases fail", func(t *testing.T) {
-		// GetFirewallRules swallows per-interface errors (missing interfaces
-		// are normal), so an all-500 rules set yields zero rules, nil error;
-		// the import then proceeds to DHCP leases.
+	t.Run("rules fetch fails", func(t *testing.T) {
+		// GetFirewallRules surfaces transport/API errors — a silent "0
+		// policies" import would hide revoked keys or an unreachable API.
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/api/core/firmware/running":
 				w.Write([]byte(firmwareJSON))
-			case "/api/core/interfaces/status":
-				w.Write([]byte(`{"interfaces":[{"name":"lan","ip":"10.0.0.1","subnet":24}]}`))
-			case "/api/core/firewall/rules/wan", "/api/core/firewall/rules/lan":
-				w.WriteHeader(http.StatusInternalServerError)
-			case "/api/core/dhcp/leases":
+			case "/api/interfaces/overview/interfaces_info":
+				w.Write([]byte(`{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`))
+			case "/api/firewall/filter/searchRule":
 				w.WriteHeader(http.StatusInternalServerError)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -244,8 +242,8 @@ func TestProviderImportSpec(t *testing.T) {
 		defer ts.Close()
 		p := &Provider{}
 		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, Username: "k", Password: "s", SkipTLSVerify: true})
-		if err == nil || !strings.Contains(err.Error(), "fetching DHCP leases") {
-			t.Errorf("error = %v, want fetching DHCP leases (rules errors are swallowed)", err)
+		if err == nil || !strings.Contains(err.Error(), "fetching firewall rules") {
+			t.Errorf("error = %v, want fetching firewall rules", err)
 		}
 	})
 
@@ -254,11 +252,11 @@ func TestProviderImportSpec(t *testing.T) {
 			switch r.URL.Path {
 			case "/api/core/firmware/running":
 				w.Write([]byte(firmwareJSON))
-			case "/api/core/interfaces/status":
-				w.Write([]byte(`{"interfaces":[{"name":"lan","ip":"10.0.0.1","subnet":24}]}`))
-			case "/api/core/firewall/rules/lan":
-				w.Write([]byte(`{"rules":[]}`))
-			case "/api/core/dhcp/leases":
+			case "/api/interfaces/overview/interfaces_info":
+				w.Write([]byte(`{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`))
+			case "/api/firewall/filter/searchRule":
+				w.Write([]byte(`{"total":0,"rows":[]}`))
+			case "/api/dhcpd/leases":
 				w.WriteHeader(http.StatusInternalServerError)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -281,9 +279,11 @@ func TestProviderCheck(t *testing.T) {
 			switch r.URL.Path {
 			case "/api/core/firmware/running":
 				w.Write([]byte(firmwareJSON))
-			case "/api/core/interfaces/status":
-				w.Write([]byte(`{"interfaces":[]}`))
-			case "/api/core/dhcp/leases":
+			case "/api/interfaces/overview/interfaces_info":
+				w.Write([]byte(`{"interfaces":{}}`))
+			case "/api/firewall/filter/searchRule":
+				w.Write([]byte(`{"total":0,"rows":[]}`))
+			case "/api/dhcpd/leases":
 				w.Write([]byte(`{"leases":[]}`))
 			default:
 				w.WriteHeader(http.StatusNotFound)

@@ -6,8 +6,10 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -23,27 +25,25 @@ type FirmwareInfoResponse struct {
 type Interface struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	DHCP        string `json:"dhcp"`
-	IP          string `json:"ip"`
-	Subnet      int    `json:"subnet"`
-	Gateway     string `json:"gateway"`
+	DHCP        bool   `json:"dhcp"`
+	IP          string `json:"ipv4"`
+	Subnet      int    `json:"-"`
+	Gateway     string `json:"ipv4_gateway"`
 }
 
-// FirewallRule represents a single firewall rule from OPNsense.
+// FirewallRule represents a single firewall rule from OPNsense
+// (GET /api/firewall/filter/searchRule row shape).
 type FirewallRule struct {
-	Type      string `json:"type"`
-	Interface string `json:"interface"`
-	Protocol  string `json:"protocol"`
-	Source    struct {
-		Address string `json:"address"`
-	} `json:"source"`
-	Destination struct {
-		Address string `json:"address"`
-	} `json:"destination"`
-	Action   string `json:"action"`
-	Disabled bool   `json:"disabled"`
-	Label    string `json:"label"`
-	RuleUUID string `json:"uuid"`
+	RuleUUID    string   `json:"uuid"`
+	Enabled     string   `json:"enabled"` // "1" = enabled
+	Action      string   `json:"action"`  // pass / block / reject
+	Interface   []string `json:"interface"`
+	Protocol    string   `json:"protocol"`
+	Source      string   `json:"source_net"`
+	Destination string   `json:"destination_net"`
+	Label       string   `json:"description"`
+	// Disabled is derived from Enabled after decoding.
+	Disabled bool
 }
 
 // DHCPLease represents a DHCP lease from OPNsense.
@@ -96,6 +96,7 @@ func (c *Client) doRequest(ctx context.Context, path string) (*http.Response, er
 		return nil, fmt.Errorf("connecting to OPNsense at %s: %w", c.host, err)
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
+		resp.Body.Close() // #nosec G104 — close error unactionable in error path
 		return nil, fmt.Errorf("authentication failed — check API key and secret")
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -121,50 +122,76 @@ func (c *Client) GetFirmwareInfo(ctx context.Context) (*FirmwareInfoResponse, er
 }
 
 // GetInterfaces returns the list of interfaces with IP configuration.
+// OPNsense serves these keyed by interface name with the address as
+// "ip/prefix" under ipv4 (GET /api/interfaces/overview/interfaces_info).
 func (c *Client) GetInterfaces(ctx context.Context) ([]Interface, error) {
-	resp, err := c.doRequest(ctx, "/core/interfaces/status")
+	resp, err := c.doRequest(ctx, "/interfaces/overview/interfaces_info")
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	var result struct {
-		Interfaces []Interface `json:"interfaces"`
+		Interfaces map[string]struct {
+			Description string `json:"description"`
+			DHCP        bool   `json:"dhcp"`
+			IPProto     string `json:"ipv4"`
+			Gateway     string `json:"ipv4_gateway"`
+		} `json:"interfaces"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decoding interfaces response: %w", err)
 	}
-	return result.Interfaces, nil
+
+	var ifaces []Interface
+	for name, raw := range result.Interfaces {
+		iface := Interface{
+			Name:        name,
+			Description: raw.Description,
+			DHCP:        raw.DHCP,
+			Gateway:     raw.Gateway,
+		}
+		if ip, ipnet, err := net.ParseCIDR(raw.IPProto); err == nil {
+			iface.IP = ip.String()
+			ones, _ := ipnet.Mask.Size()
+			iface.Subnet = ones
+		}
+		ifaces = append(ifaces, iface)
+	}
+	slices.SortFunc(ifaces, func(a, b Interface) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return ifaces, nil
 }
 
 // GetFirewallRules returns all firewall rules from OPNsense.
+// Rules are served by a single paged endpoint (GET /api/firewall/filter/searchRule);
+// any fetch failure is surfaced to the caller — a silent "0 policies" import
+// would hide real problems like revoked keys or an unreachable controller.
 func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
-	var allRules []FirewallRule
-
-	// Fetch rules from each interface
-	for _, iface := range []string{"wan", "lan", "opt1", "opt2", "opt3", "opt4", "opt5"} {
-		resp, err := c.doRequest(ctx, fmt.Sprintf("/core/firewall/rules/%s", iface))
-		if err != nil {
-			// Some interfaces may not exist; skip them
-			continue
-		}
-
-		var result struct {
-			Rules []FirewallRule `json:"rules"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			resp.Body.Close() // #nosec G104 — close error unactionable in error path
-			continue
-		}
-		resp.Body.Close() // #nosec G104 — close error unactionable after successful read
-		allRules = append(allRules, result.Rules...)
+	resp, err := c.doRequest(ctx, "/firewall/filter/searchRule")
+	if err != nil {
+		return nil, err
 	}
-	return allRules, nil
+	defer resp.Body.Close()
+
+	var result struct {
+		Total int            `json:"total"`
+		Rows  []FirewallRule `json:"rows"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding firewall rules response: %w", err)
+	}
+	for i := range result.Rows {
+		result.Rows[i].Disabled = result.Rows[i].Enabled != "1"
+	}
+	return result.Rows, nil
 }
 
 // GetDHCPLeases returns all DHCP leases from OPNsense.
+// Accepts both the {"leases": [...]} and paged {"rows": [...]} response shapes.
 func (c *Client) GetDHCPLeases(ctx context.Context) ([]DHCPLease, error) {
-	resp, err := c.doRequest(ctx, "/core/dhcp/leases")
+	resp, err := c.doRequest(ctx, "/dhcpd/leases")
 	if err != nil {
 		return nil, err
 	}
@@ -172,11 +199,15 @@ func (c *Client) GetDHCPLeases(ctx context.Context) ([]DHCPLease, error) {
 
 	var result struct {
 		Leases []DHCPLease `json:"leases"`
+		Rows   []DHCPLease `json:"rows"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decoding DHCP leases response: %w", err)
 	}
-	return result.Leases, nil
+	if len(result.Leases) > 0 {
+		return result.Leases, nil
+	}
+	return result.Rows, nil
 }
 
 // buildTLSConfig creates a TLS config based on the provided options.

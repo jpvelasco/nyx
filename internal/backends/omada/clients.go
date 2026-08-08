@@ -21,15 +21,13 @@ type ConnectedClient struct {
 	Uptime      int64  `json:"uptime"`
 }
 
-// GetClients returns all active connected clients for the given site.
+// GetClients returns all active connected clients for the given site,
+// walking every page.
 func (c *Client) GetClients(ctx context.Context, siteID string) ([]ConnectedClient, error) {
-	var result struct {
-		TotalRows int               `json:"totalRows"`
-		Data      []ConnectedClient `json:"data"`
-	}
-	path := fmt.Sprintf("sites/%s/clients?currentPage=1&currentPageSize=200&filters.active=true", siteID)
-	if err := c.get(ctx, path, &result); err != nil {
+	path := fmt.Sprintf("sites/%s/clients", siteID)
+	clients, _, err := fetchPaged[ConnectedClient](ctx, c, path, defaultPageSize, "filters.active=true")
+	if err != nil {
 		return nil, fmt.Errorf("getting clients for site %s: %w", siteID, err)
 	}
-	return result.Data, nil
+	return clients, nil
 }

@@ -209,8 +209,8 @@ func TestGetSitesResponseShapes(t *testing.T) {
 			writeEnvelope(w, 0, "", `"not-site-shaped"`)
 		}))
 		_, err := c.GetSites(context.Background())
-		if err == nil || !strings.Contains(err.Error(), "could not parse sites response") {
-			t.Errorf("GetSites error = %v, want parse failure", err)
+		if err == nil || !strings.Contains(err.Error(), "decoding paged list response") {
+			t.Errorf("GetSites error = %v, want decode failure", err)
 		}
 	})
 }

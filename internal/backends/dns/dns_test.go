@@ -513,23 +513,30 @@ func TestDialAddr(t *testing.T) {
 func TestResolve_TruncatedResponse_TCPFallback(t *testing.T) {
 	const qname = "big.example.com."
 
-	udpAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("ResolveUDPAddr: %v", err)
+	// TCP and UDP port spaces are independent, so the resolver dialing the
+	// same address over TCP can be served on the same numeric port. Windows
+	// reserves some ephemeral port ranges (Hyper-V), so retry with a fresh
+	// random port when the same-port TCP bind is refused.
+	var udpConn *net.UDPConn
+	var tcpLn net.Listener
+	for attempt := 0; attempt < 20; attempt++ {
+		var err error
+		udpConn, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+		if err != nil {
+			t.Fatalf("ListenUDP: %v", err)
+		}
+		udpPort := udpConn.LocalAddr().(*net.UDPAddr).Port
+		tcpLn, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", udpPort))
+		if err == nil {
+			break
+		}
+		udpConn.Close()
+		udpConn = nil
 	}
-	udpConn, err := net.ListenUDP("udp", udpAddr)
-	if err != nil {
-		t.Fatalf("ListenUDP: %v", err)
+	if tcpLn == nil {
+		t.Fatal("could not bind TCP on any UDP peer port — excluded port ranges?")
 	}
 	defer udpConn.Close()
-
-	// TCP and UDP port spaces are independent, so the resolver dialing the
-	// same address over TCP can be served on the same numeric port.
-	udpPort := udpConn.LocalAddr().(*net.UDPAddr).Port
-	tcpLn, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", udpPort))
-	if err != nil {
-		t.Fatalf("Listen: %v", err)
-	}
 	defer tcpLn.Close()
 
 	udpDone := make(chan struct{})

@@ -131,8 +131,8 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 			continue
 		}
 
-		from := inferZoneFromAddress(rule.Source.Address, networks)
-		to := inferZoneFromAddress(rule.Destination.Address, networks)
+		from := inferZoneFromAddress(rule.Source, networks)
+		to := inferZoneFromAddress(rule.Destination, networks)
 		if from == "" || to == "" {
 			continue
 		}
