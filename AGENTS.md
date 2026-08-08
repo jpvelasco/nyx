@@ -13,7 +13,7 @@ make lint           # golangci-lint run ./...
 make release        # cross-compile linux/darwin/windows (amd64+arm64)
 ```
 
-Go toolchain: `go.mod` declares `go 1.25.11` — do not assume the README's "Go 1.22+" is sufficient to build here.
+Go toolchain: `go.mod` declares `go 1.25.12` — do not assume the README's "Go 1.22+" is sufficient to build here.
 
 CI runs a matrix of jobs: `lint` (golangci-lint v2), `vuln` (govulncheck, informational), `build` (3-OS matrix on push, 2-OS on PR), `test` (race + coverage + Codecov upload), `goreleaser` (snapshot build + smoke test), `lint-windows`, `gosec`, and `trivy`. A separate `codacy-coverage.yml` workflow uploads coverage to Codacy via trusted handoff. CodeQL and Socket run on push/PR.
 
