@@ -22,6 +22,16 @@ var (
 	reRRSIG = regexp.MustCompile(`(?m)^\S+\s+\d+\s+IN\s+RRSIG\s`)
 )
 
+// dialAddr returns the host:port dial target for a DNS server, defaulting to
+// port 53 only when the server string carries no explicit port (IPv6 literals
+// without brackets are handled by JoinHostPort).
+func dialAddr(server string) string {
+	if _, _, err := net.SplitHostPort(server); err == nil {
+		return server
+	}
+	return net.JoinHostPort(server, "53")
+}
+
 // resolve is the internal implementation, does not call Finish.
 // Returns the CheckResult, list of resolved IPs, and any error.
 func resolve(ctx context.Context, query, server string) (*models.CheckResult, []string, error) {
@@ -39,17 +49,15 @@ func resolve(ctx context.Context, query, server string) (*models.CheckResult, []
 		}
 		ips = addrs
 	} else {
-		// Use custom resolver pointing at server:53
+		// Use custom resolver pointing at server (port 53 unless specified)
 		resolver := &net.Resolver{
 			PreferGo: true,
-			Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				// Wrap IPv6 addresses in brackets for host:port format
-				serverAddr := server
-				if strings.Contains(server, ":") && !strings.HasPrefix(server, "[") {
-					serverAddr = "[" + server + "]"
-				}
+			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				// Honor the network parameter so Go's resolver can retry over
+				// TCP when a response sets the truncation (TC) bit; a UDP-only
+				// dial would break large responses.
 				d := net.Dialer{}
-				return d.DialContext(ctx, "udp", serverAddr+":53")
+				return d.DialContext(ctx, network, dialAddr(server))
 			},
 		}
 		addrs, err := resolver.LookupHost(ctx, query)

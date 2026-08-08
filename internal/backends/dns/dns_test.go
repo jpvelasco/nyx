@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"regexp"
 	"strings"
@@ -482,4 +483,147 @@ func TestResolveExpect_MultipleIPs_ExpectedAbsent(t *testing.T) {
 	if len(result.Violations) == 0 {
 		t.Error("expected violations")
 	}
+}
+
+// =====================================================================
+// dialAddr — server address normalization (#125)
+// =====================================================================
+
+func TestDialAddr(t *testing.T) {
+	tests := []struct {
+		server string
+		want   string
+	}{
+		{"10.0.0.1", "10.0.0.1:53"},
+		{"10.0.0.1:5353", "10.0.0.1:5353"},
+		{"2001:db8::1", "[2001:db8::1]:53"},
+		{"[2001:db8::1]:5353", "[2001:db8::1]:5353"},
+		{"dns.example.com", "dns.example.com:53"},
+	}
+	for _, tt := range tests {
+		if got := dialAddr(tt.server); got != tt.want {
+			t.Errorf("dialAddr(%q) = %q, want %q", tt.server, got, tt.want)
+		}
+	}
+}
+
+// TestResolve_TruncatedResponse_TCPFallback verifies the custom resolver dial
+// honors the network parameter: a UDP response with the TC bit set must be
+// retried over TCP against the same server.
+func TestResolve_TruncatedResponse_TCPFallback(t *testing.T) {
+	const qname = "big.example.com."
+
+	udpAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("ResolveUDPAddr: %v", err)
+	}
+	udpConn, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		t.Fatalf("ListenUDP: %v", err)
+	}
+	defer udpConn.Close()
+
+	// TCP and UDP port spaces are independent, so the resolver dialing the
+	// same address over TCP can be served on the same numeric port.
+	udpPort := udpConn.LocalAddr().(*net.UDPAddr).Port
+	tcpLn, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", udpPort))
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	defer tcpLn.Close()
+
+	udpDone := make(chan struct{})
+	go func() {
+		defer close(udpDone)
+		buf := make([]byte, 4096)
+		for {
+			n, raddr, err := udpConn.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			resp := dnsMessageWithTC(buf[:n])
+			udpConn.WriteToUDP(resp, raddr) // #nosec G104 — best-effort test server
+		}
+	}()
+
+	tcpDone := make(chan struct{})
+	go func() {
+		defer close(tcpDone)
+		for {
+			conn, err := tcpLn.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				buf := make([]byte, 4096)
+				n, err := c.Read(buf)
+				if err != nil {
+					return
+				}
+				c.Write(dnsAnswer(buf[:n])) // #nosec G104 — best-effort test server
+			}(conn)
+		}
+	}()
+
+	server := udpConn.LocalAddr().String()
+	result, ips, err := resolve(dnsCtx(), strings.TrimSuffix(qname, "."), server)
+	if err != nil {
+		t.Fatalf("resolve returned error: %v", err)
+	}
+	if result.Status != models.StatusPass {
+		t.Fatalf("expected pass via TCP fallback, got %s: %s", result.Status, result.Summary)
+	}
+	if len(ips) != 1 || ips[0] != "192.0.2.77" {
+		t.Errorf("expected TCP-fallback answer 192.0.2.77, got %v", ips)
+	}
+}
+
+// dnsMessageWithTC takes a query packet and echoes it back with the TC bit set
+// and no answers — forcing the Go resolver to retry over TCP.
+func dnsMessageWithTC(query []byte) []byte {
+	resp := make([]byte, len(query))
+	copy(resp, query)
+	resp[2] |= 0x80 // QR=1 (response)
+	resp[2] |= 0x02 // TC=1 (truncated)
+	resp[3] = 0x00  // opcode/RA/zeroes/RCODE
+	return resp
+}
+
+// dnsAnswer builds a tiny NOERROR response carrying a single A record for the
+// given query. Length-prefixed when served over TCP (2-byte length header).
+func dnsAnswer(query []byte) []byte {
+	// Strip the 2-byte TCP length prefix if present.
+	q := query
+	if len(q) > 2 && int(q[0])<<8|int(q[1]) == len(q)-2 {
+		q = q[2:]
+	}
+	qdcount := q[5]
+	questionLen := 0
+	i := 12
+	for i < len(q) && q[i] != 0 {
+		i++
+	}
+	questionLen = i + 5 - 12
+	name := q[12 : i+1]
+
+	base := make([]byte, 0, 12+questionLen+16)
+	base = append(base, q[0], q[1])
+	base = append(base, 0x81, 0x80) // QR=1, RD=1, RA=1, NOERROR
+	base = append(base, 0, qdcount) // QDCOUNT (big-endian)
+	base = append(base, 0, 1)       // ANCOUNT=1
+	base = append(base, 0, 0, 0, 0) // NS/AR counts
+	base = append(base, name...)
+	base = append(base, 0, 1, 0, 1)          // QTYPE=A, QCLASS=IN
+	base = append(base, 0xc0, 0x0c)          // name pointer
+	base = append(base, 0, 1, 0, 1)          // TYPE=A, CLASS=IN
+	base = append(base, 0, 0, 0, 60)         // TTL=60
+	base = append(base, 0, 4, 192, 0, 2, 77) // RDLENGTH=4, 192.0.2.77
+
+	// TCP transport requires a 2-byte length prefix.
+	msg := make([]byte, len(base)+2)
+	msg[0] = byte(len(base) >> 8)
+	msg[1] = byte(len(base))
+	copy(msg[2:], base)
+	return msg
 }
