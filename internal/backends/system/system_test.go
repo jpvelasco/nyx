@@ -1,6 +1,12 @@
 package system
 
-import "testing"
+import (
+	"context"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"testing"
+)
 
 func TestClassifyInterface(t *testing.T) {
 	tests := []struct {
@@ -68,5 +74,49 @@ func TestIsVPNInterfaceName(t *testing.T) {
 				t.Errorf("isVPNInterfaceName(%q) = %v, want %v", tt.name, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRunCmd(t *testing.T) {
+	// Use the go binary that is running this test suite: guaranteed to exist
+	// on every CI leg and deterministic in output.
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go binary not in PATH")
+	}
+
+	t.Run("success", func(t *testing.T) {
+		out, err := runCmd(context.Background(), goBin, "version")
+		if err != nil {
+			t.Fatalf("runCmd(go version) error: %v", err)
+		}
+		if out == "" {
+			t.Fatal("expected version output")
+		}
+	})
+
+	t.Run("missing binary", func(t *testing.T) {
+		missing := filepath.Join(t.TempDir(), "definitely-missing-command")
+		if runtime.GOOS == "windows" {
+			missing += ".exe"
+		}
+		if _, err := runCmd(context.Background(), missing); err == nil {
+			t.Fatal("expected error for missing command")
+		}
+	})
+
+	t.Run("cancelled context", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := runCmd(ctx, goBin, "version"); err == nil {
+			t.Fatal("expected error for cancelled context")
+		}
+	})
+}
+
+func lookup(t *testing.T, name string) {
+	t.Helper()
+	if _, err := exec.LookPath(name); err != nil {
+		t.Skipf("%s not available in PATH", name)
 	}
 }
