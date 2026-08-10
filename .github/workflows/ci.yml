@@ -54,10 +54,9 @@ jobs:
   build:
     name: Build
     strategy:
-      # Full 3-OS matrix on push to the default branch; PRs skip macOS (10x minutes
-      # on the free tier) — Linux + Windows already cover the cross-platform risk.
+      # 3-OS matrix on every run (public repo — Actions minutes are unlimited).
       matrix:
-        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -71,9 +70,9 @@ jobs:
     name: Test
     strategy:
       fail-fast: false  # one leg failing must not cancel the others' coverage uploads
-      # Full 3-OS matrix on push to the default branch; PRs skip macOS to conserve minutes.
+      # 3-OS matrix on every run (public repo — Actions minutes are unlimited).
       matrix:
-        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
