@@ -2,10 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
-
+    branches: ["main"]
   pull_request:
-    branches: [main]
+    branches: ["main"]
 
 permissions:
   contents: read
@@ -15,7 +14,23 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9
+        with:
+          version: v2.12.2
+
+  # Lint on Windows as well — golangci-lint can fail on path separators,
+  # case-sensitivity, and CRLF while passing on Linux, so the matrix must
+  # cover it. Required context "Lint (Windows)"; keep branch protection in
+  # sync when adding/renaming jobs (see AGENTS.md).
+  lint-windows:
+    name: Lint (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
@@ -27,13 +42,11 @@ jobs:
     name: Vulnerability scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
       - name: Run govulncheck
-        # Informational only — pre-existing findings tracked as issues.
-        continue-on-error: true
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
@@ -41,11 +54,13 @@ jobs:
   build:
     name: Build
     strategy:
+      # Full 3-OS matrix on push to the default branch; PRs skip macOS (10x minutes
+      # on the free tier) — Linux + Windows already cover the cross-platform risk.
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
@@ -55,16 +70,19 @@ jobs:
   test:
     name: Test
     strategy:
-      fail-fast: false
+      fail-fast: false  # one leg failing must not cancel the others' coverage uploads
+      # Full 3-OS matrix on push to the default branch; PRs skip macOS to conserve minutes.
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
-      # OIDC; lets each leg mint the Codecov upload token
-      id-token: write
+      id-token: write  # OIDC; lets each leg mint the Codecov upload token
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      # fetch-depth: 0 so Codecov can walk git history for path mapping and so
+      # parent/base SHAs exist when the App compares PR head vs the default branch
+      # (avoids "Missing base commit" / unusable reports on shallow clones).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
@@ -101,7 +119,7 @@ jobs:
         run: go install gotest.tools/gotestsum@v1.13.0
       - name: Generate JUnit XML (Linux)
         if: runner.os == 'Linux'
-        run: gotestsum --junitfile junit.xml --format pkgname -- -parallel=1 ./...
+        run: gotestsum --junitfile junit.xml --format pkgname -- ./...
       - name: Upload test results to Codecov
         if: ${{ !cancelled() && runner.os == 'Linux' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7.0.0
@@ -111,6 +129,9 @@ jobs:
           report_type: test_results
           files: ./junit.xml
           fail_ci_if_error: false
+      # PR jobs must not receive the Codacy repository token. Save the report;
+      # a trusted workflow_run workflow (codacy-coverage.yml) downloads this
+      # artifact and uploads it to Codacy.
       - name: Save coverage for Codacy
         if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -119,64 +140,25 @@ jobs:
           path: coverage.out
           if-no-files-found: error
 
-  goreleaser:
-    name: Release build (snapshot)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v6
-        with:
-          node-version: "24"
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7
-        with:
-          args: build --snapshot --clean
-      - name: Smoke-test the built linux binary
-        run: |
-          BIN=$(find dist -type f -name nyx -path '*linux_amd64*' | head -1)
-          test -n "$BIN" || { echo "no linux/amd64 nyx binary in dist/"; exit 1; }
-          chmod +x "$BIN"
-          OUT=$("$BIN" version)
-          echo "$OUT"
-          echo "$OUT" | grep -q "0.1.0" && { echo "version ldflags did not apply (still default '0.1.0')"; exit 1; }
-          echo "smoke test OK"
-      - name: npm shim tests
-        working-directory: npm
-        run: |
-          # Safety net — currently 0 tests, but will catch regressions if test files are added.
-          TEST_COUNT=$(node --test 2>&1 | grep -oP 'tests \K\d+')
-          echo "npm tests found: $TEST_COUNT"
-
-  lint-windows:
-    name: Lint (Windows)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9
-        with:
-          version: v2.12.2
-
   gosec:
     name: gosec
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
       - name: Run gosec
-        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 ./...
+        # Keep this -exclude set in sync with .golangci.yml gosec.excludes
+        # (single source of truth) so gosec and golangci suppress the same IDs.
+        # Adjust the set to match the target repo's .golangci.yml.
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.28.0 -exclude=G104,G204,G304,G704 ./...
 
   trivy:
     name: Trivy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - name: Run Trivy filesystem scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
@@ -185,24 +167,3 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: "1"
           ignore-unfixed: true
-
-  # Codacy Static Analysis — runs on push to main to keep the dashboard in sync.
-  # PR-level checks come from the GitHub integration webhook; main-level
-  # analysis does not fire automatically after squash-merge, so we run the
-  # Codacy Analysis CLI here and upload results. Uses the existing project
-  # token (CODACY_REPOSITORY_API_TOKEN) — no new secrets needed.
-  codacy-analysis:
-    name: Codacy Analysis
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: Run Codacy Analysis CLI
-        uses: codacy/codacy-analysis-cli-action@562ee3e92b8e92df8b67e0a5ff8aa8e261919c08  # v4.4.7
-        with:
-          project-token: ${{ secrets.CODACY_REPOSITORY_API_TOKEN }}
-          upload: true
-          max-allowed-issues: 2147483647

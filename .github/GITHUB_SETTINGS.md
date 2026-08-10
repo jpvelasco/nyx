@@ -107,6 +107,30 @@ EOF
 
 ---
 
+## Codacy setup (one-time, outside the repo)
+
+Codacy cannot be fully configured from repo files — these steps are done once
+in the Codacy dashboard, then everything runs automatically (PR checks and the
+main dashboard update via the integration webhook; coverage via
+`.github/workflows/codacy-coverage.yml`).
+
+1. **Add the repository to Codacy** (if not already present) so the GitHub
+   integration analyzes PRs and posts the `Codacy Static Code Analysis` check.
+2. **Repository Settings → Analysis:** leave **cloud analysis** enabled. Do
+   NOT enable "Repository analysis on your server" — that requires a CI job to
+   upload local results on every commit, and if the job doesn't run on PRs
+   (or can't upload), PRs deadlock waiting for a check that never reports.
+3. **Repository Settings → Coverage:** copy the project token and add it as the
+   `CODACY_REPOSITORY_API_TOKEN` secret in GitHub → Settings → Secrets.
+   Validate the upload in the "Test your integration" panel after the next CI
+   run (needs a baseline commit before PR coverage metrics appear).
+4. **Code patterns:** enable the tools that fit the repo's stack (e.g. Revive
+   for Go) and disable noise (e.g. Trivy/Checkov where the repo has no
+   container/IaC files). Tools enabled by an org AI Policy cannot be disabled
+   per-repo.
+
+---
+
 ## Current settings
 
 ### General

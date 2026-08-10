@@ -11,9 +11,13 @@ permissions:
 
 jobs:
   upload:
+    # A successful Ubuntu test job can produce coverage even when another
+    # independent CI leg fails. Let the artifact determine whether to upload.
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
+      # This workflow intentionally does not check out or execute the PR
+      # revision. The only input from it is the coverage report artifact.
       - name: Download coverage report
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         continue-on-error: true
