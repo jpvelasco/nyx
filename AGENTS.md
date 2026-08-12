@@ -10,20 +10,44 @@ make vet            # go vet ./...
 make gosec          # run gosec static analysis
 make check          # full CI suite: gosec → vet → coverage → build
 make lint           # golangci-lint run ./...
+make clean          # remove built binaries and coverage.out
 make release        # cross-compile linux/darwin/windows (amd64+arm64)
+
+# Target a single package or test:
+go test ./internal/intent/...
+go test -run TestParseSpec ./internal/intent/...
 ```
 
 Go toolchain: `go.mod` declares `go 1.25.12` — do not assume the README's "Go 1.22+" is sufficient to build here.
 
 CI runs a matrix of jobs: `lint` (golangci-lint v2), `vuln` (govulncheck, informational), `build` (3-OS matrix), `test` (race + coverage + Codecov upload, 3-OS matrix — protect-main requires `Test (macos-latest)`), `goreleaser` (snapshot build + smoke test), `lint-windows`, `gosec`, and `trivy`. A separate `codacy-coverage.yml` workflow uploads coverage to Codacy via trusted handoff. CodeQL and Socket run on push/PR.
 
+`.golangci.yml` enables only `govet`, `ineffassign`, `staticcheck`, `unused`, `misspell` (+ `gofmt` formatter) — revive is intentionally disabled to avoid pre-existing style churn.
+
 ### Release flow
 
-Release workflow (`.github/workflows/release.yml`) runs GoReleaser. Tag `vX.Y.Z` or use `workflow_dispatch` with the version input. The workflow builds all 6 binaries, generates SHA-256 checksums, extracts release notes from `CHANGELOG.md`, and creates the GitHub Release with attached artifacts.
+Release workflow (`.github/workflows/release.yml`) runs GoReleaser. Tag `vX.Y.Z` or use `workflow_dispatch` with the version input. The workflow builds all 6 binaries, generates SHA-256 checksums, extracts release notes from `CHANGELOG.md`, and creates the GitHub Release with attached artifacts. The npm package `nyx-audit-cli` (`npm/`) is a thin platform-aware wrapper that downloads the matching prebuilt binary from the GitHub Release on `postinstall`.
 
 Coverage data is uploaded to Codecov via OIDC (no token) after tests in CI.
 
-See CLAUDE.md under "Codacy CLI" for Codacy tool details (WSL2, config reset, etc.).
+## Codacy CLI (codacy-cli-v2)
+
+**Must be run in WSL2 on this Windows machine** (native Windows unsupported). Binary cached under `~/.cache/codacy/codacy-cli-v2/<version>/codacy-cli-v2`; discover with `find ~/.cache/codacy/codacy-cli-v2 -name codacy-cli-v2 -type f | head -1`. The authoritative docs are that directory's `README.md` — consult `codacy-cli --help` / `codacy-cli <subcommand> --help` and do not guess flags.
+
+Typical local validation flow:
+1. In WSL: `export CODACY_API_TOKEN=...`
+2. `cd` to the nyx checkout
+3. `$CLI config reset --provider gh --organization jpvelasco --repository nyx` (pulls latest remote rules; `$CLI init ...` does similar bootstrap)
+4. `$CLI install` then `$CLI analyze` (or `--tool opengrep|revive|...` to scope)
+
+Config files (do not casually overwrite generated ones):
+- `.codacy/codacy.yaml` — runtimes + enabled tools list (managed by the CLI + `config reset`).
+- `.codacy/tools-configs/` — the actual rule files (semgrep.yaml, revive.toml, eslint.config.mjs, ruleset.xml for PMD).
+- `.codacy.yml` (repo root) — older/engines config (govet + staticcheck + npm shim excludes); separate from the v2 CLI config.
+
+Intentional manual tweaks on top of `config reset` output: PMD ruleset excludes `.*/npm/.*` (top-level await noise) and eslint.config.mjs ignores `npm/scripts/**` (shim is a postinstall downloader with intentional `nosemgrep` for fs/path/perm).
+
+Token only needed for `init` / `config reset` / remote-ruleset pulls; local analysis works without it once configs are present. WSL gotchas: the pwsh → `wsl bash -c "..."` harness is fragile with multi-line strings, `$VAR` expansion, and nested quotes — prefer one-liners or temp scripts. Keep suppressions low; prefer `.codacy.yml` `exclude_paths` + tool-level ignores, add `nosemgrep` only for intentional exceptions (e.g. probe SSH key read, nmap/system execs).
 
 ## Entrypoint
 
@@ -140,6 +164,10 @@ For example:
 - `port_check` requires `target`, `ports`, `expect`
 `runner:` references must be declared in the probes section (or be `"local"`). Do not bypass this validation unless the user explicitly requests a test-only exception.
 
+## Spec Format
+
+Version 1 intent spec: `networks`, `vpn`, `probes`, `policies`, `assertions`. Eight assertion types: `subnet_discovery`, `isolation`, `vpn_route`, `route_check`, `port_check`, `dns_check`, `network_health`, `acl_check`. See `examples/homelab.yaml` and `testdata/valid_spec.yaml`. The authoritative spec reference is `docs/spec.html`; the narrative walkthrough is `docs/walkthrough.md`.
+
 ## Other CLI Commands Worth Knowing
 
 - `nyx doctor --spec <file>` also validates the spec structure.
@@ -164,3 +192,11 @@ For example:
 - `health/` — latency, packet loss, and MTU probing.
 - `omada/` — read-only REST client for Omada SDN 6.x. Not concurrency-safe. TLS verification disabled (self-signed).
 - `batfish/` — stub returning `ErrNotImplemented`; `Available()` returns `false`.
+
+## Other Core Packages
+
+- `internal/models` — the `CheckResult` envelope used by every backend and assertion (Status, Summary, Observed, Expected, Violations, Evidence). Callers must call `result.Finish()` before rendering; `AuditReport` aggregates.
+- `internal/logger` — JSON-lines append logger with rotation, writes to `~/.nyx/nyx.log` (5MB max, 3 rotated files). Best-effort — never fails a command.
+- `internal/report` — `RenderJSON`, `RenderHuman`, `RenderRecommendations` output renderers.
+- `internal/version` — single-source version constant, injected via `-ldflags` at release build time; read by `nyx version` and MCP `serverInfo.Version`.
+- `internal/mcp` — **MCP (Model Context Protocol)** stdio server (`server.go`). All tools return `CheckResult`-shaped JSON consistent with CLI `--json` output. Only stdio transport is implemented; HTTP is stubbed.
