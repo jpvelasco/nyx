@@ -519,7 +519,7 @@ func TestResolve_TruncatedResponse_TCPFallback(t *testing.T) {
 	// UDP; retry with a fresh port when either bind is refused.
 	var udpConn *net.UDPConn
 	var tcpLn net.Listener
-	for attempt := 0; attempt < 20; attempt++ {
+	for attempt := 0; attempt < 50; attempt++ {
 		var err error
 		tcpLn, err = net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
@@ -532,6 +532,7 @@ func TestResolve_TruncatedResponse_TCPFallback(t *testing.T) {
 		}
 		tcpLn.Close()
 		tcpLn = nil
+		time.Sleep(5 * time.Millisecond)
 	}
 	if tcpLn == nil {
 		t.Fatal("could not bind UDP on any free TCP port — excluded port ranges?")

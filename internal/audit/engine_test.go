@@ -92,7 +92,7 @@ func TestDiscoveryWarnPreservedWhenZeroHostsWithinBounds(t *testing.T) {
 		Version: 1,
 		Site:    "test",
 		Networks: []intent.Network{
-			{Name: "testnet", CIDR: "10.255.255.0/24", Gateway: "10.255.255.1", Zone: "test"},
+			{Name: "testnet", CIDR: "10.255.255.0/30", Gateway: "10.255.255.1", Zone: "test"},
 		},
 		Assertions: []intent.Assertion{
 			{
@@ -133,7 +133,7 @@ func TestDiscoveryExpectedBoundsInResult(t *testing.T) {
 		Version: 1,
 		Site:    "test",
 		Networks: []intent.Network{
-			{Name: "testnet", CIDR: "10.255.255.0/24", Gateway: "10.255.255.1", Zone: "test"},
+			{Name: "testnet", CIDR: "10.255.255.0/30", Gateway: "10.255.255.1", Zone: "test"},
 		},
 		Assertions: []intent.Assertion{
 			{
@@ -310,10 +310,14 @@ func TestVirtualSubnetSuppressesRepeatWarn(t *testing.T) {
 	if !nmap.Available() {
 		t.Skip("nmap not available")
 	}
-	// Use a Hyper-V/WSL2 subnet that the test host has an adapter for,
-	// so looksVirtualByCIDR returns true without needing a VM MAC in nmap output.
-	// 10.255.144.0/20 is the default Hyper-V vEthernet (Default Switch) range.
-	cidr := "10.255.144.0/20"
+	// Scan a /24 slice of a virtual adapter's own network (Hyper-V/WSL2/
+	// VMware), so looksVirtualByCIDR returns true without needing a VM MAC
+	// in nmap output and the sweep stays small enough to finish in seconds.
+	nets := audit.VirtualIfaceNetworks()
+	if len(nets) == 0 {
+		t.Skip("no virtual adapter (Hyper-V/WSL2/VMware) on this machine")
+	}
+	cidr := nets[0]
 	spec := &intent.Spec{
 		Version: 1,
 		Site:    "test",

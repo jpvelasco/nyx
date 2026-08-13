@@ -20,6 +20,11 @@ go test -run TestParseSpec ./internal/intent/...
 
 Go toolchain: `go.mod` declares `go 1.25.12` — do not assume the README's "Go 1.22+" is sufficient to build here.
 
+Local (Windows) gotchas:
+- Parallel `go test ./...` can hit localhost port-binding flakiness on this machine — prefer `go test -p 1 ./...` for reliable runs.
+- `-race` cannot run locally (no C compiler/cgo). CI runs `-race` on all 3 OS legs; do not treat local non-race runs as full coverage.
+- The `gh` CLI token in the Windows keyring expires periodically (HTTP 401 on API calls) — restore with `gh auth login`, then continue.
+
 CI runs a matrix of jobs: `lint` (golangci-lint v2), `vuln` (govulncheck, informational), `build` (3-OS matrix), `test` (race + coverage + Codecov upload, 3-OS matrix — protect-main requires `Test (macos-latest)`), `goreleaser` (snapshot build + smoke test), `lint-windows`, `gosec`, and `trivy`. A separate `codacy-coverage.yml` workflow uploads coverage to Codacy via trusted handoff. CodeQL and Socket run on push/PR.
 
 `.golangci.yml` enables only `govet`, `ineffassign`, `staticcheck`, `unused`, `misspell` (+ `gofmt` formatter) — revive is intentionally disabled to avoid pre-existing style churn.
@@ -29,6 +34,10 @@ CI runs a matrix of jobs: `lint` (golangci-lint v2), `vuln` (govulncheck, inform
 Release workflow (`.github/workflows/release.yml`) runs GoReleaser. Tag `vX.Y.Z` or use `workflow_dispatch` with the version input. The workflow builds all 6 binaries, generates SHA-256 checksums, extracts release notes from `CHANGELOG.md`, and creates the GitHub Release with attached artifacts. The npm package `nyx-audit-cli` (`npm/`) is a thin platform-aware wrapper that downloads the matching prebuilt binary from the GitHub Release on `postinstall`.
 
 Coverage data is uploaded to Codecov via OIDC (no token) after tests in CI.
+
+**codecov/patch target is 90%** and CI runners have no nmap. Production code exercised only through nmap-gated tests (e.g. `internal/audit` virtual-adapter helpers) shows as uncovered on CI — add focused unit tests that run on every platform.
+
+PRs do not edit `CHANGELOG.md`; it is populated only at release time.
 
 ## Codacy CLI (codacy-cli-v2)
 
@@ -77,11 +86,13 @@ Per-assertion timeouts in `internal/audit/engine.go`:
 - `subnet_discovery`: 90s
 - All others: 30s
 
-These are hardcoded constants �� no per-assertion override via spec.
+These are hardcoded constants — no per-assertion override via spec.
 
 ## Nmap Dependency
 
 The `nmap` backend spawns `nmap` as a subprocess. Tests in `backends/nmap` call `nmap.Available()` and skip when missing. Any integration test or live run requires nmap installed on **$PATH (environment variable for executable search path)**.
+
+`internal/audit` has 5 integration tests that run **real nmap sweeps** when nmap is installed (~80s for the whole package, was ~180s). They scan small dead ranges (`10.255.255.0/30`) or a `/24` derived from the machine's own virtual adapters (`audit.VirtualIfaceNetworks()`, skips when none). They skip instantly on CI (no nmap). Do not "fix" them by shortening test budgets below ~2 minutes — a timed-out run is normal for the old pre-shrink targets, not a hang.
 
 `nyx init` hard-requires nmap and fails fast with a clear error if it is missing.
 
@@ -190,9 +201,9 @@ Version 1 intent spec: `networks`, `vpn`, `probes`, `policies`, `assertions`. Ei
 `internal/backends/` contains the low-level network check implementations:
 - `nmap/` — wraps `nmap -sn` subprocess for discovery; `nmap.PortScan` for port checks. `StatusWarn` from nmap (e.g. 0 hosts) is **preserved** — the engine does not overwrite it to pass.
 - `system/` — platform-specific system commands (`system_linux.go`, `system_darwin.go`, `system_windows.go`). Only `system.go` is shared.
-- `dns/` — DNS resolution checks, including optional DNSSEC validation.
+- `dns/` — DNS resolution checks, including optional DNSSEC validation. `TestResolve_TruncatedResponse_TCPFallback` retries 50 port binds because Windows runners reserve wide ephemeral port ranges (a 20-attempt version flaked in CI).
 - `health/` — latency, packet loss, and MTU probing.
-- `omada/` — read-only REST client for Omada SDN 6.x. Not concurrency-safe. TLS verification disabled (self-signed).
+- `omada/` — read-only REST client for Omada SDN 6.x. **Concurrency-safe** with retry/backoff and automatic re-login — see the Omada Backend section. TLS verification disabled (self-signed).
 - `batfish/` — stub returning `ErrNotImplemented`; `Available()` returns `false`.
 
 ## Other Core Packages

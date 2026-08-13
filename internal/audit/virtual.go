@@ -36,6 +36,64 @@ func looksVirtual(evidence []string) bool {
 	return false
 }
 
+// virtualIfaceAddrs returns the addresses of virtual-named adapters
+// (Hyper-V, WSL2, VMware, VirtualBox, Docker). Shared by both virtual
+// detection paths so the adapter enumeration lives in one place.
+func virtualIfaceAddrs() []net.IPNet {
+	return virtualIfaceAddrsFrom(net.Interfaces)
+}
+
+// virtualIfaceAddrsFrom enumerates virtual-named adapter addresses from a
+// provided interface source so the error path is unit-testable.
+func virtualIfaceAddrsFrom(interfaces func() ([]net.Interface, error)) []net.IPNet {
+	ifaces, err := interfaces()
+	if err != nil {
+		return nil
+	}
+	var out []net.IPNet
+	for _, iface := range ifaces {
+		if !isVirtualIfaceName(iface.Name) {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ipNet, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			out = append(out, *ipNet)
+		}
+	}
+	return out
+}
+
+// virtualNetworksFrom maps each IPv4 address to its /24 network. IPv6
+// addresses are skipped; a machine has no virtual adapter when the input
+// is empty.
+func virtualNetworksFrom(addrs []net.IPNet) []string {
+	var out []string
+	mask24 := net.CIDRMask(24, 32)
+	for _, ipNet := range addrs {
+		ip4 := ipNet.IP.To4()
+		if ip4 == nil {
+			continue
+		}
+		out = append(out, (&net.IPNet{IP: ip4.Mask(mask24), Mask: mask24}).String())
+	}
+	return out
+}
+
+// VirtualIfaceNetworks returns the /24 network CIDRs owned by virtual
+// adapters (Hyper-V, WSL2, VMware, VirtualBox, Docker). Used by tests to
+// scan a small slice of a virtual subnet deterministically. Empty when the
+// machine has no virtual adapter.
+func VirtualIfaceNetworks() []string {
+	return virtualNetworksFrom(virtualIfaceAddrs())
+}
+
 // looksVirtualByCIDR returns true if the local interface that owns cidr has a
 // virtual adapter name. Used when nmap finds 0 hosts and reports no MACs.
 func looksVirtualByCIDR(cidr string) bool {
@@ -43,23 +101,14 @@ func looksVirtualByCIDR(cidr string) bool {
 	if err != nil {
 		return false
 	}
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return false
-	}
-	for _, iface := range ifaces {
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, a := range addrs {
-			ip, ok := a.(*net.IPNet)
-			if !ok {
-				continue
-			}
-			if ipNet.Contains(ip.IP) {
-				return isVirtualIfaceName(iface.Name)
-			}
+	return anyAddrIn(virtualIfaceAddrs(), ipNet)
+}
+
+// anyAddrIn reports whether any of the addresses falls inside ipNet.
+func anyAddrIn(addrs []net.IPNet, ipNet *net.IPNet) bool {
+	for _, addr := range addrs {
+		if ipNet.Contains(addr.IP) {
+			return true
 		}
 	}
 	return false
