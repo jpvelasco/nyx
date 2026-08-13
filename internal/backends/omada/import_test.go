@@ -216,7 +216,7 @@ func TestImportSpecEndToEnd(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	got, err := ImportSpec(context.Background(), ts.URL, "admin", "pw", "hq", false, true, "")
+	got, err := ImportSpec(context.Background(), ts.URL, "admin", "pw", "hq", false, true, "", nil)
 	if err != nil {
 		t.Fatalf("ImportSpec: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestImportSpecEndToEnd(t *testing.T) {
 
 func TestImportSpecErrors(t *testing.T) {
 	t.Run("client init fails", func(t *testing.T) {
-		_, err := ImportSpec(context.Background(), "https://127.0.0.1:1", "a", "b", "", true, true, "")
+		_, err := ImportSpec(context.Background(), "https://127.0.0.1:1", "a", "b", "", true, true, "", nil)
 		if err == nil {
 			t.Error("expected error for unreachable controller")
 		}
@@ -284,7 +284,7 @@ func TestImportSpecErrors(t *testing.T) {
 			}
 		}))
 		defer ts.Close()
-		_, err := ImportSpec(context.Background(), ts.URL, "admin", "bad", "", true, true, "")
+		_, err := ImportSpec(context.Background(), ts.URL, "admin", "bad", "", true, true, "", nil)
 		if err == nil || !strings.Contains(err.Error(), "login failed") {
 			t.Errorf("error = %v, want login failed", err)
 		}
@@ -302,7 +302,7 @@ func TestImportSpecErrors(t *testing.T) {
 			}
 		})
 		defer ts.Close()
-		_, err := ImportSpec(context.Background(), ts.URL, "a", "b", "", true, true, "")
+		_, err := ImportSpec(context.Background(), ts.URL, "a", "b", "", true, true, "", nil)
 		if err == nil || !strings.Contains(err.Error(), "fetching sites") {
 			t.Errorf("error = %v, want fetching sites", err)
 		}
@@ -322,7 +322,7 @@ func TestImportSpecErrors(t *testing.T) {
 			}
 		})
 		defer ts.Close()
-		_, err := ImportSpec(context.Background(), ts.URL, "a", "b", "Other", true, true, "")
+		_, err := ImportSpec(context.Background(), ts.URL, "a", "b", "Other", true, true, "", nil)
 		if err == nil || !strings.Contains(err.Error(), `"Other" not found`) {
 			t.Errorf("error = %v, want site not found", err)
 		}
@@ -344,7 +344,7 @@ func TestImportSpecErrors(t *testing.T) {
 			}
 		})
 		defer ts.Close()
-		_, err := ImportSpec(context.Background(), ts.URL, "a", "b", "", true, true, "")
+		_, err := ImportSpec(context.Background(), ts.URL, "a", "b", "", true, true, "", nil)
 		if err == nil || !strings.Contains(err.Error(), "fetching networks") {
 			t.Errorf("error = %v, want fetching networks", err)
 		}
@@ -379,7 +379,7 @@ func TestImportSpecWarnings(t *testing.T) {
 	})
 	defer ts.Close()
 
-	got, err := ImportSpec(context.Background(), ts.URL, "a", "b", "", true, true, "")
+	got, err := ImportSpec(context.Background(), ts.URL, "a", "b", "", true, true, "", nil)
 	if err != nil {
 		t.Fatalf("ImportSpec: %v", err)
 	}

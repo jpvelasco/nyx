@@ -30,6 +30,7 @@ func (o *OmadaProvider) Info(ctx context.Context, opts providers.ImportOptions) 
 	if err != nil {
 		return nil, fmt.Errorf("connecting to omada controller: %w", err)
 	}
+	client.SetLogger(opts.Logger)
 	info := client.Info()
 	return &providers.ProviderInfo{
 		Provider: "omada",
@@ -44,7 +45,7 @@ func (o *OmadaProvider) Info(ctx context.Context, opts providers.ImportOptions) 
 
 // ImportSpec imports networks, policies, and clients from the Omada controller and returns a generated intent spec.
 func (o *OmadaProvider) ImportSpec(ctx context.Context, opts providers.ImportOptions) (*providers.ImportResult, error) {
-	result, err := omadabackend.ImportSpec(ctx, opts.Host, opts.Username, opts.Password, opts.Site, opts.Debug, opts.SkipTLSVerify, opts.CACertPath)
+	result, err := omadabackend.ImportSpec(ctx, opts.Host, opts.Username, opts.Password, opts.Site, opts.Debug, opts.SkipTLSVerify, opts.CACertPath, opts.Logger)
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +91,7 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 		result.Finish()
 		return result, nil
 	}
+	client.SetLogger(opts.Logger)
 	if err := client.Login(ctx, opts.Username, opts.Password); err != nil {
 		result.Status = models.StatusError
 		result.Summary = fmt.Sprintf("Omada login failed: %v", err)

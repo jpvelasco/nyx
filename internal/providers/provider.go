@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/logger"
 	"github.com/jpvelasco/nyx/internal/models"
 )
 
@@ -17,6 +18,9 @@ type ImportOptions struct {
 	Debug         bool
 	SkipTLSVerify bool
 	CACertPath    string
+	// Logger receives structured operation events (login, retries, session
+	// refresh) from provider clients. Never contains credentials.
+	Logger *logger.Logger
 }
 
 // ProviderInfo holds version and connection metadata returned by Info.

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 const testInfoResponse = `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true}}`
@@ -29,6 +30,8 @@ func newTestClient(t *testing.T, h http.HandlerFunc) (*Client, *httptest.Server)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
+	// Keep retries cheap so retry-path tests don't sleep.
+	c.retryBase = time.Millisecond
 	return c, ts
 }
 

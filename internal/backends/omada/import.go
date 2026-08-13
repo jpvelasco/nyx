@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/logger"
 )
 
 // ImportResult holds the generated spec and a summary of what was found.
@@ -20,13 +21,15 @@ type ImportResult struct {
 }
 
 // ImportSpec connects to the controller, fetches all relevant configuration,
-// and produces an intent.Spec that reflects the observed design.
-func ImportSpec(ctx context.Context, host, username, password, siteName string, debug bool, skipTLSVerify bool, caCertPath string) (*ImportResult, error) {
+// and produces an intent.Spec that reflects the observed design. log is an
+// optional structured logger for operation events (may be nil).
+func ImportSpec(ctx context.Context, host, username, password, siteName string, debug bool, skipTLSVerify bool, caCertPath string, log *logger.Logger) (*ImportResult, error) {
 	client, err := NewClient(ctx, host, skipTLSVerify, caCertPath)
 	if err != nil {
 		return nil, err
 	}
 	client.Debug = debug
+	client.SetLogger(log)
 	defer client.Logout(ctx) //nolint:errcheck
 
 	if err := client.Login(ctx, username, password); err != nil {

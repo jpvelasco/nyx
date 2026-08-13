@@ -112,6 +112,7 @@ func buildInfoCmd(p providers.Provider) *cobra.Command {
 				Password:      providerPassword,
 				SkipTLSVerify: providerSkipTLS,
 				CACertPath:    providerCACertPath,
+				Logger:        log,
 			})
 			if err != nil {
 				return err
@@ -157,6 +158,7 @@ func buildImportCmd(p providers.Provider) *cobra.Command {
 				Debug:         providerDebug,
 				SkipTLSVerify: providerSkipTLS,
 				CACertPath:    providerCACertPath,
+				Logger:        log,
 			})
 			if err != nil {
 				return err
@@ -213,6 +215,7 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 				Debug:         providerDebug,
 				SkipTLSVerify: providerSkipTLS,
 				CACertPath:    providerCACertPath,
+				Logger:        log,
 			})
 			if err != nil {
 				return err

@@ -89,9 +89,11 @@ The `nmap` backend spawns `nmap` as a subprocess. Tests in `backends/nmap` call 
 
 `internal/backends/system` uses Go build tags: `system_linux.go`, `system_darwin.go`, `system_windows.go`. Only `system.go` is shared. When adding system calls, provide all three platform files.
 
-## Omada Backend Gotchas
+## Omada Backend
 
-- Not concurrency-safe — do not call its methods from multiple goroutines.
+- The HTTP client (`internal/backends/omada`) is **concurrency-safe**: requests are serialised through an internal mutex. It retries transient failures (network errors, HTTP 5xx) with exponential backoff (3 retries, 500ms base capped at 5s) and, on a session-expired response, performs a **single automatic re-login** using the credentials from the last successful `Login` before retrying the request.
+- `Login` retains the username/password in memory for automatic session refresh; `Logout` clears them. Credentials are **never** written to logs, evidence, or recommendations.
+- Optional structured operation logging (login, re-login, session expiry, retries) via `Client.SetLogger(*logger.Logger)`; wired from the CLI through `providers.ImportOptions.Logger`. Log fields never include credentials, hostnames, or IP addresses.
 - `acl_check` assertions read Omada credentials from env vars (`OMADA_HOST`, `OMADA_USERNAME`, `OMADA_PASSWORD`, `OMADA_SITE`), not from spec or flags.
 - TLS verification is intentionally disabled (self-signed cert).
 
