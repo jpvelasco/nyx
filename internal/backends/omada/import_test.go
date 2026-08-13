@@ -87,23 +87,23 @@ func TestSelectSite(t *testing.T) {
 	sites := []Site{{ID: "a", Name: "HQ"}, {ID: "b", Name: "Branch"}}
 
 	t.Run("empty name picks first", func(t *testing.T) {
-		s, err := selectSite(sites, "")
+		s, err := SelectSite(sites, "")
 		if err != nil || s.ID != "a" {
-			t.Errorf("selectSite(\"\") = %+v, %v; want first site", s, err)
+			t.Errorf("SelectSite(\"\") = %+v, %v; want first site", s, err)
 		}
 	})
 
 	t.Run("case-insensitive match", func(t *testing.T) {
-		s, err := selectSite(sites, "BRANCH")
+		s, err := SelectSite(sites, "BRANCH")
 		if err != nil || s.ID != "b" {
-			t.Errorf("selectSite(\"BRANCH\") = %+v, %v; want site b", s, err)
+			t.Errorf("SelectSite(\"BRANCH\") = %+v, %v; want site b", s, err)
 		}
 	})
 
 	t.Run("missing site error", func(t *testing.T) {
-		_, err := selectSite(sites, "Nope")
+		_, err := SelectSite(sites, "Nope")
 		if err == nil || !strings.Contains(err.Error(), `site "Nope" not found`) {
-			t.Errorf("selectSite(\"Nope\") error = %v, want not-found", err)
+			t.Errorf("SelectSite(\"Nope\") error = %v, want not-found", err)
 		}
 	})
 }

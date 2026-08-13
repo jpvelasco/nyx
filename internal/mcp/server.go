@@ -87,12 +87,21 @@ type contentBlock struct {
 	Text string `json:"text"`
 }
 
+// omadaSurface is the Omada observation surface exposed to agents.
+type omadaSurface interface {
+	Info(ctx context.Context, opts service.OmadaOptions) (*service.OmadaInfo, error)
+	ListNetworks(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaNetwork, error)
+	ListACLs(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaACLRule, error)
+	ListClients(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaClient, error)
+}
+
 // Server is the MCP stdio server
 type Server struct {
 	reader      io.Reader
 	writer      io.Writer
 	initialized bool
 	checkSvc    *service.CheckService
+	omadaSvc    omadaSurface
 }
 
 // NewServer creates a new MCP server
@@ -101,6 +110,7 @@ func NewServer() *Server {
 		reader:   os.Stdin,
 		writer:   os.Stdout,
 		checkSvc: service.NewCheckService(),
+		omadaSvc: service.NewOmadaService(),
 	}
 }
 
@@ -291,6 +301,67 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: inputSchema{
 				Type:       "object",
 				Properties: map[string]propSchema{},
+			},
+		},
+		{
+			Name:        "omada_get_info",
+			Description: "Fetch metadata (version, API version, omada CID) from an Omada SDN controller without authentication.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]propSchema{
+					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
+					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
+					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
+				},
+				Required: []string{"host"},
+			},
+		},
+		{
+			Name:        "omada_list_networks",
+			Description: "List LAN networks/VLANs configured on an Omada SDN controller site.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]propSchema{
+					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
+					"username":        {Type: "string", Description: "Omada account username"},
+					"password":        {Type: "string", Description: "Omada account password"},
+					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
+					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
+					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
+				},
+				Required: []string{"host", "username", "password"},
+			},
+		},
+		{
+			Name:        "omada_list_acls",
+			Description: "List ACL (firewall) rules, including gateway ACLs, on an Omada SDN controller site.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]propSchema{
+					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
+					"username":        {Type: "string", Description: "Omada account username"},
+					"password":        {Type: "string", Description: "Omada account password"},
+					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
+					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
+					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
+				},
+				Required: []string{"host", "username", "password"},
+			},
+		},
+		{
+			Name:        "omada_list_clients",
+			Description: "List currently connected clients on an Omada SDN controller site.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]propSchema{
+					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
+					"username":        {Type: "string", Description: "Omada account username"},
+					"password":        {Type: "string", Description: "Omada account password"},
+					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
+					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
+					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
+				},
+				Required: []string{"host", "username", "password"},
 			},
 		},
 	}
@@ -514,9 +585,74 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		}
 		return toJSON(out), false
 
+	case "omada_get_info":
+		opts, msg := omadaOptionsFromArgs(args, false)
+		if msg != "" {
+			return msg, true
+		}
+		info, err := s.omadaSvc.Info(ctx, opts)
+		if err != nil {
+			return fmt.Sprintf("omada info request failed: %v", err), true
+		}
+		return toJSON(info), false
+
+	case "omada_list_networks":
+		opts, msg := omadaOptionsFromArgs(args, true)
+		if msg != "" {
+			return msg, true
+		}
+		nets, err := s.omadaSvc.ListNetworks(ctx, opts)
+		if err != nil {
+			return fmt.Sprintf("omada networks request failed: %v", err), true
+		}
+		return toJSON(nets), false
+
+	case "omada_list_acls":
+		opts, msg := omadaOptionsFromArgs(args, true)
+		if msg != "" {
+			return msg, true
+		}
+		rules, err := s.omadaSvc.ListACLs(ctx, opts)
+		if err != nil {
+			return fmt.Sprintf("omada acls request failed: %v", err), true
+		}
+		return toJSON(rules), false
+
+	case "omada_list_clients":
+		opts, msg := omadaOptionsFromArgs(args, true)
+		if msg != "" {
+			return msg, true
+		}
+		clients, err := s.omadaSvc.ListClients(ctx, opts)
+		if err != nil {
+			return fmt.Sprintf("omada clients request failed: %v", err), true
+		}
+		return toJSON(clients), false
+
 	default:
 		return fmt.Sprintf("unknown tool: %s", name), true
 	}
+}
+
+// omadaOptionsFromArgs extracts Omada connection options from tool arguments.
+// The returned message is non-empty when a required parameter is missing.
+func omadaOptionsFromArgs(args map[string]interface{}, needCredentials bool) (service.OmadaOptions, string) {
+	var opts service.OmadaOptions
+	opts.Host, _ = args["host"].(string)
+	if opts.Host == "" {
+		return opts, "host parameter is required"
+	}
+	if needCredentials {
+		opts.Username, _ = args["username"].(string)
+		opts.Password, _ = args["password"].(string)
+		if opts.Username == "" || opts.Password == "" {
+			return opts, "username and password parameters are required"
+		}
+	}
+	opts.Site, _ = args["site"].(string)
+	opts.SkipTLSVerify, _ = args["skip_tls_verify"].(bool)
+	opts.CACertPath, _ = args["ca_cert_path"].(string)
+	return opts, ""
 }
 
 // DispatchToolForTest exposes dispatchTool for testing.

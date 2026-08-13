@@ -46,7 +46,7 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string, 
 	}
 
 	// Pick the target site
-	site, err := selectSite(sites, siteName)
+	site, err := SelectSite(sites, siteName)
 	if err != nil {
 		return nil, err
 	}
@@ -276,9 +276,9 @@ func sanitizeName(s string) string {
 	return strings.Trim(out.String(), "-")
 }
 
-// selectSite finds the site matching siteName, or returns the first site if
+// SelectSite finds the site matching siteName, or returns the first site if
 // siteName is empty. Returns an error if siteName is set but not found.
-func selectSite(sites []Site, siteName string) (Site, error) {
+func SelectSite(sites []Site, siteName string) (Site, error) {
 	if siteName == "" {
 		return sites[0], nil
 	}

@@ -251,6 +251,10 @@ Add to your MCP config:
 | `ping_target` | Ping a target |
 | `run_doctor` | Check environment health + optional spec validation |
 | `provider_list` | List registered providers |
+| `omada_get_info` | Fetch Omada controller metadata (no auth) |
+| `omada_list_networks` | List Omada LAN networks/VLANs for a site |
+| `omada_list_acls` | List Omada ACL + gateway ACL rules for a site |
+| `omada_list_clients` | List Omada connected clients for a site |
 
 ## Providers
 

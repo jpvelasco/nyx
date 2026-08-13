@@ -19,7 +19,7 @@ import (
 )
 
 func newTestServer() *Server {
-	return &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{}, checkSvc: service.NewCheckService()}
+	return &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{}, checkSvc: service.NewCheckService(), omadaSvc: service.NewOmadaService()}
 }
 
 func TestNewServer(t *testing.T) {
@@ -185,8 +185,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 10 {
-		t.Fatalf("expected 10 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 14 {
+		t.Fatalf("expected 14 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -195,7 +195,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -584,6 +584,155 @@ func TestDispatchGetInterfaces_BackendError(t *testing.T) {
 	}
 }
 
+func TestDispatchOmadaGetInfo_MissingHost(t *testing.T) {
+	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "omada_get_info", map[string]interface{}{})
+	if !isErr || !strings.Contains(text, "host parameter is required") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchOmadaGetInfo_Success(t *testing.T) {
+	stub := &stubOmadaSvc{info: &service.OmadaInfo{Provider: "omada", Version: "6.4.5.1", APIVersion: "2.0", OmadaCID: "abc123", Configured: true}}
+	server := serverWithOmadaStub(stub)
+	text, isErr := server.DispatchToolForTest(context.Background(), "omada_get_info", map[string]interface{}{
+		"host":            "omada.local",
+		"skip_tls_verify": true,
+		"ca_cert_path":    "ca.pem",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, `"provider": "omada"`) || !strings.Contains(text, `"version": "6.4.5.1"`) {
+		t.Errorf("expected info JSON, got: %s", text)
+	}
+	if stub.calls != 1 {
+		t.Errorf("service calls = %d, want 1", stub.calls)
+	}
+	if stub.lastOpts.Host != "omada.local" || !stub.lastOpts.SkipTLSVerify || stub.lastOpts.CACertPath != "ca.pem" {
+		t.Errorf("options = %+v", stub.lastOpts)
+	}
+	if stub.lastOpts.Password != "" {
+		t.Error("get_info must not carry credentials")
+	}
+}
+
+func TestDispatchOmadaGetInfo_ServiceError(t *testing.T) {
+	stub := &stubOmadaSvc{err: errors.New("connection refused")}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_get_info", map[string]interface{}{
+		"host": "omada.local",
+	})
+	if !isErr || !strings.Contains(text, "omada info request failed") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchOmadaListNetworks_MissingCredentials(t *testing.T) {
+	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "omada_list_networks", map[string]interface{}{
+		"host": "omada.local",
+	})
+	if !isErr || !strings.Contains(text, "username and password parameters are required") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchOmadaListNetworks_Success(t *testing.T) {
+	stub := &stubOmadaSvc{networks: []service.OmadaNetwork{
+		{ID: "n1", Name: "Trusted", VLANID: 10, CIDR: "10.0.10.0/24", Gateway: "10.0.10.1", DHCPEnabled: true},
+	}}
+	server := serverWithOmadaStub(stub)
+	text, isErr := server.DispatchToolForTest(context.Background(), "omada_list_networks", map[string]interface{}{
+		"host":     "omada.local",
+		"username": "admin",
+		"password": "pw",
+		"site":     "HQ",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, `"name": "Trusted"`) || !strings.Contains(text, `"cidr": "10.0.10.0/24"`) {
+		t.Errorf("expected network JSON, got: %s", text)
+	}
+	if stub.calls != 1 {
+		t.Errorf("service calls = %d, want 1", stub.calls)
+	}
+	if stub.lastOpts.Host != "omada.local" || stub.lastOpts.Username != "admin" || stub.lastOpts.Password != "pw" || stub.lastOpts.Site != "HQ" {
+		t.Errorf("options = %+v", stub.lastOpts)
+	}
+	if strings.Contains(text, "pw") {
+		t.Error("tool output must not echo the password")
+	}
+}
+
+func TestDispatchOmadaListNetworks_ServiceError(t *testing.T) {
+	stub := &stubOmadaSvc{err: errors.New("site not found")}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_networks", map[string]interface{}{
+		"host":     "omada.local",
+		"username": "admin",
+		"password": "pw",
+	})
+	if !isErr || !strings.Contains(text, "omada networks request failed") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchOmadaListACLs_Success(t *testing.T) {
+	stub := &stubOmadaSvc{acls: []service.OmadaACLRule{
+		{ID: "a1", Name: "Block IoT", Enabled: true, Policy: "drop", SourceName: "iot", DestName: "trusted"},
+	}}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_acls", map[string]interface{}{
+		"host":     "omada.local",
+		"username": "admin",
+		"password": "pw",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, `"policy": "drop"`) || !strings.Contains(text, `"source_name": "iot"`) {
+		t.Errorf("expected ACL JSON, got: %s", text)
+	}
+}
+
+func TestDispatchOmadaListACLs_ServiceError(t *testing.T) {
+	stub := &stubOmadaSvc{err: errors.New("no ACL endpoint")}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_acls", map[string]interface{}{
+		"host":     "omada.local",
+		"username": "admin",
+		"password": "pw",
+	})
+	if !isErr || !strings.Contains(text, "omada acls request failed") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchOmadaListClients_Success(t *testing.T) {
+	stub := &stubOmadaSvc{clients: []service.OmadaClient{
+		{MAC: "aa:bb:cc:dd:ee:ff", IP: "10.0.10.5", Name: "nas", NetworkName: "Trusted", Active: true},
+	}}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_clients", map[string]interface{}{
+		"host":     "omada.local",
+		"username": "admin",
+		"password": "pw",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, `"name": "nas"`) || !strings.Contains(text, `"network_name": "Trusted"`) {
+		t.Errorf("expected client JSON, got: %s", text)
+	}
+}
+
+func TestDispatchOmadaListClients_ServiceError(t *testing.T) {
+	stub := &stubOmadaSvc{err: errors.New("getting clients")}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_clients", map[string]interface{}{
+		"host":     "omada.local",
+		"username": "admin",
+		"password": "pw",
+	})
+	if !isErr || !strings.Contains(text, "omada clients request failed") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+}
+
 func nonEmptyLines(s string) []string {
 	var lines []string
 	for _, l := range strings.Split(s, "\n") {
@@ -640,3 +789,42 @@ func (d *dummyProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 	return nil, errors.New("unused")
 }
 func (d *dummyProvider) Spec() *intent.Spec { return nil }
+
+// stubOmadaSvc is a hermetic stand-in for the Omada observation surface.
+type stubOmadaSvc struct {
+	info     *service.OmadaInfo
+	networks []service.OmadaNetwork
+	acls     []service.OmadaACLRule
+	clients  []service.OmadaClient
+	err      error
+	lastOpts service.OmadaOptions
+	calls    int
+}
+
+func (s *stubOmadaSvc) Info(_ context.Context, opts service.OmadaOptions) (*service.OmadaInfo, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.info, s.err
+}
+
+func (s *stubOmadaSvc) ListNetworks(_ context.Context, opts service.OmadaOptions) ([]service.OmadaNetwork, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.networks, s.err
+}
+
+func (s *stubOmadaSvc) ListACLs(_ context.Context, opts service.OmadaOptions) ([]service.OmadaACLRule, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.acls, s.err
+}
+
+func (s *stubOmadaSvc) ListClients(_ context.Context, opts service.OmadaOptions) ([]service.OmadaClient, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.clients, s.err
+}
+
+func serverWithOmadaStub(stub *stubOmadaSvc) *Server {
+	return &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{}, checkSvc: service.NewCheckService(), omadaSvc: stub}
+}
