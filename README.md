@@ -256,6 +256,7 @@ Add to your MCP config:
 | `omada_list_acls` | List Omada ACL + gateway ACL rules for a site |
 | `omada_list_clients` | List Omada connected clients for a site |
 | `omada_import` | Import Omada state into an intent spec (networks, policies, assertions) |
+| `omada_plan` | Preview ACL rule differences between the controller and a proposed spec (read-only) |
 
 ## Providers
 

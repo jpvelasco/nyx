@@ -117,6 +117,37 @@ func TestMaxInt(t *testing.T) {
 	}
 }
 
+func TestPoliciesFromRules(t *testing.T) {
+	networks := []Network{
+		{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24"},
+		{ID: "n2", Name: "IoT", GatewaySubnet: "10.0.1.1/24"},
+	}
+	rules := []ACLRule{
+		{Name: "Block IoT", Policy: "drop", Status: true, SourceType: "network", SourceName: "IoT", DestType: "network", DestName: "Trusted"},
+		{Name: "Allow Web", Policy: "accept", Status: true, SourceType: "network", SourceID: "n2", DestType: "network", DestID: "n1"},
+		{Name: "Disabled", Policy: "drop", Status: false},
+		{Name: "Unresolved", Policy: "drop", Status: true, SourceType: "inet"},
+	}
+
+	got := PoliciesFromRules(rules, networks)
+	if len(got) != 3 {
+		t.Fatalf("policies = %+v, want 3 (disabled skipped)", got)
+	}
+	byName := map[string]intent.Policy{}
+	for _, p := range got {
+		byName[p.Name] = p
+	}
+	if p := byName["block-iot"]; p.From != "iot" || p.To != "trusted" || p.Action != "deny" {
+		t.Errorf("block-iot = %+v, want iot->trusted deny", p)
+	}
+	if p := byName["allow-web"]; p.From != "iot" || p.To != "trusted" || p.Action != "allow" {
+		t.Errorf("allow-web = %+v, want iot->trusted allow via network ids", p)
+	}
+	if p := byName["unresolved"]; p.From != "inet" {
+		t.Errorf("unresolved = %+v, want endpoint fallback to source type", p)
+	}
+}
+
 func TestBuildAssertions(t *testing.T) {
 	networks := []intent.Network{
 		{Name: "lan", CIDR: "10.0.0.0/24", Gateway: "10.0.0.1"},

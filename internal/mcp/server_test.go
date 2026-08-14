@@ -185,8 +185,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 15 {
-		t.Fatalf("expected 15 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 16 {
+		t.Fatalf("expected 16 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -195,7 +195,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_import"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_import", "omada_plan"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -780,6 +780,63 @@ func TestDispatchOmadaImport_ServiceError(t *testing.T) {
 	}
 }
 
+func TestDispatchOmadaPlan_MissingParams(t *testing.T) {
+	server := newTestServer()
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan", map[string]interface{}{}); !isErr || !strings.Contains(text, "host parameter is required") {
+		t.Errorf("missing host: (%q, %v)", text, isErr)
+	}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan", map[string]interface{}{"host": "omada.local"}); !isErr || !strings.Contains(text, "username and password parameters are required") {
+		t.Errorf("missing creds: (%q, %v)", text, isErr)
+	}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan", map[string]interface{}{
+		"host": "omada.local", "username": "admin", "password": "pw",
+	}); !isErr || !strings.Contains(text, "spec parameter is required") {
+		t.Errorf("missing spec: (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchOmadaPlan_Success(t *testing.T) {
+	stub := &stubOmadaSvc{plan: &service.OmadaPlan{
+		Site: "HQ", ProposedSite: "HQ", CurrentRules: 3, ProposedRules: 4,
+		ToAdd: []service.OmadaPolicyDiff{{From: "guest", To: "trusted", Action: "deny"}},
+	}}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_plan", map[string]interface{}{
+		"host":     "omada.local",
+		"username": "admin",
+		"password": "pw",
+		"site":     "HQ",
+		"spec":     "version: 1\nsite: HQ\npolicies: []\n",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, `"current_rules": 3`) || !strings.Contains(text, `"to_add"`) || !strings.Contains(text, `"from": "guest"`) {
+		t.Errorf("expected plan JSON, got: %s", text)
+	}
+	if stub.lastOpts.Site != "HQ" {
+		t.Errorf("options = %+v", stub.lastOpts)
+	}
+	if strings.Contains(text, "pw") {
+		t.Error("tool output must not echo the password")
+	}
+}
+
+func TestDispatchOmadaPlan_ServiceError(t *testing.T) {
+	stub := &stubOmadaSvc{err: errors.New("plan failed")}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_plan", map[string]interface{}{
+		"host":     "omada.local",
+		"username": "admin",
+		"password": "pw",
+		"spec":     "version: 1\nsite: HQ\npolicies: []\n",
+	})
+	if !isErr || !strings.Contains(text, "omada plan request failed") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+	if strings.Contains(text, "pw") {
+		t.Error("error output must not echo the password")
+	}
+}
+
 func nonEmptyLines(s string) []string {
 	var lines []string
 	for _, l := range strings.Split(s, "\n") {
@@ -844,6 +901,7 @@ type stubOmadaSvc struct {
 	acls     []service.OmadaACLRule
 	clients  []service.OmadaClient
 	imp      *service.OmadaImport
+	plan     *service.OmadaPlan
 	err      error
 	lastOpts service.OmadaOptions
 	calls    int
@@ -877,6 +935,12 @@ func (s *stubOmadaSvc) Import(_ context.Context, opts service.OmadaOptions) (*se
 	s.calls++
 	s.lastOpts = opts
 	return s.imp, s.err
+}
+
+func (s *stubOmadaSvc) Plan(_ context.Context, opts service.OmadaOptions, _ string) (*service.OmadaPlan, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.plan, s.err
 }
 
 func serverWithOmadaStub(stub *stubOmadaSvc) *Server {

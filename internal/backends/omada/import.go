@@ -114,7 +114,25 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string, 
 	}
 
 	// Map enabled ACL rules → intent.Policy
-	for _, rule := range allRules {
+	spec.Policies = PoliciesFromRules(allRules, omadaNets)
+
+	// Generate assertions
+	spec.Assertions = buildAssertions(spec.Networks, omadaNets, clients, allRules, netsByID)
+
+	result.Spec = spec
+	return result, nil
+}
+
+// PoliciesFromRules converts enabled ACL rules to intent policies the same
+// way ImportSpec does, so a plan can be diffed against a proposed spec.
+// Disabled rules are skipped; endpoints resolve to sanitized network names.
+func PoliciesFromRules(rules []ACLRule, networks []Network) []intent.Policy {
+	netsByID := make(map[string]intent.Network, len(networks))
+	for _, n := range networks {
+		netsByID[n.ID] = intent.Network{Name: sanitizeName(n.Name), CIDR: n.CIDR(), Gateway: n.Gateway()}
+	}
+	var policies []intent.Policy
+	for _, rule := range rules {
 		if !rule.Status {
 			continue // skip disabled rules
 		}
@@ -124,19 +142,14 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string, 
 		}
 		from := resolveRuleEndpoint(rule.SourceType, rule.SourceName, rule.SourceID, netsByID)
 		to := resolveRuleEndpoint(rule.DestType, rule.DestName, rule.DestID, netsByID)
-		spec.Policies = append(spec.Policies, intent.Policy{
+		policies = append(policies, intent.Policy{
 			Name:   sanitizeName(rule.Name),
 			From:   from,
 			To:     to,
 			Action: action,
 		})
 	}
-
-	// Generate assertions
-	spec.Assertions = buildAssertions(spec.Networks, omadaNets, clients, allRules, netsByID)
-
-	result.Spec = spec
-	return result, nil
+	return policies
 }
 
 // buildAssertions generates a useful set of assertions from the imported data.

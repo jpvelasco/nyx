@@ -2,11 +2,15 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+
+	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
+	"github.com/jpvelasco/nyx/internal/intent"
 )
 
 const omadaTestInfo = `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true}}`
@@ -208,6 +212,14 @@ func TestOmadaService_SessionFailures(t *testing.T) {
 		}},
 		{"clients/connect-fail", connectOpts, "fetching controller info", func(opts OmadaOptions) error {
 			_, err := NewOmadaService().ListClients(context.Background(), opts)
+			return err
+		}},
+		{"plan/login-fail", authOpts, "login failed", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().Plan(context.Background(), opts, omadaPlanProposal)
+			return err
+		}},
+		{"plan/connect-fail", connectOpts, "fetching controller info", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().Plan(context.Background(), opts, omadaPlanProposal)
 			return err
 		}},
 	}
@@ -510,4 +522,284 @@ func TestOmadaServiceListClients_FetchFails(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "fetching clients") {
 		t.Fatalf("ListClients error = %v, want clients fetch failure", err)
 	}
+}
+
+const omadaPlanProposal = `version: 1
+site: HQ
+networks:
+  - name: trusted
+    cidr: 10.0.10.0/24
+  - name: iot
+    cidr: 10.0.20.0/24
+  - name: guest
+    cidr: 10.0.30.0/24
+  - name: wan
+    cidr: 10.0.0.0/24
+policies:
+  - name: block-iot
+    from: iot
+    to: trusted
+    action: deny
+  - name: allow-iot-guest
+    from: iot
+    to: guest
+    action: allow
+  - name: block-guest
+    from: guest
+    to: trusted
+    action: deny
+  - name: block-dmz
+    from: iot
+    to: dmz
+    action: deny
+assertions: []
+`
+
+func TestOmadaServicePlan(t *testing.T) {
+	var loggedOut bool
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/abc123/api/v2/login":
+			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
+		case "/abc123/api/v2/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			writeOmadaEnvelope(w, 0, `{"totalRows":4,"data":[
+				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
+				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
+				{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"},
+				{"id":"n4","name":"WAN","gatewaySubnet":"10.0.0.1/24"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/firewall/acl":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block IoT","status":true,"policy":"drop","srcType":"network","srcName":"IoT","dstType":"network","dstName":"Trusted","index":1}]}`)
+		case "/abc123/api/v2/sites/s1/setting/firewall/gwacl":
+			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
+				{"id":"g1","name":"Block IoT Guest","status":true,"policy":"drop","srcType":"network","srcName":"IoT","dstType":"network","dstName":"Guest","index":1},
+				{"id":"g2","name":"IoT WAN","status":true,"policy":"accept","srcType":"network","srcName":"IoT","dstType":"network","dstName":"WAN","index":2}]}`)
+		case "/abc123/api/v2/logout":
+			loggedOut = true
+			writeOmadaEnvelope(w, 0, "null")
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	plan, err := NewOmadaService().Plan(context.Background(), OmadaOptions{
+		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+	}, omadaPlanProposal)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if plan.Site != "HQ" || plan.ProposedSite != "HQ" {
+		t.Errorf("sites = current %q proposed %q, want HQ/HQ", plan.Site, plan.ProposedSite)
+	}
+	if plan.CurrentRules != 3 || plan.ProposedRules != 4 {
+		t.Errorf("counts = current %d proposed %d, want 3/4", plan.CurrentRules, plan.ProposedRules)
+	}
+	if len(plan.Unchanged) != 1 || plan.Unchanged[0].From != "iot" || plan.Unchanged[0].To != "trusted" || plan.Unchanged[0].Action != "deny" {
+		t.Errorf("unchanged = %+v, want iot->trusted deny", plan.Unchanged)
+	}
+	if len(plan.ToChange) != 1 || plan.ToChange[0].From != "iot" || plan.ToChange[0].To != "guest" ||
+		plan.ToChange[0].CurrentAction != "deny" || plan.ToChange[0].ProposedAction != "allow" {
+		t.Errorf("to_change = %+v, want iot->guest deny->allow", plan.ToChange)
+	}
+	if len(plan.ToAdd) != 2 {
+		t.Fatalf("to_add = %+v, want 2", plan.ToAdd)
+	}
+	addKeys := map[string]string{}
+	for _, d := range plan.ToAdd {
+		addKeys[d.From+"|"+d.To] = d.Action
+	}
+	if addKeys["guest|trusted"] != "deny" || addKeys["iot|dmz"] != "deny" {
+		t.Errorf("to_add = %+v, want guest->trusted and iot->dmz deny", plan.ToAdd)
+	}
+	if len(plan.ToRemove) != 1 || plan.ToRemove[0].From != "iot" || plan.ToRemove[0].To != "wan" || plan.ToRemove[0].Action != "allow" {
+		t.Errorf("to_remove = %+v, want iot->wan allow", plan.ToRemove)
+	}
+	if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], "dmz") {
+		t.Errorf("warnings = %v, want dmz not declared", plan.Warnings)
+	}
+	if !loggedOut {
+		t.Error("expected logout after plan")
+	}
+}
+
+func TestOmadaServicePlan_InvalidProposal(t *testing.T) {
+	svc := &OmadaService{NewClient: func(ctx context.Context, host string, skipTLSVerify bool, caCertPath string) (*omadabackend.Client, error) {
+		t.Error("NewClient called; proposal must be validated before any controller request")
+		return nil, errors.New("unexpected client")
+	}}
+	_, err := svc.Plan(context.Background(), OmadaOptions{Host: "https://omada.local"}, "version: 1\nsite: HQ\nnot: [valid")
+	if err == nil || !strings.Contains(err.Error(), "parsing spec YAML") {
+		t.Fatalf("Plan error = %v, want spec parse failure", err)
+	}
+}
+
+func TestOmadaServicePlan_NetworksFetchFails(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/abc123/api/v2/login":
+			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
+		case "/abc123/api/v2/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	_, err := NewOmadaService().Plan(context.Background(), OmadaOptions{
+		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+	}, omadaPlanProposal)
+	if err == nil || !strings.Contains(err.Error(), "fetching networks") {
+		t.Fatalf("Plan error = %v, want networks fetch failure", err)
+	}
+}
+
+func TestOmadaServicePlan_GatewayACLsFetchFails(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/abc123/api/v2/login":
+			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
+		case "/abc123/api/v2/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/firewall/acl":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block","status":true,"policy":"drop"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	_, err := NewOmadaService().Plan(context.Background(), OmadaOptions{
+		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+	}, omadaPlanProposal)
+	if err == nil || !strings.Contains(err.Error(), "gateway ACL") {
+		t.Fatalf("Plan error = %v, want gateway ACL fetch failure", err)
+	}
+}
+
+func TestOmadaServicePlan_ACLsFetchFails(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/abc123/api/v2/login":
+			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
+		case "/abc123/api/v2/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	_, err := NewOmadaService().Plan(context.Background(), OmadaOptions{
+		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+	}, omadaPlanProposal)
+	if err == nil || !strings.Contains(err.Error(), "fetching ACL rules") {
+		t.Fatalf("Plan error = %v, want switch ACL fetch failure", err)
+	}
+}
+
+func TestDiffPolicies(t *testing.T) {
+	current := []intent.Policy{
+		{Name: "a", From: "iot", To: "trusted", Action: "deny"},
+		{Name: "b", From: "iot", To: "wan", Action: "allow"},
+		{Name: "c", From: "", To: "", Action: "deny"},
+	}
+	proposed := []intent.Policy{
+		{Name: "a", From: "iot", To: "trusted", Action: "deny"},
+		{Name: "b", From: "iot", To: "wan", Action: "deny"},
+		{Name: "d", From: "guest", To: "trusted", Action: "deny"},
+	}
+
+	plan := diffPolicies(current, proposed, []string{"trusted", "iot", "guest", "wan"})
+	if len(plan.Unchanged) != 1 || plan.Unchanged[0].From != "iot" || plan.Unchanged[0].To != "trusted" {
+		t.Errorf("unchanged = %+v, want iot->trusted", plan.Unchanged)
+	}
+	if len(plan.ToChange) != 1 || plan.ToChange[0].CurrentAction != "allow" || plan.ToChange[0].ProposedAction != "deny" {
+		t.Errorf("to_change = %+v, want allow->deny", plan.ToChange)
+	}
+	if len(plan.ToAdd) != 1 || plan.ToAdd[0].From != "guest" || plan.ToAdd[0].To != "trusted" {
+		t.Errorf("to_add = %+v, want guest->trusted", plan.ToAdd)
+	}
+	if len(plan.ToRemove) != 1 || plan.ToRemove[0].From != "" || plan.ToRemove[0].To != "" || plan.ToRemove[0].Action != "deny" {
+		t.Errorf("to_remove = %+v, want empty-endpoint deny (iot->wan is a change)", plan.ToRemove)
+	}
+	if plan.CurrentRules != 3 || plan.ProposedRules != 3 {
+		t.Errorf("counts = current %d proposed %d, want 3/3", plan.CurrentRules, plan.ProposedRules)
+	}
+
+	t.Run("empty current", func(t *testing.T) {
+		plan := diffPolicies(nil, proposed, nil)
+		if len(plan.ToAdd) != 3 || len(plan.ToRemove) != 0 || len(plan.Unchanged) != 0 || len(plan.ToChange) != 0 {
+			t.Errorf("empty current plan = %+v, want all 3 proposed as adds", plan)
+		}
+		if len(plan.Warnings) != 6 {
+			t.Errorf("warnings = %v, want 6 undeclared endpoints", plan.Warnings)
+		}
+	})
+
+	t.Run("empty proposed", func(t *testing.T) {
+		plan := diffPolicies(current, nil, nil)
+		if len(plan.ToRemove) != 3 || len(plan.ToAdd) != 0 || len(plan.Unchanged) != 0 || len(plan.ToChange) != 0 {
+			t.Errorf("empty proposed plan = %+v, want all 3 current as removals", plan)
+		}
+	})
+
+	t.Run("duplicate endpoints are all reported", func(t *testing.T) {
+		dup := append([]intent.Policy{}, proposed...)
+		dup = append(dup, intent.Policy{Name: "dup", From: "guest", To: "trusted", Action: "allow"})
+		plan := diffPolicies(current, dup, nil)
+		if len(plan.ToChange) != 1 {
+			t.Errorf("to_change = %+v, want iot->wan change only", plan.ToChange)
+		}
+		if len(plan.ToAdd) != 2 {
+			t.Fatalf("to_add = %+v, want both guest->trusted rules", plan.ToAdd)
+		}
+		actions := map[string]bool{}
+		for _, d := range plan.ToAdd {
+			actions[d.Action] = true
+		}
+		if !actions["deny"] || !actions["allow"] {
+			t.Errorf("to_add = %+v, want one deny and one allow", plan.ToAdd)
+		}
+		if len(plan.ToRemove) != 1 || plan.ToRemove[0].From != "" {
+			t.Errorf("to_remove = %+v, want only the empty-endpoint rule", plan.ToRemove)
+		}
+	})
+
+	t.Run("duplicate current rules are not hidden", func(t *testing.T) {
+		cur := []intent.Policy{
+			{Name: "x1", From: "iot", To: "wan", Action: "deny"},
+			{Name: "x2", From: "iot", To: "wan", Action: "allow"},
+		}
+		prop := []intent.Policy{{Name: "x1", From: "iot", To: "wan", Action: "deny"}}
+		plan := diffPolicies(cur, prop, nil)
+		if len(plan.Unchanged) != 1 || plan.Unchanged[0].Action != "deny" {
+			t.Errorf("unchanged = %+v, want the deny rule", plan.Unchanged)
+		}
+		if len(plan.ToRemove) != 1 || plan.ToRemove[0].Action != "allow" {
+			t.Errorf("to_remove = %+v, want the excess allow rule", plan.ToRemove)
+		}
+	})
+
+	t.Run("excess proposed rules are reported as adds", func(t *testing.T) {
+		cur := []intent.Policy{{Name: "x1", From: "iot", To: "wan", Action: "deny"}}
+		prop := []intent.Policy{
+			{Name: "x1", From: "iot", To: "wan", Action: "deny"},
+			{Name: "x2", From: "iot", To: "wan", Action: "deny"},
+		}
+		plan := diffPolicies(cur, prop, nil)
+		if len(plan.Unchanged) != 1 || len(plan.ToAdd) != 1 || plan.ToAdd[0].Action != "deny" {
+			t.Errorf("plan = %+v, want 1 unchanged + 1 add", plan)
+		}
+	})
+
+	t.Run("policyWithAction falls back when action absent", func(t *testing.T) {
+		policies := []intent.Policy{{Name: "only", From: "a", To: "b", Action: "deny"}}
+		got := policyWithAction(policies, "allow")
+		if got.Name != "only" {
+			t.Errorf("policyWithAction = %+v, want fallback to first policy", got)
+		}
+	})
 }

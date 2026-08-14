@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
 	"github.com/jpvelasco/nyx/internal/intent"
@@ -82,6 +83,33 @@ type OmadaImport struct {
 	ACLRuleCount      int          `json:"acl_rule_count"`
 	ClientCount       int          `json:"client_count"`
 	Warnings          []string     `json:"warnings"`
+}
+
+// OmadaPolicyDiff describes one policy pair in a plan: unchanged, to add, to
+// remove, or to change. Action is the effective action; CurrentAction and
+// ProposedAction are set on changes so the agent sees both sides.
+type OmadaPolicyDiff struct {
+	Name           string `json:"name,omitempty"`
+	From           string `json:"from"`
+	To             string `json:"to"`
+	Action         string `json:"action,omitempty"`
+	CurrentAction  string `json:"current_action,omitempty"`
+	ProposedAction string `json:"proposed_action,omitempty"`
+}
+
+// OmadaPlan is a read-only actuator preview: the difference between the
+// controller's current ACL rules and a proposed intent spec. No changes are
+// applied. Warnings flag proposal endpoints that are not declared networks.
+type OmadaPlan struct {
+	Site          string            `json:"site"`
+	ProposedSite  string            `json:"proposed_site"`
+	CurrentRules  int               `json:"current_rules"`
+	ProposedRules int               `json:"proposed_rules"`
+	Unchanged     []OmadaPolicyDiff `json:"unchanged"`
+	ToAdd         []OmadaPolicyDiff `json:"to_add"`
+	ToRemove      []OmadaPolicyDiff `json:"to_remove"`
+	ToChange      []OmadaPolicyDiff `json:"to_change"`
+	Warnings      []string          `json:"warnings"`
 }
 
 // OmadaService exposes the Omada observation surface shared by the MCP server
@@ -226,6 +254,180 @@ func (s *OmadaService) Import(ctx context.Context, opts OmadaOptions) (*OmadaImp
 		ClientCount:       result.ClientCount,
 		Warnings:          result.Warnings,
 	}, nil
+}
+
+// Plan previews the difference between the controller's current ACL rules
+// and a proposed intent spec. It is read-only: nothing is applied. The
+// proposal is validated before any controller request is made.
+func (s *OmadaService) Plan(ctx context.Context, opts OmadaOptions, proposedYAML string) (*OmadaPlan, error) {
+	proposed, err := intent.ParseSpec([]byte(proposedYAML))
+	if err != nil {
+		return nil, err
+	}
+
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+
+	nets, err := client.GetNetworks(ctx, site.EffectiveID())
+	if err != nil {
+		return nil, fmt.Errorf("fetching networks: %w", err)
+	}
+	rules, err := client.GetACLRules(ctx, site.EffectiveID())
+	if err != nil {
+		return nil, fmt.Errorf("fetching ACL rules: %w", err)
+	}
+	gwRules, err := client.GetGatewayACLRules(ctx, site.EffectiveID())
+	if err != nil {
+		return nil, fmt.Errorf("fetching gateway ACL rules: %w", err)
+	}
+
+	current := omadabackend.PoliciesFromRules(append(rules, gwRules...), nets)
+	plan := diffPolicies(current, proposed.Policies, networkNames(proposed.Networks))
+	plan.Site = site.Name
+	plan.ProposedSite = proposed.Site
+	return plan, nil
+}
+
+// networkNames returns the declared network names of a spec.
+func networkNames(networks []intent.Network) []string {
+	names := make([]string, 0, len(networks))
+	for _, n := range networks {
+		names = append(names, n.Name)
+	}
+	return names
+}
+
+// diffPolicies compares current controller policies against the proposed
+// ones. Policies match on the from/to pair; a single pair with a different
+// action on each side is a change. Multiple rules for the same pair are
+// matched by action counts so no rule is silently dropped. Warnings flag
+// proposal endpoints that are not declared in the proposed spec's networks.
+func diffPolicies(current, proposed []intent.Policy, declaredNetworks []string) *OmadaPlan {
+	declared := make(map[string]bool, len(declaredNetworks))
+	for _, n := range declaredNetworks {
+		declared[n] = true
+	}
+
+	plan := &OmadaPlan{CurrentRules: len(current), ProposedRules: len(proposed)}
+
+	currentGroups := groupPoliciesByKey(current)
+	proposedGroups := groupPoliciesByKey(proposed)
+
+	for _, key := range sortedKeys(union(currentGroups, proposedGroups)) {
+		cur := currentGroups[key]
+		prop := proposedGroups[key]
+		switch {
+		case len(prop) == 0:
+			for _, cp := range cur {
+				plan.ToRemove = append(plan.ToRemove, diffFromPolicy(cp, "", cp.Action))
+			}
+		case len(cur) == 1 && len(prop) == 1 && cur[0].Action != prop[0].Action:
+			plan.ToChange = append(plan.ToChange, diffFromPolicy(prop[0], cur[0].Action, prop[0].Action))
+			warnIfUndeclared(prop[0], declared, &plan.Warnings)
+		default:
+			curCounts := countActions(cur)
+			propCounts := countActions(prop)
+			for action, c := range curCounts {
+				p := propCounts[action]
+				for i := 0; i < min(c, p); i++ {
+					plan.Unchanged = append(plan.Unchanged, diffFromPolicy(policyWithAction(prop, action), "", action))
+				}
+				for i := 0; i < c-p; i++ {
+					plan.ToRemove = append(plan.ToRemove, diffFromPolicy(policyWithAction(cur, action), "", action))
+				}
+				for i := 0; i < p-c; i++ {
+					plan.ToAdd = append(plan.ToAdd, diffFromPolicy(policyWithAction(prop, action), "", action))
+					warnIfUndeclared(policyWithAction(prop, action), declared, &plan.Warnings)
+				}
+			}
+			for action, p := range propCounts {
+				if curCounts[action] > 0 {
+					continue
+				}
+				for i := 0; i < p; i++ {
+					plan.ToAdd = append(plan.ToAdd, diffFromPolicy(policyWithAction(prop, action), "", action))
+					warnIfUndeclared(policyWithAction(prop, action), declared, &plan.Warnings)
+				}
+			}
+		}
+	}
+	return plan
+}
+
+// groupPoliciesByKey indexes policies by their from|to pair, preserving all
+// entries (including duplicates).
+func groupPoliciesByKey(policies []intent.Policy) map[string][]intent.Policy {
+	groups := make(map[string][]intent.Policy, len(policies))
+	for _, p := range policies {
+		key := policyKey(p)
+		groups[key] = append(groups[key], p)
+	}
+	return groups
+}
+
+func policyKey(p intent.Policy) string {
+	return p.From + "|" + p.To
+}
+
+// countActions tallies how many policies use each action within a group.
+func countActions(policies []intent.Policy) map[string]int {
+	counts := make(map[string]int, len(policies))
+	for _, p := range policies {
+		counts[p.Action]++
+	}
+	return counts
+}
+
+func policyWithAction(policies []intent.Policy, action string) intent.Policy {
+	for _, p := range policies {
+		if p.Action == action {
+			return p
+		}
+	}
+	return policies[0]
+}
+
+func union(a, b map[string][]intent.Policy) map[string]bool {
+	keys := make(map[string]bool, len(a)+len(b))
+	for k := range a {
+		keys[k] = true
+	}
+	for k := range b {
+		keys[k] = true
+	}
+	return keys
+}
+
+func sortedKeys(keys map[string]bool) []string {
+	out := make([]string, 0, len(keys))
+	for k := range keys {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// warnIfUndeclared appends a warning when a proposal endpoint is not a
+// declared network in the proposed spec.
+func warnIfUndeclared(p intent.Policy, declared map[string]bool, warnings *[]string) {
+	if p.From != "" && !declared[p.From] {
+		*warnings = append(*warnings,
+			fmt.Sprintf("policy %q: from %q is not a declared network in the proposed spec", p.Name, p.From))
+	}
+	if p.To != "" && !declared[p.To] {
+		*warnings = append(*warnings,
+			fmt.Sprintf("policy %q: to %q is not a declared network in the proposed spec", p.Name, p.To))
+	}
+}
+
+func diffFromPolicy(p intent.Policy, currentAction, proposedAction string) OmadaPolicyDiff {
+	if currentAction == "" || currentAction == proposedAction {
+		return OmadaPolicyDiff{Name: p.Name, From: p.From, To: p.To, Action: proposedAction}
+	}
+	return OmadaPolicyDiff{Name: p.Name, From: p.From, To: p.To, CurrentAction: currentAction, ProposedAction: proposedAction}
 }
 
 func (s *OmadaService) newClient(ctx context.Context, opts OmadaOptions) (*omadabackend.Client, error) {

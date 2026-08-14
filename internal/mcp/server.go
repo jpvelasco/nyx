@@ -87,13 +87,15 @@ type contentBlock struct {
 	Text string `json:"text"`
 }
 
-// omadaSurface is the Omada observation surface exposed to agents.
+// omadaSurface is the Omada observation and read-only planning surface
+// exposed to agents.
 type omadaSurface interface {
 	Info(ctx context.Context, opts service.OmadaOptions) (*service.OmadaInfo, error)
 	ListNetworks(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaNetwork, error)
 	ListACLs(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaACLRule, error)
 	ListClients(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaClient, error)
 	Import(ctx context.Context, opts service.OmadaOptions) (*service.OmadaImport, error)
+	Plan(ctx context.Context, opts service.OmadaOptions, proposedYAML string) (*service.OmadaPlan, error)
 }
 
 // Server is the MCP stdio server
@@ -381,6 +383,23 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				Required: []string{"host", "username", "password"},
 			},
 		},
+		{
+			Name:        "omada_plan",
+			Description: "Preview the difference between the controller's current ACL rules and a proposed intent spec. Read-only: nothing is applied.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]propSchema{
+					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
+					"username":        {Type: "string", Description: "Omada account username"},
+					"password":        {Type: "string", Description: "Omada account password"},
+					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
+					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
+					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
+					"spec":            {Type: "string", Description: "Proposed intent spec (YAML): networks and policies to preview"},
+				},
+				Required: []string{"host", "username", "password", "spec"},
+			},
+		},
 	}
 
 	return &jsonRPCResponse{
@@ -656,6 +675,21 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 			return fmt.Sprintf("omada import request failed: %v", err), true
 		}
 		return toJSON(imp), false
+
+	case "omada_plan":
+		opts, msg := omadaOptionsFromArgs(args, true)
+		if msg != "" {
+			return msg, true
+		}
+		specYAML, _ := args["spec"].(string)
+		if specYAML == "" {
+			return "spec parameter is required", true
+		}
+		plan, err := s.omadaSvc.Plan(ctx, opts, specYAML)
+		if err != nil {
+			return fmt.Sprintf("omada plan request failed: %v", err), true
+		}
+		return toJSON(plan), false
 
 	default:
 		return fmt.Sprintf("unknown tool: %s", name), true
