@@ -18,14 +18,14 @@ go test ./internal/intent/...
 go test -run TestParseSpec ./internal/intent/...
 ```
 
-Go toolchain: `go.mod` declares `go 1.25.12` — do not assume the README's "Go 1.22+" is sufficient to build here.
+Go toolchain: `go.mod` declares `go 1.25.13` — the `go` directive is authoritative over any README minimum-version claim.
 
 Local (Windows) gotchas:
 - Parallel `go test ./...` can hit localhost port-binding flakiness on this machine — prefer `go test -p 1 ./...` for reliable runs.
 - `-race` cannot run locally (no C compiler/cgo). CI runs `-race` on all 3 OS legs; do not treat local non-race runs as full coverage.
 - The `gh` CLI token in the Windows keyring expires periodically (HTTP 401 on API calls) — restore with `gh auth login`, then continue.
 
-CI runs a matrix of jobs: `lint` (golangci-lint v2), `vuln` (govulncheck, informational), `build` (3-OS matrix), `test` (race + coverage + Codecov upload, 3-OS matrix — protect-main requires `Test (macos-latest)`), `goreleaser` (snapshot build + smoke test), `lint-windows`, `gosec`, and `trivy`. A separate `codacy-coverage.yml` workflow uploads coverage to Codacy via trusted handoff. CodeQL and Socket run on push/PR.
+CI runs a matrix of jobs: `lint` (golangci-lint v2), `vuln` (govulncheck — a hard gate; stdlib vulnerabilities fail the check and require a `go.mod` toolchain bump), `build` (3-OS matrix), `test` (race + coverage + Codecov upload, 3-OS matrix — protect-main requires `Test (macos-latest)`), `goreleaser` (snapshot build + smoke test), `lint-windows`, `gosec`, and `trivy`. A separate `codacy-coverage.yml` workflow uploads coverage to Codacy via trusted handoff. CodeQL and Socket run on push/PR.
 
 `.golangci.yml` enables only `govet`, `ineffassign`, `staticcheck`, `unused`, `misspell` (+ `gofmt` formatter) — revive is intentionally disabled to avoid pre-existing style churn.
 
