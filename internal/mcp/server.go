@@ -98,6 +98,14 @@ type omadaSurface interface {
 	Plan(ctx context.Context, opts service.OmadaOptions, proposedYAML string) (*service.OmadaPlan, error)
 }
 
+// opnsenseSurface is the OPNsense observation surface exposed to agents.
+type opnsenseSurface interface {
+	Info(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseInfo, error)
+	ListInterfaces(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseInterface, error)
+	ListFirewallRules(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseFirewallRule, error)
+	ListClients(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseClient, error)
+}
+
 // Server is the MCP stdio server
 type Server struct {
 	reader      io.Reader
@@ -105,15 +113,17 @@ type Server struct {
 	initialized bool
 	checkSvc    *service.CheckService
 	omadaSvc    omadaSurface
+	opnsenseSvc opnsenseSurface
 }
 
 // NewServer creates a new MCP server
 func NewServer() *Server {
 	return &Server{
-		reader:   os.Stdin,
-		writer:   os.Stdout,
-		checkSvc: service.NewCheckService(),
-		omadaSvc: service.NewOmadaService(),
+		reader:      os.Stdin,
+		writer:      os.Stdout,
+		checkSvc:    service.NewCheckService(),
+		omadaSvc:    service.NewOmadaService(),
+		opnsenseSvc: service.NewOpnsenseService(),
 	}
 }
 
@@ -398,6 +408,66 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"spec":            {Type: "string", Description: "Proposed intent spec (YAML): networks and policies to preview"},
 				},
 				Required: []string{"host", "username", "password", "spec"},
+			},
+		},
+		{
+			Name:        "opnsense_get_info",
+			Description: "Fetch firmware metadata (version, product, arch) from an OPNsense firewall.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]propSchema{
+					"host":            {Type: "string", Description: "OPNsense firewall hostname or IP"},
+					"api_key":         {Type: "string", Description: "OPNsense API key"},
+					"api_secret":      {Type: "string", Description: "OPNsense API secret"},
+					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
+					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
+				},
+				Required: []string{"host", "api_key", "api_secret"},
+			},
+		},
+		{
+			Name:        "opnsense_list_interfaces",
+			Description: "List OPNsense interfaces with their IP configuration.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]propSchema{
+					"host":            {Type: "string", Description: "OPNsense firewall hostname or IP"},
+					"api_key":         {Type: "string", Description: "OPNsense API key"},
+					"api_secret":      {Type: "string", Description: "OPNsense API secret"},
+					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
+					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
+				},
+				Required: []string{"host", "api_key", "api_secret"},
+			},
+		},
+		{
+			Name:        "opnsense_list_firewall_rules",
+			Description: "List OPNsense firewall filter rules (actions pass/block/reject).",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]propSchema{
+					"host":            {Type: "string", Description: "OPNsense firewall hostname or IP"},
+					"api_key":         {Type: "string", Description: "OPNsense API key"},
+					"api_secret":      {Type: "string", Description: "OPNsense API secret"},
+					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
+					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
+				},
+				Required: []string{"host", "api_key", "api_secret"},
+			},
+		},
+		{
+			Name:        "opnsense_list_clients",
+			Description: "List OPNsense DHCP leases as the host inventory (OPNsense exposes no live client state).",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]propSchema{
+					"host":            {Type: "string", Description: "OPNsense firewall hostname or IP"},
+					"api_key":         {Type: "string", Description: "OPNsense API key"},
+					"api_secret":      {Type: "string", Description: "OPNsense API secret"},
+					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
+					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
+				},
+				Required: []string{"host", "api_key", "api_secret"},
 			},
 		},
 	}
@@ -691,6 +761,50 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		}
 		return toJSON(plan), false
 
+	case "opnsense_get_info":
+		opts, msg := opnsenseOptionsFromArgs(args, true)
+		if msg != "" {
+			return msg, true
+		}
+		info, err := s.opnsenseSvc.Info(ctx, opts)
+		if err != nil {
+			return fmt.Sprintf("opnsense info request failed: %v", err), true
+		}
+		return toJSON(info), false
+
+	case "opnsense_list_interfaces":
+		opts, msg := opnsenseOptionsFromArgs(args, true)
+		if msg != "" {
+			return msg, true
+		}
+		ifaces, err := s.opnsenseSvc.ListInterfaces(ctx, opts)
+		if err != nil {
+			return fmt.Sprintf("opnsense interfaces request failed: %v", err), true
+		}
+		return toJSON(ifaces), false
+
+	case "opnsense_list_firewall_rules":
+		opts, msg := opnsenseOptionsFromArgs(args, true)
+		if msg != "" {
+			return msg, true
+		}
+		rules, err := s.opnsenseSvc.ListFirewallRules(ctx, opts)
+		if err != nil {
+			return fmt.Sprintf("opnsense firewall rules request failed: %v", err), true
+		}
+		return toJSON(rules), false
+
+	case "opnsense_list_clients":
+		opts, msg := opnsenseOptionsFromArgs(args, true)
+		if msg != "" {
+			return msg, true
+		}
+		clients, err := s.opnsenseSvc.ListClients(ctx, opts)
+		if err != nil {
+			return fmt.Sprintf("opnsense clients request failed: %v", err), true
+		}
+		return toJSON(clients), false
+
 	default:
 		return fmt.Sprintf("unknown tool: %s", name), true
 	}
@@ -712,6 +826,27 @@ func omadaOptionsFromArgs(args map[string]interface{}, needCredentials bool) (se
 		}
 	}
 	opts.Site, _ = args["site"].(string)
+	opts.SkipTLSVerify, _ = args["skip_tls_verify"].(bool)
+	opts.CACertPath, _ = args["ca_cert_path"].(string)
+	return opts, ""
+}
+
+// opnsenseOptionsFromArgs extracts OPNsense connection options from tool
+// arguments. The returned message is non-empty when a required parameter is
+// missing.
+func opnsenseOptionsFromArgs(args map[string]interface{}, needCredentials bool) (service.OpnsenseOptions, string) {
+	var opts service.OpnsenseOptions
+	opts.Host, _ = args["host"].(string)
+	if opts.Host == "" {
+		return opts, "host parameter is required"
+	}
+	if needCredentials {
+		opts.APIKey, _ = args["api_key"].(string)
+		opts.APISecret, _ = args["api_secret"].(string)
+		if opts.APIKey == "" || opts.APISecret == "" {
+			return opts, "api key and api secret parameters are required"
+		}
+	}
 	opts.SkipTLSVerify, _ = args["skip_tls_verify"].(bool)
 	opts.CACertPath, _ = args["ca_cert_path"].(string)
 	return opts, ""

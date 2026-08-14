@@ -257,6 +257,10 @@ Add to your MCP config:
 | `omada_list_clients` | List Omada connected clients for a site |
 | `omada_import` | Import Omada state into an intent spec (networks, policies, assertions) |
 | `omada_plan` | Preview ACL rule differences between the controller and a proposed spec (read-only) |
+| `opnsense_get_info` | Fetch OPNsense firmware metadata |
+| `opnsense_list_interfaces` | List OPNsense interfaces with IP configuration |
+| `opnsense_list_firewall_rules` | List OPNsense firewall filter rules |
+| `opnsense_list_clients` | List OPNsense DHCP leases (host inventory) |
 
 ## Providers
 

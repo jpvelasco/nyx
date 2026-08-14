@@ -185,8 +185,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 16 {
-		t.Fatalf("expected 16 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 20 {
+		t.Fatalf("expected 20 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -195,7 +195,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_import", "omada_plan"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_import", "omada_plan", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -837,6 +837,97 @@ func TestDispatchOmadaPlan_ServiceError(t *testing.T) {
 	}
 }
 
+func TestDispatchOpnsense_MissingParams(t *testing.T) {
+	server := newTestServer()
+	for _, tool := range []string{"opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients"} {
+		if text, isErr := server.DispatchToolForTest(context.Background(), tool, map[string]interface{}{}); !isErr || !strings.Contains(text, "host parameter is required") {
+			t.Errorf("%s missing host: (%q, %v)", tool, text, isErr)
+		}
+		if text, isErr := server.DispatchToolForTest(context.Background(), tool, map[string]interface{}{"host": "fw.local"}); !isErr || !strings.Contains(text, "api key and api secret parameters are required") {
+			t.Errorf("%s missing creds: (%q, %v)", tool, text, isErr)
+		}
+	}
+}
+
+func TestDispatchOpnsenseGetInfo(t *testing.T) {
+	stub := &stubOpnsenseSvc{info: &service.OpnsenseInfo{
+		Provider: "opnsense", Version: "24.7.11", Product: "OPNsense", Arch: "amd64",
+	}}
+	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_get_info", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, `"version": "24.7.11"`) {
+		t.Errorf("expected info JSON, got: %s", text)
+	}
+	if stub.lastOpts.Host != "fw.local" {
+		t.Errorf("options = %+v", stub.lastOpts)
+	}
+	if strings.Contains(text, "secret1") {
+		t.Error("tool output must not echo the API secret")
+	}
+}
+
+func TestDispatchOpnsenseListInterfaces(t *testing.T) {
+	stub := &stubOpnsenseSvc{interfaces: []service.OpnsenseInterface{
+		{Name: "lan", IP: "10.0.10.1", Subnet: 24, Gateway: "10.0.10.1"},
+	}}
+	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_list_interfaces", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, `"name": "lan"`) || !strings.Contains(text, `"subnet": 24`) {
+		t.Errorf("expected interfaces JSON, got: %s", text)
+	}
+}
+
+func TestDispatchOpnsenseListFirewallRules(t *testing.T) {
+	stub := &stubOpnsenseSvc{rules: []service.OpnsenseFirewallRule{
+		{UUID: "u1", Action: "block", Source: "10.0.20.0/24", Destination: "10.0.10.0/24"},
+	}}
+	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_list_firewall_rules", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, `"action": "block"`) || !strings.Contains(text, `"source": "10.0.20.0/24"`) {
+		t.Errorf("expected rules JSON, got: %s", text)
+	}
+}
+
+func TestDispatchOpnsenseListClients(t *testing.T) {
+	stub := &stubOpnsenseSvc{clients: []service.OpnsenseClient{
+		{MAC: "aa:bb:cc:dd:ee:ff", IP: "10.0.10.5", Hostname: "nas"},
+	}}
+	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_list_clients", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, `"hostname": "nas"`) {
+		t.Errorf("expected clients JSON, got: %s", text)
+	}
+}
+
+func TestDispatchOpnsense_ServiceError(t *testing.T) {
+	stub := &stubOpnsenseSvc{err: errors.New("fetch failed")}
+	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_list_interfaces", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+	})
+	if !isErr || !strings.Contains(text, "opnsense interfaces request failed") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+	if strings.Contains(text, "secret1") {
+		t.Error("error output must not echo the API secret")
+	}
+}
+
 func nonEmptyLines(s string) []string {
 	var lines []string
 	for _, l := range strings.Split(s, "\n") {
@@ -941,6 +1032,40 @@ func (s *stubOmadaSvc) Plan(_ context.Context, opts service.OmadaOptions, _ stri
 	s.calls++
 	s.lastOpts = opts
 	return s.plan, s.err
+}
+
+// stubOpnsenseSvc is a hermetic stand-in for the OPNsense observation surface.
+type stubOpnsenseSvc struct {
+	info       *service.OpnsenseInfo
+	interfaces []service.OpnsenseInterface
+	rules      []service.OpnsenseFirewallRule
+	clients    []service.OpnsenseClient
+	err        error
+	lastOpts   service.OpnsenseOptions
+}
+
+func (s *stubOpnsenseSvc) Info(_ context.Context, opts service.OpnsenseOptions) (*service.OpnsenseInfo, error) {
+	s.lastOpts = opts
+	return s.info, s.err
+}
+
+func (s *stubOpnsenseSvc) ListInterfaces(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseInterface, error) {
+	s.lastOpts = opts
+	return s.interfaces, s.err
+}
+
+func (s *stubOpnsenseSvc) ListFirewallRules(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseFirewallRule, error) {
+	s.lastOpts = opts
+	return s.rules, s.err
+}
+
+func (s *stubOpnsenseSvc) ListClients(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseClient, error) {
+	s.lastOpts = opts
+	return s.clients, s.err
+}
+
+func serverWithOpnsenseStub(stub *stubOpnsenseSvc) *Server {
+	return &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{}, checkSvc: service.NewCheckService(), opnsenseSvc: stub}
 }
 
 func serverWithOmadaStub(stub *stubOmadaSvc) *Server {
