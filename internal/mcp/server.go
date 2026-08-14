@@ -88,7 +88,7 @@ type contentBlock struct {
 }
 
 // omadaSurface is the Omada observation and read-only planning surface
-// exposed to agents.
+// exposed to agents, plus the dry-run-default ACL mutation tool.
 type omadaSurface interface {
 	Info(ctx context.Context, opts service.OmadaOptions) (*service.OmadaInfo, error)
 	ListNetworks(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaNetwork, error)
@@ -96,6 +96,7 @@ type omadaSurface interface {
 	ListClients(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaClient, error)
 	Import(ctx context.Context, opts service.OmadaOptions) (*service.OmadaImport, error)
 	Plan(ctx context.Context, opts service.OmadaOptions, proposedYAML string) (*service.OmadaPlan, error)
+	ApplyACL(ctx context.Context, opts service.OmadaOptions, req service.OmadaACLApplyRequest) (*service.OmadaACLApplyResult, error)
 }
 
 // opnsenseSurface is the OPNsense observation surface exposed to agents.
@@ -408,6 +409,28 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"spec":            {Type: "string", Description: "Proposed intent spec (YAML): networks and policies to preview"},
 				},
 				Required: []string{"host", "username", "password", "spec"},
+			},
+		},
+		{
+			Name:        "omada_apply_acl",
+			Description: "Apply an ACL policy change on the controller: create the rule or enable a disabled matching rule. Dry-run is the default: set dry_run=false to apply for real. A real apply is followed by a targeted isolation audit of the changed endpoints (disable with post_audit=false).",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]propSchema{
+					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
+					"username":        {Type: "string", Description: "Omada account username"},
+					"password":        {Type: "string", Description: "Omada account password"},
+					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
+					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
+					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
+					"from":            {Type: "string", Description: "Source network name"},
+					"to":              {Type: "string", Description: "Destination network name"},
+					"action":          {Type: "string", Description: "Policy action: allow or deny"},
+					"policy_name":     {Type: "string", Description: "Optional rule name; a from-to-action name is derived when empty"},
+					"dry_run":         {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
+					"post_audit":      {Type: "boolean", Description: "Run a targeted isolation audit after a real apply. Default true."},
+				},
+				Required: []string{"host", "username", "password", "from", "to", "action"},
 			},
 		},
 		{
@@ -761,6 +784,34 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		}
 		return toJSON(plan), false
 
+	case "omada_apply_acl":
+		opts, msg := omadaOptionsFromArgs(args, true)
+		if msg != "" {
+			return msg, true
+		}
+		req := service.OmadaACLApplyRequest{
+			PolicyName: argString(args, "policy_name"),
+			From:       argString(args, "from"),
+			To:         argString(args, "to"),
+			Action:     argString(args, "action"),
+			DryRun:     argBoolDefault(args, "dry_run", true),
+			PostAudit:  argBoolDefault(args, "post_audit", true),
+		}
+		if req.From == "" {
+			return "from parameter is required", true
+		}
+		if req.To == "" {
+			return "to parameter is required", true
+		}
+		if req.Action == "" {
+			return "action parameter is required", true
+		}
+		res, err := s.omadaSvc.ApplyACL(ctx, opts, req)
+		if err != nil {
+			return fmt.Sprintf("omada apply request failed: %v", err), true
+		}
+		return toJSON(res), false
+
 	case "opnsense_get_info":
 		opts, msg := opnsenseOptionsFromArgs(args, true)
 		if msg != "" {
@@ -829,6 +880,21 @@ func omadaOptionsFromArgs(args map[string]interface{}, needCredentials bool) (se
 	opts.SkipTLSVerify, _ = args["skip_tls_verify"].(bool)
 	opts.CACertPath, _ = args["ca_cert_path"].(string)
 	return opts, ""
+}
+
+// argString returns a string tool argument, or "" when absent.
+func argString(args map[string]interface{}, key string) string {
+	s, _ := args[key].(string)
+	return s
+}
+
+// argBoolDefault returns a boolean tool argument, or the default when absent.
+func argBoolDefault(args map[string]interface{}, key string, def bool) bool {
+	v, ok := args[key].(bool)
+	if !ok {
+		return def
+	}
+	return v
 }
 
 // opnsenseOptionsFromArgs extracts OPNsense connection options from tool

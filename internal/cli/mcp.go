@@ -23,8 +23,9 @@ var mcpCmd = &cobra.Command{
 var mcpServeCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start MCP server for AI agent integration",
-	Long: `Start a Model Context Protocol server that exposes nyx's
-read-only tools for AI agents. Default transport is stdio.`,
+	Long: `Start a Model Context Protocol server that exposes nyx's audit
+and vendor tools (including dry-run-default Omada ACL mutation) to AI agents.
+Default transport is stdio.`,
 	Example: `  nyx mcp serve
   nyx mcp serve --stdio`,
 	RunE: func(_ *cobra.Command, _ []string) error {

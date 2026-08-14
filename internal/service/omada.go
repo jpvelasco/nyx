@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/jpvelasco/nyx/internal/audit"
 	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
 	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/models"
+	providers "github.com/jpvelasco/nyx/internal/providers"
+	omadaprovider "github.com/jpvelasco/nyx/internal/providers/omada"
 )
 
 // OmadaOptions carries everything needed to talk to an Omada SDN controller.
@@ -112,15 +116,54 @@ type OmadaPlan struct {
 	Warnings      []string          `json:"warnings"`
 }
 
+// OmadaACLApplyRequest describes a single desired ACL change on the site.
+// DryRun previews without mutating; PostAudit (default true) runs a targeted
+// isolation audit after a real apply.
+type OmadaACLApplyRequest struct {
+	PolicyName string
+	From       string
+	To         string
+	Action     string // "allow" or "deny"
+	DryRun     bool
+	PostAudit  bool
+}
+
+// OmadaPostAudit is the targeted re-verification run after a real apply.
+type OmadaPostAudit struct {
+	Status  string              `json:"status"`
+	Summary string              `json:"summary"`
+	Finding *models.CheckResult `json:"finding,omitempty"`
+}
+
+// OmadaACLApplyResult is the structured outcome of an apply with
+// before/after evidence and the post-apply audit.
+type OmadaACLApplyResult struct {
+	DryRun    bool            `json:"dry_run"`
+	Outcome   string          `json:"outcome"` // "created" | "enabled" | "unchanged"
+	RuleID    string          `json:"rule_id,omitempty"`
+	FromCIDR  string          `json:"from_cidr"`
+	ToCIDR    string          `json:"to_cidr"`
+	Before    string          `json:"before"`
+	After     string          `json:"after"`
+	PostAudit *OmadaPostAudit `json:"post_audit,omitempty"`
+}
+
 // OmadaService exposes the Omada observation surface shared by the MCP server
-// and any future CLI commands. NewClient is a seam for tests.
+// and any future CLI commands. NewClient is a seam for tests; PostAudit runs
+// the targeted post-apply audit and defaults to the real audit engine.
 type OmadaService struct {
 	NewClient func(ctx context.Context, host string, skipTLSVerify bool, caCertPath string) (*omadabackend.Client, error)
+	PostAudit func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error)
 }
 
 // NewOmadaService creates an OmadaService using the real controller client.
 func NewOmadaService() *OmadaService {
-	return &OmadaService{NewClient: omadabackend.NewClient}
+	return &OmadaService{
+		NewClient: omadabackend.NewClient,
+		PostAudit: func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
+			return audit.NewEngine(spec).Run(ctx)
+		},
+	}
 }
 
 // Info fetches controller metadata without authentication.
@@ -289,6 +332,92 @@ func (s *OmadaService) Plan(ctx context.Context, opts OmadaOptions, proposedYAML
 	plan.Site = site.Name
 	plan.ProposedSite = proposed.Site
 	return plan, nil
+}
+
+// ApplyACL applies a single desired ACL change through the registered
+// provider's mutation surface. A real (non-dry-run) apply that changes the
+// controller is followed by a targeted isolation audit against the same
+// endpoints, returned as post_audit evidence.
+func (s *OmadaService) ApplyACL(ctx context.Context, opts OmadaOptions, req OmadaACLApplyRequest) (*OmadaACLApplyResult, error) {
+	applier, err := s.newApplier()
+	if err != nil {
+		return nil, err
+	}
+	res, err := applier.ApplyACL(ctx, providers.ACLApplyRequest{
+		PolicyName: req.PolicyName,
+		From:       req.From,
+		To:         req.To,
+		Action:     req.Action,
+		DryRun:     req.DryRun,
+	}, providers.ImportOptions{
+		Host:          opts.Host,
+		Username:      opts.Username,
+		Password:      opts.Password,
+		Site:          opts.Site,
+		SkipTLSVerify: opts.SkipTLSVerify,
+		CACertPath:    opts.CACertPath,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := &OmadaACLApplyResult{
+		DryRun:   res.DryRun,
+		Outcome:  res.Outcome,
+		RuleID:   res.RuleID,
+		FromCIDR: res.FromCIDR,
+		ToCIDR:   res.ToCIDR,
+		Before:   res.Before,
+		After:    res.After,
+	}
+	if !res.DryRun && res.Outcome != "unchanged" && req.PostAudit {
+		out.PostAudit = s.runPostAudit(ctx, req, res)
+	}
+	return out, nil
+}
+
+// newApplier returns the registered Omada provider's ACLApplier. The registry
+// lookup enforces the optional-interface contract: a provider that cannot
+// mutate is refused with a clear error.
+func (s *OmadaService) newApplier() (providers.ACLApplier, error) {
+	p := providers.Get(omadaprovider.ProviderName)
+	applier, ok := p.(providers.ACLApplier)
+	if !ok {
+		return nil, fmt.Errorf("provider %q does not implement ACL mutation", omadaprovider.ProviderName)
+	}
+	return applier, nil
+}
+
+// runPostAudit builds a targeted spec for the changed endpoints and runs the
+// isolation assertion through the configured audit engine.
+func (s *OmadaService) runPostAudit(ctx context.Context, req OmadaACLApplyRequest, res *providers.ACLApplyResult) *OmadaPostAudit {
+	spec := &intent.Spec{
+		Version: 1,
+		Site:    "post-mutation",
+		Networks: []intent.Network{
+			{Name: req.From, CIDR: res.FromCIDR},
+			{Name: req.To, CIDR: res.ToCIDR},
+		},
+		Assertions: []intent.Assertion{{
+			Type:   "isolation",
+			From:   req.From,
+			To:     req.To,
+			Expect: req.Action,
+		}},
+	}
+	if s.PostAudit == nil {
+		return &OmadaPostAudit{Status: string(models.StatusError), Summary: "post-mutation audit unavailable"}
+	}
+	report, err := s.PostAudit(ctx, spec)
+	if err != nil {
+		return &OmadaPostAudit{Status: string(models.StatusError), Summary: fmt.Sprintf("post-mutation audit failed: %v", err)}
+	}
+	for _, f := range report.Findings {
+		if f.CheckType == "isolation" {
+			finding := f
+			return &OmadaPostAudit{Status: string(f.Status), Summary: f.Summary, Finding: &finding}
+		}
+	}
+	return &OmadaPostAudit{Status: string(models.StatusError), Summary: "post-mutation audit returned no isolation finding"}
 }
 
 // networkNames returns the declared network names of a spec.

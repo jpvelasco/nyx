@@ -11,6 +11,9 @@ import (
 
 	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
 	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/models"
+	providers "github.com/jpvelasco/nyx/internal/providers"
+	omadaprovider "github.com/jpvelasco/nyx/internal/providers/omada"
 )
 
 const omadaTestInfo = `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true}}`
@@ -802,4 +805,209 @@ func TestDiffPolicies(t *testing.T) {
 			t.Errorf("policyWithAction = %+v, want fallback to first policy", got)
 		}
 	})
+}
+
+// omadaApplyServer serves a mutable ACL rule list plus networks for
+// ApplyACL tests. Writes on unexpected paths fail the test.
+func omadaApplyServer(t *testing.T, initialRules string) *httptest.Server {
+	t.Helper()
+	state := initialRules
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/abc123/api/v2/login":
+			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
+		case r.URL.Path == "/abc123/api/v2/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
+			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
+				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
+				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"}]}`)
+		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acl" && r.Method == http.MethodGet:
+			writeOmadaEnvelope(w, 0, state)
+		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acl" && r.Method == http.MethodPost:
+			writeOmadaEnvelope(w, 0, `{"id":"a9","name":"block-iot","status":true,"policy":"drop","protocols":"all","srcType":"network","srcId":"n2","srcName":"IoT","dstType":"network","dstId":"n1","dstName":"Trusted","index":4}`)
+			state = `{"totalRows":1,"data":[{"id":"a9","name":"block-iot","status":true,"policy":"drop","protocols":"all","srcType":"network","srcId":"n2","srcName":"IoT","dstType":"network","dstId":"n1","dstName":"Trusted","index":4}]}`
+		case strings.HasPrefix(r.URL.Path, "/abc123/api/v2/sites/s1/setting/firewall/acl/") && r.Method == http.MethodPatch:
+			writeOmadaEnvelope(w, 0, `{"id":"a1","name":"block-iot","status":true,"policy":"drop","protocols":"all","srcType":"network","srcId":"n2","srcName":"IoT","dstType":"network","dstId":"n1","dstName":"Trusted","index":4}`)
+			state = `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":"drop","protocols":"all","srcType":"network","srcId":"n2","srcName":"IoT","dstType":"network","dstId":"n1","dstName":"Trusted","index":4}]}`
+		case r.URL.Path == "/abc123/api/v2/logout":
+			writeOmadaEnvelope(w, 0, "null")
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	return ts
+}
+
+func cannedPostAudit(t *testing.T, wantFrom, wantTo, wantExpect string) func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
+	t.Helper()
+	return func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
+		if len(spec.Networks) != 2 {
+			t.Errorf("post-audit spec has %d networks, want 2", len(spec.Networks))
+		}
+		if spec.Networks[0].Name != wantFrom || spec.Networks[0].CIDR != "10.0.20.0/24" {
+			t.Errorf("post-audit network[0] = %+v, want %s/10.0.20.0/24", spec.Networks[0], wantFrom)
+		}
+		if spec.Networks[1].Name != wantTo || spec.Networks[1].CIDR != "10.0.10.0/24" {
+			t.Errorf("post-audit network[1] = %+v, want %s/10.0.10.0/24", spec.Networks[1], wantTo)
+		}
+		if len(spec.Assertions) != 1 || spec.Assertions[0].Type != "isolation" ||
+			spec.Assertions[0].From != wantFrom || spec.Assertions[0].To != wantTo || spec.Assertions[0].Expect != wantExpect {
+			t.Errorf("post-audit assertions = %+v, want isolation %s -> %s expect %s", spec.Assertions, wantFrom, wantTo, wantExpect)
+		}
+		return &models.AuditReport{
+			Audit:  "post-mutation",
+			Status: models.StatusPass,
+			Findings: []models.CheckResult{{
+				Tool: "system", CheckType: "isolation", Runner: "local",
+				Target: wantFrom + " -> " + wantTo, Status: models.StatusPass,
+				Summary: "isolation confirmed",
+			}},
+		}, nil
+	}
+}
+
+func TestOmadaServiceApplyACL(t *testing.T) {
+	t.Run("real apply runs post-audit", func(t *testing.T) {
+		ts := omadaApplyServer(t, `{"totalRows":0,"data":[]}`)
+		svc := NewOmadaService()
+		svc.PostAudit = cannedPostAudit(t, "iot", "trusted", "deny")
+		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
+			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		}, OmadaACLApplyRequest{From: "iot", To: "trusted", Action: "deny", PostAudit: true})
+		if err != nil {
+			t.Fatalf("ApplyACL: %v", err)
+		}
+		if res.DryRun || res.Outcome != "created" || res.RuleID != "a9" {
+			t.Errorf("result = %+v, want real created rule a9", res)
+		}
+		if res.PostAudit == nil || res.PostAudit.Status != string(models.StatusPass) {
+			t.Fatalf("post_audit = %+v, want pass finding", res.PostAudit)
+		}
+		if res.PostAudit.Finding == nil || res.PostAudit.Finding.CheckType != "isolation" {
+			t.Errorf("post_audit finding = %+v, want isolation check", res.PostAudit.Finding)
+		}
+	})
+
+	t.Run("dry run defaults to no mutation and no post-audit", func(t *testing.T) {
+		ts := omadaApplyServer(t, `{"totalRows":0,"data":[]}`)
+		svc := NewOmadaService()
+		svc.PostAudit = func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
+			t.Error("post-audit must not run for a dry run")
+			return nil, nil
+		}
+		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
+			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		}, OmadaACLApplyRequest{From: "iot", To: "trusted", Action: "deny", DryRun: true})
+		if err != nil {
+			t.Fatalf("ApplyACL: %v", err)
+		}
+		if !res.DryRun || res.Outcome != "created" || res.PostAudit != nil {
+			t.Errorf("result = %+v, want dry run planned create without post-audit", res)
+		}
+	})
+
+	t.Run("unchanged skips post-audit", func(t *testing.T) {
+		ts := omadaApplyServer(t, `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":"drop","srcType":"network","srcId":"n2","srcName":"IoT","dstType":"network","dstId":"n1","dstName":"Trusted","index":4}]}`)
+		svc := NewOmadaService()
+		svc.PostAudit = func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
+			t.Error("post-audit must not run when nothing changed")
+			return nil, nil
+		}
+		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
+			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		}, OmadaACLApplyRequest{From: "iot", To: "trusted", Action: "deny", PostAudit: true})
+		if err != nil {
+			t.Fatalf("ApplyACL: %v", err)
+		}
+		if res.Outcome != "unchanged" || res.PostAudit != nil {
+			t.Errorf("result = %+v, want unchanged without post-audit", res)
+		}
+	})
+
+	t.Run("post-audit opt-out", func(t *testing.T) {
+		ts := omadaApplyServer(t, `{"totalRows":0,"data":[]}`)
+		svc := NewOmadaService()
+		svc.PostAudit = func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
+			t.Error("post-audit must not run when disabled")
+			return nil, nil
+		}
+		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
+			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		}, OmadaACLApplyRequest{From: "iot", To: "trusted", Action: "deny", PostAudit: false})
+		if err != nil {
+			t.Fatalf("ApplyACL: %v", err)
+		}
+		if res.Outcome != "created" || res.PostAudit != nil {
+			t.Errorf("result = %+v, want created without post-audit", res)
+		}
+	})
+
+	t.Run("post-audit failure is reported, not fatal", func(t *testing.T) {
+		ts := omadaApplyServer(t, `{"totalRows":0,"data":[]}`)
+		svc := NewOmadaService()
+		svc.PostAudit = func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
+			return nil, errors.New("engine exploded")
+		}
+		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
+			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		}, OmadaACLApplyRequest{From: "iot", To: "trusted", Action: "deny", PostAudit: true})
+		if err != nil {
+			t.Fatalf("ApplyACL: %v", err)
+		}
+		if res.Outcome != "created" {
+			t.Errorf("outcome = %q, want created", res.Outcome)
+		}
+		if res.PostAudit == nil || res.PostAudit.Status != "error" || !strings.Contains(res.PostAudit.Summary, "engine exploded") {
+			t.Errorf("post_audit = %+v, want error summary with engine message", res.PostAudit)
+		}
+	})
+
+	t.Run("invalid request is rejected before any controller request", func(t *testing.T) {
+		svc := &OmadaService{NewClient: func(ctx context.Context, host string, skipTLSVerify bool, caCertPath string) (*omadabackend.Client, error) {
+			t.Error("NewClient called; request must be validated first")
+			return nil, errors.New("unexpected client")
+		}}
+		_, err := svc.ApplyACL(context.Background(), OmadaOptions{Host: "https://omada.local"},
+			OmadaACLApplyRequest{From: "a", To: "b", Action: "drop"})
+		if err == nil || !strings.Contains(err.Error(), "action") {
+			t.Fatalf("ApplyACL error = %v, want action validation failure", err)
+		}
+	})
+}
+
+// nonMutatingProvider is a registry stand-in that lacks the ACLApplier
+// surface, to verify the clear-error safety rail.
+type nonMutatingProvider struct{}
+
+func (nonMutatingProvider) Name() string           { return "omada" }
+func (nonMutatingProvider) Capabilities() []string { return []string{"info"} }
+func (nonMutatingProvider) Info(context.Context, providers.ImportOptions) (*providers.ProviderInfo, error) {
+	return nil, nil
+}
+func (nonMutatingProvider) ImportSpec(context.Context, providers.ImportOptions) (*providers.ImportResult, error) {
+	return nil, nil
+}
+func (nonMutatingProvider) Check(context.Context, providers.ImportOptions) (*providers.AuditResult, error) {
+	return nil, nil
+}
+func (nonMutatingProvider) CheckACL(context.Context, providers.ACLCheckRequest, providers.ImportOptions) (*models.CheckResult, error) {
+	return nil, nil
+}
+
+func TestOmadaServiceApplyACL_ProviderLacksMutation(t *testing.T) {
+	providers.Reset()
+	t.Cleanup(func() {
+		providers.Reset()
+		_ = providers.Register(&omadaprovider.OmadaProvider{})
+	})
+	if err := providers.Register(nonMutatingProvider{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	svc := NewOmadaService()
+	_, err := svc.ApplyACL(context.Background(), OmadaOptions{Host: "https://omada.local"},
+		OmadaACLApplyRequest{From: "a", To: "b", Action: "deny"})
+	if err == nil || !strings.Contains(err.Error(), "does not implement ACL mutation") {
+		t.Fatalf("ApplyACL error = %v, want missing-mutation capability error", err)
+	}
 }

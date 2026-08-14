@@ -185,8 +185,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 20 {
-		t.Fatalf("expected 20 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 21 {
+		t.Fatalf("expected 21 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -195,7 +195,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_import", "omada_plan", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_import", "omada_plan", "omada_apply_acl", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -837,6 +837,95 @@ func TestDispatchOmadaPlan_ServiceError(t *testing.T) {
 	}
 }
 
+func TestDispatchOmadaApplyACL_MissingParams(t *testing.T) {
+	server := newTestServer()
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{}); !isErr || !strings.Contains(text, "host parameter is required") {
+		t.Errorf("missing host: (%q, %v)", text, isErr)
+	}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{"host": "omada.local"}); !isErr || !strings.Contains(text, "username and password parameters are required") {
+		t.Errorf("missing creds: (%q, %v)", text, isErr)
+	}
+	base := map[string]interface{}{"host": "omada.local", "username": "admin", "password": "pw"}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_apply_acl", base); !isErr || !strings.Contains(text, "from parameter is required") {
+		t.Errorf("missing from: (%q, %v)", text, isErr)
+	}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
+		"host": "omada.local", "username": "admin", "password": "pw", "from": "iot",
+	}); !isErr || !strings.Contains(text, "to parameter is required") {
+		t.Errorf("missing to: (%q, %v)", text, isErr)
+	}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
+		"host": "omada.local", "username": "admin", "password": "pw", "from": "iot", "to": "trusted",
+	}); !isErr || !strings.Contains(text, "action parameter is required") {
+		t.Errorf("missing action: (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchOmadaApplyACL_Success(t *testing.T) {
+	stub := &stubOmadaSvc{apply: &service.OmadaACLApplyResult{
+		DryRun: true, Outcome: "created", RuleID: "a9",
+		FromCIDR: "10.0.20.0/24", ToCIDR: "10.0.10.0/24",
+		Before: "[]", After: "[]",
+	}}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
+		"host": "omada.local", "username": "admin", "password": "pw", "site": "HQ",
+		"from": "iot", "to": "trusted", "action": "deny",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, `"dry_run": true`) || !strings.Contains(text, `"outcome": "created"`) || !strings.Contains(text, `"rule_id": "a9"`) {
+		t.Errorf("expected apply JSON, got: %s", text)
+	}
+	if !stub.lastApplyReq.DryRun {
+		t.Error("dry_run must default to true when the argument is absent")
+	}
+	if stub.lastApplyReq.From != "iot" || stub.lastApplyReq.To != "trusted" || stub.lastApplyReq.Action != "deny" {
+		t.Errorf("apply request = %+v", stub.lastApplyReq)
+	}
+	if strings.Contains(text, "pw") {
+		t.Error("tool output must not echo the password")
+	}
+}
+
+func TestDispatchOmadaApplyACL_ExplicitApply(t *testing.T) {
+	stub := &stubOmadaSvc{apply: &service.OmadaACLApplyResult{
+		Outcome: "created", RuleID: "a9", FromCIDR: "10.0.20.0/24", ToCIDR: "10.0.10.0/24",
+		Before: "[]", After: "[{\"id\":\"a9\"}]",
+		PostAudit: &service.OmadaPostAudit{Status: "pass", Summary: "isolation confirmed"},
+	}}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
+		"host": "omada.local", "username": "admin", "password": "pw",
+		"from": "iot", "to": "trusted", "action": "deny", "dry_run": false, "post_audit": false,
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if stub.lastApplyReq.DryRun {
+		t.Error("dry_run must be false when explicitly set")
+	}
+	if stub.lastApplyReq.PostAudit {
+		t.Error("post_audit must be false when explicitly set")
+	}
+	if !strings.Contains(text, `"outcome": "created"`) {
+		t.Errorf("expected apply JSON, got: %s", text)
+	}
+}
+
+func TestDispatchOmadaApplyACL_ServiceError(t *testing.T) {
+	stub := &stubOmadaSvc{err: errors.New("apply failed")}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
+		"host": "omada.local", "username": "admin", "password": "pw",
+		"from": "iot", "to": "trusted", "action": "deny",
+	})
+	if !isErr || !strings.Contains(text, "omada apply request failed") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+	if strings.Contains(text, "pw") {
+		t.Error("error output must not echo the password")
+	}
+}
+
 func TestDispatchOpnsense_MissingParams(t *testing.T) {
 	server := newTestServer()
 	for _, tool := range []string{"opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients"} {
@@ -987,15 +1076,17 @@ func (d *dummyProvider) Spec() *intent.Spec { return nil }
 
 // stubOmadaSvc is a hermetic stand-in for the Omada observation surface.
 type stubOmadaSvc struct {
-	info     *service.OmadaInfo
-	networks []service.OmadaNetwork
-	acls     []service.OmadaACLRule
-	clients  []service.OmadaClient
-	imp      *service.OmadaImport
-	plan     *service.OmadaPlan
-	err      error
-	lastOpts service.OmadaOptions
-	calls    int
+	info         *service.OmadaInfo
+	networks     []service.OmadaNetwork
+	acls         []service.OmadaACLRule
+	clients      []service.OmadaClient
+	imp          *service.OmadaImport
+	plan         *service.OmadaPlan
+	apply        *service.OmadaACLApplyResult
+	err          error
+	lastOpts     service.OmadaOptions
+	lastApplyReq service.OmadaACLApplyRequest
+	calls        int
 }
 
 func (s *stubOmadaSvc) Info(_ context.Context, opts service.OmadaOptions) (*service.OmadaInfo, error) {
@@ -1032,6 +1123,13 @@ func (s *stubOmadaSvc) Plan(_ context.Context, opts service.OmadaOptions, _ stri
 	s.calls++
 	s.lastOpts = opts
 	return s.plan, s.err
+}
+
+func (s *stubOmadaSvc) ApplyACL(_ context.Context, opts service.OmadaOptions, req service.OmadaACLApplyRequest) (*service.OmadaACLApplyResult, error) {
+	s.calls++
+	s.lastOpts = opts
+	s.lastApplyReq = req
+	return s.apply, s.err
 }
 
 // stubOpnsenseSvc is a hermetic stand-in for the OPNsense observation surface.

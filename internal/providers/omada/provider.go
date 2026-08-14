@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jpvelasco/nyx/internal/audit"
@@ -13,11 +14,14 @@ import (
 	providers "github.com/jpvelasco/nyx/internal/providers"
 )
 
+// ProviderName is the registry identifier for the Omada provider.
+const ProviderName = "omada"
+
 // OmadaProvider implements providers.Provider for TP-Link Omada SDN controllers.
 type OmadaProvider struct{}
 
 // Name returns the provider identifier "omada".
-func (o *OmadaProvider) Name() string { return "omada" }
+func (o *OmadaProvider) Name() string { return ProviderName }
 
 // Capabilities lists the supported operations for this provider.
 func (o *OmadaProvider) Capabilities() []string {
@@ -153,7 +157,193 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 }
 
 var _ providers.Provider = (*OmadaProvider)(nil)
+var _ providers.ACLApplier = (*OmadaProvider)(nil)
 
 func init() {
 	_ = providers.Register(&OmadaProvider{})
+}
+
+// ApplyACL ensures a switch ACL rule exists from req.From to req.To with the
+// requested action. It is idempotent: an already-active matching rule yields
+// outcome "unchanged" without a write. Dry-run previews the planned change
+// and never mutates. A conflicting rule with a different policy is refused
+// with a message pointing at the plan tool. Before/after evidence is the
+// controller's rule list as JSON.
+func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequest, opts providers.ImportOptions) (*providers.ACLApplyResult, error) {
+	if req.From == "" {
+		return nil, fmt.Errorf("apply ACL: from is required")
+	}
+	if req.To == "" {
+		return nil, fmt.Errorf("apply ACL: to is required")
+	}
+	policy := aclPolicyForAction(req.Action)
+	if policy == "" {
+		return nil, fmt.Errorf("apply ACL: action must be 'allow' or 'deny', got %q", req.Action)
+	}
+
+	client, err := omadabackend.NewClient(ctx, opts.Host, opts.SkipTLSVerify, opts.CACertPath)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to omada controller: %w", err)
+	}
+	client.SetLogger(opts.Logger)
+	if err := client.Login(ctx, opts.Username, opts.Password); err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+
+	sites, err := client.GetSites(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching sites: %w", err)
+	}
+	site, err := omadabackend.SelectSite(sites, opts.Site)
+	if err != nil {
+		return nil, err
+	}
+	siteID := site.EffectiveID()
+
+	nets, err := client.GetNetworks(ctx, siteID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching networks: %w", err)
+	}
+	src, err := networkByName(nets, req.From)
+	if err != nil {
+		return nil, err
+	}
+	dst, err := networkByName(nets, req.To)
+	if err != nil {
+		return nil, err
+	}
+
+	rules, err := client.GetACLRules(ctx, siteID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching ACL rules: %w", err)
+	}
+
+	var existing *omadabackend.ACLRule
+	for i := range rules {
+		if strings.EqualFold(rules[i].SourceName, src.Name) && strings.EqualFold(rules[i].DestName, dst.Name) {
+			existing = &rules[i]
+			break
+		}
+	}
+
+	outcome := "created"
+	var rule omadabackend.ACLRule
+	switch {
+	case existing == nil:
+		rule = omadabackend.ACLRule{
+			Name:       aclRuleName(req),
+			Status:     true,
+			Policy:     policy,
+			Protocols:  "all",
+			SourceType: "network",
+			SourceID:   src.ID,
+			SourceName: src.Name,
+			DestType:   "network",
+			DestID:     dst.ID,
+			DestName:   dst.Name,
+		}
+	case rulePolicyMatches(existing.Policy, req.Action) && existing.Status:
+		outcome = "unchanged"
+		rule = *existing
+	case rulePolicyMatches(existing.Policy, req.Action) && !existing.Status:
+		outcome = "enabled"
+		rule = *existing
+		rule.Status = true
+	default:
+		return nil, fmt.Errorf(
+			"conflicting ACL rule %q already exists for %s -> %s with policy %q; use the omada_plan tool to reconcile",
+			existing.Name, src.Name, dst.Name, existing.Policy)
+	}
+
+	ruleID := rule.ID
+	if !req.DryRun && outcome != "unchanged" {
+		var err error
+		if outcome == "created" {
+			_, err = client.CreateACLRule(ctx, siteID, rule)
+		} else {
+			_, err = client.UpdateACLRule(ctx, siteID, rule.ID, rule)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	before, _ := json.Marshal(rules)
+	after := string(before)
+	if !req.DryRun && outcome != "unchanged" {
+		refreshed, err := client.GetACLRules(ctx, siteID)
+		if err != nil {
+			return nil, fmt.Errorf("refetching ACL rules after %s: %w", outcome, err)
+		}
+		afterJSON, _ := json.Marshal(refreshed)
+		after = string(afterJSON)
+		if outcome == "created" {
+			ruleID = ""
+			for i := range refreshed {
+				if strings.EqualFold(refreshed[i].SourceName, src.Name) &&
+					strings.EqualFold(refreshed[i].DestName, dst.Name) &&
+					rulePolicyMatches(refreshed[i].Policy, req.Action) {
+					ruleID = refreshed[i].ID
+					break
+				}
+			}
+		}
+	}
+
+	return &providers.ACLApplyResult{
+		DryRun:   req.DryRun,
+		Outcome:  outcome,
+		RuleID:   ruleID,
+		FromCIDR: src.CIDR(),
+		ToCIDR:   dst.CIDR(),
+		Before:   string(before),
+		After:    after,
+	}, nil
+}
+
+// aclPolicyForAction maps an intent action to the controller policy string.
+// It returns "" for unknown actions.
+func aclPolicyForAction(action string) string {
+	switch action {
+	case "allow":
+		return "accept"
+	case "deny":
+		return "drop"
+	}
+	return ""
+}
+
+// rulePolicyMatches reports whether a controller policy implements the
+// intent action (accept == allow, drop == deny).
+func rulePolicyMatches(policy, action string) bool {
+	if action == "deny" && strings.EqualFold(policy, "drop") {
+		return true
+	}
+	return action == "allow" && strings.EqualFold(policy, "accept")
+}
+
+// aclRuleName derives a rule name from the request, defaulting to a
+// deterministic from-to-action pattern.
+func aclRuleName(req providers.ACLApplyRequest) string {
+	if req.PolicyName != "" {
+		return req.PolicyName
+	}
+	return fmt.Sprintf("%s-%s-%s", strings.ToLower(req.From), strings.ToLower(req.To), req.Action)
+}
+
+// networkByName resolves a network name case-insensitively, listing the
+// available names in the error for agents.
+func networkByName(nets []omadabackend.Network, name string) (omadabackend.Network, error) {
+	for _, n := range nets {
+		if strings.EqualFold(n.Name, name) {
+			return n, nil
+		}
+	}
+	names := make([]string, 0, len(nets))
+	for _, n := range nets {
+		names = append(names, n.Name)
+	}
+	sort.Strings(names)
+	return omadabackend.Network{}, fmt.Errorf("no network named %q; available: %s", name, strings.Join(names, ", "))
 }

@@ -107,6 +107,8 @@ The `nmap` backend spawns `nmap` as a subprocess. Tests in `backends/nmap` call 
 - Optional structured operation logging (login, re-login, session expiry, retries) via `Client.SetLogger(*logger.Logger)`; wired from the CLI through `providers.ImportOptions.Logger`. Log fields never include credentials, hostnames, or IP addresses.
 - `acl_check` assertions read Omada credentials from env vars (`OMADA_HOST`, `OMADA_USERNAME`, `OMADA_PASSWORD`, `OMADA_SITE`), not from spec or flags.
 - TLS verification is intentionally disabled (self-signed cert).
+- The client has a **write surface** for switch ACLs: `CreateACLRule` (POST) and `UpdateACLRule` (PATCH with the full writable payload — Omada requires PATCH to carry every writable field). The Omada provider implements the optional `providers.ACLApplier` interface; the service looks it up with a type-assertion safety rail (`provider "omada" does not implement ACL mutation` if absent).
+- `omada_apply_acl` is **idempotent** (matches an existing rule by from/to network names, case-insensitive; outcomes `created`/`enabled`/`unchanged`), **dry-run by default** (MCP layer defaults `dry_run=true`; the service treats `PostAudit` as strict zero-value-false), and follows a real apply with a **targeted isolation audit** of the changed endpoints (`post_audit` default true; a post-audit failure is reported, never fatal). Conflicting existing rules error out and point to `omada_plan`.
 
 ## Probe System
 
@@ -203,7 +205,7 @@ Version 1 intent spec: `networks`, `vpn`, `probes`, `policies`, `assertions`. Ei
 - `system/` — platform-specific system commands (`system_linux.go`, `system_darwin.go`, `system_windows.go`). Only `system.go` is shared.
 - `dns/` — DNS resolution checks, including optional DNSSEC validation. `TestResolve_TruncatedResponse_TCPFallback` retries 50 port binds because Windows runners reserve wide ephemeral port ranges (a 20-attempt version flaked in CI).
 - `health/` — latency, packet loss, and MTU probing.
-- `omada/` — read-only REST client for Omada SDN 6.x. **Concurrency-safe** with retry/backoff and automatic re-login — see the Omada Backend section. TLS verification disabled (self-signed).
+- `omada/` — REST client for Omada SDN 6.x (reads + switch-ACL writes). **Concurrency-safe** with retry/backoff and automatic re-login — see the Omada Backend section. TLS verification disabled (self-signed).
 - `batfish/` — stub returning `ErrNotImplemented`; `Available()` returns `false`.
 
 ## Other Core Packages

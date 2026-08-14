@@ -1,5 +1,6 @@
-// Package omada provides a read-only client for the Omada SDN controller
-// local REST API (controller 6.x, API v2).
+// Package omada provides a client for the Omada SDN controller local REST
+// API (controller 6.x, API v2). Reads cover sites, networks, ACL rules,
+// clients, and controller info; writes cover ACL rule create and update.
 //
 // Credentials are never logged or stored beyond the lifetime of the client.
 // Authentication produces a short-lived token that is refreshed automatically;
@@ -374,7 +375,7 @@ func (c *Client) doRequestLocked(ctx context.Context, method, path string, body 
 		if err != nil {
 			return err
 		}
-		if method == http.MethodPost {
+		if method == http.MethodPost || method == http.MethodPatch {
 			req.Header.Set("Content-Type", "application/json")
 		}
 		c.addAuthHeaders(req)

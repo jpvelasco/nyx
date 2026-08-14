@@ -56,6 +56,37 @@ type ACLCheckRequest struct {
 	ExpectEnforced bool
 }
 
+// ACLApplyRequest describes a single desired ACL policy change: ensure a
+// rule exists from From to To with the given action.
+type ACLApplyRequest struct {
+	PolicyName string // rule name; a default is derived when empty
+	From       string // source network name
+	To         string // destination network name
+	Action     string // "allow" or "deny"
+	DryRun     bool   // preview the change without mutating
+}
+
+// ACLApplyResult is the structured outcome of an apply attempt, with
+// before/after evidence for auditing. Before and After hold the JSON arrays
+// of ACL rules as seen by the controller; they are identical when nothing
+// was mutated.
+type ACLApplyResult struct {
+	DryRun   bool   `json:"dry_run"`
+	Outcome  string `json:"outcome"` // "created" | "enabled" | "unchanged"
+	RuleID   string `json:"rule_id,omitempty"`
+	FromCIDR string `json:"from_cidr"` // resolved network CIDRs for re-audit
+	ToCIDR   string `json:"to_cidr"`
+	Before   string `json:"before"`
+	After    string `json:"after"`
+}
+
+// ACLApplier is the optional mutation surface a provider may implement.
+// Providers that cannot mutate return ErrCapabilityUnsupported behaviour
+// through the service layer when ApplyACL is requested.
+type ACLApplier interface {
+	ApplyACL(ctx context.Context, req ACLApplyRequest, opts ImportOptions) (*ACLApplyResult, error)
+}
+
 // Provider is implemented by each vendor backend.
 type Provider interface {
 	Name() string
