@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
+	"github.com/jpvelasco/nyx/internal/intent"
 )
 
 // OmadaOptions carries everything needed to talk to an Omada SDN controller.
@@ -69,6 +70,18 @@ type OmadaClient struct {
 	DeviceType  string `json:"device_type"`
 	Active      bool   `json:"active"`
 	Uptime      int64  `json:"uptime_seconds"`
+}
+
+// OmadaImport is the generated intent spec plus the fetch summary, letting
+// agents compare intended state (spec) against observed state.
+type OmadaImport struct {
+	Spec              *intent.Spec `json:"spec"`
+	Site              string       `json:"site"`
+	ControllerVersion string       `json:"controller_version"`
+	NetworkCount      int          `json:"network_count"`
+	ACLRuleCount      int          `json:"acl_rule_count"`
+	ClientCount       int          `json:"client_count"`
+	Warnings          []string     `json:"warnings"`
 }
 
 // OmadaService exposes the Omada observation surface shared by the MCP server
@@ -194,6 +207,25 @@ func (s *OmadaService) ListClients(ctx context.Context, opts OmadaOptions) ([]Om
 		})
 	}
 	return out, nil
+}
+
+// Import connects, imports the controller state, and produces an intent
+// spec reflecting the observed design (networks, policies, assertions).
+func (s *OmadaService) Import(ctx context.Context, opts OmadaOptions) (*OmadaImport, error) {
+	result, err := omadabackend.ImportSpec(ctx, opts.Host, opts.Username, opts.Password, opts.Site,
+		false, opts.SkipTLSVerify, opts.CACertPath, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &OmadaImport{
+		Spec:              result.Spec,
+		Site:              result.Site.Name,
+		ControllerVersion: result.ControllerVersion,
+		NetworkCount:      result.NetworkCount,
+		ACLRuleCount:      result.ACLRuleCount,
+		ClientCount:       result.ClientCount,
+		Warnings:          result.Warnings,
+	}, nil
 }
 
 func (s *OmadaService) newClient(ctx context.Context, opts OmadaOptions) (*omadabackend.Client, error) {

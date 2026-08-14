@@ -378,6 +378,120 @@ func TestOmadaServiceListClients(t *testing.T) {
 	}
 }
 
+func TestOmadaServiceImport(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/abc123/api/v2/login":
+			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
+		case "/abc123/api/v2/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
+				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"dhcpEnabled":true},
+				{"id":"n2","name":"IoT","purpose":"lan","vlan":20,"gatewaySubnet":"10.0.20.1/24","isolation":true,"dhcpEnabled":false}]}`)
+		case "/abc123/api/v2/sites/s1/setting/firewall/acl":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block IoT","status":true,"policy":"drop","srcType":"network","srcId":"n2","srcName":"IoT","dstType":"network","dstId":"n1","dstName":"Trusted","index":1}]}`)
+		case "/abc123/api/v2/sites/s1/setting/firewall/gwacl":
+			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
+		case "/abc123/api/v2/sites/s1/clients":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","name":"nas","networkName":"Trusted"}]}`)
+		case "/abc123/api/v2/logout":
+			writeOmadaEnvelope(w, 0, "null")
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	imp, err := NewOmadaService().Import(context.Background(), OmadaOptions{
+		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+	})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if imp.Site != "HQ" {
+		t.Errorf("site = %q, want HQ", imp.Site)
+	}
+	if imp.ControllerVersion != "6.4.5.1" {
+		t.Errorf("controller_version = %q, want 6.4.5.1", imp.ControllerVersion)
+	}
+	if imp.NetworkCount != 2 || imp.ACLRuleCount != 1 || imp.ClientCount != 1 {
+		t.Errorf("counts = nets %d, acls %d, clients %d; want 2/1/1", imp.NetworkCount, imp.ACLRuleCount, imp.ClientCount)
+	}
+	if len(imp.Warnings) != 0 {
+		t.Errorf("warnings = %v, want none", imp.Warnings)
+	}
+	if imp.Spec == nil {
+		t.Fatal("spec is nil")
+	}
+	if len(imp.Spec.Networks) != 2 || imp.Spec.Networks[0].Name != "trusted" || imp.Spec.Networks[0].CIDR != "10.0.10.0/24" {
+		t.Errorf("spec networks = %+v, want sanitized trusted/10.0.10.0/24", imp.Spec.Networks)
+	}
+	if len(imp.Spec.Policies) != 1 || imp.Spec.Policies[0].From != "iot" || imp.Spec.Policies[0].To != "trusted" || imp.Spec.Policies[0].Action != "deny" {
+		t.Errorf("spec policies = %+v, want iot->trusted deny", imp.Spec.Policies)
+	}
+	hasIsolation := false
+	for _, a := range imp.Spec.Assertions {
+		if a.Type == "isolation" && a.From == "iot" && a.To == "trusted" {
+			hasIsolation = true
+		}
+	}
+	if !hasIsolation {
+		t.Errorf("assertions = %+v, want iot->trusted isolation", imp.Spec.Assertions)
+	}
+}
+
+func TestOmadaServiceImport_Warnings(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/abc123/api/v2/login":
+			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
+		case "/abc123/api/v2/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"}]}`)
+		case "/abc123/api/v2/sites/s1/clients":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5"}]}`)
+		case "/abc123/api/v2/logout":
+			writeOmadaEnvelope(w, 0, "null")
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	imp, err := NewOmadaService().Import(context.Background(), OmadaOptions{
+		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+	})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if len(imp.Warnings) != 2 {
+		t.Fatalf("warnings = %v, want ACL + gateway ACL fetch warnings", imp.Warnings)
+	}
+	if imp.ACLRuleCount != 0 || imp.NetworkCount != 1 {
+		t.Errorf("counts = acls %d, nets %d; want 0/1", imp.ACLRuleCount, imp.NetworkCount)
+	}
+}
+
+func TestOmadaServiceImport_NetworksFetchFails(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/abc123/api/v2/login":
+			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
+		case "/abc123/api/v2/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	_, err := NewOmadaService().Import(context.Background(), OmadaOptions{
+		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "fetching networks") {
+		t.Fatalf("Import error = %v, want networks fetch failure", err)
+	}
+}
+
 func TestOmadaServiceListClients_FetchFails(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
