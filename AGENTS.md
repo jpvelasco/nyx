@@ -110,6 +110,14 @@ The `nmap` backend spawns `nmap` as a subprocess. Tests in `backends/nmap` call 
 - The client has a **write surface** for switch ACLs: `CreateACLRule` (POST) and `UpdateACLRule` (PATCH with the full writable payload — Omada requires PATCH to carry every writable field). The Omada provider implements the optional `providers.ACLApplier` interface; the service looks it up with a type-assertion safety rail (`provider "omada" does not implement ACL mutation` if absent).
 - `omada_apply_acl` is **idempotent** (matches an existing rule by from/to network names, case-insensitive; outcomes `created`/`enabled`/`unchanged`), **dry-run by default** (MCP layer defaults `dry_run=true`; the service treats `PostAudit` as strict zero-value-false), and follows a real apply with a **targeted isolation audit** of the changed endpoints (`post_audit` default true; a post-audit failure is reported, never fatal). Conflicting existing rules error out and point to `omada_plan`.
 
+## Agent Loop
+
+End-to-end agent workflow: **observe → import → plan → apply (dry-run) → apply → re-audit**.
+
+- `omada_import` produces a baseline spec; `omada_plan` previews ACL diffs (read-only); `omada_apply_acl` is the only mutation surface (`create` or `enable`), dry-run by default, with a built-in post-apply isolation audit.
+- The MCP server is the only thing that talks to the controller on the agent's behalf — the controller API is never exposed to agents directly, and credentials stay in env vars, never in spec, flags, tool output, logs, evidence, or recommendations.
+- Do not broaden a mutation after a post-apply audit failure; surface the evidence and let the agent reconcile via `omada_plan`.
+
 ## Probe System
 
 Assertions with `runner: <probe-name>` execute remotely via SSH from a declared probe host (`internal/probe`, built on `golang.org/x/crypto/ssh`). Supported assertion types over SSH:

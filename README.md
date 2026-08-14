@@ -263,6 +263,24 @@ Add to your MCP config:
 | `opnsense_list_firewall_rules` | List OPNsense firewall filter rules |
 | `opnsense_list_clients` | List OPNsense DHCP leases (host inventory) |
 
+### Agent Workflow: Observe → Plan → Apply → Verify
+
+nyx supports a closed loop for enforcing intent on Omada:
+
+1. **Observe** — `run_audit` against a spec, or `omada_list_networks` / `omada_list_acls` / `omada_list_clients` to inspect controller state.
+2. **Import** — `omada_import` builds a baseline intent spec from the controller (networks, policies, assertions).
+3. **Plan** — `omada_plan` previews the ACL differences between the controller and a proposed spec. Nothing is changed.
+4. **Apply (dry-run)** — `omada_apply_acl` with `dry_run=true` (the default) previews the mutation: outcome (`created`/`enabled`/`unchanged`) and the resulting rule state. Nothing is written.
+5. **Apply (real)** — repeat with `dry_run=false` to create the rule or enable a disabled matching rule.
+6. **Verify** — a real apply runs a targeted isolation audit of the changed endpoints (`post_audit=true` by default). Run `run_audit` again to confirm the whole spec still passes.
+
+Safety rails:
+
+- `omada_apply_acl` is **dry-run by default**; a real apply requires an explicit `dry_run=false`.
+- Mutation is idempotent and limited to creating rules or enabling disabled matching rules. A conflicting rule with a different policy is rejected, and the agent is pointed at `omada_plan` to reconcile.
+- Credentials come from environment variables (`OMADA_HOST`, `OMADA_USERNAME`, `OMADA_PASSWORD`, `OMADA_SITE`) — never from spec, flags, or tool arguments — and never appear in tool output.
+- A post-apply audit failure is reported but never fatal; the agent decides the next step from the evidence.
+
 ## Providers
 
 nyx supports multiple network backends via a provider system. Vendors register at startup and expose vendor-specific commands.
