@@ -16,12 +16,12 @@ import (
 )
 
 func main() {
-	os.Exit(execute(os.Getenv, os.Stdout, os.Stderr))
+	os.Exit(runMain(os.Getenv, os.Stdout, os.Stderr))
 }
 
-// execute runs the omada-clients workflow and returns an exit code.
-// It returns 0 on success, 1 on failure.
-func execute(getenv func(string) string, stdout, stderr io.Writer) int {
+// runMain is the main entrypoint body, factored out so tests can exercise
+// the exit-code path without calling os.Exit.
+func runMain(getenv func(string) string, stdout, stderr io.Writer) int {
 	if err := run(getenv, stdout); err != nil {
 		fmt.Fprintln(stderr, "omada-clients:", err)
 		return 1

@@ -270,7 +270,7 @@ func TestRun_NoSites(t *testing.T) {
 	}
 }
 
-func TestExecute_Success(t *testing.T) {
+func TestRunMain_Success(t *testing.T) {
 	// Use a valid host that will succeed (we'll mock the server).
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -308,15 +308,15 @@ func TestExecute_Success(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := execute(getenv, &stdout, &stderr)
+	code := runMain(getenv, &stdout, &stderr)
 	if code != 0 {
-		t.Errorf("execute() = %d, want 0 (success)", code)
+		t.Errorf("runMain() = %d, want 0 (success)", code)
 	}
 	if stderr.Len() != 0 {
-		t.Errorf("execute() wrote to stderr: %s", stderr.String())
+		t.Errorf("runMain() wrote to stderr: %s", stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "Site: Home") {
-		t.Errorf("execute() output missing 'Site: Home':\n%s", stdout.String())
+		t.Errorf("runMain() output missing 'Site: Home':\n%s", stdout.String())
 	}
 }
 
@@ -327,15 +327,15 @@ func TestExecute_Failure(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := execute(getenv, &stdout, &stderr)
+	code := runMain(getenv, &stdout, &stderr)
 	if code != 1 {
-		t.Errorf("execute() = %d, want 1 (failure)", code)
+		t.Errorf("runMain() = %d, want 1 (failure)", code)
 	}
 	if !strings.Contains(stderr.String(), "omada-clients:") {
-		t.Errorf("execute() stderr missing 'omada-clients:':\n%s", stderr.String())
+		t.Errorf("runMain() stderr missing 'omada-clients:':\n%s", stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "set OMADA_HOST") {
-		t.Errorf("execute() stderr missing error message:\n%s", stderr.String())
+		t.Errorf("runMain() stderr missing error message:\n%s", stderr.String())
 	}
 }
 
