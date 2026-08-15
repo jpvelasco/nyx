@@ -138,14 +138,16 @@ type OmadaPostAudit struct {
 // OmadaACLApplyResult is the structured outcome of an apply with
 // before/after evidence and the post-apply audit.
 type OmadaACLApplyResult struct {
-	DryRun    bool            `json:"dry_run"`
-	Outcome   string          `json:"outcome"` // "created" | "enabled" | "unchanged"
-	RuleID    string          `json:"rule_id,omitempty"`
-	FromCIDR  string          `json:"from_cidr"`
-	ToCIDR    string          `json:"to_cidr"`
-	Before    string          `json:"before"`
-	After     string          `json:"after"`
-	PostAudit *OmadaPostAudit `json:"post_audit,omitempty"`
+	DryRun      bool            `json:"dry_run"`
+	Outcome     string          `json:"outcome"` // "created" | "enabled" | "unchanged"
+	RuleID      string          `json:"rule_id,omitempty"`
+	FromCIDR    string          `json:"from_cidr"`
+	ToCIDR      string          `json:"to_cidr"`
+	FromGateway string          `json:"from_gateway,omitempty"`
+	ToGateway   string          `json:"to_gateway,omitempty"`
+	Before      string          `json:"before"`
+	After       string          `json:"after"`
+	PostAudit   *OmadaPostAudit `json:"post_audit,omitempty"`
 }
 
 // OmadaService exposes the Omada observation surface shared by the MCP server
@@ -361,13 +363,15 @@ func (s *OmadaService) ApplyACL(ctx context.Context, opts OmadaOptions, req Omad
 		return nil, err
 	}
 	out := &OmadaACLApplyResult{
-		DryRun:   res.DryRun,
-		Outcome:  res.Outcome,
-		RuleID:   res.RuleID,
-		FromCIDR: res.FromCIDR,
-		ToCIDR:   res.ToCIDR,
-		Before:   res.Before,
-		After:    res.After,
+		DryRun:      res.DryRun,
+		Outcome:     res.Outcome,
+		RuleID:      res.RuleID,
+		FromCIDR:    res.FromCIDR,
+		ToCIDR:      res.ToCIDR,
+		FromGateway: res.FromGateway,
+		ToGateway:   res.ToGateway,
+		Before:      res.Before,
+		After:       res.After,
 	}
 	if !res.DryRun && res.Outcome != "unchanged" && req.PostAudit {
 		out.PostAudit = s.runPostAudit(ctx, req, res)
@@ -388,14 +392,16 @@ func (s *OmadaService) newApplier() (providers.ACLApplier, error) {
 }
 
 // runPostAudit builds a targeted spec for the changed endpoints and runs the
-// isolation assertion through the configured audit engine.
+// isolation assertion through the configured audit engine. The gateways from
+// the apply result are mandatory: without them runIsolation has no target to
+// ping and the audit is unverifiable by construction.
 func (s *OmadaService) runPostAudit(ctx context.Context, req OmadaACLApplyRequest, res *providers.ACLApplyResult) *OmadaPostAudit {
 	spec := &intent.Spec{
 		Version: 1,
 		Site:    "post-mutation",
 		Networks: []intent.Network{
-			{Name: req.From, CIDR: res.FromCIDR},
-			{Name: req.To, CIDR: res.ToCIDR},
+			{Name: req.From, CIDR: res.FromCIDR, Gateway: res.FromGateway},
+			{Name: req.To, CIDR: res.ToCIDR, Gateway: res.ToGateway},
 		},
 		Assertions: []intent.Assertion{{
 			Type:   "isolation",

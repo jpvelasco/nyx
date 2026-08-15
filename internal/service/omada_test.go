@@ -845,11 +845,13 @@ func cannedPostAudit(t *testing.T, wantFrom, wantTo, wantExpect string) func(ctx
 		if len(spec.Networks) != 2 {
 			t.Errorf("post-audit spec has %d networks, want 2", len(spec.Networks))
 		}
-		if spec.Networks[0].Name != wantFrom || spec.Networks[0].CIDR != "10.0.20.0/24" {
-			t.Errorf("post-audit network[0] = %+v, want %s/10.0.20.0/24", spec.Networks[0], wantFrom)
+		if spec.Networks[0].Name != wantFrom || spec.Networks[0].CIDR != "10.0.20.0/24" ||
+			spec.Networks[0].Gateway != "10.0.20.1" {
+			t.Errorf("post-audit network[0] = %+v, want %s/10.0.20.0/24 gw 10.0.20.1", spec.Networks[0], wantFrom)
 		}
-		if spec.Networks[1].Name != wantTo || spec.Networks[1].CIDR != "10.0.10.0/24" {
-			t.Errorf("post-audit network[1] = %+v, want %s/10.0.10.0/24", spec.Networks[1], wantTo)
+		if spec.Networks[1].Name != wantTo || spec.Networks[1].CIDR != "10.0.10.0/24" ||
+			spec.Networks[1].Gateway != "10.0.10.1" {
+			t.Errorf("post-audit network[1] = %+v, want %s/10.0.10.0/24 gw 10.0.10.1", spec.Networks[1], wantTo)
 		}
 		if len(spec.Assertions) != 1 || spec.Assertions[0].Type != "isolation" ||
 			spec.Assertions[0].From != wantFrom || spec.Assertions[0].To != wantTo || spec.Assertions[0].Expect != wantExpect {

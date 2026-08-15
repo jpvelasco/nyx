@@ -245,6 +245,8 @@ func TestProviderCheckACL(t *testing.T) {
 				writeEnvelope(w, 0, "", `{"token":"t1"}`)
 			case "/abc123/api/v2/logout":
 				writeEnvelope(w, 0, "", "null")
+			case "/abc123/api/v2/sites":
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			case "/abc123/api/v2/sites/s1/setting/firewall/acl":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 					{"id":"a1","name":"Deny Lan to IoT","status":true,"policy":"drop","srcName":"lan","dstName":"iot"},
@@ -259,8 +261,10 @@ func TestProviderCheckACL(t *testing.T) {
 		return ts, &OmadaProvider{}
 	}
 
+	// The site is addressed by display name; the ACL endpoints are keyed by
+	// site ID — resolution must happen inside CheckACL.
 	opts := func(ts *httptest.Server) providers.ImportOptions {
-		return providers.ImportOptions{Host: ts.URL, Username: "admin", Password: "pw", Site: "s1", SkipTLSVerify: true}
+		return providers.ImportOptions{Host: ts.URL, Username: "admin", Password: "pw", Site: "HQ", SkipTLSVerify: true}
 	}
 
 	t.Run("enforced and found", func(t *testing.T) {
@@ -325,6 +329,8 @@ func TestProviderCheckACL(t *testing.T) {
 				writeEnvelope(w, 0, "", `{"token":"t1"}`)
 			case "/abc123/api/v2/logout":
 				writeEnvelope(w, 0, "", "null")
+			case "/abc123/api/v2/sites":
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			case "/abc123/api/v2/sites/s1/setting/firewall/acl":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 					{"id":"a1","name":"Allow Web","status":true,"policy":"accept","srcName":"LAN","dstName":"IoT"}
@@ -387,6 +393,8 @@ func TestProviderCheckACL(t *testing.T) {
 				writeEnvelope(w, 0, "", `{"token":"t1"}`)
 			case "/abc123/api/v2/logout":
 				writeEnvelope(w, 0, "", "null")
+			case "/abc123/api/v2/sites":
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -400,6 +408,109 @@ func TestProviderCheckACL(t *testing.T) {
 		}
 		if res.Status != "error" {
 			t.Errorf("status = %s, want error", res.Status)
+		}
+	})
+
+	t.Run("site selection fails for unknown site", func(t *testing.T) {
+		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/abc123/api/v2/login":
+				writeEnvelope(w, 0, "", `{"token":"t1"}`)
+			case "/abc123/api/v2/logout":
+				writeEnvelope(w, 0, "", "null")
+			case "/abc123/api/v2/sites":
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		p := &OmadaProvider{}
+		res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{
+			PolicyName: "p", From: "lan", To: "iot", Action: "deny", ExpectEnforced: true,
+		}, providers.ImportOptions{Host: ts.URL, Username: "admin", Password: "pw", Site: "Branch", SkipTLSVerify: true})
+		if err != nil {
+			t.Fatalf("CheckACL: %v", err)
+		}
+		if res.Status != "error" {
+			t.Errorf("status = %s, want error for unknown site", res.Status)
+		}
+	})
+
+	t.Run("site fetch failure surfaces as error", func(t *testing.T) {
+		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/abc123/api/v2/login":
+				writeEnvelope(w, 0, "", `{"token":"t1"}`)
+			case "/abc123/api/v2/logout":
+				writeEnvelope(w, 0, "", "null")
+			case "/abc123/api/v2/sites":
+				w.WriteHeader(http.StatusInternalServerError)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		p := &OmadaProvider{}
+		res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{
+			PolicyName: "p", From: "lan", To: "iot", Action: "deny", ExpectEnforced: true,
+		}, providers.ImportOptions{Host: ts.URL, Username: "admin", Password: "pw", Site: "HQ", SkipTLSVerify: true})
+		if err != nil {
+			t.Fatalf("CheckACL: %v", err)
+		}
+		if res.Status != "error" || !strings.Contains(res.Summary, "failed to fetch sites") {
+			t.Errorf("status = %s, summary = %q; want error mentioning failed site fetch", res.Status, res.Summary)
+		}
+	})
+
+	t.Run("gateway ACL fetch failure downgrades negative verdicts to warn", func(t *testing.T) {
+		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/abc123/api/v2/login":
+				writeEnvelope(w, 0, "", `{"token":"t1"}`)
+			case "/abc123/api/v2/logout":
+				writeEnvelope(w, 0, "", "null")
+			case "/abc123/api/v2/sites":
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+			case "/abc123/api/v2/sites/s1/setting/firewall/acl":
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
+					{"id":"a1","name":"Deny Lan to IoT","status":true,"policy":"drop","srcName":"lan","dstName":"iot"}
+				]}`)
+			default:
+				w.WriteHeader(http.StatusNotFound) // gwacl endpoints absent
+			}
+		}))
+		p := &OmadaProvider{}
+		// Found in switch ACLs: definitive pass even without gateway data.
+		res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{
+			PolicyName: "p", From: "lan", To: "iot", Action: "deny", ExpectEnforced: true,
+		}, opts(ts))
+		if err != nil {
+			t.Fatalf("CheckACL: %v", err)
+		}
+		if res.Status != "pass" {
+			t.Errorf("status = %s, want pass (found in switch ACLs)", res.Status)
+		}
+		// Not found: a gateway-scoped rule could flip this — warn, not fail.
+		res, err = p.CheckACL(context.Background(), providers.ACLCheckRequest{
+			PolicyName: "p", From: "guest", To: "iot", Action: "deny", ExpectEnforced: true,
+		}, opts(ts))
+		if err != nil {
+			t.Fatalf("CheckACL: %v", err)
+		}
+		if res.Status != "warn" {
+			t.Errorf("status = %s, want warn (gateway ACLs unverified)", res.Status)
+		}
+		if !strings.Contains(res.Summary, "gateway ACLs unverified") {
+			t.Errorf("summary = %q, want mention of unverified gateway ACLs", res.Summary)
+		}
+		foundEvidence := false
+		for _, e := range res.Evidence {
+			if strings.Contains(e, "gateway ACL rules could not be fetched") {
+				foundEvidence = true
+				break
+			}
+		}
+		if !foundEvidence {
+			t.Errorf("evidence = %v, want gateway fetch error surfaced", res.Evidence)
 		}
 	})
 }
@@ -463,6 +574,9 @@ func TestProviderApplyACL(t *testing.T) {
 		}
 		if res.FromCIDR != "10.0.20.0/24" || res.ToCIDR != "10.0.10.0/24" {
 			t.Errorf("cidrs = from %q to %q, want resolved network CIDRs", res.FromCIDR, res.ToCIDR)
+		}
+		if res.FromGateway != "10.0.20.1" || res.ToGateway != "10.0.10.1" {
+			t.Errorf("gateways = from %q to %q, want resolved network gateways", res.FromGateway, res.ToGateway)
 		}
 		if res.Before == res.After {
 			t.Error("before/after evidence must differ after a real create")

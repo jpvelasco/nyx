@@ -104,15 +104,41 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 	}
 	defer client.Logout(ctx)
 
-	rules, err := client.GetACLRules(ctx, opts.Site)
+	// The ACL endpoints address the site by its ID, not its display name —
+	// resolve the configured site name first.
+	sites, err := client.GetSites(ctx)
+	if err != nil {
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("failed to fetch sites: %v", err)
+		result.Finish()
+		return result, nil
+	}
+	site, err := omadabackend.SelectSite(sites, opts.Site)
+	if err != nil {
+		result.Status = models.StatusError
+		result.Summary = err.Error()
+		result.Finish()
+		return result, nil
+	}
+	siteID := site.EffectiveID()
+
+	rules, err := client.GetACLRules(ctx, siteID)
 	if err != nil {
 		result.Status = models.StatusError
 		result.Summary = fmt.Sprintf("failed to fetch ACL rules: %v", err)
 		result.Finish()
 		return result, nil
 	}
-	gwRules, _ := client.GetGatewayACLRules(ctx, opts.Site) // best-effort, don't fail on gateway rule fetch
+	gwRules, gwErr := client.GetGatewayACLRules(ctx, siteID)
 	allRules := append(rules, gwRules...)
+
+	// A failed gateway ACL fetch leaves the negative verdicts incomplete: a
+	// gateway-scoped rule we could not enumerate would flip them. Surface the
+	// error and downgrade instead of failing on partial evidence.
+	if gwErr != nil {
+		result.Evidence = append(result.Evidence,
+			fmt.Sprintf("gateway ACL rules could not be fetched: %v — verdict covers switch ACLs only", gwErr))
+	}
 
 	// Check if a matching ACL rule exists
 	found := false
@@ -150,6 +176,13 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 	} else {
 		result.Status = models.StatusFail
 		result.Summary = fmt.Sprintf("ACL policy %q is enforced but expected not_enforced", req.PolicyName)
+	}
+
+	// A negative verdict is only trustworthy when every ACL scope responded:
+	// a gateway-scoped rule that could not be fetched would flip it.
+	if gwErr != nil && result.Status == models.StatusFail {
+		result.Status = models.StatusWarn
+		result.Summary += " (gateway ACLs unverified — check the controller for gateway-scoped rules)"
 	}
 
 	result.Finish()
@@ -292,13 +325,15 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 	}
 
 	return &providers.ACLApplyResult{
-		DryRun:   req.DryRun,
-		Outcome:  outcome,
-		RuleID:   ruleID,
-		FromCIDR: src.CIDR(),
-		ToCIDR:   dst.CIDR(),
-		Before:   string(before),
-		After:    after,
+		DryRun:      req.DryRun,
+		Outcome:     outcome,
+		RuleID:      ruleID,
+		FromCIDR:    src.CIDR(),
+		ToCIDR:      dst.CIDR(),
+		FromGateway: src.Gateway(),
+		ToGateway:   dst.Gateway(),
+		Before:      string(before),
+		After:       after,
 	}, nil
 }
 

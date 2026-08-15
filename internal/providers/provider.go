@@ -71,13 +71,15 @@ type ACLApplyRequest struct {
 // of ACL rules as seen by the controller; they are identical when nothing
 // was mutated.
 type ACLApplyResult struct {
-	DryRun   bool   `json:"dry_run"`
-	Outcome  string `json:"outcome"` // "created" | "enabled" | "unchanged"
-	RuleID   string `json:"rule_id,omitempty"`
-	FromCIDR string `json:"from_cidr"` // resolved network CIDRs for re-audit
-	ToCIDR   string `json:"to_cidr"`
-	Before   string `json:"before"`
-	After    string `json:"after"`
+	DryRun      bool   `json:"dry_run"`
+	Outcome     string `json:"outcome"` // "created" | "enabled" | "unchanged"
+	RuleID      string `json:"rule_id,omitempty"`
+	FromCIDR    string `json:"from_cidr"` // resolved network CIDRs for re-audit
+	ToCIDR      string `json:"to_cidr"`
+	FromGateway string `json:"from_gateway,omitempty"` // gateway IPs for re-audit
+	ToGateway   string `json:"to_gateway,omitempty"`
+	Before      string `json:"before"`
+	After       string `json:"after"`
 }
 
 // ACLApplier is the optional mutation surface a provider may implement.
