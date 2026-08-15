@@ -513,7 +513,7 @@ func TestDispatchRunDoctor_WithSpecFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sp.WriteString("version: 1\nsite: test\n"); err != nil {
+	if _, err := sp.WriteString("version: 1\nsite: test\nprobes:\n  - name: p1\n    host: 192.0.2.1\n    user: admin\n"); err != nil {
 		t.Fatal(err)
 	}
 	if err := sp.Close(); err != nil {
@@ -525,8 +525,8 @@ func TestDispatchRunDoctor_WithSpecFile(t *testing.T) {
 	if isErr {
 		t.Fatalf("unexpected error: %s", text)
 	}
-	if !strings.Contains(text, "spec_file") || !strings.Contains(text, "nmap_installed") {
-		t.Errorf("expected nmap + spec checks, got: %s", text)
+	if !strings.Contains(text, "spec_file") || !strings.Contains(text, "nmap_installed") || !strings.Contains(text, "probe_reachable") {
+		t.Errorf("expected nmap + spec + probe checks, got: %s", text)
 	}
 }
 

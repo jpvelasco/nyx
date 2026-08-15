@@ -1,12 +1,15 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/probe"
 )
 
 // NmapCheck returns a CheckResult for whether nmap is available.
@@ -39,6 +42,24 @@ func SpecFileCheck(path string) *models.CheckResult {
 	result.Summary = fmt.Sprintf("spec file readable (%d bytes)", len(data))
 	result.Finish()
 	return result
+}
+
+// ProbeChecks returns a doctor-style check per probe declared in the spec
+// file: SSH reachability + authentication via a read-only handshake. It
+// returns nil when the spec cannot be loaded — the caller's file/validity
+// checks already surface that.
+func ProbeChecks(path string) []*models.CheckResult {
+	spec, err := intent.LoadSpec(path)
+	if err != nil {
+		return nil
+	}
+	var checks []*models.CheckResult
+	for _, p := range spec.Probes {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		checks = append(checks, probe.DiagnosticCheck(ctx, probe.FromSpec(p)))
+		cancel()
+	}
+	return checks
 }
 
 // SpecValidCheck returns a CheckResult for whether the spec file is valid.

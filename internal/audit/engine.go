@@ -800,15 +800,7 @@ func (e *Engine) runViaProbe(ctx context.Context, a intent.Assertion) (*models.C
 		return nil, fmt.Errorf("probe %q not found in spec", a.Runner)
 	}
 
-	probeP := probe.Probe{
-		Name:              p.Name,
-		Host:              p.Host,
-		User:              p.User,
-		Port:              p.Port,
-		Key:               p.Key,
-		VLAN:              p.VLAN,
-		SkipHostKeyVerify: p.SkipHostKeyVerify,
-	}
+	probeP := probe.FromSpec(*p)
 
 	// For isolation assertions, check all gateways in the destination zone
 	if a.Type == "isolation" {

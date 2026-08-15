@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -21,6 +22,9 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/models"
 )
 
 const testSSHPassword = "testpass"
@@ -49,6 +53,19 @@ type testSSHServer struct {
 // port 22 so these tests also run on rootless CI runners.
 func startTestSSHServer(t *testing.T, hangExec bool, rejectSessions bool, execReply bool, exitStatus uint32) *testSSHServer {
 	t.Helper()
+	return startTestSSHServerWithOptions(t, hangExec, rejectSessions, execReply, exitStatus, false)
+}
+
+// startTestSSHServerRejectingKeys is like startTestSSHServer, but the server
+// rejects every public key so client-side auth failures can be exercised
+// without racing a config mutation against the serve goroutine.
+func startTestSSHServerRejectingKeys(t *testing.T, hangExec bool, rejectSessions bool, execReply bool, exitStatus uint32) *testSSHServer {
+	t.Helper()
+	return startTestSSHServerWithOptions(t, hangExec, rejectSessions, execReply, exitStatus, true)
+}
+
+func startTestSSHServerWithOptions(t *testing.T, hangExec bool, rejectSessions bool, execReply bool, exitStatus uint32, rejectKeys bool) *testSSHServer {
+	t.Helper()
 	hostKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -57,6 +74,14 @@ func startTestSSHServer(t *testing.T, hangExec bool, rejectSessions bool, execRe
 	if err != nil {
 		t.Fatal(err)
 	}
+	publicKeyCallback := func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+		return nil, nil
+	}
+	if rejectKeys {
+		publicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+			return nil, fmt.Errorf("key rejected for %q", conn.User())
+		}
+	}
 	config := &ssh.ServerConfig{
 		PasswordCallback: func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
 			if subtle.ConstantTimeCompare(password, []byte(testSSHPassword)) == 1 {
@@ -64,9 +89,7 @@ func startTestSSHServer(t *testing.T, hangExec bool, rejectSessions bool, execRe
 			}
 			return nil, fmt.Errorf("password rejected for %q", conn.User())
 		},
-		PublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-			return nil, nil
-		},
+		PublicKeyCallback: publicKeyCallback,
 	}
 	config.AddHostKey(signer)
 
@@ -204,8 +227,14 @@ func TestRun_HostKeyVerificationFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected host key verification failure")
 	}
-	if !strings.Contains(err.Error(), `probe "p1" unreachable`) {
-		t.Errorf("error should mention probe name, got: %v", err)
+	var hostKeyErr *HostKeyError
+	if !errors.As(err, &hostKeyErr) {
+		t.Fatalf("expected *HostKeyError, got %T: %v", err, err)
+	}
+	for _, want := range []string{`probe "p1"`, "host key verification failed", "--skip-host-key-verify"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
 	}
 }
 
@@ -556,14 +585,11 @@ func TestRun_RemoteErrorTyped(t *testing.T) {
 }
 
 func TestRun_TransportErrorTyped(t *testing.T) {
-	// Host key verification fails → transport error, not remote error.
-	startTestSSHServer(t, false, false, true, 0)
-	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
-	writeTestKey(t, keyPath)
-
-	p := testProbe("127.0.0.1")
-	p.Key = keyPath
-	_, err := Run(context.Background(), p, []string{"echo", "hi"}, false)
+	// An unreachable host yields a transport error, not remote or auth.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	p := Probe{Name: "test", Host: "192.0.2.1", User: "u", VLAN: "iot"}
+	_, err := Run(ctx, p, []string{"echo", "hi"}, true)
 	if err == nil {
 		t.Fatal("expected transport failure")
 	}
@@ -588,5 +614,293 @@ func TestRun_AuthMethodsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "reading key file") {
 		t.Errorf("expected key-reading detail in error, got: %v", err)
+	}
+}
+
+// TestRun_AuthDiagnosticsTable covers the classified auth/host-key error
+// paths table-driven: host-key failure, skip-verify success, key rejection,
+// missing/unparsable key files, and a missing ssh-agent.
+func TestRun_AuthDiagnosticsTable(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, srv *testSSHServer) string // returns key path; "" = none
+		skipVerify  bool
+		rejectKeys  bool         // server rejects every public key
+		wantErrKind reflect.Type // nil = success
+		wantMessage string
+	}{
+		{
+			name: "host key fail",
+			setup: func(t *testing.T, _ *testSSHServer) string {
+				keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+				writeTestKey(t, keyPath)
+				return keyPath
+			},
+			wantErrKind: reflect.TypeOf((*HostKeyError)(nil)),
+			wantMessage: "host key verification failed",
+		},
+		{
+			name: "skip verify succeeds",
+			setup: func(t *testing.T, _ *testSSHServer) string {
+				keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+				writeTestKey(t, keyPath)
+				return keyPath
+			},
+			skipVerify: true,
+		},
+		{
+			name: "key rejected by server",
+			setup: func(t *testing.T, _ *testSSHServer) string {
+				keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+				writeTestKey(t, keyPath)
+				return keyPath
+			},
+			skipVerify:  true,
+			rejectKeys:  true,
+			wantErrKind: reflect.TypeOf((*AuthError)(nil)),
+			wantMessage: "authentication failed",
+		},
+		{
+			name: "missing key path",
+			setup: func(t *testing.T, _ *testSSHServer) string {
+				return filepath.Join(t.TempDir(), "missing-key")
+			},
+			wantErrKind: reflect.TypeOf((*AuthError)(nil)),
+			wantMessage: "reading key file",
+		},
+		{
+			name: "unparsable key",
+			setup: func(t *testing.T, _ *testSSHServer) string {
+				keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+				if err := os.WriteFile(keyPath, []byte("not a private key"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return keyPath
+			},
+			wantErrKind: reflect.TypeOf((*AuthError)(nil)),
+			wantMessage: "parsing key file",
+		},
+		{
+			name: "no key and no agent",
+			setup: func(t *testing.T, _ *testSSHServer) string {
+				t.Setenv("SSH_AUTH_SOCK", "")
+				return ""
+			},
+			wantErrKind: reflect.TypeOf((*AuthError)(nil)),
+			wantMessage: "no authentication methods available",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.rejectKeys {
+				startTestSSHServerRejectingKeys(t, false, false, true, 0)
+			} else {
+				startTestSSHServer(t, false, false, true, 0)
+			}
+			p := testProbe("127.0.0.1")
+			p.Key = tt.setup(t, nil)
+
+			_, err := Run(context.Background(), p, []string{"echo", "hi"}, tt.skipVerify)
+			if tt.wantErrKind == nil {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			target := reflect.New(tt.wantErrKind).Interface()
+			if !errors.As(err, target) {
+				t.Fatalf("expected %v, got %T: %v", tt.wantErrKind, err, err)
+			}
+			if !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Errorf("error should contain %q, got: %v", tt.wantMessage, err)
+			}
+		})
+	}
+}
+
+func TestDiagnose_HostKeyFailure(t *testing.T) {
+	startTestSSHServer(t, false, false, true, 0)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+	err := Diagnose(context.Background(), p)
+	var hostKeyErr *HostKeyError
+	if !errors.As(err, &hostKeyErr) {
+		t.Fatalf("expected *HostKeyError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "skip_host_key_verify") {
+		t.Errorf("error should mention skip_host_key_verify, got: %v", err)
+	}
+}
+
+func TestRun_NonSSHServerDefaultsToTransportError(t *testing.T) {
+	// A host that accepts TCP but never speaks SSH fails the handshake with
+	// an unclassifiable error, which must surface as a TransportError.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		conn.Close()
+	}()
+
+	p := testProbe("127.0.0.1")
+	p.Port = ln.Addr().(*net.TCPAddr).Port
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+	p.Key = keyPath
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err = Run(ctx, p, []string{"echo", "ok"}, true)
+	var transportErr *TransportError
+	if !errors.As(err, &transportErr) {
+		t.Fatalf("expected *TransportError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "unreachable") {
+		t.Errorf("error should be actionable, got: %v", err)
+	}
+}
+
+func TestDiagnose_SpecSkipFlagHonored(t *testing.T) {
+	// A probe configured with skip_host_key_verify reaches the auth phase,
+	// so a valid key succeeds end-to-end.
+	startTestSSHServer(t, false, false, true, 0)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+	p.SkipHostKeyVerify = true
+	if err := Diagnose(context.Background(), p); err != nil {
+		t.Fatalf("unexpected error with spec-level skip: %v", err)
+	}
+}
+
+func TestDiagnose_AuthFailure(t *testing.T) {
+	// With host-key verification on, the handshake dies at the host-key
+	// check before auth runs; a probe that skips verification surfaces the
+	// auth failure instead.
+	startTestSSHServerRejectingKeys(t, false, false, true, 0)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+	p.SkipHostKeyVerify = true
+	err := Diagnose(context.Background(), p)
+	var authErr *AuthError
+	if !errors.As(err, &authErr) {
+		t.Fatalf("expected *AuthError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "SSH_AUTH_SOCK") {
+		t.Errorf("error should mention SSH_AUTH_SOCK guidance, got: %v", err)
+	}
+}
+
+func TestDiagnose_Unreachable(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	p := Probe{Name: "test", Host: "192.0.2.1", User: "u", VLAN: "iot"}
+	err := Diagnose(ctx, p)
+	var transErr *TransportError
+	if !errors.As(err, &transErr) {
+		t.Fatalf("expected *TransportError, got %T: %v", err, err)
+	}
+}
+
+func TestFromSpec(t *testing.T) {
+	got := FromSpec(intent.Probe{Name: "p", Host: "1.2.3.4", User: "u", Port: 2222, Key: "k", VLAN: "iot", SkipHostKeyVerify: true})
+	want := Probe{Name: "p", Host: "1.2.3.4", User: "u", Port: 2222, Key: "k", VLAN: "iot", SkipHostKeyVerify: true}
+	if got != want {
+		t.Errorf("FromSpec = %+v, want %+v", got, want)
+	}
+}
+
+// TestDiagnosticCheckTable exercises the doctor-shaped check across the
+// classified outcomes: pass, host-key failure, auth failure, unreachable.
+func TestDiagnosticCheckTable(t *testing.T) {
+	tests := []struct {
+		name         string
+		setup        func(t *testing.T) Probe
+		wantStatus   models.Status
+		wantReached  bool
+		wantAuthOK   bool
+		wantViolates bool
+	}{
+		{
+			name: "pass",
+			setup: func(t *testing.T) Probe {
+				startTestSSHServer(t, false, false, true, 0)
+				keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+				writeTestKey(t, keyPath)
+				p := testProbe("127.0.0.1")
+				p.Key = keyPath
+				p.SkipHostKeyVerify = true
+				return p
+			},
+			wantStatus: models.StatusPass, wantReached: true, wantAuthOK: true,
+		},
+		{
+			name: "host key fail",
+			setup: func(t *testing.T) Probe {
+				startTestSSHServer(t, false, false, true, 0)
+				keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+				writeTestKey(t, keyPath)
+				p := testProbe("127.0.0.1")
+				p.Key = keyPath
+				return p
+			},
+			wantStatus: models.StatusFail, wantReached: true, wantAuthOK: false, wantViolates: true,
+		},
+		{
+			name: "auth fail",
+			setup: func(t *testing.T) Probe {
+				startTestSSHServerRejectingKeys(t, false, false, true, 0)
+				keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+				writeTestKey(t, keyPath)
+				p := testProbe("127.0.0.1")
+				p.Key = keyPath
+				p.SkipHostKeyVerify = true
+				return p
+			},
+			wantStatus: models.StatusFail, wantReached: true, wantAuthOK: false, wantViolates: true,
+		},
+		{
+			name: "unreachable",
+			setup: func(t *testing.T) Probe {
+				return Probe{Name: "test", Host: "192.0.2.1", User: "u", VLAN: "iot"}
+			},
+			wantStatus: models.StatusFail, wantReached: false, wantAuthOK: false, wantViolates: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := tt.setup(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			c := DiagnosticCheck(ctx, p)
+			if c.Status != tt.wantStatus {
+				t.Errorf("status = %q, want %q", c.Status, tt.wantStatus)
+			}
+			if got, _ := c.Observed["reachable"].(bool); got != tt.wantReached {
+				t.Errorf("observed reachable = %v, want %v", c.Observed["reachable"], tt.wantReached)
+			}
+			if got, _ := c.Observed["auth_ok"].(bool); got != tt.wantAuthOK {
+				t.Errorf("observed auth_ok = %v, want %v", c.Observed["auth_ok"], tt.wantAuthOK)
+			}
+			if (len(c.Violations) > 0) != tt.wantViolates {
+				t.Errorf("violations = %v, wantViolates = %v", c.Violations, tt.wantViolates)
+			}
+		})
 	}
 }

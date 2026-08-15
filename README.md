@@ -249,7 +249,7 @@ Add to your MCP config:
 | `load_spec` | Load and validate a spec file |
 | `get_interfaces` | List network interfaces |
 | `ping_target` | Ping a target |
-| `run_doctor` | Check environment health + optional spec validation |
+| `run_doctor` | Check environment health + optional spec validation + probe SSH reachability/auth (read-only) |
 | `provider_list` | List registered providers |
 | `omada_get_info` | Fetch Omada controller metadata (no auth) |
 | `omada_list_networks` | List Omada LAN networks/VLANs for a site |

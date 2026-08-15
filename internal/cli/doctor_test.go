@@ -4,7 +4,32 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/jpvelasco/nyx/internal/models"
 )
+
+func TestDoctorSpecProbeCheck(t *testing.T) {
+	specFile = writeSpec(t, "version: 1\nsite: test\nprobes:\n  - name: p1\n    host: 192.0.2.1\n    user: admin\n")
+	checks := runSpecChecks(specFile)
+	var found *models.CheckResult
+	for i := range checks {
+		if checks[i].CheckType == "probe_reachable" && checks[i].Target == "p1" {
+			found = &checks[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("expected a probe_reachable check for probe p1")
+	}
+	if found.Status != models.StatusFail {
+		t.Errorf("status = %q, want fail for unreachable probe", found.Status)
+	}
+	if !strings.Contains(found.Summary, "unreachable") {
+		t.Errorf("summary should report unreachable, got: %s", found.Summary)
+	}
+	if len(found.Violations) == 0 {
+		t.Error("expected actionable violation guidance")
+	}
+}
 
 func TestNmapInstallHintNoSudo(t *testing.T) {
 	hint := nmapInstallHint()

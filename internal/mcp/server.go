@@ -301,7 +301,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		},
 		{
 			Name:        "run_doctor",
-			Description: "Check nyx environment health. Optionally validate a spec file.",
+			Description: "Check nyx environment health. Optionally validate a spec file and probe SSH reachability/auth for declared probes.",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]propSchema{
@@ -692,6 +692,9 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		if specPath != "" {
 			findings = append(findings, *service.SpecFileCheck(specPath))
 			findings = append(findings, *service.SpecValidCheck(specPath))
+			for _, c := range service.ProbeChecks(specPath) {
+				findings = append(findings, *c)
+			}
 		}
 
 		doctorReport := &models.AuditReport{

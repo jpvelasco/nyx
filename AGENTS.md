@@ -132,6 +132,10 @@ Auth is **public key + SSH agent only — no password auth.** The `key:` probe f
 
 **Host key verification is ON by default.** `probe.Run` fails if the host key isn't trusted (message tells the user). Bypass per-run via the `--skip-host-key-verify` flag or per-probe via `skip_host_key_verify: true` in the spec. This is an intentional improvement over blind `InsecureIgnoreHostKey()`.
 
+**Handshake failures are typed and actionable.** `probe.Run` returns `HostKeyError` (untrusted host key — verify the key matches the probe or bypass), `AuthError` (key path, agent, or credentials problem, with `SSH_AUTH_SOCK` guidance), or `TransportError` (unreachable host / handshake failure, naming the VLAN). `probe.FromSpec` maps intent probe declarations onto the runtime probe; `probe.Diagnose` performs a read-only handshake with no remote command.
+
+**`nyx doctor --spec` and MCP `run_doctor` emit a `probe_reachable` check per declared probe** (SSH reachability + auth via read-only handshake, 5s timeout each, no remote command executed). A probe without `skip_host_key_verify` reports a host-key failure by design — the handshake dies at the host-key check before auth can be tested; set the flag (or trust the key) to surface auth failures.
+
 Local (non-probe) `isolation` results are only **definitive** when the runner is inside the source zone. Otherwise the engine emits "unverifiable"/"unconfirmed" instead of a hard violation, and the message suggests `runner: <probe>` from the source zone.
 
 ## nyx init
