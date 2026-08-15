@@ -10,6 +10,7 @@ import (
 
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/backends/system"
+	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -90,14 +91,7 @@ then write a nyx.yaml spec you can customize.`,
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "  scan failed: %v — continuing with 0 hosts\n", err)
 			} else if result != nil {
-				if v, ok := result.Observed["hosts_up"]; ok {
-					switch n := v.(type) {
-					case int:
-						hostCount = n
-					case float64:
-						hostCount = int(n)
-					}
-				}
+				hostCount = hostCountFrom(result)
 			}
 
 			nets = append(nets, initNet{
@@ -162,6 +156,26 @@ type localCIDR struct {
 	ifaceName string
 }
 
+// hostCountFrom extracts the live-host count from a discovery result. The
+// nmap backend records it under Observed["total"]; a nil result, a missing
+// key, or an unexpected value type all mean "0 hosts".
+func hostCountFrom(result *models.CheckResult) int {
+	if result == nil {
+		return 0
+	}
+	v, ok := result.Observed["total"]
+	if !ok {
+		return 0
+	}
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	}
+	return 0
+}
+
 // detectLocalCIDRs finds RFC1918 subnets the local machine has addresses in,
 // using the routing table to find real gateways instead of guessing .1.
 // If interfaceName is non-empty, only that interface is considered.
@@ -201,6 +215,12 @@ func detectLocalCIDRs(interfaceName string) ([]localCIDR, error) {
 
 	for _, iface := range ifaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		// Virtual/host-only adapters (VMware, Hyper-V, WSL2, Docker, OpenVPN)
+		// have no real network behind them — skip them unless the user
+		// explicitly selected one with --interface.
+		if interfaceName == "" && isVirtualIface(iface.Name) {
 			continue
 		}
 		if interfaceName != "" && iface.Name != interfaceName {
