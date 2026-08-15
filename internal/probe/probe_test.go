@@ -35,7 +35,7 @@ const testSSHPassword = "testpass"
 var lastTestServerPort int
 
 // testSSHServer is an in-process SSH server used to exercise Run/Check
-// against a real handshake on 127.0.0.1:22 without external dependencies.
+// against a real handshake on a loopback port without external dependencies.
 type testSSHServer struct {
 	t              *testing.T
 	ln             net.Listener
@@ -380,6 +380,43 @@ func TestIsUnreachable(t *testing.T) {
 	}
 }
 
+func TestUnreachableError_UsesConfiguredPort(t *testing.T) {
+	// The unreachable error must name the probe's configured port, not a
+	// hardcoded :22.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	p := Probe{Name: "test", Host: "192.0.2.1", User: "testuser", VLAN: "iot", Port: 8022}
+	_, err := Run(ctx, p, []string{"echo", "hello"}, false)
+	if err == nil {
+		t.Fatal("expected error for unreachable host")
+	}
+	var transErr *TransportError
+	if !errors.As(err, &transErr) {
+		t.Fatalf("expected *TransportError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "192.0.2.1:8022") {
+		t.Errorf("error should mention configured port 8022, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "192.0.2.1:22") {
+		t.Errorf("error should not hardcode port 22, got: %v", err)
+	}
+}
+
+func TestDialWithContext_CancellationAbortsDial(t *testing.T) {
+	// A cancelled context must abort the dial promptly instead of waiting
+	// out the default timeout.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	_, err := dialWithContext(ctx, testProbe("192.0.2.1"))
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("expected cancelled context to abort the dial promptly, took %v", elapsed)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got: %v", err)
+	}
+}
 func TestDialWithContext_DefaultDeadline(t *testing.T) { // RFC5737 TEST-NET is non-routable: the dial hangs and must hit the
 	// 10s default deadline imposed on a context without one.
 	start := time.Now()
@@ -825,6 +862,27 @@ func TestDiagnose_AuthFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "SSH_AUTH_SOCK") {
 		t.Errorf("error should mention SSH_AUTH_SOCK guidance, got: %v", err)
+	}
+}
+
+func TestAuthError_UsesConfiguredPort(t *testing.T) {
+	// The auth-failure error must name the probe's configured port, not a
+	// hardcoded :22.
+	startTestSSHServerRejectingKeys(t, false, false, true, 0)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+	p.SkipHostKeyVerify = true
+	_, err := Run(context.Background(), p, []string{"echo", "hi"}, true)
+	var authErr *AuthError
+	if !errors.As(err, &authErr) {
+		t.Fatalf("expected *AuthError, got %T: %v", err, err)
+	}
+	want := fmt.Sprintf("at 127.0.0.1:%d", lastTestServerPort)
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error should mention configured port %d, got: %v", lastTestServerPort, err)
 	}
 }
 

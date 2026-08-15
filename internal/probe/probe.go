@@ -190,7 +190,7 @@ func classifyHandshakeError(p Probe, err error) error {
 	case strings.Contains(msg, "host key verification failed"):
 		return &HostKeyError{fmt.Errorf("probe %q: SSH host key verification failed for %s — the host key is not trusted; verify it matches %s, or bypass with --skip-host-key-verify (CLI) / skip_host_key_verify: true (probe spec)", p.Name, p.Host, p.Host)}
 	case strings.Contains(msg, "unable to authenticate"):
-		return &AuthError{fmt.Errorf("probe %q: SSH authentication failed for user %q at %s:22 — check the key: path in the probe spec and that the ssh-agent (SSH_AUTH_SOCK) holds the correct key", p.Name, p.User, p.Host)}
+		return &AuthError{fmt.Errorf("probe %q: SSH authentication failed for user %q at %s — check the key: path in the probe spec and that the ssh-agent (SSH_AUTH_SOCK) holds the correct key", p.Name, p.User, p.addr())}
 	default:
 		return unreachableError(p, err)
 	}
@@ -199,7 +199,7 @@ func classifyHandshakeError(p Probe, err error) error {
 // unreachableError reports a transport-level failure (dial or handshake)
 // with the probe identity and VLAN context needed to fix it.
 func unreachableError(p Probe, err error) error {
-	return &TransportError{fmt.Errorf("probe %q unreachable at %s:22 — is the host on VLAN %s and SSH running? (%w)", p.Name, p.Host, p.VLAN, err)}
+	return &TransportError{fmt.Errorf("probe %q unreachable at %s — is the host on VLAN %s and SSH running? (%w)", p.Name, p.addr(), p.VLAN, err)}
 }
 
 // FromSpec converts an intent-spec probe declaration into the runtime probe
@@ -222,7 +222,7 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// Check verifies that the probe is reachable via TCP on port 22 (no SSH handshake).
+// Check verifies that the probe is reachable via TCP on its configured port (no SSH handshake).
 func Check(ctx context.Context, p Probe) error {
 	conn, err := dialWithContext(ctx, p)
 	if err != nil {
@@ -294,19 +294,20 @@ func DiagnosticCheck(ctx context.Context, p Probe) *models.CheckResult {
 	return c
 }
 
-// dialWithContext establishes a TCP connection to p.Host:22 with the given context deadline.
+// dialWithContext establishes a TCP connection to p.addr() honoring the
+// given context's deadline and cancellation. A context without a deadline
+// gets a 10s cap so a hung host cannot block forever.
 func dialWithContext(ctx context.Context, p Probe) (net.Conn, error) {
-	// Extract deadline from context
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		deadline = time.Now().Add(10 * time.Second)
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	timeout := time.Until(deadline)
-	if timeout <= 0 {
-		return nil, fmt.Errorf("context deadline exceeded")
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
 	}
-
-	return net.DialTimeout("tcp", p.addr(), timeout)
+	var d net.Dialer
+	return d.DialContext(ctx, "tcp", p.addr())
 }
 
 // authMethods builds the SSH auth method chain: private key (if provided) then ssh-agent.
