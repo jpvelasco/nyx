@@ -3,11 +3,14 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/jpvelasco/nyx/internal/audit"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
@@ -18,6 +21,19 @@ import (
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/version"
 )
+
+const (
+	// maxFrameSize caps a single newline-delimited JSON-RPC frame. Frames
+	// beyond this size are answered with a parse error and discarded so an
+	// oversized message cannot crash or wedge the server.
+	maxFrameSize = 8 * 1024 * 1024
+)
+
+// toolCallTimeout bounds a single tools/call dispatch so a hung backend
+// cannot leave the server wedged. Dispatch runs in a goroutine and the
+// caller selects on the result, so the server always answers within this
+// window even if the backend ignores context cancellation.
+var toolCallTimeout = 5 * time.Minute
 
 // JSON-RPC types
 type jsonRPCRequest struct {
@@ -130,39 +146,95 @@ func NewServer() *Server {
 
 // Serve runs the MCP server loop on stdio
 func (s *Server) Serve(ctx context.Context) error {
-	scanner := bufio.NewScanner(s.reader)
-	// Increase buffer for large messages
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+	reader := bufio.NewReaderSize(s.reader, 64*1024)
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
+	for {
+		frame, err := readFrame(reader)
+		if err == io.EOF {
+			if len(frame) == 0 {
+				return nil
+			}
+			err = nil // process the final frame that has no trailing newline
+		}
+		if err != nil {
+			if err == errFrameTooLarge {
+				s.writeResponse(&jsonRPCResponse{
+					JSONRPC: "2.0",
+					Error:   &rpcError{Code: -32700, Message: "parse error: frame exceeds the size limit"},
+				})
+				continue
+			}
+			return err
+		}
+
+		frame = bytes.TrimSpace(frame)
+		if len(frame) == 0 {
 			continue
 		}
 
 		var req jsonRPCRequest
-		if err := json.Unmarshal(line, &req); err != nil {
-			// Skip malformed messages
+		if err := json.Unmarshal(frame, &req); err != nil {
+			s.writeResponse(&jsonRPCResponse{
+				JSONRPC: "2.0",
+				Error:   &rpcError{Code: -32700, Message: "parse error: invalid JSON-RPC message"},
+			})
 			continue
 		}
 
 		// Notifications have no ID and need no response
 		if req.ID == nil || string(req.ID) == "null" {
-			// Handle notifications (e.g., notifications/initialized)
-			if req.Method == "notifications/initialized" {
-				continue
-			}
 			continue
 		}
 
-		resp := s.handleRequest(ctx, &req)
-		respBytes, err := json.Marshal(resp)
-		if err != nil {
+		s.writeResponse(s.handleRequest(ctx, &req))
+	}
+}
+
+// errFrameTooLarge marks a newline-delimited frame that exceeds maxFrameSize.
+var errFrameTooLarge = errors.New("frame too large")
+
+// readFrame reads one newline-delimited frame, capping its size so a single
+// oversized line cannot exhaust memory. The remainder of an oversized line is
+// drained so the server can keep serving subsequent frames. A final frame
+// without a trailing newline is returned together with io.EOF.
+func readFrame(r *bufio.Reader) ([]byte, error) {
+	var frame []byte
+	for {
+		chunk, err := r.ReadSlice('\n')
+		frame = append(frame, chunk...)
+		if err == bufio.ErrBufferFull {
+			if len(frame) > maxFrameSize {
+				if drainErr := drainLine(r); drainErr != nil {
+					return nil, drainErr
+				}
+				return nil, errFrameTooLarge
+			}
 			continue
 		}
-		fmt.Fprintf(s.writer, "%s\n", respBytes)
+		if len(frame) > maxFrameSize {
+			return nil, errFrameTooLarge
+		}
+		return frame, err // nil or io.EOF
 	}
-	return scanner.Err()
+}
+
+// drainLine discards the remainder of a line that exceeded maxFrameSize.
+func drainLine(r *bufio.Reader) error {
+	for {
+		_, err := r.ReadSlice('\n')
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return err // nil or io.EOF — either way the line has ended
+	}
+}
+
+func (s *Server) writeResponse(resp *jsonRPCResponse) {
+	respBytes, err := json.Marshal(resp)
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(s.writer, "%s\n", respBytes)
 }
 
 func (s *Server) handleRequest(ctx context.Context, req *jsonRPCRequest) *jsonRPCResponse {
@@ -519,15 +591,39 @@ func (s *Server) handleToolCall(ctx context.Context, req *jsonRPCRequest) *jsonR
 		}
 	}
 
-	resultText, isError := s.dispatchTool(ctx, params.Name, params.Arguments)
-	return &jsonRPCResponse{
-		JSONRPC: "2.0",
-		ID:      req.ID,
-		Result: toolCallResult{
-			Content: []contentBlock{{Type: "text", Text: resultText}},
-			IsError: isError,
-		},
+	ctx, cancel := context.WithTimeout(ctx, toolCallTimeout)
+	defer cancel()
+
+	done := make(chan toolDispatchResult, 1)
+	go func() {
+		text, isErr := s.dispatchTool(ctx, params.Name, params.Arguments)
+		done <- toolDispatchResult{text: text, isErr: isErr}
+	}()
+
+	select {
+	case result := <-done:
+		return &jsonRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result: toolCallResult{
+				Content: []contentBlock{{Type: "text", Text: result.text}},
+				IsError: result.isErr,
+			},
+		}
+	case <-ctx.Done():
+		return &jsonRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error: &rpcError{Code: -32000, Message: fmt.Sprintf(
+				"tool call %q timed out after %s; the operation was cancelled — check the target network or rerun",
+				params.Name, toolCallTimeout)},
+		}
 	}
+}
+
+type toolDispatchResult struct {
+	text  string
+	isErr bool
 }
 
 func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]interface{}) (string, bool) {

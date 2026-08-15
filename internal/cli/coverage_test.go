@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -889,6 +890,150 @@ func TestVerifyIsolationCmd_PingError(t *testing.T) {
 	requireExitCode(t, err, 3)
 }
 
+// ---------------------------------------------------------------------------
+// verify-isolation --from honored via spec (#192)
+// ---------------------------------------------------------------------------
+
+func isolationSpec(t *testing.T, lanCIDR, lanGateway string) string {
+	t.Helper()
+	return writeSpec(t, fmt.Sprintf(`version: 1
+site: test
+networks:
+  - name: lan
+    cidr: %s
+    gateway: %s
+    zone: lan
+  - name: iot
+    cidr: 10.253.0.0/24
+    gateway: 127.0.0.1
+    zone: iot
+`, lanCIDR, lanGateway))
+}
+
+func TestVerifyIsolationCmd_Spec_FromRequired(t *testing.T) {
+	saveRestoreGlobals(t)
+	specFile = isolationSpec(t, "192.0.2.0/24", "192.0.2.1")
+	isolationFrom = ""
+	isolationTo = "iot"
+	timeout = "10s"
+	err := verifyIsolationCmd.RunE(verifyIsolationCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "--from is required") {
+		t.Fatalf("expected --from required error, got %v", err)
+	}
+}
+
+func TestVerifyIsolationCmd_Spec_UnknownFromZone(t *testing.T) {
+	saveRestoreGlobals(t)
+	specFile = isolationSpec(t, "192.0.2.0/24", "192.0.2.1")
+	isolationFrom = "bogus"
+	isolationTo = "iot"
+	timeout = "10s"
+	err := verifyIsolationCmd.RunE(verifyIsolationCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), `source zone "bogus" is not declared`) {
+		t.Fatalf("expected unknown-zone error, got %v", err)
+	}
+}
+
+func TestVerifyIsolationCmd_Spec_RunnerOutsideFromZone(t *testing.T) {
+	// The from-zone is TEST-NET, which this host can never be inside of, so
+	// the engine must refuse a definitive verdict even though the to-zone
+	// gateway is reachable. Before #192 the --from value was ignored and this
+	// produced a hard fail (exit 1) from the local vantage point.
+	saveRestoreGlobals(t)
+	specFile = isolationSpec(t, "192.0.2.0/24", "192.0.2.1")
+	isolationFrom = "lan"
+	isolationTo = "iot"
+	timeout = "10s"
+	jsonOutput = true
+	outputPath = filepath.Join(t.TempDir(), "iso.json")
+	err := verifyIsolationCmd.RunE(verifyIsolationCmd, nil)
+	requireExitCode(t, err, 3) // unconfirmed from outside the source zone
+}
+
+func TestVerifyIsolationCmd_Spec_RunnerInsideFromZone(t *testing.T) {
+	// The from-zone wraps this host's own address, so the engine's runner
+	// context places it inside the source zone and the verdict is definitive:
+	// the to-zone gateway is loopback, which is reachable on every platform,
+	// so isolation is violated.
+	saveRestoreGlobals(t)
+	ip := hostIPv4(t)
+	specFile = isolationSpec(t, ip+"/32", ip)
+	isolationFrom = "lan"
+	isolationTo = "iot"
+	timeout = "10s"
+	jsonOutput = true
+	outputPath = filepath.Join(t.TempDir(), "iso.json")
+	err := verifyIsolationCmd.RunE(verifyIsolationCmd, nil)
+	requireExitCode(t, err, 1) // violation confirmed from inside the source zone
+}
+
+func TestVerifyIsolationCmd_Spec_BadSpecFile(t *testing.T) {
+	saveRestoreGlobals(t)
+	specFile = filepath.Join(t.TempDir(), "missing.yaml")
+	isolationFrom = "lan"
+	isolationTo = "iot"
+	timeout = "10s"
+	err := verifyIsolationCmd.RunE(verifyIsolationCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "loading spec") {
+		t.Fatalf("expected spec-loading error, got %v", err)
+	}
+}
+
+func TestVerifyIsolationCmd_UnreachableTarget(t *testing.T) {
+	// Without a spec, --from is a label and an unreachable target must not
+	// error the command: Linux/darwin report "not reachable" as a pass
+	// (exit 0), while Windows ping exits nonzero and produces a warn
+	// (exit 3). Either verdict is correct for its platform.
+	saveRestoreGlobals(t)
+	specFile = ""
+	isolationFrom = "lan"
+	isolationTo = "192.0.2.1"
+	timeout = "5s"
+	err := verifyIsolationCmd.RunE(verifyIsolationCmd, nil)
+	if err == nil {
+		return
+	}
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if exitErr.Code != 3 {
+		t.Errorf("exit code = %d, want 0 (linux/darwin) or 3 (windows)", exitErr.Code)
+	}
+}
+
+// hostIPv4 returns any non-loopback IPv4 address on this host, mirroring the
+// engine's runner-context enumeration.
+func hostIPv4(t *testing.T) string {
+	t.Helper()
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ipnet, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipnet.IP.To4()
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			return ip.String()
+		}
+	}
+	t.Fatal("no non-loopback IPv4 address found on this host")
+	return ""
+}
+
 func TestDiscoverCmd_MissingSubnet(t *testing.T) {
 	saveRestoreGlobals(t)
 	discoverSubnet = ""
@@ -951,7 +1096,7 @@ func TestDoctorCmd_Human_FailingChecks(t *testing.T) {
 	saveRestoreGlobals(t)
 	outputPath = filepath.Join(t.TempDir(), "doctor.txt")
 	err := doctorCmd.RunE(doctorCmd, nil)
-	requireExitCode(t, err, 2) // missing nmap => issues found
+	requireExitCode(t, err, 1) // missing nmap => fail => exit 1 (was hardcoded 2)
 }
 
 // TestDoctorCmd_NoHome_NoPanic ensures the log-directory check survives an
@@ -967,7 +1112,7 @@ func TestDoctorCmd_NoHome_NoPanic(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	} else {
-		requireExitCode(t, err, 2)
+		requireExitCode(t, err, 1)
 	}
 }
 

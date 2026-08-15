@@ -73,3 +73,27 @@ func TestNmapPassSummaryContainsNoRoot(t *testing.T) {
 		t.Errorf("nmap PASS summary format changed — update doctor.go to restore no-root note: %q", summary)
 	}
 }
+
+// TestDoctorExitCodeAggregation verifies the worst doctor check status maps to
+// the documented exit codes. Regression for #191 (always-2) and #163 (doctor
+// never emitted exit code 3).
+func TestDoctorExitCodeAggregation(t *testing.T) {
+	tests := []struct {
+		name   string
+		checks []models.CheckResult
+		want   int
+	}{
+		{"all pass", []models.CheckResult{{Status: models.StatusPass}, {Status: models.StatusPass}}, 0},
+		{"fail dominates", []models.CheckResult{{Status: models.StatusWarn}, {Status: models.StatusFail}}, 1},
+		{"error", []models.CheckResult{{Status: models.StatusError}, {Status: models.StatusWarn}}, 2},
+		{"warn only", []models.CheckResult{{Status: models.StatusPass}, {Status: models.StatusWarn}}, 3},
+		{"empty", nil, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := exitCodeForStatus(models.ComputeOverallStatus(tt.checks)); got != tt.want {
+				t.Errorf("doctor aggregation = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

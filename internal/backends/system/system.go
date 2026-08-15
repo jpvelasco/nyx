@@ -59,13 +59,12 @@ func runCmd(ctx context.Context, name string, args ...string) (string, error) {
 func classifyInterface(name, linkType string) string {
 	lower := strings.ToLower(name)
 	switch {
-	case strings.HasPrefix(lower, "wg"):
+	case strings.HasPrefix(lower, "wg") || strings.Contains(lower, "wireguard"):
 		return "wireguard"
 	case strings.HasPrefix(lower, "lo"):
 		return "loopback"
-	case strings.HasPrefix(lower, "tun") || strings.HasPrefix(lower, "tap"):
-		return "tunnel"
-	case strings.HasPrefix(lower, "utun"):
+	case strings.HasPrefix(lower, "tun") || strings.HasPrefix(lower, "tap") ||
+		strings.HasPrefix(lower, "utun") || strings.Contains(lower, "tunnel"):
 		return "tunnel"
 	case strings.HasPrefix(lower, "br"):
 		return "bridge"
@@ -88,12 +87,18 @@ func classifyInterface(name, linkType string) string {
 }
 
 // isVPNInterfaceName returns true if the interface name looks like a VPN tunnel.
+// "wireguard" and "tunnel" are matched as substrings, not just prefixes, so
+// Windows adapters named "WireGuard Tunnel" (or renamed variants keeping
+// either marker) are detected — a WireGuard TUN adapter's name is not
+// guaranteed to start with "wg".
 func isVPNInterfaceName(name string) bool {
 	lower := strings.ToLower(name)
 	return strings.HasPrefix(lower, "wg") ||
+		strings.Contains(lower, "wireguard") ||
 		strings.HasPrefix(lower, "tun") ||
 		strings.HasPrefix(lower, "tap") ||
 		strings.HasPrefix(lower, "utun") ||
+		strings.Contains(lower, "tunnel") ||
 		strings.HasPrefix(lower, "ipsec") ||
 		strings.HasPrefix(lower, "tailscale") ||
 		strings.HasPrefix(lower, "nordlynx") ||

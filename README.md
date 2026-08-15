@@ -99,7 +99,7 @@ For the full story of what this feels like on a real multi-VLAN homelab (includi
 --output <path>   Write output to file instead of stdout
 --spec <file>     Path to YAML spec file (used by audit)
 --verbose         Verbose output with additional evidence
---timeout <dur>   Timeout for operations (default 60s)
+--timeout <dur>   Timeout for operations (default 120s)
 ```
 
 ## YAML Spec Format

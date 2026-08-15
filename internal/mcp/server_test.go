@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jpvelasco/nyx/internal/backends"
 	"github.com/jpvelasco/nyx/internal/backends/system"
@@ -56,10 +57,10 @@ func TestServe_EndToEnd(t *testing.T) {
 	}
 
 	lines := nonEmptyLines(out.String())
-	if len(lines) != 4 {
-		t.Fatalf("expected 4 responses, got %d: %q", len(lines), out.String())
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 responses, got %d: %q", len(lines), out.String())
 	}
-	for i, wantID := range []string{"1", "2", "3", "4"} {
+	for i, wantID := range []string{"1", "2", "3"} {
 		if !strings.Contains(lines[i], `"id":`+wantID) {
 			t.Errorf("response %d: expected id %s, got %s", i, wantID, lines[i])
 		}
@@ -70,8 +71,14 @@ func TestServe_EndToEnd(t *testing.T) {
 	if !strings.Contains(lines[2], `"unknown tool: nope"`) || !strings.Contains(lines[2], `"isError":true`) {
 		t.Errorf("expected unknown tool error, got %s", lines[2])
 	}
-	if !strings.Contains(lines[3], `"subnet parameter is required"`) {
-		t.Errorf("expected required-param error for discover_subnet, got %s", lines[3])
+	if !strings.Contains(lines[3], `-32700`) || !strings.Contains(lines[3], `parse error`) {
+		t.Errorf("expected parse error for malformed frame, got %s", lines[3])
+	}
+	if !strings.Contains(lines[4], `"id":4`) {
+		t.Errorf("response 4: expected id 4, got %s", lines[4])
+	}
+	if !strings.Contains(lines[4], `"subnet parameter is required"`) {
+		t.Errorf("expected required-param error for discover_subnet, got %s", lines[4])
 	}
 }
 
@@ -89,8 +96,80 @@ func TestServe_MalformedAndNotificationsSkipped(t *testing.T) {
 	if err := server.Serve(context.Background()); err != nil {
 		t.Fatalf("Serve returned error: %v", err)
 	}
+	lines := nonEmptyLines(out.String())
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 parse-error responses, got %d: %q", len(lines), out.String())
+	}
+	for i, line := range lines {
+		if !strings.Contains(line, `-32700`) || !strings.Contains(line, `parse error`) {
+			t.Errorf("response %d: expected parse error, got %s", i, line)
+		}
+		if !strings.Contains(line, `"id":null`) {
+			t.Errorf("parse-error response %d must carry a null id, got %s", i, line)
+		}
+	}
+}
+
+func TestServe_OversizedFrame_ParseErrorAndContinue(t *testing.T) {
+	var in bytes.Buffer
+	var out bytes.Buffer
+	server := &Server{reader: &in, writer: &out, checkSvc: service.NewCheckService()}
+
+	// Crossing maxFrameSize mid-chunk (not on a 64KB boundary) exercises the
+	// drain-then-error path; a trailing newline lets the drain succeed.
+	in.WriteString(strings.Repeat("x", maxFrameSize+64*1024+1) + "\n")
+	in.WriteString(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n")
+
+	if err := server.Serve(context.Background()); err != nil {
+		t.Fatalf("Serve returned error: %v", err)
+	}
+	lines := nonEmptyLines(out.String())
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 responses, got %d: %q", len(lines), out.String())
+	}
+	if !strings.Contains(lines[0], `-32700`) || !strings.Contains(lines[0], `parse error`) {
+		t.Errorf("expected parse error for oversized frame, got %s", lines[0])
+	}
+	if !strings.Contains(lines[1], `"id":1`) {
+		t.Errorf("server must keep serving after an oversized frame, got %s", lines[1])
+	}
+}
+
+func TestServe_NoTrailingNewline(t *testing.T) {
+	// The final frame may lack a trailing newline; it must still be processed
+	// before Serve returns on EOF.
+	var in bytes.Buffer
+	var out bytes.Buffer
+	server := &Server{reader: &in, writer: &out, checkSvc: service.NewCheckService()}
+
+	in.WriteString(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+
+	if err := server.Serve(context.Background()); err != nil {
+		t.Fatalf("Serve returned error: %v", err)
+	}
+	lines := nonEmptyLines(out.String())
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 response, got %d: %q", len(lines), out.String())
+	}
+	if !strings.Contains(lines[0], `"id":1`) {
+		t.Errorf("final frame without newline must be processed, got %s", lines[0])
+	}
+}
+
+func TestServe_OversizedFrame_NoTrailingNewline(t *testing.T) {
+	// An oversized final frame with no trailing newline: the drain ends at
+	// EOF and Serve must terminate cleanly instead of hanging or panicking.
+	var in bytes.Buffer
+	var out bytes.Buffer
+	server := &Server{reader: &in, writer: &out, checkSvc: service.NewCheckService()}
+
+	in.WriteString(strings.Repeat("x", maxFrameSize+64*1024+1))
+
+	if err := server.Serve(context.Background()); err != nil {
+		t.Fatalf("Serve returned error: %v", err)
+	}
 	if out.Len() != 0 {
-		t.Errorf("expected no responses for notifications/malformed input, got %q", out.String())
+		t.Errorf("expected no responses for oversized EOF-terminated frame, got %q", out.String())
 	}
 }
 
@@ -210,6 +289,58 @@ func TestHandleToolCall_NotInitialized(t *testing.T) {
 	resp := newTestServer().handleToolCall(context.Background(), &jsonRPCRequest{ID: json.RawMessage(`1`)})
 	if resp.Error == nil || resp.Error.Code != -32002 {
 		t.Fatalf("expected -32002, got %+v", resp.Error)
+	}
+}
+
+func TestHandleToolCall_Timeout(t *testing.T) {
+	old := toolCallTimeout
+	toolCallTimeout = 50 * time.Millisecond
+	defer func() { toolCallTimeout = old }()
+
+	svc := &blockingOmadaSvc{started: make(chan struct{})}
+	server := &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{}, checkSvc: service.NewCheckService(), omadaSvc: svc}
+	server.initialized = true
+
+	resp := server.handleToolCall(context.Background(), &jsonRPCRequest{
+		ID:     json.RawMessage(`9`),
+		Params: json.RawMessage(`{"name":"omada_get_info","arguments":{"host":"omada.local"}}`),
+	})
+	if resp.Error == nil || resp.Error.Code != -32000 {
+		t.Fatalf("expected -32000 timeout error, got %+v", resp.Error)
+	}
+	if !strings.Contains(resp.Error.Message, "timed out after") || !strings.Contains(resp.Error.Message, "omada_get_info") {
+		t.Errorf("message = %q", resp.Error.Message)
+	}
+	if string(resp.ID) != "9" {
+		t.Errorf("ID = %s, want 9", resp.ID)
+	}
+}
+
+func TestServe_ContinuesAfterToolCallTimeout(t *testing.T) {
+	old := toolCallTimeout
+	toolCallTimeout = 50 * time.Millisecond
+	defer func() { toolCallTimeout = old }()
+
+	var in bytes.Buffer
+	var out bytes.Buffer
+	server := &Server{reader: &in, writer: &out, checkSvc: service.NewCheckService(), omadaSvc: &blockingOmadaSvc{started: make(chan struct{})}}
+	server.initialized = true
+
+	in.WriteString(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"omada_get_info","arguments":{"host":"omada.local"}}}` + "\n")
+	in.WriteString(`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}` + "\n")
+
+	if err := server.Serve(context.Background()); err != nil {
+		t.Fatalf("Serve returned error: %v", err)
+	}
+	lines := nonEmptyLines(out.String())
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 responses, got %d: %q", len(lines), out.String())
+	}
+	if !strings.Contains(lines[0], `-32000`) {
+		t.Errorf("expected timeout error for hung tool call, got %s", lines[0])
+	}
+	if !strings.Contains(lines[1], `"id":2`) || !strings.Contains(lines[1], `"tools"`) {
+		t.Errorf("server must stay responsive after a timeout, got %s", lines[1])
 	}
 }
 
@@ -1073,6 +1204,19 @@ func (d *dummyProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 	return nil, errors.New("unused")
 }
 func (d *dummyProvider) Spec() *intent.Spec { return nil }
+
+// blockingOmadaSvc blocks until the context is cancelled, simulating a hung
+// backend that observes cancellation but takes longer than the tool timeout.
+type blockingOmadaSvc struct {
+	stubOmadaSvc
+	started chan struct{}
+}
+
+func (b *blockingOmadaSvc) Info(ctx context.Context, _ service.OmadaOptions) (*service.OmadaInfo, error) {
+	close(b.started)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
 
 // stubOmadaSvc is a hermetic stand-in for the Omada observation surface.
 type stubOmadaSvc struct {

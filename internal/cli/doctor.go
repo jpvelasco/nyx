@@ -26,7 +26,6 @@ var doctorCmd = &cobra.Command{
   nyx doctor --json`,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		var checks []models.CheckResult
-		allPass := true
 
 		// 1. nmap installed — we need it for scans
 		nmapCheck := models.NewCheckResult("doctor", "nmap_installed", "local", "nmap")
@@ -48,7 +47,6 @@ var doctorCmd = &cobra.Command{
 			nmapCheck.Status = models.StatusFail
 			nmapCheck.Summary = "nmap is missing — we can't scan without it"
 			nmapCheck.Violations = append(nmapCheck.Violations, nmapInstallHint())
-			allPass = false
 		}
 		nmapCheck.Finish()
 		checks = append(checks, *nmapCheck)
@@ -70,14 +68,12 @@ var doctorCmd = &cobra.Command{
 		if err := os.MkdirAll(logDir, 0700); err != nil { // nosemgrep
 			logDirCheck.Status = models.StatusFail
 			logDirCheck.Summary = fmt.Sprintf("can't create log directory %s: %v", logDir, err)
-			allPass = false
 		} else {
 			testFile := logDir + "/.nyx_write_test"
 			// #nosec G304 — path is internal log dir
 			if f, err := os.OpenFile(testFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600); err != nil { // nosemgrep
 				logDirCheck.Status = models.StatusFail
 				logDirCheck.Summary = fmt.Sprintf("log directory %s isn't writable: %v", logDir, err)
-				allPass = false
 			} else {
 				f.Close()           // #nosec G104 — best-effort cleanup
 				os.Remove(testFile) // #nosec G104 — best-effort cleanup
@@ -125,13 +121,11 @@ var doctorCmd = &cobra.Command{
 		// Spec checks
 		if specFile != "" {
 			specChecks := runSpecChecks(specFile)
-			for _, sc := range specChecks {
-				if sc.Status == models.StatusFail || sc.Status == models.StatusError {
-					allPass = false
-				}
-			}
 			checks = append(checks, specChecks...)
 		}
+
+		// The worst check status drives the exit code (0 pass / 1 fail / 2 error / 3 warn).
+		worst := models.ComputeOverallStatus(checks)
 
 		w, err := getWriter()
 		if err != nil {
@@ -144,7 +138,7 @@ var doctorCmd = &cobra.Command{
 		if jsonOutput {
 			r := &models.AuditReport{
 				Audit:    "doctor",
-				Status:   models.ComputeOverallStatus(checks),
+				Status:   worst,
 				Summary:  models.Tally(checks),
 				Findings: checks,
 			}
@@ -164,7 +158,7 @@ var doctorCmd = &cobra.Command{
 			fmt.Fprintln(w, "\n"+RenderEnvironmentBriefing(brief))
 		}
 
-		if allPass {
+		if worst == models.StatusPass {
 			if specFile != "" {
 				fmt.Fprintf(w, "Everything checks out — ready to audit. Try: nyx audit --spec %s\n", specFile)
 				fmt.Fprintln(w, "For ongoing confidence: nyx snapshot baseline then nyx drift status after future changes.")
@@ -173,9 +167,8 @@ var doctorCmd = &cobra.Command{
 			}
 		} else {
 			fmt.Fprintln(w, "\nThere are issues above. Fix them and try again.")
-			return &ExitError{Code: 2}
 		}
-		return nil
+		return statusExitError(worst)
 	},
 }
 

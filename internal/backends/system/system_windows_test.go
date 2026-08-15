@@ -310,6 +310,19 @@ func TestCheckVPNInterface(t *testing.T) {
 		}
 	})
 
+	t.Run("wireguard tunnel name not present", func(t *testing.T) {
+		// Regression for #190: "WireGuard Tunnel" (and renamed variants
+		// keeping a marker) must be recognized as a VPN name even though it
+		// does not start with "wg".
+		vpn, err := CheckVPNInterface(ctx, "WireGuard Tunnel")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if vpn {
+			t.Error("expected absent WireGuard interface to report false")
+		}
+	})
+
 	t.Run("present vpn interface", func(t *testing.T) {
 		ifaces, err := GetInterfaces(ctx)
 		if err != nil {
