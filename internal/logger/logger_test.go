@@ -72,6 +72,45 @@ func TestLoggerRotation(t *testing.T) {
 	}
 }
 
+func TestLoggerRotationKeepsGenerations(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "nyx.log")
+	log, err := New(path, 64, 3)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	defer log.Close()
+
+	// Each entry exceeds maxSize, so every write triggers a rotation and
+	// each generation holds exactly one entry.
+	for i := 0; i < 7; i++ {
+		log.Info("audit", map[string]interface{}{"idx": i})
+	}
+
+	for _, tc := range []struct {
+		name   string
+		marker string
+	}{
+		{"nyx.log", `"idx":6`},
+		{"nyx.log.1", `"idx":5`},
+		{"nyx.log.2", `"idx":4`},
+		{"nyx.log.3", `"idx":3`},
+	} {
+		content, err := os.ReadFile(filepath.Join(tmpDir, tc.name)) // nosemgrep: go_filesystem_rule-fileread
+		if err != nil {
+			t.Fatalf("ReadFile(%s) failed: %v", tc.name, err)
+		}
+		if !contains(string(content), tc.marker) {
+			t.Errorf("%s expected to contain %s, got: %s", tc.name, tc.marker, content)
+		}
+	}
+
+	rotated, _ := filepath.Glob(filepath.Join(tmpDir, "nyx.log.*"))
+	if len(rotated) != 3 {
+		t.Errorf("expected exactly 3 rotated files, got %d: %v", len(rotated), rotated)
+	}
+}
+
 func TestNew_MkdirAllError(t *testing.T) {
 	blocker := filepath.Join(t.TempDir(), "blocker")
 	if err := os.WriteFile(blocker, []byte("file"), 0600); err != nil {

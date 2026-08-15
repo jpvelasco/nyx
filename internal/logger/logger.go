@@ -114,14 +114,11 @@ func (l *Logger) openFile() error {
 }
 
 func (l *Logger) rotate() {
+	_ = os.Remove(fmt.Sprintf("%s.%d", l.path, l.maxFiles))
 	for i := l.maxFiles - 1; i >= 1; i-- {
 		old := fmt.Sprintf("%s.%d", l.path, i)
 		newPath := fmt.Sprintf("%s.%d", l.path, i+1)
-		if i == l.maxFiles-1 {
-			_ = os.Remove(old)
-		} else {
-			_ = os.Rename(old, newPath)
-		}
+		_ = os.Rename(old, newPath)
 	}
 	_ = os.Rename(l.path, l.path+".1")
 }
