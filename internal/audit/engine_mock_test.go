@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/backends"
@@ -255,13 +256,13 @@ func TestRunIsolation_DenyConfirmed(t *testing.T) {
 	}
 	eng := NewEngine(spec)
 	eng.Backend = mock
+	eng.runnerCtx = models.RunnerContext{Networks: []string{"fromnet"}}
 	result, err := eng.runIsolation(context.Background(), spec.Assertions[0])
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// When runner is not in from zone and all blocked, it should be warn (unconfirmed)
-	if result.Status != models.StatusWarn && result.Status != models.StatusPass {
-		t.Errorf("expected warn or pass, got %s: %s", result.Status, result.Summary)
+	if result.Status != models.StatusPass {
+		t.Errorf("expected pass when runner is in from zone and all blocked, got %s: %s", result.Status, result.Summary)
 	}
 }
 
@@ -279,12 +280,99 @@ func TestRunIsolation_AllowConfirmed(t *testing.T) {
 	}
 	eng := NewEngine(spec)
 	eng.Backend = mock
+	eng.runnerCtx = models.RunnerContext{Networks: []string{"fromnet"}}
 	result, err := eng.runIsolation(context.Background(), spec.Assertions[0])
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result.Status != models.StatusPass {
 		t.Errorf("expected pass, got %s: %s", result.Status, result.Summary)
+	}
+}
+
+// TestRunIsolation_VantageGuard verifies that every verdict is downgraded to
+// Warn when the runner is outside the source zone — reachability observed
+// from the wrong vantage point is never definitive.
+func TestRunIsolation_VantageGuard(t *testing.T) {
+	tests := []struct {
+		name        string
+		expect      string
+		reachable   bool
+		wantSummary string
+	}{
+		{name: "deny blocked", expect: "deny", reachable: false, wantSummary: "isolation unconfirmed"},
+		{name: "deny reachable", expect: "deny", reachable: true, wantSummary: "isolation unconfirmed"},
+		{name: "allow reachable", expect: "allow", reachable: true, wantSummary: "connectivity unconfirmed"},
+		{name: "allow blocked", expect: "allow", reachable: false, wantSummary: "connectivity unconfirmed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := &intent.Spec{
+				Version: 1, Site: "test",
+				Networks: []intent.Network{
+					{Name: "fromnet", CIDR: "10.0.0.0/24", Gateway: "10.0.0.1", Zone: "fromzone"},
+					{Name: "tonet", CIDR: "10.0.1.0/24", Gateway: "10.0.1.1", Zone: "tozone"},
+				},
+				Assertions: []intent.Assertion{{Type: "isolation", From: "fromzone", To: "tozone", Expect: tt.expect}},
+			}
+			mock := &backends.MockBackend{
+				PingResult: &system.PingResult{Reachable: tt.reachable},
+			}
+			eng := NewEngine(spec)
+			eng.Backend = mock
+			// runnerCtx.Networks empty → runner not in from zone
+			result, err := eng.runIsolation(context.Background(), spec.Assertions[0])
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result.Status != models.StatusWarn {
+				t.Errorf("expected warn from outside the source zone, got %s: %s", result.Status, result.Summary)
+			}
+			if !strings.Contains(result.Summary, tt.wantSummary) {
+				t.Errorf("summary %q does not contain %q", result.Summary, tt.wantSummary)
+			}
+		})
+	}
+}
+
+// TestRunIsolation_DefinitiveInZone verifies that hard verdicts are emitted
+// when the runner is inside the source zone.
+func TestRunIsolation_DefinitiveInZone(t *testing.T) {
+	tests := []struct {
+		name      string
+		expect    string
+		reachable bool
+		want      models.Status
+	}{
+		{name: "deny blocked", expect: "deny", reachable: false, want: models.StatusPass},
+		{name: "deny reachable", expect: "deny", reachable: true, want: models.StatusFail},
+		{name: "allow reachable", expect: "allow", reachable: true, want: models.StatusPass},
+		{name: "allow blocked", expect: "allow", reachable: false, want: models.StatusFail},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := &intent.Spec{
+				Version: 1, Site: "test",
+				Networks: []intent.Network{
+					{Name: "fromnet", CIDR: "10.0.0.0/24", Gateway: "10.0.0.1", Zone: "fromzone"},
+					{Name: "tonet", CIDR: "10.0.1.0/24", Gateway: "10.0.1.1", Zone: "tozone"},
+				},
+				Assertions: []intent.Assertion{{Type: "isolation", From: "fromzone", To: "tozone", Expect: tt.expect}},
+			}
+			mock := &backends.MockBackend{
+				PingResult: &system.PingResult{Reachable: tt.reachable},
+			}
+			eng := NewEngine(spec)
+			eng.Backend = mock
+			eng.runnerCtx = models.RunnerContext{Networks: []string{"fromnet"}}
+			result, err := eng.runIsolation(context.Background(), spec.Assertions[0])
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result.Status != tt.want {
+				t.Errorf("expected %s, got %s: %s", tt.want, result.Status, result.Summary)
+			}
+		})
 	}
 }
 

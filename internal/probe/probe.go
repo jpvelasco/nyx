@@ -48,6 +48,17 @@ type AuthError struct{ err error }
 func (e *AuthError) Error() string { return e.err.Error() }
 func (e *AuthError) Unwrap() error { return e.err }
 
+// IsUnreachable reports whether err means the probe never executed the
+// remote command — transport, host-key, or authentication failure — as
+// opposed to the command running and failing (RemoteError). Callers use
+// this to avoid treating probe outages as remote evidence.
+func IsUnreachable(err error) bool {
+	var transErr *TransportError
+	var hostKeyErr *HostKeyError
+	var authErr *AuthError
+	return errors.As(err, &transErr) || errors.As(err, &hostKeyErr) || errors.As(err, &authErr)
+}
+
 // Probe represents a remote node that can execute commands via SSH.
 type Probe struct {
 	Name              string // probe name

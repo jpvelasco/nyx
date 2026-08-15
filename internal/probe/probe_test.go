@@ -358,8 +358,29 @@ func TestShellQuote(t *testing.T) {
 	}
 }
 
-func TestDialWithContext_DefaultDeadline(t *testing.T) {
-	// RFC5737 TEST-NET is non-routable: the dial hangs and must hit the
+func TestIsUnreachable(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "transport", err: &TransportError{fmt.Errorf("dial failed")}, want: true},
+		{name: "host key", err: &HostKeyError{fmt.Errorf("host key verification failed")}, want: true},
+		{name: "auth", err: &AuthError{fmt.Errorf("unable to authenticate")}, want: true},
+		{name: "remote command failure", err: &RemoteError{fmt.Errorf("exit status 1")}, want: false},
+		{name: "generic", err: fmt.Errorf("something else"), want: false},
+		{name: "nil", err: nil, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsUnreachable(tt.err); got != tt.want {
+				t.Errorf("IsUnreachable(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDialWithContext_DefaultDeadline(t *testing.T) { // RFC5737 TEST-NET is non-routable: the dial hangs and must hit the
 	// 10s default deadline imposed on a context without one.
 	start := time.Now()
 	_, err := dialWithContext(context.Background(), testProbe("192.0.2.1"))

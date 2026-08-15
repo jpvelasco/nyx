@@ -970,13 +970,14 @@ func TestRunIsolation_IsolationViolation(t *testing.T) {
 	}
 	eng := NewEngine(spec)
 	eng.Backend = mock
+	eng.runnerCtx = models.RunnerContext{Networks: []string{"fromnet"}}
 	a := intent.Assertion{Type: "isolation", From: "fromzone", To: "tozone", Expect: "deny"}
 	result, err := eng.runIsolation(context.Background(), a)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result.Status != models.StatusFail {
-		t.Errorf("expected fail (deny but reachable), got %s: %s", result.Status, result.Summary)
+		t.Errorf("expected fail (deny but reachable, runner in from zone), got %s: %s", result.Status, result.Summary)
 	}
 }
 
@@ -993,13 +994,14 @@ func TestRunIsolation_ConnectivityFailure(t *testing.T) {
 	}
 	eng := NewEngine(spec)
 	eng.Backend = mock
+	eng.runnerCtx = models.RunnerContext{Networks: []string{"fromnet"}}
 	a := intent.Assertion{Type: "isolation", From: "fromzone", To: "tozone", Expect: "allow"}
 	result, err := eng.runIsolation(context.Background(), a)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result.Status != models.StatusFail {
-		t.Errorf("expected fail (allow but blocked), got %s: %s", result.Status, result.Summary)
+		t.Errorf("expected fail (allow but blocked, runner in from zone), got %s: %s", result.Status, result.Summary)
 	}
 }
 
@@ -1067,6 +1069,7 @@ func TestRunIsolation_TargetAsNetworkName(t *testing.T) {
 	}
 	eng := NewEngine(spec)
 	eng.Backend = mock
+	eng.runnerCtx = models.RunnerContext{Networks: []string{"fromnet"}}
 	a := intent.Assertion{Type: "isolation", From: "fromzone", To: "tonet", Expect: "allow"}
 	result, err := eng.runIsolation(context.Background(), a)
 	if err != nil {
@@ -1097,9 +1100,12 @@ func TestRunIsolation_UnverifiableFromZone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// not in from zone, expect allow, not all blocked → pass (connectivity confirmed)
-	if result.Status != models.StatusPass {
-		t.Errorf("expected pass (allow+reachable), got %s: %s", result.Status, result.Summary)
+	// not in from zone → never a hard verdict, even when reachable
+	if result.Status != models.StatusWarn {
+		t.Errorf("expected warn (runner outside from zone), got %s: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "connectivity unconfirmed") {
+		t.Errorf("expected 'connectivity unconfirmed' summary, got: %s", result.Summary)
 	}
 }
 

@@ -514,11 +514,24 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 				a.From, a.To,
 			)
 		}
-	} else if expectDeny && allBlocked && !runnerInFromZone {
+	} else if !runnerInFromZone {
+		// None of the four outcomes is definitive when the runner is outside
+		// the source zone: reachable gateways may be the runner's own network
+		// (e.g. a runner inside the destination zone pings its own gateway),
+		// and unreachable gateways may simply mean this host has no route.
+		// Report what was observed without a hard verdict.
 		result.Status = models.StatusWarn
+		prefix := "isolation"
+		if !expectDeny {
+			prefix = "connectivity"
+		}
+		state := "unreachable"
+		if !allBlocked {
+			state = "reachable"
+		}
 		result.Summary = fmt.Sprintf(
-			"isolation unconfirmed: %s → %s gateways unreachable, but nyx is not running from inside the %s zone — use runner: <probe> for a definitive check",
-			a.From, a.To, a.From,
+			"%s unconfirmed: %s → %s gateways %s, but nyx is not running from inside the %s zone — use runner: <probe> for a definitive check",
+			prefix, a.From, a.To, state, a.From,
 		)
 	} else if expectDeny && allBlocked {
 		result.Status = models.StatusPass
@@ -868,8 +881,7 @@ func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, p
 		output, err := probe.Run(ctx, probeP, cmd, e.SkipHostKeyVerify)
 		result.Evidence = append(result.Evidence, output)
 
-		var transErr *probe.TransportError
-		if errors.As(err, &transErr) || ctx.Err() != nil {
+		if probe.IsUnreachable(err) || ctx.Err() != nil {
 			// The probe never executed the ping — SSH, auth, or session
 			// failure. This must NOT count as evidence that the gateway
 			// is blocked.
