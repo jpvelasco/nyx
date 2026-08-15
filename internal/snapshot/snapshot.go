@@ -258,7 +258,7 @@ func ComputeDrift(baseline, current *Snapshot) *DriftResult {
 		base, exists := baselineMap[key]
 		if !exists {
 			switch cur.Status {
-			case models.StatusFail:
+			case models.StatusFail, models.StatusError:
 				dr.NewFailures = append(dr.NewFailures, cur)
 			case models.StatusWarn:
 				dr.NewWarnings = append(dr.NewWarnings, cur)

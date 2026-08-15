@@ -1038,6 +1038,88 @@ func TestComputeDrift_CompletelyNewFailure(t *testing.T) {
 	}
 }
 
+// TestComputeDrift_NewErrorIsFailure verifies that a brand-new ERROR-status
+// finding is surfaced in the drift report (it used to be invisible).
+func TestComputeDrift_NewErrorIsFailure(t *testing.T) {
+	base := &Snapshot{
+		RunAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Status:  models.StatusPass,
+		Summary: models.ReportSummary{Pass: 1, Fail: 0, Warn: 0},
+		Findings: []models.CheckResult{
+			{CheckType: "subnet_discovery", Target: "10.0.0.0/24", Status: models.StatusPass},
+		},
+	}
+	current := &Snapshot{
+		RunAt:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Status:  models.StatusError,
+		Summary: models.ReportSummary{Pass: 1, Error: 1},
+		Findings: []models.CheckResult{
+			{CheckType: "subnet_discovery", Target: "10.0.0.0/24", Status: models.StatusPass},
+			{CheckType: "acl_check", Target: "policy1", Status: models.StatusError,
+				Summary: "acl_check requires OMADA_HOST environment variables"},
+		},
+	}
+
+	dr := ComputeDrift(base, current)
+	if dr == nil {
+		t.Fatal("expected non-nil drift result")
+	}
+	if len(dr.NewFailures) != 1 {
+		t.Errorf("expected 1 new failure from error finding, got %d", len(dr.NewFailures))
+	}
+	if dr.NewFailures[0].CheckType != "acl_check" {
+		t.Errorf("expected new failure to be the acl_check error, got %q", dr.NewFailures[0].CheckType)
+	}
+	if len(dr.NewWarnings) != 0 {
+		t.Errorf("expected 0 new warnings, got %d", len(dr.NewWarnings))
+	}
+}
+
+// TestComputeDrift_PortCheckDisambiguation verifies that two port_check
+// assertions on the same target with different ports do not collide
+// (regression: the Expected["ports"] disambiguator was never populated).
+func TestComputeDrift_PortCheckDisambiguation(t *testing.T) {
+	base := &Snapshot{
+		RunAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Status:  models.StatusPass,
+		Summary: models.ReportSummary{Pass: 2},
+		Findings: []models.CheckResult{
+			{CheckType: "port_check", Target: "10.0.0.1", Status: models.StatusPass,
+				Expected: map[string]interface{}{"ports": []interface{}{float64(80)}}},
+			{CheckType: "port_check", Target: "10.0.0.1", Status: models.StatusPass,
+				Expected: map[string]interface{}{"ports": []interface{}{float64(22)}}},
+		},
+	}
+	current := &Snapshot{
+		RunAt:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Status:  models.StatusFail,
+		Summary: models.ReportSummary{Pass: 1, Fail: 1},
+		Findings: []models.CheckResult{
+			{CheckType: "port_check", Target: "10.0.0.1", Status: models.StatusPass,
+				Expected: map[string]interface{}{"ports": []interface{}{float64(80)}}},
+			{CheckType: "port_check", Target: "10.0.0.1", Status: models.StatusFail,
+				Expected: map[string]interface{}{"ports": []interface{}{float64(22)}},
+				Summary:  "port check failed on 10.0.0.1"},
+		},
+	}
+
+	dr := ComputeDrift(base, current)
+	if dr == nil {
+		t.Fatal("expected non-nil drift result")
+	}
+	if len(dr.NewFailures) != 0 {
+		t.Errorf("expected 0 new failures, got %d", len(dr.NewFailures))
+	}
+	// The port 22 check Pass→Fail must surface as a degradation — with the
+	// collision bug, one of the two same-target checks was dropped entirely.
+	if len(dr.Degraded) != 1 {
+		t.Errorf("expected exactly 1 degraded check (port 22), got %d", len(dr.Degraded))
+	}
+	if len(dr.FixedFailures) != 0 {
+		t.Errorf("expected 0 fixed failures, got %d", len(dr.FixedFailures))
+	}
+}
+
 func TestComputeDrift_GoneEntirely(t *testing.T) {
 	base := &Snapshot{
 		RunAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),

@@ -431,6 +431,10 @@ func TestRunPortCheck_AllOpen(t *testing.T) {
 	if result.Status != models.StatusPass {
 		t.Errorf("expected pass, got %s: %s", result.Status, result.Summary)
 	}
+	// The ports expectation must be populated for drift-key disambiguation.
+	if result.Expected["ports"] == nil {
+		t.Error("expected Expected[\"ports\"] to be set for drift disambiguation")
+	}
 }
 
 func TestRunPortCheck_MixedStates(t *testing.T) {
@@ -499,6 +503,10 @@ func TestRunDNSCheck_BasicResolve(t *testing.T) {
 	}
 	if result.Status != models.StatusPass {
 		t.Errorf("expected pass, got %s", result.Status)
+	}
+	// The query expectation must be populated for drift-key disambiguation.
+	if result.Expected["query"] != "example.com" {
+		t.Errorf("expected Expected[\"query\"] = example.com, got %v", result.Expected["query"])
 	}
 }
 

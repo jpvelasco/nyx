@@ -678,6 +678,7 @@ func (e *Engine) runPortCheck(ctx context.Context, a intent.Assertion) (*models.
 		result.Summary = fmt.Sprintf("port check failed on %s: %s", a.Target, strings.Join(violations, "; "))
 	}
 	result.Expected["expect"] = a.Expect
+	result.Expected["ports"] = a.Ports
 	return result, nil
 }
 
@@ -693,6 +694,11 @@ func (e *Engine) runDNSCheck(ctx context.Context, a intent.Assertion) (*models.C
 	if err != nil {
 		return nil, fmt.Errorf("dns check failed: %w", err)
 	}
+
+	if result.Expected == nil {
+		result.Expected = map[string]interface{}{}
+	}
+	result.Expected["query"] = a.Query
 
 	if a.DNSSEC {
 		dnssecResult, dnssecErr := e.Backend.CheckDNSSEC(ctx, a.Query, a.Server)
