@@ -4,12 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 )
 
 // defaultPageSize is the page size used for all paginated list endpoints.
 const defaultPageSize = 200
+
+// maxPages caps the number of page requests fetchPaged will issue. A
+// controller that reports totalRows: 0 (or omits it) and ignores currentPage
+// would otherwise loop forever.
+const maxPages = 100
 
 // fetchPaged walks a paged Omada list endpoint ({"totalRows":N,"data":[...]}),
 // following currentPage until every row is collected. Controllers that don't
@@ -18,10 +24,14 @@ const defaultPageSize = 200
 // reported by the API on the first page.
 func fetchPaged[T any](ctx context.Context, c *Client, basePath string, pageSize int, extraQuery ...string) ([]T, int, error) {
 	var (
-		items []T
-		total int
+		items     []T
+		total     int
+		firstData []T
 	)
 	for page := 1; ; page++ {
+		if page > maxPages {
+			return nil, 0, fmt.Errorf("%s: controller did not terminate after %d pages — it may be ignoring currentPage", basePath, maxPages)
+		}
 		query := "currentPage=" + strconv.Itoa(page) + "&currentPageSize=" + strconv.Itoa(pageSize)
 		if len(extraQuery) > 0 {
 			query += "&" + strings.Join(extraQuery, "&")
@@ -44,6 +54,9 @@ func fetchPaged[T any](ctx context.Context, c *Client, basePath string, pageSize
 		}
 		if page == 1 {
 			total = paged.TotalRows
+			firstData = paged.Data
+		} else if len(paged.Data) > 0 && reflect.DeepEqual(paged.Data, firstData) {
+			return nil, 0, fmt.Errorf("%s: controller repeated page 1 at page %d — it is ignoring currentPage", basePath, page)
 		}
 		items = append(items, paged.Data...)
 		if len(paged.Data) == 0 || (total > 0 && len(items) >= total) {

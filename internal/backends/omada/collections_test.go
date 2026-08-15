@@ -271,3 +271,38 @@ func TestGetClientsError(t *testing.T) {
 		t.Errorf("error = %v, want getting-clients wrapper", err)
 	}
 }
+
+func TestFetchPaged_RepeatedPageDetected(t *testing.T) {
+	// A controller that reports totalRows: 0 and ignores currentPage repeats
+	// page 1 forever. fetchPaged must fail fast instead of looping.
+	requested := 0
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested++
+		writeEnvelope(w, 0, "", `{"totalRows":0,"data":[{"mac":"aa:11"}]}`)
+	}))
+	_, _, err := fetchPaged[struct{ MAC string }](context.Background(), c, "sites/s1/clients", defaultPageSize)
+	if err == nil || !strings.Contains(err.Error(), "repeated page 1") {
+		t.Fatalf("error = %v, want repeated-page-1 error", err)
+	}
+	if requested != 2 {
+		t.Errorf("requests = %d, want 2 (page 1 then repeat detected)", requested)
+	}
+}
+
+func TestFetchPaged_PageCap(t *testing.T) {
+	// A controller with totalRows: 0 that returns a distinct non-empty page
+	// for every request would never terminate on its own — the page cap must
+	// stop it.
+	requested := 0
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested++
+		writeEnvelope(w, 0, "", `{"totalRows":0,"data":[{"mac":"aa:`+strconv.Itoa(requested)+`"}]}`)
+	}))
+	_, _, err := fetchPaged[struct{ MAC string }](context.Background(), c, "sites/s1/clients", defaultPageSize)
+	if err == nil || !strings.Contains(err.Error(), "did not terminate after "+strconv.Itoa(maxPages)+" pages") {
+		t.Fatalf("error = %v, want page-cap error", err)
+	}
+	if requested != maxPages {
+		t.Errorf("requests = %d, want %d (cap aborts before the next page)", requested, maxPages)
+	}
+}
