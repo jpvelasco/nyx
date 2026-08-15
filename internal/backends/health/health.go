@@ -44,7 +44,9 @@ var (
 )
 
 // PingCheck runs a ping with the specified count and returns detailed stats.
-// Always returns StatusPass; caller decides pass/fail based on thresholds.
+// A failed ping (host down, no route, firewall drop) yields StatusFail — a
+// health finding — not StatusError. Only context cancellation is an
+// execution error.
 func PingCheck(ctx context.Context, target string, count int) (*models.CheckResult, *PingStats, error) {
 	result := models.NewCheckResult("ping", "network_health", "system", target)
 
@@ -75,9 +77,13 @@ func PingCheck(ctx context.Context, target string, count int) (*models.CheckResu
 	}
 	result.Observed = statsMap
 
-	if err != nil {
-		result.Status = models.StatusError
-		result.Summary = fmt.Sprintf("ping error: %v", err)
+	// The target is unreachable: ping failed and/or the output confirms
+	// total loss (some implementations exit 0 on 100% loss, e.g. busybox).
+	// Report a Fail verdict consistent with the probe path, never Error.
+	if summary, violation := classifyPingFailure(err, stats, target); violation != "" {
+		result.Status = models.StatusFail
+		result.Summary = summary
+		result.Violations = append(result.Violations, violation)
 		result.Finish()
 		return result, stats, nil
 	}
@@ -91,7 +97,8 @@ func PingCheck(ctx context.Context, target string, count int) (*models.CheckResu
 
 // CheckLatencyAndLoss runs 10 pings and checks if latency and loss are within limits.
 // Fails if observed values exceed thresholds (when thresholds > 0).
-// Warnings only if ping fails with error.
+// A failed ping (host down) already yields StatusFail from PingCheck and
+// passes through untouched; only context cancellation surfaces StatusError.
 func CheckLatencyAndLoss(ctx context.Context, target string, maxLatencyMs float64, maxLossPct float64) (*models.CheckResult, error) {
 	result, stats, err := PingCheck(ctx, target, 10)
 
@@ -101,8 +108,9 @@ func CheckLatencyAndLoss(ctx context.Context, target string, maxLatencyMs float6
 		"max_loss_pct":   maxLossPct,
 	}
 
-	// If ping failed (error status), return as-is
-	if result.Status == models.StatusError {
+	// Ping failure verdicts (Fail/Error) pass through as-is — a dead host
+	// must never be overwritten by threshold classification.
+	if result.Status != models.StatusPass {
 		result.Finish()
 		return result, err
 	}
@@ -116,6 +124,21 @@ func CheckLatencyAndLoss(ctx context.Context, target string, maxLatencyMs float6
 
 	result.Finish()
 	return result, nil
+}
+
+// classifyPingFailure builds the Fail verdict text for an unreachable target.
+// The ping is considered failed when the command errored (exit code, DNS
+// failure) or the output reports 100% loss (some implementations exit 0 on
+// total loss). Returns an empty violation when the ping succeeded.
+func classifyPingFailure(err error, stats *PingStats, target string) (summary, violation string) {
+	if err == nil && stats.LossPct < 100 {
+		return "", ""
+	}
+	if stats.LossPct >= 100 {
+		return fmt.Sprintf("ping %s: %d sent, %d received (%.1f%% loss)",
+			target, stats.Sent, stats.Received, stats.LossPct), "100% packet loss — host unreachable"
+	}
+	return fmt.Sprintf("ping %s failed: %v", target, err), fmt.Sprintf("ping error: %v", err)
 }
 
 // classifyLatencyLoss compares observed ping stats against thresholds.

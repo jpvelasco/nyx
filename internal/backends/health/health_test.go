@@ -3,6 +3,7 @@ package health
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"runtime"
 	"strings"
 	"testing"
@@ -312,24 +313,79 @@ func TestClassifyLatencyLoss(t *testing.T) {
 	}
 }
 
+// TestClassifyPingFailure covers all three verdict branches of the pure
+// failure classifier without spawning a subprocess.
+func TestClassifyPingFailure(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		stats       *PingStats
+		wantSummary string
+		wantViol    string
+	}{
+		{
+			name:        "successful ping",
+			err:         nil,
+			stats:       &PingStats{Sent: 10, Received: 10},
+			wantSummary: "",
+			wantViol:    "",
+		},
+		{
+			name:        "total loss in output",
+			err:         nil,
+			stats:       &PingStats{Sent: 3, Received: 0, LossPct: 100},
+			wantSummary: "ping 192.0.2.1: 3 sent, 0 received (100.0% loss)",
+			wantViol:    "100% packet loss — host unreachable",
+		},
+		{
+			name:        "command error without loss line",
+			err:         errors.New("exit status 2"),
+			stats:       &PingStats{Sent: 3, Received: 0},
+			wantSummary: "ping 192.0.2.1 failed: exit status 2",
+			wantViol:    "ping error: exit status 2",
+		},
+		{
+			name:        "command error with partial loss",
+			err:         errors.New("exit status 1"),
+			stats:       &PingStats{Sent: 3, Received: 1, LossPct: 66.7},
+			wantSummary: "ping 192.0.2.1 failed: exit status 1",
+			wantViol:    "ping error: exit status 1",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			summary, violation := classifyPingFailure(tc.err, tc.stats, "192.0.2.1")
+			if summary != tc.wantSummary {
+				t.Errorf("summary = %q, want %q", summary, tc.wantSummary)
+			}
+			if violation != tc.wantViol {
+				t.Errorf("violation = %q, want %q", violation, tc.wantViol)
+			}
+		})
+	}
+}
+
 func TestPingCheckUnreachable(t *testing.T) {
-	// TEST-NET address — unreachable without cancelling the context, so
-	// PingCheck should report StatusError via the ping error path.
+	// TEST-NET address — unreachable without cancelling the context. A dead
+	// host is a health failure (Fail), not an execution error.
 	result, stats, err := PingCheck(context.Background(), "192.0.2.1", 1)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	if err == nil {
-		t.Skipf("unexpected success pinging TEST-NET: %s", result.Summary)
+	if result.Status == "pass" {
+		t.Skipf("unexpected reachable TEST-NET: %s", result.Summary)
 	}
-	if result.Status != "error" {
-		t.Errorf("expected status 'error', got %s", result.Status)
+	if result.Status != "fail" {
+		t.Errorf("expected status 'fail', got %s", result.Status)
 	}
-	if !strings.Contains(result.Summary, "ping error") {
-		t.Errorf("expected summary to mention ping error, got: %s", result.Summary)
+	if len(result.Violations) == 0 {
+		t.Error("expected a violation for an unreachable host")
+	}
+	if err != nil {
+		t.Errorf("expected nil error for a Fail verdict, got %v", err)
 	}
 	if stats == nil {
-		t.Fatal("expected non-nil stats on error path")
+		t.Fatal("expected non-nil stats on failure path")
 	}
 	if stats.Sent != 1 {
 		t.Errorf("expected sent 1, got %d", stats.Sent)
@@ -1265,6 +1321,25 @@ func TestCheckLatencyAndLossErrorPath(t *testing.T) {
 	}
 	if result.Expected["max_latency_ms"] != 100.0 {
 		t.Errorf("expected max_latency_ms in Expected, got %v", result.Expected["max_latency_ms"])
+	}
+}
+
+// TestCheckLatencyAndLossUnreachable verifies that a dead host stays Fail —
+// threshold classification must never overwrite the PingCheck failure with
+// a Pass (regression: expect_loss_pct: 0 on a dead target used to pass).
+func TestCheckLatencyAndLossUnreachable(t *testing.T) {
+	result, err := CheckLatencyAndLoss(context.Background(), "192.0.2.1", 0, 0)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if err == nil && result.Status != "fail" {
+		t.Skipf("unexpected reachable TEST-NET: %s", result.Summary)
+	}
+	if result.Status != "fail" {
+		t.Errorf("expected status 'fail' for unreachable host, got %q: %s", result.Status, result.Summary)
+	}
+	if len(result.Violations) == 0 {
+		t.Error("expected a violation for an unreachable host")
 	}
 }
 

@@ -598,6 +598,45 @@ func TestRunNetworkHealth_PingCheck(t *testing.T) {
 	}
 }
 
+// TestRunNetworkHealth_DeadHostFail verifies a Fail verdict from the backend
+// (host down, 100% loss) flows through the engine untouched — it must not be
+// converted into an engine error or overwritten (regression: dead targets
+// used to surface as Error / exit 2, and expect_loss_pct: 0 could pass).
+func TestRunNetworkHealth_DeadHostFail(t *testing.T) {
+	r := models.NewCheckResult("ping", "network_health", "system", "10.0.0.1")
+	r.Status = models.StatusFail
+	r.Observed = map[string]interface{}{"loss_pct": float64(100), "sent": 3, "received": 0}
+	r.Violations = []string{"100% packet loss — host unreachable"}
+	r.Finish()
+
+	tests := []struct {
+		name      string
+		assertion intent.Assertion
+	}{
+		{name: "no thresholds", assertion: intent.Assertion{Type: "network_health", Target: "10.0.0.1"}},
+		{name: "zero loss threshold", assertion: intent.Assertion{Type: "network_health", Target: "10.0.0.1", ExpectLossPct: 0}},
+		{name: "latency threshold", assertion: intent.Assertion{Type: "network_health", Target: "10.0.0.1", ExpectLatencyMs: 100}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := &intent.Spec{
+				Version: 1, Site: "test",
+				Assertions: []intent.Assertion{tt.assertion},
+			}
+			mock := &backends.MockBackend{PingCheckResult: r, LatencyResult: r}
+			eng := NewEngine(spec)
+			eng.Backend = mock
+			result, err := eng.runNetworkHealth(context.Background(), spec.Assertions[0])
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result.Status != models.StatusFail {
+				t.Errorf("expected fail for dead host, got %s: %s", result.Status, result.Summary)
+			}
+		})
+	}
+}
+
 func TestRunNetworkHealth_LatencyAndLoss(t *testing.T) {
 	r := models.NewCheckResult("ping", "network_health", "system", "10.0.0.1")
 	r.Status = models.StatusPass
