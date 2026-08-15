@@ -270,4 +270,73 @@ func TestRun_NoSites(t *testing.T) {
 	}
 }
 
+func TestExecute_Success(t *testing.T) {
+	// Use a valid host that will succeed (we'll mock the server).
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/info":
+			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"3","omadacId":"test","configured":true}}`) //nosem // test mock
+		case strings.Contains(r.URL.Path, "/login"):
+			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"token":"tok123"}}`) //nosem // test mock
+		case strings.Contains(r.URL.Path, "/logout"):
+			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":null}`) //nosem // test mock
+		case strings.Contains(r.URL.Path, "/clients"):
+			//nosem // test mock
+			fmt.Fprint(w, envelope(`{"totalRows":1,"data":[
+				{"mac":"aa:bb:cc:dd:ee:01","ip":"10.0.20.10","name":"PC1","hostName":"pc1","networkName":"LAN","vid":1,"wireless":false,"vendor":"Dell","deviceType":"Computer","active":true,"uptime":100}
+			]}`))
+		case strings.Contains(r.URL.Path, "/sites"):
+			fmt.Fprint(w, envelope(`{"totalRows":1,"data":[{"id":"site1","name":"Home","type":0}]}`)) //nosem // test mock
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"errorCode":-1,"msg":"not found","result":null}`) //nosem // test mock
+		}
+	}))
+	defer ts.Close()
+
+	getenv := func(key string) string {
+		switch key {
+		case "OMADA_HOST":
+			return strings.TrimPrefix(ts.URL, "https://")
+		case "OMADA_USERNAME":
+			return "admin"
+		case "OMADA_PASSWORD":
+			return "secret"
+		}
+		return ""
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := execute(getenv, &stdout, &stderr)
+	if code != 0 {
+		t.Errorf("execute() = %d, want 0 (success)", code)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("execute() wrote to stderr: %s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Site: Home") {
+		t.Errorf("execute() output missing 'Site: Home':\n%s", stdout.String())
+	}
+}
+
+func TestExecute_Failure(t *testing.T) {
+	// Use missing credentials to trigger a failure.
+	getenv := func(key string) string {
+		return ""
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := execute(getenv, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("execute() = %d, want 1 (failure)", code)
+	}
+	if !strings.Contains(stderr.String(), "omada-clients:") {
+		t.Errorf("execute() stderr missing 'omada-clients:':\n%s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "set OMADA_HOST") {
+		t.Errorf("execute() stderr missing error message:\n%s", stderr.String())
+	}
+}
+
 var _ io.Writer = (*bytes.Buffer)(nil)
