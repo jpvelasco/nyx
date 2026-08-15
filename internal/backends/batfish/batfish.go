@@ -1,5 +1,7 @@
-// Package batfish is a stub for future Batfish network-analysis integration.
-// Full support is planned for v2 of nyx.
+// Package batfish is an intentional v2 placeholder: Batfish network-analysis
+// integration is not implemented and this package is NOT wired into the audit
+// engine or any backend registry. Available() always returns false and every
+// operation returns ErrNotImplemented. Do not treat it as a live backend.
 package batfish
 
 import "errors"
