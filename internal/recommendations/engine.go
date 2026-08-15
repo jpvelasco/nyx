@@ -743,10 +743,12 @@ func recommendNetworkUnreachable(g failureGroup, spec *intent.Spec, runner model
 			if f.Target != "" {
 				patchLines = append(patchLines, "     target: "+f.Target)
 			}
+			var zones []string
 			for z := range seenZones {
-				patchLines = append(patchLines, "+    runner: "+z+"-probe")
-				break
+				zones = append(zones, z)
 			}
+			slices.Sort(zones)
+			patchLines = append(patchLines, "+    runner: "+zones[0]+"-probe")
 		}
 
 		rec.SpecPatch = strings.Join(patchLines, "\n")
@@ -1109,10 +1111,10 @@ func recommendNetworkDegraded(g failureGroup, spec *intent.Spec, runner models.R
 	if spec != nil && len(g.failures) > 0 {
 		var patchLines []string
 		for _, f := range g.failures {
-			obsLatency := extractInt(f.Observed["latency_ms"])
+			obsLatency := extractInt(f.Observed["avg_rtt_ms"])
 			obsLoss := extractInt(f.Observed["loss_pct"])
-			oldLatency := extractInt(f.Expected["expect_latency_ms"])
-			oldLoss := extractInt(f.Expected["expect_loss_pct"])
+			oldLatency := extractInt(f.Expected["max_latency_ms"])
+			oldLoss := extractInt(f.Expected["max_loss_pct"])
 			newLatency := obsLatency + (obsLatency / 3)
 			if newLatency < oldLatency {
 				newLatency = oldLatency
@@ -1122,7 +1124,7 @@ func recommendNetworkDegraded(g failureGroup, spec *intent.Spec, runner models.R
 				patchLines = append(patchLines, "-    expect_latency_ms: "+fmt.Sprintf("%d", oldLatency))
 				patchLines = append(patchLines, "+    expect_latency_ms: "+fmt.Sprintf("%d  # adjusted; observed %dms", newLatency, obsLatency))
 			}
-			if oldLoss >= 0 {
+			if oldLoss > 0 {
 				patchLines = append(patchLines, "-    expect_loss_pct: "+fmt.Sprintf("%d", oldLoss))
 				newLoss := obsLoss + 1
 				if newLoss < 1 {
@@ -1249,29 +1251,28 @@ func parseIsolationTarget(target string) (from, to string) {
 	return "", ""
 }
 
-// parseIsolationFromSummary extracts from/to from a summary like "isolation violation: personal can reach gaming".
+// parseIsolationFromSummary extracts from/to from a summary like
+// "isolation violation: personal can reach gaming" (local runs) or
+// "isolation confirmed from probe \"p1\": personal cannot reach gaming".
+// The engine always separates the verdict prefix from the from zone with
+// ": ", so the from zone is the text between the last ": " and the
+// reachability phrase. "cannot reach" must be matched before "can reach"
+// and its full length consumed, or the trailing slice lands mid-word.
 func parseIsolationFromSummary(summary string) (from, to string) {
-	// Pattern: "... personal can reach gaming"
-	idx := strings.Index(summary, "can reach")
+	phrase := "cannot reach"
+	idx := strings.Index(summary, phrase)
 	if idx < 0 {
-		idx = strings.Index(summary, "cannot reach")
+		phrase = "can reach"
+		idx = strings.Index(summary, phrase)
 	}
 	if idx < 0 {
 		return "", ""
 	}
 
-	// Find the word before "can reach"
 	before := strings.TrimSpace(summary[:idx])
-	after := strings.TrimSpace(summary[idx+len("can reach"):])
-
-	// The "from" is typically the last word or phrase before "can reach"
-	// Look for "expected deny" or "isolation violation" markers
-	for _, marker := range []string{"isolation violation:", "expected deny", "isolation confirmed:", "connectivity confirmed:"} {
-		if mIdx := strings.Index(before, marker); mIdx >= 0 {
-			before = strings.TrimSpace(before[mIdx+len(marker):])
-			break
-		}
+	if cIdx := strings.LastIndex(before, ": "); cIdx >= 0 {
+		before = strings.TrimSpace(before[cIdx+len(": "):])
 	}
-
+	after := strings.TrimSpace(summary[idx+len(phrase):])
 	return before, after
 }

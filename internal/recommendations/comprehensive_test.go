@@ -1262,8 +1262,8 @@ func TestRecommendNetworkDegraded_WithObservedValues(t *testing.T) {
 			{
 				CheckType: "network_health", Target: "10.0.20.254", Status: models.StatusFail,
 				Summary:  "latency and loss",
-				Observed: map[string]interface{}{"latency_ms": 500, "loss_pct": 15},
-				Expected: map[string]interface{}{"expect_latency_ms": 100, "expect_loss_pct": 5},
+				Observed: map[string]interface{}{"avg_rtt_ms": 500, "loss_pct": 15},
+				Expected: map[string]interface{}{"max_latency_ms": 100, "max_loss_pct": 5},
 			},
 		},
 	}
@@ -1677,12 +1677,42 @@ func TestParseIsolationFromSummary_AdditionalPatterns(t *testing.T) {
 	}{
 		{"isolation confirmed", "isolation confirmed: iot can reach lan", "iot", "lan"},
 		{"connectivity confirmed", "connectivity confirmed: a can reach b", "a", "b"},
-		{"expected deny marker", "expected deny: iot can reach lan", ": iot", "lan"},
+		{"expected deny marker", "expected deny: iot can reach lan", "iot", "lan"},
 		{"no can reach", "some random text", "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			from, to := parseIsolationFromSummary(tt.input)
+			if from != tt.wantFrom || to != tt.wantTo {
+				t.Errorf("parseIsolationFromSummary(%q) = (%q, %q); want (%q, %q)", tt.input, from, to, tt.wantFrom, tt.wantTo)
+			}
+		})
+	}
+}
+
+// TestParseIsolationFromSummary_RealFormats covers every summary string the
+// audit engine emits for isolation verdicts (local runs in runIsolation and
+// probe runs in EvalIsolationStatus). See internal/audit/engine.go.
+func TestParseIsolationFromSummary_RealFormats(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantFrom string
+		wantTo   string
+	}{
+		{"isolation confirmed local", "isolation confirmed: personal cannot reach gaming", "personal", "gaming"},
+		{"isolation violation local", "isolation violation: personal can reach gaming", "personal", "gaming"},
+		{"connectivity confirmed local", "connectivity confirmed: personal can reach gaming", "personal", "gaming"},
+		{"connectivity failure local", "connectivity failure: personal cannot reach gaming", "personal", "gaming"},
+		{"isolation confirmed probe", `isolation confirmed from probe "edge-probe": personal cannot reach gaming`, "personal", "gaming"},
+		{"isolation violation probe", `isolation violation from probe "edge-probe": personal can reach gaming`, "personal", "gaming"},
+		{"connectivity confirmed probe", `connectivity confirmed from probe "edge-probe": personal can reach gaming`, "personal", "gaming"},
+		{"connectivity failure probe", `connectivity failure from probe "edge-probe": personal cannot reach gaming`, "personal", "gaming"},
+		{"lowercased input", "isolation confirmed: guest wifi cannot reach iot", "guest wifi", "iot"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			from, to := parseIsolationFromSummary(strings.ToLower(tt.input))
 			if from != tt.wantFrom || to != tt.wantTo {
 				t.Errorf("parseIsolationFromSummary(%q) = (%q, %q); want (%q, %q)", tt.input, from, to, tt.wantFrom, tt.wantTo)
 			}
@@ -1731,6 +1761,42 @@ func TestRecommendNetworkDegraded_NoExpectedValues(t *testing.T) {
 	recs := recommendNetworkDegraded(g, spec, runner, 1)
 	if len(recs) != 1 {
 		t.Fatalf("expected 1 recommendation, got %d", len(recs))
+	}
+}
+
+// TestRecommendNetworkDegraded_ReadsRealResultKeys verifies the SpecPatch old
+// values come from the keys the health backend actually populates
+// (Observed["avg_rtt_ms"]/["loss_pct"], Expected["max_latency_ms"]/["max_loss_pct"]),
+// not the never-written expect_* names.
+func TestRecommendNetworkDegraded_ReadsRealResultKeys(t *testing.T) {
+	g := failureGroup{
+		category: "network_degraded",
+		failures: []models.CheckResult{
+			{
+				CheckType: "network_health", Target: "10.0.0.1", Status: models.StatusFail,
+				Summary:  "high latency",
+				Observed: map[string]interface{}{"avg_rtt_ms": 300, "loss_pct": 10},
+				Expected: map[string]interface{}{"max_latency_ms": 100, "max_loss_pct": 5},
+			},
+		},
+	}
+	spec := &intent.Spec{
+		Networks: []intent.Network{{Name: "net", CIDR: "10.0.0.0/24", Zone: "zone-a"}},
+	}
+	recs := recommendNetworkDegraded(g, spec, models.RunnerContext{}, 1)
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 recommendation, got %d", len(recs))
+	}
+	patch := recs[0].SpecPatch
+	for _, want := range []string{
+		"-    expect_latency_ms: 100",
+		"+    expect_latency_ms: 400  # adjusted; observed 300ms",
+		"-    expect_loss_pct: 5",
+		"+    expect_loss_pct: 11  # adjusted; observed 10% loss",
+	} {
+		if !strings.Contains(patch, want) {
+			t.Errorf("expected %q in SpecPatch, got:\n%s", want, patch)
+		}
 	}
 }
 

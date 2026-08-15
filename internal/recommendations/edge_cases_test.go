@@ -207,8 +207,8 @@ func TestRecommendNetworkDegraded_LatencyAdjustmentNeeded(t *testing.T) {
 		failures: []models.CheckResult{
 			{CheckType: "network_health", Target: "10.0.0.1", Status: models.StatusFail,
 				Summary:  "high latency",
-				Observed: map[string]interface{}{"latency_ms": 200, "loss_pct": 0},
-				Expected: map[string]interface{}{"expect_latency_ms": 100, "expect_loss_pct": 5},
+				Observed: map[string]interface{}{"avg_rtt_ms": 200, "loss_pct": 0},
+				Expected: map[string]interface{}{"max_latency_ms": 100, "max_loss_pct": 5},
 			},
 		},
 	}
@@ -235,8 +235,8 @@ func TestRecommendNetworkDegraded_LatencyAlreadyHigh(t *testing.T) {
 		failures: []models.CheckResult{
 			{CheckType: "network_health", Target: "10.0.0.1", Status: models.StatusFail,
 				Summary:  "high latency",
-				Observed: map[string]interface{}{"latency_ms": 50, "loss_pct": 0},
-				Expected: map[string]interface{}{"expect_latency_ms": 200, "expect_loss_pct": 0},
+				Observed: map[string]interface{}{"avg_rtt_ms": 50, "loss_pct": 0},
+				Expected: map[string]interface{}{"max_latency_ms": 200, "max_loss_pct": 0},
 			},
 		},
 	}
@@ -252,6 +252,10 @@ func TestRecommendNetworkDegraded_LatencyAlreadyHigh(t *testing.T) {
 	r := recs[0]
 	if !containsStr(r.SpecPatch, "expect_latency_ms") {
 		t.Errorf("expected latency threshold in SpecPatch, got: %s", r.SpecPatch)
+	}
+	// No loss threshold configured (max_loss_pct 0) means no loss patch line
+	if containsStr(r.SpecPatch, "expect_loss_pct") {
+		t.Errorf("expected no loss threshold in SpecPatch when max_loss_pct is 0, got: %s", r.SpecPatch)
 	}
 }
 
@@ -293,6 +297,38 @@ func TestRecommendNetworkUnreachable_DuplicateZones(t *testing.T) {
 	}
 }
 
+// --- recommendNetworkUnreachable: runner zone pick must be deterministic ---
+
+func TestRecommendNetworkUnreachable_DeterministicRunnerZone(t *testing.T) {
+	g := failureGroup{
+		category: "network_unreachable",
+		failures: []models.CheckResult{
+			{CheckType: "port_check", Target: "10.0.1.5", Status: models.StatusError, Summary: "connection refused"},
+			{CheckType: "port_check", Target: "10.0.2.5", Status: models.StatusError, Summary: "connection refused"},
+			{CheckType: "port_check", Target: "10.0.3.5", Status: models.StatusError, Summary: "connection refused"},
+		},
+	}
+	spec := &intent.Spec{
+		Networks: []intent.Network{
+			{Name: "zulu", CIDR: "10.0.1.0/24", Zone: "zulu"},
+			{Name: "alpha", CIDR: "10.0.2.0/24", Zone: "alpha"},
+			{Name: "mike", CIDR: "10.0.3.0/24", Zone: "mike"},
+		},
+	}
+	runner := models.RunnerContext{}
+	// Map iteration order varies per iteration — repeated runs must still
+	// name the same (alphabetically first) zone in the runner example.
+	for i := 0; i < 100; i++ {
+		recs := recommendNetworkUnreachable(g, spec, runner, 1)
+		if len(recs) != 1 {
+			t.Fatalf("iteration %d: expected 1 recommendation, got %d", i, len(recs))
+		}
+		if !containsStr(recs[0].SpecPatch, "+    runner: alpha-probe") {
+			t.Fatalf("iteration %d: expected deterministic runner alpha-probe, got patch:\n%s", i, recs[0].SpecPatch)
+		}
+	}
+}
+
 // --- recommendDiscovery: "expected min" with negative host count (edge case) ---
 
 func TestRecommendDiscovery_ExpectedMinNegativeHostCount(t *testing.T) {
@@ -325,8 +361,8 @@ func TestRecommendNetworkDegraded_NegativeLossPct(t *testing.T) {
 		failures: []models.CheckResult{
 			{CheckType: "network_health", Target: "10.0.0.1", Status: models.StatusFail,
 				Summary:  "high latency",
-				Observed: map[string]interface{}{"latency_ms": 50, "loss_pct": float64(-3)}, // negative → extractInt returns -3
-				Expected: map[string]interface{}{"expect_latency_ms": 200, "expect_loss_pct": 0},
+				Observed: map[string]interface{}{"avg_rtt_ms": 50, "loss_pct": float64(-3)}, // negative → extractInt returns -3
+				Expected: map[string]interface{}{"max_latency_ms": 200, "max_loss_pct": 5},
 			},
 		},
 	}
