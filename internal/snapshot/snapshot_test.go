@@ -828,6 +828,41 @@ func TestComputeDrift_NoChange(t *testing.T) {
 	}
 }
 
+func TestComputeDrift_PassToSkipIsNotImprovement(t *testing.T) {
+	// A check that was passing and is now skipped did not improve — it no
+	// longer ran at all. Regression for the skip-rank bug (#164) that listed
+	// pass→skip under Improved.
+	base := &Snapshot{
+		RunAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Status:  models.StatusPass,
+		Summary: models.ReportSummary{Pass: 1, Fail: 0, Warn: 0},
+		Findings: []models.CheckResult{
+			{CheckType: "port_check", Target: "10.0.0.5", Status: models.StatusPass,
+				Expected: map[string]interface{}{"ports": "[22]"}},
+		},
+	}
+	current := &Snapshot{
+		RunAt:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Status:  models.StatusPass,
+		Summary: models.ReportSummary{Pass: 0, Fail: 0, Warn: 0},
+		Findings: []models.CheckResult{
+			{CheckType: "port_check", Target: "10.0.0.5", Status: models.StatusSkip,
+				Expected: map[string]interface{}{"ports": "[22]"}},
+		},
+	}
+
+	dr := ComputeDrift(base, current)
+	if dr == nil {
+		t.Fatal("expected non-nil drift result")
+	}
+	if len(dr.Improved) != 0 {
+		t.Errorf("expected 0 improved checks, got %d", len(dr.Improved))
+	}
+	if len(dr.Degraded) != 0 {
+		t.Errorf("expected 0 degraded checks, got %d", len(dr.Degraded))
+	}
+}
+
 func TestComputeDrift_NewFailure(t *testing.T) {
 	base := &Snapshot{
 		RunAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -1326,8 +1361,11 @@ func TestStatusWorsened(t *testing.T) {
 		{"error_to_fail", models.StatusError, models.StatusFail, false},
 		{"pass_to_pass", models.StatusPass, models.StatusPass, false},
 		{"fail_to_fail", models.StatusFail, models.StatusFail, false},
-		{"skip_to_pass", models.StatusSkip, models.StatusPass, true},
+		{"skip_to_pass", models.StatusSkip, models.StatusPass, false},
 		{"pass_to_skip", models.StatusPass, models.StatusSkip, false},
+		{"skip_to_fail", models.StatusSkip, models.StatusFail, false},
+		{"fail_to_skip", models.StatusFail, models.StatusSkip, false},
+		{"warn_to_skip", models.StatusWarn, models.StatusSkip, false},
 	}
 
 	for _, tt := range tests {
@@ -1360,7 +1398,9 @@ func TestStatusImproved(t *testing.T) {
 		{"pass_to_warn", models.StatusPass, models.StatusWarn, false},
 		{"fail_to_error", models.StatusFail, models.StatusError, false},
 		{"pass_to_pass", models.StatusPass, models.StatusPass, false},
-		{"skip_to_pass", models.StatusSkip, models.StatusPass, false}, // skip rank is -1, so pass is "worse" than skip
+		{"skip_to_pass", models.StatusSkip, models.StatusPass, false}, // skip carries no status — not an improvement
+		{"pass_to_skip", models.StatusPass, models.StatusSkip, false}, // a skipped check is not better
+		{"fail_to_skip", models.StatusFail, models.StatusSkip, false}, // hiding a failure is not a fix
 	}
 
 	for _, tt := range tests {

@@ -353,14 +353,19 @@ func buildLookup(findings []models.CheckResult) map[string]models.CheckResult {
 	return lookup
 }
 
-// statusWorsened returns true if newStatus is worse than oldStatus.
+// statusWorsened returns true if newStatus is worse than oldStatus. Skip
+// transitions are excluded entirely: a check that did not run carries no
+// status, so pass→skip is not an improvement and skip→fail is not a
+// degradation — both are reported as unchanged.
 func statusWorsened(old, newStatus models.Status) bool {
+	if old == models.StatusSkip || newStatus == models.StatusSkip {
+		return false
+	}
 	rank := map[models.Status]int{
 		models.StatusPass:  0,
 		models.StatusWarn:  1,
 		models.StatusFail:  2,
 		models.StatusError: 3,
-		models.StatusSkip:  -1,
 	}
 	return rank[newStatus] > rank[old]
 }
