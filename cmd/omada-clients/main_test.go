@@ -320,7 +320,7 @@ func TestRunMain_Success(t *testing.T) {
 	}
 }
 
-func TestExecute_Failure(t *testing.T) {
+func TestRunMain_Failure(t *testing.T) {
 	// Use missing credentials to trigger a failure.
 	getenv := func(key string) string {
 		return ""
