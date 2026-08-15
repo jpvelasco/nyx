@@ -89,18 +89,14 @@ var auditCmd = &cobra.Command{
 			defer w.Close()
 		}
 
-		if jsonOutput {
-			return renderAuditReport(w, auditReport)
-		}
-		report.RenderHuman(w, auditReport)
-
-		// Generate and render recommendations for actionable findings.
-		// We include Fail, Warn, *and* Error results for network-behavior checks.
-		// Timeouts and "unreachable from here" errors are some of the most common
+		// Generate recommendations for actionable findings before the output
+		// split so the JSON path carries them too. We include Fail, Warn,
+		// *and* Error results for network-behavior checks. Timeouts and
+		// "unreachable from here" errors are some of the most common
 		// real-world signals (especially when scanning from the wrong VLAN).
-		// Pure setup/auth errors (e.g. missing Omada credentials) are deliberately skipped.
+		// Pure setup/auth errors (e.g. missing Omada credentials) are
+		// deliberately skipped.
 		var failures []models.CheckResult
-		seen := make(map[int]bool)
 		for i, f := range auditReport.Findings {
 			include := f.Status == models.StatusFail || f.Status == models.StatusWarn || f.Status == models.StatusError
 
@@ -113,18 +109,17 @@ var auditCmd = &cobra.Command{
 			}
 
 			if include {
-				if !seen[i] {
-					failures = append(failures, f)
-					seen[i] = true
-				}
+				failures = append(failures, auditReport.Findings[i])
 			}
 		}
 
+		var recs []recommendations.Recommendation
 		if len(failures) > 0 {
-			recs, recErr := recommendations.GenerateRecommendations(failures, spec, auditReport.Runner)
+			var recErr error
+			recs, recErr = recommendations.GenerateRecommendations(failures, spec, auditReport.Runner)
 			if recErr == nil && len(recs) > 0 {
 				// Convert recommendations to models.Recommendation for JSON output
-				var modelRecs []models.Recommendation
+				modelRecs := make([]models.Recommendation, 0, len(recs))
 				for _, r := range recs {
 					modelRecs = append(modelRecs, models.Recommendation{
 						Priority:    r.Priority,
@@ -137,8 +132,16 @@ var auditCmd = &cobra.Command{
 					})
 				}
 				auditReport.Recommendations = modelRecs
-				report.RenderRecommendations(w, recs)
 			}
+		}
+
+		if jsonOutput {
+			return renderAuditReport(w, auditReport)
+		}
+		report.RenderHuman(w, auditReport)
+
+		if len(recs) > 0 {
+			report.RenderRecommendations(w, recs)
 		}
 
 		// Long-term value encouragement (helps users build the "sleep at night" habit)

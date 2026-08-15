@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -1086,6 +1087,65 @@ func TestAuditCmd_EmptySpec(t *testing.T) {
 	if err := auditCmd.RunE(auditCmd, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func TestAuditCmd_JSONIncludesRecommendations(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	saveRestoreGlobals(t)
+	// Isolation between two TEST-NET zones: the runner is not inside the
+	// source zone, so the verdict is a WARN ("unconfirmed"). Warnings feed
+	// the recommendations engine — a vantage_point recommendation must reach
+	// the --json output (regression: recommendations were only generated on
+	// the human path, so JSON reports never carried them).
+	specFile = writeSpec(t, `version: 1
+site: test
+networks:
+  - name: alpha
+    cidr: 192.0.2.0/24
+    gateway: 192.0.2.1
+  - name: beta
+    cidr: 198.51.100.0/24
+    gateway: 198.51.100.1
+assertions:
+  - type: isolation
+    from: alpha
+    to: beta
+    expect: deny
+`)
+	outPath := filepath.Join(t.TempDir(), "out.json")
+	outputPath = outPath
+	jsonOutput = true
+	err := auditCmd.RunE(auditCmd, nil)
+	requireExitCode(t, err, 3) // unconfirmed isolation => warn
+	data, readErr := os.ReadFile(outPath)
+	if readErr != nil {
+		t.Fatalf("reading audit output: %v", readErr)
+	}
+	var report models.AuditReport
+	if umErr := json.Unmarshal(data, &report); umErr != nil {
+		t.Fatalf("audit output is not valid JSON: %v", umErr)
+	}
+	if len(report.Recommendations) == 0 {
+		t.Fatal("expected recommendations in JSON output, got none")
+	}
+	found := false
+	for _, r := range report.Recommendations {
+		if r.Category == "vantage_point" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a vantage_point recommendation, got %+v", report.Recommendations)
+	}
+
+	// The human path must render the recommendations too.
+	jsonOutput = false
+	outputPath = ""
+	err = auditCmd.RunE(auditCmd, nil)
+	requireExitCode(t, err, 3)
 }
 
 func TestInterfacesCmd_NoSpec(t *testing.T) {

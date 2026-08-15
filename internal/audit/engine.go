@@ -610,6 +610,17 @@ func (e *Engine) runVPNRoute(ctx context.Context, a intent.Assertion) (*models.C
 			result.Violations = append(result.Violations,
 				fmt.Sprintf("expected tunnel route, got device %s", route.Device))
 		}
+	} else if a.ExpectTunnel != nil {
+		// expect_tunnel: false — the route must NOT go through the tunnel.
+		if viaTunnel {
+			result.Status = models.StatusFail
+			result.Summary = fmt.Sprintf("%s routed via %s (tunnel)", a.Target, route.Device)
+			result.Violations = append(result.Violations,
+				fmt.Sprintf("expected direct route, got tunnel device %s", route.Device))
+		} else {
+			result.Status = models.StatusPass
+			result.Summary = fmt.Sprintf("%s routed via %s (not tunnel)", a.Target, route.Device)
+		}
 	} else {
 		result.Status = models.StatusPass
 		result.Summary = fmt.Sprintf("%s routed via %s", a.Target, route.Device)

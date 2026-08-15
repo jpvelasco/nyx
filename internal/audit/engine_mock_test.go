@@ -802,6 +802,75 @@ func TestRunVPNRoute_VPNNotFound(t *testing.T) {
 	}
 }
 
+func TestRunVPNRoute_ExpectTunnelFalse_DirectRoutePasses(t *testing.T) {
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		VPN:        []intent.VPNConfig{{Name: "work", Type: "wireguard", Interface: "wg0"}},
+		Assertions: []intent.Assertion{{Type: "vpn_route", VPN: "work", Target: "10.0.0.1", ExpectTunnel: ptrBool(false)}},
+	}
+	mock := &backends.MockBackend{
+		RouteResult:        &system.Route{Device: "eth0", Gateway: "192.168.1.1", Destination: "10.0.0.0/8"},
+		VPNInterfaceResult: false,
+	}
+	eng := NewEngine(spec)
+	eng.Backend = mock
+	result, err := eng.runVPNRoute(context.Background(), spec.Assertions[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusPass {
+		t.Errorf("expected pass for direct route with expect_tunnel false, got %s: %s", result.Status, result.Summary)
+	}
+}
+
+func TestRunVPNRoute_ExpectTunnelFalse_TunnelRouteFails(t *testing.T) {
+	// Regression: expect_tunnel: false used to fall into the always-pass
+	// else branch, so a route leaking through the tunnel passed a
+	// split-tunnel expectation.
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		VPN:        []intent.VPNConfig{{Name: "work", Type: "wireguard", Interface: "wg0"}},
+		Assertions: []intent.Assertion{{Type: "vpn_route", VPN: "work", Target: "10.0.0.1", ExpectTunnel: ptrBool(false)}},
+	}
+	mock := &backends.MockBackend{
+		RouteResult:        &system.Route{Device: "wg0", Gateway: "10.0.0.1", Destination: "10.0.0.0/8"},
+		VPNInterfaceResult: false,
+	}
+	eng := NewEngine(spec)
+	eng.Backend = mock
+	result, err := eng.runVPNRoute(context.Background(), spec.Assertions[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusFail {
+		t.Errorf("expected fail for tunnel route with expect_tunnel false, got %s: %s", result.Status, result.Summary)
+	}
+	if len(result.Violations) == 0 {
+		t.Error("expected a violation naming the tunnel device")
+	}
+}
+
+func TestRunVPNRoute_NoExpectationInformational(t *testing.T) {
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		VPN:        []intent.VPNConfig{{Name: "work", Type: "wireguard", Interface: "wg0"}},
+		Assertions: []intent.Assertion{{Type: "vpn_route", VPN: "work", Target: "10.0.0.1"}},
+	}
+	mock := &backends.MockBackend{
+		RouteResult:        &system.Route{Device: "wg0", Gateway: "10.0.0.1", Destination: "10.0.0.0/8"},
+		VPNInterfaceResult: false,
+	}
+	eng := NewEngine(spec)
+	eng.Backend = mock
+	result, err := eng.runVPNRoute(context.Background(), spec.Assertions[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusPass {
+		t.Errorf("expected pass for informational route check, got %s: %s", result.Status, result.Summary)
+	}
+}
+
 // --- runRouteCheck ---
 
 func TestRunRouteCheck(t *testing.T) {
