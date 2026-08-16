@@ -80,7 +80,7 @@ func saveRestoreGlobals(t *testing.T) {
 func writeSpec(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "spec.yaml")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -1264,7 +1264,8 @@ assertions:
 	jsonOutput = true
 	err := auditCmd.RunE(auditCmd, nil)
 	requireExitCode(t, err, 3) // unconfirmed isolation => warn
-	data, readErr := os.ReadFile(outPath)
+	// Codacy false positive: outPath is created under t.TempDir(), not from user input.
+	data, readErr := os.ReadFile(outPath) // nosemgrep: go_filesystem_rule-fileread
 	if readErr != nil {
 		t.Fatalf("reading audit output: %v", readErr)
 	}
@@ -1354,7 +1355,8 @@ func TestSnapshotBaselineCmd_CorruptSnapshotFallback(t *testing.T) {
 	saveRestoreGlobals(t)
 	lastAuditReport = nil
 	dir := filepath.Join(home, ".nyx", "snapshots")
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	// Directories need execute permission for traversal; 0700 restricts access to the owner.
+	if err := os.MkdirAll(dir, 0700); err != nil { // nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	// Newest snapshot is corrupt JSON — the fallback must surface the error.

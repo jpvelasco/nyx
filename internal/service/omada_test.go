@@ -34,7 +34,8 @@ func omadaTestServer(t *testing.T, h http.HandlerFunc) *httptest.Server {
 }
 
 func writeOmadaEnvelope(w http.ResponseWriter, errorCode int, result string) {
-	w.Write([]byte(`{"errorCode":` + strconv.Itoa(errorCode) + `,"msg":"","result":` + result + `}`))
+	// Codacy false positive: this test-only JSON fixture receives only test-controlled payloads.
+	w.Write([]byte(`{"errorCode":` + strconv.Itoa(errorCode) + `,"msg":"","result":` + result + `}`)) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 }
 
 func TestOmadaServiceInfo(t *testing.T) {

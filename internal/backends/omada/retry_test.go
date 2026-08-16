@@ -526,7 +526,8 @@ func TestOperationLogging(t *testing.T) {
 	}
 	l.Close()
 
-	data, err := os.ReadFile(path)
+	// Codacy false positive: path names this test's log inside t.TempDir().
+	data, err := os.ReadFile(path) // nosemgrep: go_filesystem_rule-fileread
 	if err != nil {
 		t.Fatalf("reading log: %v", err)
 	}
