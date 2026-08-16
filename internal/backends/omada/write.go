@@ -11,16 +11,17 @@ import (
 // controller-managed and must not be sent. Names are resolved client-side
 // and are not accepted on write.
 type aclRuleWrite struct {
-	Name        string    `json:"name"`
-	Type        ACLType   `json:"type"`
-	Status      bool      `json:"status"`
-	Policy      ACLPolicy `json:"policy"`
-	Protocols   []int     `json:"protocols"`
-	SourceType  string    `json:"sourceType"`
-	SourceIDs   []string  `json:"sourceIds"`
-	DestType    string    `json:"destinationType"`
-	DestIDs     []string  `json:"destinationIds"`
-	TimeRangeID string    `json:"timeRangeId,omitempty"`
+	Name        string       `json:"name"`
+	Type        ACLType      `json:"type"`
+	Status      bool         `json:"status"`
+	Policy      ACLPolicy    `json:"policy"`
+	Protocols   []int        `json:"protocols"`
+	SourceType  EndpointKind `json:"sourceType"`
+	SourceIDs   []string     `json:"sourceIds"`
+	DestType    EndpointKind `json:"destinationType"`
+	DestIDs     []string     `json:"destinationIds"`
+	Direction   ACLDirection `json:"direction,omitempty"`
+	TimeRangeID string       `json:"timeRangeId,omitempty"`
 }
 
 func ruleToWrite(rule ACLRule) aclRuleWrite {
@@ -38,6 +39,7 @@ func ruleToWrite(rule ACLRule) aclRuleWrite {
 		SourceIDs:   rule.SourceIDs,
 		DestType:    rule.DestType,
 		DestIDs:     rule.DestIDs,
+		Direction:   rule.Direction,
 		TimeRangeID: rule.TimeRangeID,
 	}
 }

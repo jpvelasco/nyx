@@ -245,9 +245,9 @@ func (s *OmadaService) ListACLs(ctx context.Context, opts OmadaOptions) ([]Omada
 			Enabled:    r.Status,
 			Policy:     r.Policy.String(),
 			Protocols:  omadabackend.ProtocolsLabel(r.Protocols),
-			SourceType: r.SourceType,
+			SourceType: r.SourceType.String(),
 			SourceName: r.SourceName,
-			DestType:   r.DestType,
+			DestType:   r.DestType.String(),
 			DestName:   r.DestName,
 			Index:      r.Index,
 		})

@@ -1,7 +1,9 @@
 package omada
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -95,21 +97,68 @@ func ProtocolsLabel(protocols []int) string {
 	return strings.Join(parts, ",")
 }
 
+// EndpointKind is a source/destination classifier. The live 6.x API sends
+// this as an int (0 = network). Older fixtures and some docs use the
+// string "network" — both decode.
+type EndpointKind int
+
+// EndpointNetwork is a LAN network / VLAN endpoint.
+const EndpointNetwork EndpointKind = 0
+
+// String returns the agent-facing label for the endpoint kind.
+func (k EndpointKind) String() string {
+	if k == EndpointNetwork {
+		return "network"
+	}
+	return strconv.Itoa(int(k))
+}
+
+// UnmarshalJSON accepts a JSON number or the string "network".
+func (k *EndpointKind) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) > 0 && data[0] == '"' {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+		if strings.EqualFold(s, "network") || s == "" {
+			*k = EndpointNetwork
+			return nil
+		}
+		return fmt.Errorf("unknown ACL endpoint kind %q", s)
+	}
+	var n int
+	if err := json.Unmarshal(data, &n); err != nil {
+		return err
+	}
+	*k = EndpointKind(n)
+	return nil
+}
+
+// ACLDirection is the gateway rule's path: LAN-to-LAN, LAN-to-WAN, WAN-in, VPN-in.
+type ACLDirection struct {
+	LANToWAN bool     `json:"lanToWan"`
+	LANToLAN bool     `json:"lanToLan"`
+	WANInIDs []string `json:"wanInIds"`
+	VPNInIDs []string `json:"vpnInIds"`
+}
+
 // ACLRule is one row of the Omada 6.x unified ACL list. Endpoint names are
 // not on the wire — resolve them with ResolveRules after fetching networks.
 type ACLRule struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Type        ACLType   `json:"type"`
-	Status      bool      `json:"status"`
-	Policy      ACLPolicy `json:"policy"`
-	Protocols   []int     `json:"protocols"`
-	SourceType  string    `json:"sourceType"`
-	SourceIDs   []string  `json:"sourceIds"`
-	DestType    string    `json:"destinationType"`
-	DestIDs     []string  `json:"destinationIds"`
-	Index       int       `json:"index"`
-	TimeRangeID string    `json:"timeRangeId,omitempty"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Type        ACLType      `json:"type"`
+	Status      bool         `json:"status"`
+	Policy      ACLPolicy    `json:"policy"`
+	Protocols   []int        `json:"protocols"`
+	SourceType  EndpointKind `json:"sourceType"`
+	SourceIDs   []string     `json:"sourceIds"`
+	DestType    EndpointKind `json:"destinationType"`
+	DestIDs     []string     `json:"destinationIds"`
+	Direction   ACLDirection `json:"direction"`
+	Index       int          `json:"index"`
+	TimeRangeID string       `json:"timeRangeId,omitempty"`
 
 	// Resolved from LAN networks; omitted on the wire.
 	SourceName string `json:"-"`

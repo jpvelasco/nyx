@@ -1,10 +1,83 @@
 package omada
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/intent"
 )
+
+func TestEndpointKindUnmarshal(t *testing.T) {
+	cases := []struct {
+		in   string
+		want EndpointKind
+	}{
+		{`0`, EndpointNetwork},
+		{`"network"`, EndpointNetwork},
+		{`"Network"`, EndpointNetwork},
+		{`2`, EndpointKind(2)},
+	}
+	for _, tc := range cases {
+		var k EndpointKind
+		if err := json.Unmarshal([]byte(tc.in), &k); err != nil {
+			t.Fatalf("Unmarshal(%s): %v", tc.in, err)
+		}
+		if k != tc.want {
+			t.Errorf("Unmarshal(%s) = %v, want %v", tc.in, k, tc.want)
+		}
+	}
+	var bad EndpointKind
+	if err := json.Unmarshal([]byte(`"ip-group"`), &bad); err == nil {
+		t.Error("expected error for unknown string kind")
+	}
+	if err := json.Unmarshal([]byte(`{`), &bad); err == nil {
+		t.Error("expected error for truncated JSON")
+	}
+	if err := json.Unmarshal([]byte(`true`), &bad); err == nil {
+		t.Error("expected error for bool JSON")
+	}
+	if EndpointKind(2).String() != "2" {
+		t.Errorf("String() for kind 2 = %q, want 2", EndpointKind(2).String())
+	}
+}
+
+func TestFetchACLsLiveGatewayShape(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("type") != "0" {
+			writeEnvelope(w, -1, "General error.", "null")
+			return
+		}
+		writeEnvelope(w, 0, "", `{
+			"totalRows":1,"data":[{
+				"id":"6a00b0c0d0e0f0a0b0c0d0e1","type":0,"index":1,"name":"iot-lan-deny",
+				"status":true,"policy":0,"protocols":[256],
+				"sourceType":0,"sourceIds":["n-iot"],
+				"destinationType":0,"destinationIds":["n-lan","n-guest"],
+				"direction":{"lanToWan":false,"lanToLan":true,"wanInIds":[],"vpnInIds":[]}
+			}],
+			"aclDisable":true
+		}`)
+	}))
+	list, err := c.FetchACLs(context.Background(), "s1", ACLTypeGateway)
+	if err != nil {
+		t.Fatalf("FetchACLs: %v", err)
+	}
+	if !list.ACLDisable || len(list.Rules) != 1 {
+		t.Fatalf("list = %+v, want one gateway rule", list)
+	}
+	r := list.Rules[0]
+	if r.SourceType != EndpointNetwork || r.DestType != EndpointNetwork {
+		t.Errorf("kinds = src %v dst %v, want network", r.SourceType, r.DestType)
+	}
+	if !r.Direction.LANToLAN || r.Direction.LANToWAN {
+		t.Errorf("direction = %+v, want lanToLan only", r.Direction)
+	}
+	if len(r.DestIDs) != 2 || r.Policy != ACLPolicyDeny {
+		t.Errorf("rule = %+v, want deny to two dest networks", r)
+	}
+}
 
 func TestACLPolicyMapping(t *testing.T) {
 	if ACLPolicyDeny.String() != "drop" || ACLPolicyPermit.String() != "accept" {

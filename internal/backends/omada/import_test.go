@@ -88,6 +88,7 @@ func TestResolveRuleEndpoint(t *testing.T) {
 		{"known network id", "inet", "", []string{"net-1"}, "lan"},
 		{"unknown id kept", "inet", "", []string{"other"}, "other"},
 		{"fallback to type", "inet", "", nil, "inet"},
+		{"network kind without ids is unresolved", "network", "", nil, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -139,10 +140,10 @@ func TestPoliciesFromRules(t *testing.T) {
 		{ID: "n2", Name: "IoT", GatewaySubnet: "10.0.1.1/24"},
 	}
 	rules := []ACLRule{
-		{Name: "Block IoT", Policy: ACLPolicyDeny, Status: true, SourceType: "network", SourceName: "IoT", DestType: "network", DestName: "Trusted"},
-		{Name: "Allow Web", Policy: ACLPolicyPermit, Status: true, SourceType: "network", SourceIDs: []string{"n2"}, DestType: "network", DestIDs: []string{"n1"}},
+		{Name: "Block IoT", Policy: ACLPolicyDeny, Status: true, SourceType: EndpointNetwork, SourceName: "IoT", DestType: EndpointNetwork, DestName: "Trusted"},
+		{Name: "Allow Web", Policy: ACLPolicyPermit, Status: true, SourceType: EndpointNetwork, SourceIDs: []string{"n2"}, DestType: EndpointNetwork, DestIDs: []string{"n1"}},
 		{Name: "Disabled", Policy: ACLPolicyDeny, Status: false},
-		{Name: "Unresolved", Policy: ACLPolicyDeny, Status: true, SourceType: "inet"},
+		{Name: "Unresolved", Policy: ACLPolicyDeny, Status: true, SourceType: EndpointKind(7)},
 	}
 
 	got := PoliciesFromRules(rules, networks)
@@ -159,14 +160,14 @@ func TestPoliciesFromRules(t *testing.T) {
 	if p := byName["allow-web"]; p.From != "iot" || p.To != "trusted" || p.Action != "allow" {
 		t.Errorf("allow-web = %+v, want iot->trusted allow via network ids", p)
 	}
-	if p := byName["unresolved"]; p.From != "inet" {
+	if p := byName["unresolved"]; p.From != "7" {
 		t.Errorf("unresolved = %+v, want endpoint fallback to source type", p)
 	}
 }
 
 func TestPoliciesFromRulesUnknownPolicyDefaultsDeny(t *testing.T) {
 	got := PoliciesFromRules([]ACLRule{{
-		Name: "odd", Policy: ACLPolicy(9), Status: true, SourceType: "network", SourceName: "a", DestType: "network", DestName: "b",
+		Name: "odd", Policy: ACLPolicy(9), Status: true, SourceType: EndpointNetwork, SourceName: "a", DestType: EndpointNetwork, DestName: "b",
 	}}, nil)
 	if len(got) != 1 || got[0].Action != "deny" {
 		t.Errorf("unknown policy = %+v, want deny fallback", got)
@@ -188,9 +189,9 @@ func TestBuildAssertions(t *testing.T) {
 		{SSID: "IoT-Guest", IP: "10.0.1.10"},
 	}
 	rules := []ACLRule{
-		{Name: "lan-iot-deny", Policy: ACLPolicyDeny, Status: true, SourceType: "network", SourceName: "lan", DestType: "network", DestName: "iot"},
+		{Name: "lan-iot-deny", Policy: ACLPolicyDeny, Status: true, SourceType: EndpointNetwork, SourceName: "lan", DestType: EndpointNetwork, DestName: "iot"},
 		{Name: "disabled", Policy: ACLPolicyDeny, Status: false},
-		{Name: "allow-web", Policy: ACLPolicyPermit, Status: true, SourceType: "network", SourceName: "lan", DestType: "network", DestName: "iot"},
+		{Name: "allow-web", Policy: ACLPolicyPermit, Status: true, SourceType: EndpointNetwork, SourceName: "lan", DestType: EndpointNetwork, DestName: "iot"},
 		{Name: "unresolved", Policy: ACLPolicyDeny, Status: true},
 	}
 	netsByID := map[string]intent.Network{"n1": networks[0], "n2": networks[1]}

@@ -25,10 +25,10 @@ func sampleSwitchRule() ACLRule {
 		Status:     true,
 		Policy:     ACLPolicyDeny,
 		Protocols:  []int{ProtocolAll},
-		SourceType: "network",
+		SourceType: EndpointNetwork,
 		SourceIDs:  []string{"n2"},
 		SourceName: "IoT",
-		DestType:   "network",
+		DestType:   EndpointNetwork,
 		DestIDs:    []string{"n1"},
 		DestName:   "Trusted",
 	}
@@ -70,11 +70,14 @@ func TestCreateACLRule(t *testing.T) {
 	if len(body.Protocols) != 1 || body.Protocols[0] != ProtocolAll {
 		t.Errorf("body protocols = %v, want [256]", body.Protocols)
 	}
-	if body.SourceType != "network" || len(body.SourceIDs) != 1 || body.SourceIDs[0] != "n2" {
+	if body.SourceType != EndpointNetwork || len(body.SourceIDs) != 1 || body.SourceIDs[0] != "n2" {
 		t.Errorf("body source = %+v, want network n2", body)
 	}
-	if body.DestType != "network" || len(body.DestIDs) != 1 || body.DestIDs[0] != "n1" {
+	if body.DestType != EndpointNetwork || len(body.DestIDs) != 1 || body.DestIDs[0] != "n1" {
 		t.Errorf("body dest = %+v, want network n1", body)
+	}
+	if !strings.Contains(gotBody, `"sourceType":0`) {
+		t.Errorf("body = %q, want sourceType encoded as 0", gotBody)
 	}
 	if strings.Contains(gotBody, `"srcName"`) || strings.Contains(gotBody, `"sourceName"`) {
 		t.Errorf("body = %q, must not include resolved names", gotBody)

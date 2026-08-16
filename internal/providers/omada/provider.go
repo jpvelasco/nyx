@@ -272,10 +272,10 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 			Status:     true,
 			Policy:     policy,
 			Protocols:  []int{omadabackend.ProtocolAll},
-			SourceType: "network",
+			SourceType: omadabackend.EndpointNetwork,
 			SourceIDs:  []string{src.ID},
 			SourceName: src.Name,
-			DestType:   "network",
+			DestType:   omadabackend.EndpointNetwork,
 			DestIDs:    []string{dst.ID},
 			DestName:   dst.Name,
 		}

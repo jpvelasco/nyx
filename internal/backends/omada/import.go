@@ -144,8 +144,8 @@ func PoliciesFromRules(rules []ACLRule, networks []Network) []intent.Policy {
 		if action == "" {
 			action = "deny"
 		}
-		from := resolveRuleEndpoint(rule.SourceType, rule.SourceName, rule.SourceIDs, netsByID)
-		to := resolveRuleEndpoint(rule.DestType, rule.DestName, rule.DestIDs, netsByID)
+		from := resolveRuleEndpoint(rule.SourceType.String(), rule.SourceName, rule.SourceIDs, netsByID)
+		to := resolveRuleEndpoint(rule.DestType.String(), rule.DestName, rule.DestIDs, netsByID)
 		policies = append(policies, intent.Policy{
 			Name:   sanitizeName(rule.Name),
 			From:   from,
@@ -210,8 +210,8 @@ func buildAssertions(networks []intent.Network, omadaNets []Network, clients []C
 		if !rule.Policy.IsDeny() {
 			continue
 		}
-		from := resolveRuleEndpoint(rule.SourceType, rule.SourceName, rule.SourceIDs, netsByID)
-		to := resolveRuleEndpoint(rule.DestType, rule.DestName, rule.DestIDs, netsByID)
+		from := resolveRuleEndpoint(rule.SourceType.String(), rule.SourceName, rule.SourceIDs, netsByID)
+		to := resolveRuleEndpoint(rule.DestType.String(), rule.DestName, rule.DestIDs, netsByID)
 		if from == "" || to == "" {
 			continue
 		}
@@ -266,6 +266,10 @@ func resolveRuleEndpoint(epType, name string, ids []string, netsByID map[string]
 		return sanitizeName(name)
 	}
 	if len(ids) == 0 {
+		// "network" with no IDs is unresolved, not an endpoint named "network".
+		if epType == "" || epType == EndpointNetwork.String() {
+			return ""
+		}
 		return epType
 	}
 	parts := make([]string, 0, len(ids))
