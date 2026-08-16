@@ -13,6 +13,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/backends"
 	"github.com/jpvelasco/nyx/internal/backends/health"
 	"github.com/jpvelasco/nyx/internal/backends/system"
+	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	providers "github.com/jpvelasco/nyx/internal/providers"
@@ -754,6 +755,165 @@ func TestRunACLCheck_MissingCredentials(t *testing.T) {
 	}
 	if result.Status != models.StatusError {
 		t.Errorf("expected error for missing credentials, got %s: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "requires") {
+		t.Errorf("expected 'requires' in summary, got: %s", result.Summary)
+	}
+}
+
+type recordingACLProvider struct {
+	called bool
+	opts   providers.ImportOptions
+}
+
+func (r *recordingACLProvider) Name() string           { return "recacl" }
+func (r *recordingACLProvider) Capabilities() []string { return []string{"acl_check"} }
+func (r *recordingACLProvider) Info(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInfo, error) {
+	return nil, nil
+}
+func (r *recordingACLProvider) ImportSpec(ctx context.Context, opts providers.ImportOptions) (*providers.ImportResult, error) {
+	return nil, nil
+}
+func (r *recordingACLProvider) Check(ctx context.Context, opts providers.ImportOptions) (*providers.AuditResult, error) {
+	return nil, nil
+}
+func (r *recordingACLProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequest, opts providers.ImportOptions) (*models.CheckResult, error) {
+	r.called = true
+	r.opts = opts
+	return &models.CheckResult{Status: models.StatusPass}, nil
+}
+
+func TestRunACLCheck_VaultFallback(t *testing.T) {
+	providers.Reset()
+	t.Cleanup(func() { providers.Reset() })
+	rec := &recordingACLProvider{}
+	if err := providers.Register(rec); err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	t.Setenv("OMADA_HOST", "")
+	t.Setenv("OMADA_USERNAME", "")
+	t.Setenv("OMADA_PASSWORD", "")
+
+	storePath := filepath.Join(t.TempDir(), "credentials.json")
+	store, err := credentials.Open(storePath)
+	if err != nil {
+		t.Fatalf("credentials.Open failed: %v", err)
+	}
+	if err := store.Set("recacl", "default", credentials.Entry{
+		"host":     "10.0.0.9",
+		"username": "vault-user",
+		"password": "vault-pass",
+	}); err != nil {
+		t.Fatalf("store.Set failed: %v", err)
+	}
+
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Policies: []intent.Policy{
+			{Name: "policy1", From: "zone1", To: "zone2", Action: "deny"},
+		},
+	}
+	eng := NewEngine(spec)
+	eng.Backend = &backends.MockBackend{}
+	eng.CredentialsPath = storePath
+	a := intent.Assertion{
+		Type:     "acl_check",
+		Provider: "recacl",
+		Policy:   "policy1",
+		Expect:   "enforced",
+	}
+	result, err := eng.runACLCheck(context.Background(), a)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !rec.called {
+		t.Fatal("provider was not called; vault fallback did not fill credentials")
+	}
+	if rec.opts.Host != "10.0.0.9" || rec.opts.Username != "vault-user" || rec.opts.Password != "vault-pass" {
+		t.Errorf("provider received opts from env instead of vault: %+v", rec.opts)
+	}
+	if result.Status != models.StatusPass {
+		t.Errorf("expected pass from recording provider, got %s", result.Status)
+	}
+}
+
+func TestRunACLCheck_VaultEmptyFallbackStillErrors(t *testing.T) {
+	providers.Reset()
+	t.Cleanup(func() { providers.Reset() })
+	providers.Register(&aclTestProvider{})
+
+	t.Setenv("OMADA_HOST", "")
+	t.Setenv("OMADA_USERNAME", "")
+	t.Setenv("OMADA_PASSWORD", "")
+
+	// Store exists but has no entry for this provider.
+	storePath := filepath.Join(t.TempDir(), "credentials.json")
+	if _, err := credentials.Open(storePath); err != nil {
+		t.Fatalf("credentials.Open failed: %v", err)
+	}
+
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Policies: []intent.Policy{
+			{Name: "policy1", From: "zone1", To: "zone2", Action: "deny"},
+		},
+	}
+	eng := NewEngine(spec)
+	eng.Backend = &backends.MockBackend{}
+	eng.CredentialsPath = storePath
+	a := intent.Assertion{
+		Type:     "acl_check",
+		Provider: "acltest",
+		Policy:   "policy1",
+		Expect:   "enforced",
+	}
+	result, err := eng.runACLCheck(context.Background(), a)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusError {
+		t.Errorf("expected error when vault has no entry, got %s", result.Status)
+	}
+}
+
+func TestRunACLCheck_VaultCorruptFallsThrough(t *testing.T) {
+	providers.Reset()
+	t.Cleanup(func() { providers.Reset() })
+	providers.Register(&aclTestProvider{})
+
+	t.Setenv("OMADA_HOST", "")
+	t.Setenv("OMADA_USERNAME", "")
+	t.Setenv("OMADA_PASSWORD", "")
+
+	// A corrupt store must not crash the check; it falls through to the
+	// normal missing-credentials error.
+	storePath := filepath.Join(t.TempDir(), "credentials.json")
+	if err := os.WriteFile(storePath, []byte("garbage"), 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Policies: []intent.Policy{
+			{Name: "policy1", From: "zone1", To: "zone2", Action: "deny"},
+		},
+	}
+	eng := NewEngine(spec)
+	eng.Backend = &backends.MockBackend{}
+	eng.CredentialsPath = storePath
+	a := intent.Assertion{
+		Type:     "acl_check",
+		Provider: "acltest",
+		Policy:   "policy1",
+		Expect:   "enforced",
+	}
+	result, err := eng.runACLCheck(context.Background(), a)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusError {
+		t.Errorf("expected missing-credentials error, got %s", result.Status)
 	}
 	if !strings.Contains(result.Summary, "requires") {
 		t.Errorf("expected 'requires' in summary, got: %s", result.Summary)

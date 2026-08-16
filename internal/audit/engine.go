@@ -17,6 +17,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/backends"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/backends/system"
+	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/probe"
@@ -42,6 +43,7 @@ type Engine struct {
 	CACertPath        string               // path to custom CA cert PEM file
 	SkipHostKeyVerify bool                 // skip SSH host key verification for probes
 	SeenDBPath        string               // if non-empty, overrides ~/.nyx/seen.json (used in tests)
+	CredentialsPath   string               // if non-empty, overrides ~/.nyx/credentials.json (used in tests)
 	Backend           backends.Backend     // backend abstraction; nil means use default
 	Logger            *slog.Logger         // structured logger; nil means use default stderr logger
 	runnerCtx         models.RunnerContext // populated once at Run() time
@@ -770,6 +772,37 @@ func aclCheckErrorResult(provider, policy string, summary string) *models.CheckR
 	return result
 }
 
+// fillFromCredentialStore completes missing import options from the
+// encrypted credential store (entry <provider>/default). Store failures are
+// silently ignored — env vars remain the primary source and the caller
+// still reports missing credentials.
+func fillFromCredentialStore(opts providers.ImportOptions, provider, path string) providers.ImportOptions {
+	if path == "" {
+		path = credentials.DefaultPath()
+	}
+	store, err := credentials.Open(path)
+	if err != nil {
+		return opts
+	}
+	entry, ok := store.Get(provider, "default")
+	if !ok {
+		return opts
+	}
+	if opts.Host == "" {
+		opts.Host = entry["host"]
+	}
+	if opts.Username == "" {
+		opts.Username = entry["username"]
+	}
+	if opts.Password == "" {
+		opts.Password = entry["password"]
+	}
+	if opts.Site == "" {
+		opts.Site = entry["site"]
+	}
+	return opts
+}
+
 func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
 	providerName := a.Provider
 	if providerName == "" {
@@ -806,8 +839,11 @@ func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.C
 		CACertPath:    e.CACertPath,
 	}
 	if opts.Host == "" || opts.Username == "" || opts.Password == "" {
+		opts = fillFromCredentialStore(opts, providerName, e.CredentialsPath)
+	}
+	if opts.Host == "" || opts.Username == "" || opts.Password == "" {
 		return aclCheckErrorResult(providerName, a.Policy,
-			"acl_check requires OMADA_HOST, OMADA_USERNAME, OMADA_PASSWORD environment variables"), nil
+			"acl_check requires OMADA_HOST, OMADA_USERNAME, OMADA_PASSWORD environment variables, or stored credentials (see `nyx credentials set omada`)"), nil
 	}
 
 	expect := a.Expect // "enforced" or "not_enforced"

@@ -65,6 +65,7 @@ func init() {
 	rootCmd.AddCommand(auditCmd)
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(providerCmd)
+	rootCmd.AddCommand(credentialsCmd)
 	rootCmd.AddCommand(versionCmd)
 
 	// Logger is best-effort — if it fails, we continue without logging.
