@@ -53,6 +53,9 @@ var auditCmd = &cobra.Command{
 		engine.Interface = GetSelectedInterface()
 		engine.WarnVirtual = warnVirtual
 		engine.SkipHostKeyVerify = skipHostKeyVerify
+		if slogLog != nil {
+			engine.Logger = slogLog
+		}
 		auditReport, err := engine.Run(ctx)
 		if err != nil {
 			return fmt.Errorf("audit failed: %w", err)

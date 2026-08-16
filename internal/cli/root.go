@@ -3,6 +3,7 @@ package cli
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/jpvelasco/nyx/internal/logger"
@@ -21,6 +22,7 @@ var (
 	warnVirtual       bool
 	skipHostKeyVerify bool
 	log               *logger.Logger
+	slogLog           *slog.Logger
 
 	// lastAuditReport caches the most recent audit result so that
 	// `nyx snapshot baseline` and `nyx drift status` can work immediately after an audit.
@@ -34,6 +36,16 @@ var rootCmd = &cobra.Command{
 against intended behavior. It combines live checks, declared intent via YAML
 specs, and agent-friendly output for homelabs and developer environments.`,
 	SilenceUsage: true,
+}
+
+// PersistentPreRun stamps every invocation with a trace ID so log lines from
+// one CLI/MCP run correlate, regardless of which command ran.
+func init() {
+	rootCmd.PersistentPreRun = func(_ *cobra.Command, _ []string) {
+		if slogLog != nil {
+			slog.SetDefault(slogLog.With("trace_id", logger.NewTraceID()))
+		}
+	}
 }
 
 func init() {
@@ -58,6 +70,13 @@ func init() {
 	// Logger is best-effort — if it fails, we continue without logging.
 	if l, err := logger.New(logger.DefaultPath(), 5*1024*1024, 3); err == nil {
 		log = l
+	}
+
+	// Structured logger (slog) writes to the same rotating file, honoring
+	// NYX_LOG_LEVEL / NYX_LOG_FILE. Best-effort like the legacy logger.
+	if sl, err := logger.NewSlog(logger.EnvLogFile(), 5*1024*1024, 3, logger.EnvLevel()); err == nil {
+		slogLog = sl
+		slog.SetDefault(sl)
 	}
 }
 
