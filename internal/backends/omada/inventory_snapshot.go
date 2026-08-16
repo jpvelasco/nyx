@@ -14,16 +14,17 @@ import (
 // best-effort: failures are recorded in Warnings and the snapshot is still
 // returned (the Networks fetch is mandatory and fails the whole call).
 type InventorySnapshot struct {
-	ControllerVersion string
-	Devices           []Device
-	Networks          []Network
-	Bindings          NetworkBindings
-	GatewayACLs       ACLList
-	SwitchACLs        ACLList
-	GatewayACLsOK     bool
-	SwitchACLsOK      bool
-	Clients           []ConnectedClient
-	Warnings          []string
+	ControllerVersion  string
+	ControllerCategory string
+	Devices            []Device
+	Networks           []Network
+	Bindings           NetworkBindings
+	GatewayACLs        ACLList
+	SwitchACLs         ACLList
+	GatewayACLsOK      bool
+	SwitchACLsOK       bool
+	Clients            []ConnectedClient
+	Warnings           []string
 }
 
 // FetchInventory loads the site's full observation in one pass. Network
@@ -34,9 +35,10 @@ func (c *Client) FetchInventory(ctx context.Context, siteID string) (*InventoryS
 		return nil, err
 	}
 	snap := &InventorySnapshot{
-		ControllerVersion: c.Info().ControllerVer,
-		Networks:          nets,
-		Bindings:          BuildNetworkBindings(nets),
+		ControllerVersion:  c.Info().ControllerVer,
+		ControllerCategory: c.Info().Category,
+		Networks:           nets,
+		Bindings:           BuildNetworkBindings(nets),
 	}
 
 	devices, err := c.GetDevices(ctx, siteID)
@@ -77,8 +79,9 @@ func (c *Client) FetchInventory(ctx context.Context, siteID string) (*InventoryS
 // sanitized to match the spec's network entries.
 func BuildSpecInventory(snap *InventorySnapshot) *intent.Inventory {
 	inv := &intent.Inventory{
-		ControllerVersion: snap.ControllerVersion,
-		NetworkGateways:   make(map[string]string),
+		ControllerVersion:  snap.ControllerVersion,
+		ControllerCategory: snap.ControllerCategory,
+		NetworkGateways:    make(map[string]string),
 	}
 	gwMap := NetworkGatewayMap(snap.Devices, snap.Networks, snap.Bindings)
 	for _, n := range snap.Networks {
@@ -124,7 +127,11 @@ func RenderInventory(snap *InventorySnapshot, siteName string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Site: %s\n", siteName)
 	if snap.ControllerVersion != "" {
-		fmt.Fprintf(&b, "Controller: %s\n", snap.ControllerVersion)
+		cat := ""
+		if snap.ControllerCategory != "" {
+			cat = " (" + snap.ControllerCategory + ")"
+		}
+		fmt.Fprintf(&b, "Controller: %s%s\n", snap.ControllerVersion, cat)
 	}
 	for _, w := range snap.Warnings {
 		fmt.Fprintf(&b, "Warning: %s\n", w)

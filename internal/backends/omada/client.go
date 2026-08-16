@@ -141,6 +141,7 @@ type ControllerInfo struct {
 	OmadaCID      string `json:"omadacId"`
 	Configured    bool   `json:"configured"`
 	Type          int    `json:"type"`
+	Category      string `json:"omadacCategory"`
 }
 
 // apiResponse is the envelope every Omada API response is wrapped in.

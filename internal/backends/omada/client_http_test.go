@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const testInfoResponse = `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true}}`
+const testInfoResponse = `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true,"omadacCategory":"advanced"}}`
 
 // newTestClient spins up a TLS test server with a default /api/info handler
 // and returns a ready-to-use Client pointing at it.
@@ -94,6 +94,9 @@ func TestNewClientNormalisesHost(t *testing.T) {
 	}
 	if c.info == nil || c.info.ControllerVer != "6.4.5.1" {
 		t.Errorf("info = %+v, want version 6.4.5.1", c.info)
+	}
+	if c.info == nil || c.info.Category != "advanced" {
+		t.Errorf("info = %+v, want category advanced", c.info)
 	}
 }
 

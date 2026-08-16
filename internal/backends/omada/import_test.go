@@ -336,6 +336,9 @@ func TestImportSpecEndToEnd(t *testing.T) {
 	if got.Spec.Inventory == nil {
 		t.Fatal("spec.inventory is nil, want populated by import")
 	}
+	if got.Spec.Inventory.ControllerCategory != "advanced" {
+		t.Errorf("inventory controller_category = %q, want advanced from /api/info", got.Spec.Inventory.ControllerCategory)
+	}
 	if len(got.Spec.Inventory.Devices) != 1 || got.Spec.Inventory.Devices[0].Name != "GW-CORE" ||
 		got.Spec.Inventory.Devices[0].Type != "gateway" {
 		t.Errorf("inventory devices = %+v, want 1 gateway GW-CORE", got.Spec.Inventory.Devices)

@@ -171,6 +171,7 @@ An `acl_check` failure can mean two very different things: the rule is missing, 
 ```yaml
 inventory:
   controller_version: 6.4.5.1
+  controller_category: advanced
   devices:
     - type: gateway
       name: GW-CORE

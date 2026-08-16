@@ -234,6 +234,9 @@ func TestFetchInventory(t *testing.T) {
 		if snap.ControllerVersion == "" {
 			t.Error("ControllerVersion empty, want 6.4.5.1 from /api/info")
 		}
+		if snap.ControllerCategory != "advanced" {
+			t.Errorf("ControllerCategory = %q, want advanced from /api/info", snap.ControllerCategory)
+		}
 	})
 
 	t.Run("partial failures degrade to warnings", func(t *testing.T) {
@@ -273,19 +276,23 @@ func TestFetchInventory(t *testing.T) {
 
 func TestBuildSpecInventory(t *testing.T) {
 	snap := &InventorySnapshot{
-		ControllerVersion: "6.4.5.1",
-		Devices:           []Device{{Name: "GW-CORE", Model: "GW-CORE", Type: "gateway", MAC: "aa:bb:cc:dd:ee:00", IP: "10.0.0.254", FirmwareVersion: "2.2.3", NeedUpgrade: true}},
-		Networks:          []Network{{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24", VLANID: 10, DeviceMac: "aa:bb:cc:dd:ee:00"}},
-		Bindings:          NetworkBindings{"n1": "aa:bb:cc:dd:ee:00"},
-		GatewayACLs:       ACLList{ACLDisable: true, SupportLanToLan: true, Rules: []ACLRule{{}, {}}},
-		GatewayACLsOK:     true,
-		SwitchACLs:        ACLList{ACLDisable: false},
-		SwitchACLsOK:      true,
-		Clients:           []ConnectedClient{{MAC: "aa"}},
+		ControllerVersion:  "6.4.5.1",
+		ControllerCategory: "advanced",
+		Devices:            []Device{{Name: "GW-CORE", Model: "GW-CORE", Type: "gateway", MAC: "aa:bb:cc:dd:ee:00", IP: "10.0.0.254", FirmwareVersion: "2.2.3", NeedUpgrade: true}},
+		Networks:           []Network{{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24", VLANID: 10, DeviceMac: "aa:bb:cc:dd:ee:00"}},
+		Bindings:           NetworkBindings{"n1": "aa:bb:cc:dd:ee:00"},
+		GatewayACLs:        ACLList{ACLDisable: true, SupportLanToLan: true, Rules: []ACLRule{{}, {}}},
+		GatewayACLsOK:      true,
+		SwitchACLs:         ACLList{ACLDisable: false},
+		SwitchACLsOK:       true,
+		Clients:            []ConnectedClient{{MAC: "aa"}},
 	}
 	inv := BuildSpecInventory(snap)
 	if inv.ControllerVersion != "6.4.5.1" {
 		t.Errorf("ControllerVersion = %q", inv.ControllerVersion)
+	}
+	if inv.ControllerCategory != "advanced" {
+		t.Errorf("ControllerCategory = %q, want advanced", inv.ControllerCategory)
 	}
 	if len(inv.Devices) != 1 || inv.Devices[0].Name != "GW-CORE" || inv.Devices[0].Type != "gateway" ||
 		!inv.Devices[0].Upgrade || inv.Devices[0].Firmware != "2.2.3" {
@@ -326,21 +333,22 @@ func TestBuildSpecInventoryOmitsFailedScopes(t *testing.T) {
 
 func TestRenderInventory(t *testing.T) {
 	snap := &InventorySnapshot{
-		ControllerVersion: "6.4.5.1",
-		Devices:           []Device{{Name: "GW-CORE", Model: "GW-CORE", Type: "gateway", MAC: "aa:bb:cc:dd:ee:00", IP: "10.0.0.254", FirmwareVersion: "2.2.3", NeedUpgrade: true}},
-		Networks:          []Network{{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24", VLANID: 10, DeviceMac: "aa:bb:cc:dd:ee:00"}},
-		Bindings:          NetworkBindings{"n1": "aa:bb:cc:dd:ee:00"},
-		GatewayACLs:       ACLList{ACLDisable: true, SupportLanToLan: true, Rules: []ACLRule{{}}},
-		GatewayACLsOK:     true,
-		SwitchACLs:        ACLList{Rules: []ACLRule{}},
-		SwitchACLsOK:      true,
-		Clients:           []ConnectedClient{{MAC: "aa"}, {MAC: "bb"}},
-		Warnings:          []string{"clients unavailable: boom"},
+		ControllerVersion:  "6.4.5.1",
+		ControllerCategory: "advanced",
+		Devices:            []Device{{Name: "GW-CORE", Model: "GW-CORE", Type: "gateway", MAC: "aa:bb:cc:dd:ee:00", IP: "10.0.0.254", FirmwareVersion: "2.2.3", NeedUpgrade: true}},
+		Networks:           []Network{{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24", VLANID: 10, DeviceMac: "aa:bb:cc:dd:ee:00"}},
+		Bindings:           NetworkBindings{"n1": "aa:bb:cc:dd:ee:00"},
+		GatewayACLs:        ACLList{ACLDisable: true, SupportLanToLan: true, Rules: []ACLRule{{}}},
+		GatewayACLsOK:      true,
+		SwitchACLs:         ACLList{Rules: []ACLRule{}},
+		SwitchACLsOK:       true,
+		Clients:            []ConnectedClient{{MAC: "aa"}, {MAC: "bb"}},
+		Warnings:           []string{"clients unavailable: boom"},
 	}
 	out := RenderInventory(snap, "HQ")
 	for _, want := range []string{
 		"Site: HQ",
-		"Controller: 6.4.5.1",
+		"Controller: 6.4.5.1 (advanced)",
 		"Warning: clients unavailable: boom",
 		"== Devices (1) ==",
 		"GW-CORE",
@@ -363,6 +371,21 @@ func TestRenderInventory(t *testing.T) {
 	}
 	if !strings.Contains(out, "enabled") {
 		t.Errorf("switch scope should render enabled:\n%s", out)
+	}
+}
+
+func TestRenderInventoryNoCategory(t *testing.T) {
+	snap := &InventorySnapshot{
+		ControllerVersion: "6.4.5.1",
+		Networks:          []Network{{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24"}},
+		Bindings:          NetworkBindings{},
+	}
+	out := RenderInventory(snap, "HQ")
+	if !strings.Contains(out, "Controller: 6.4.5.1\n") {
+		t.Errorf("version without category must render bare:\n%s", out)
+	}
+	if strings.Contains(out, "Controller: 6.4.5.1 (") {
+		t.Errorf("empty category must not render a parenthetical:\n%s", out)
 	}
 }
 

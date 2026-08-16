@@ -866,11 +866,12 @@ func TestDispatchOmadaListClients_ServiceError(t *testing.T) {
 
 func TestDispatchOmadaInventory_Success(t *testing.T) {
 	stub := &stubOmadaSvc{inventory: &service.OmadaInventory{
-		Site:              "HQ",
-		ControllerVersion: "6.4.5.1",
-		NetworkGateways:   map[string]string{"trusted": "GW-CORE"},
-		ClientCount:       7,
-		Warnings:          []string{"clients unavailable: timeout"},
+		Site:               "HQ",
+		ControllerVersion:  "6.4.5.1",
+		ControllerCategory: "advanced",
+		NetworkGateways:    map[string]string{"trusted": "GW-CORE"},
+		ClientCount:        7,
+		Warnings:           []string{"clients unavailable: timeout"},
 	}}
 	server := serverWithOmadaStub(stub)
 	text, isErr := server.DispatchToolForTest(context.Background(), "omada_inventory", map[string]interface{}{
@@ -885,6 +886,7 @@ func TestDispatchOmadaInventory_Success(t *testing.T) {
 	for _, want := range []string{
 		`"site": "HQ"`,
 		`"controller_version": "6.4.5.1"`,
+		`"controller_category": "advanced"`,
 		`"trusted": "GW-CORE"`,
 		`"client_count": 7`,
 		`"clients unavailable: timeout"`,

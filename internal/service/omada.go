@@ -298,13 +298,14 @@ func (s *OmadaService) ListClients(ctx context.Context, opts OmadaOptions) ([]Om
 // agent-friendly shape: devices, networks with gateway bindings, ACL scope
 // states, and the active client count.
 type OmadaInventory struct {
-	Site              string            `json:"site"`
-	ControllerVersion string            `json:"controller_version"`
-	Devices           []serviceDevice   `json:"devices"`
-	NetworkGateways   map[string]string `json:"network_gateways,omitempty"`
-	ACLScopes         []serviceACLScope `json:"acl_scopes,omitempty"`
-	ClientCount       int               `json:"client_count"`
-	Warnings          []string          `json:"warnings,omitempty"`
+	Site               string            `json:"site"`
+	ControllerVersion  string            `json:"controller_version"`
+	ControllerCategory string            `json:"controller_category,omitempty"`
+	Devices            []serviceDevice   `json:"devices"`
+	NetworkGateways    map[string]string `json:"network_gateways,omitempty"`
+	ACLScopes          []serviceACLScope `json:"acl_scopes,omitempty"`
+	ClientCount        int               `json:"client_count"`
+	Warnings           []string          `json:"warnings,omitempty"`
 }
 
 // serviceDevice is one managed device (gateway, switch, or AP).
@@ -340,13 +341,14 @@ func (s *OmadaService) Inventory(ctx context.Context, opts OmadaOptions) (*Omada
 		return nil, err
 	}
 	inv := &OmadaInventory{
-		Site:              site.Name,
-		ControllerVersion: snap.ControllerVersion,
-		Devices:           []serviceDevice{},
-		ACLScopes:         []serviceACLScope{},
-		ClientCount:       len(snap.Clients),
-		Warnings:          snap.Warnings,
-		NetworkGateways:   map[string]string{},
+		Site:               site.Name,
+		ControllerVersion:  snap.ControllerVersion,
+		ControllerCategory: snap.ControllerCategory,
+		Devices:            []serviceDevice{},
+		ACLScopes:          []serviceACLScope{},
+		ClientCount:        len(snap.Clients),
+		Warnings:           snap.Warnings,
+		NetworkGateways:    map[string]string{},
 	}
 	specInv := omadabackend.BuildSpecInventory(snap)
 	inv.NetworkGateways = specInv.NetworkGateways

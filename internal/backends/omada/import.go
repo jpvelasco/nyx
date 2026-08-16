@@ -137,15 +137,16 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string, 
 	// Inventory snapshot: what the controller's devices and ACL scopes look
 	// like right now, so audits can flag drift (e.g. ACL scope disabled).
 	spec.Inventory = BuildSpecInventory(&InventorySnapshot{
-		ControllerVersion: result.ControllerVersion,
-		Devices:           devices,
-		Networks:          omadaNets,
-		Bindings:          BuildNetworkBindings(omadaNets),
-		GatewayACLs:       gwList,
-		GatewayACLsOK:     gwListOK,
-		SwitchACLs:        aclList,
-		SwitchACLsOK:      aclListOK,
-		Clients:           clients,
+		ControllerVersion:  result.ControllerVersion,
+		ControllerCategory: client.Info().Category,
+		Devices:            devices,
+		Networks:           omadaNets,
+		Bindings:           BuildNetworkBindings(omadaNets),
+		GatewayACLs:        gwList,
+		GatewayACLsOK:      gwListOK,
+		SwitchACLs:         aclList,
+		SwitchACLsOK:       aclListOK,
+		Clients:            clients,
 	})
 
 	result.Spec = spec

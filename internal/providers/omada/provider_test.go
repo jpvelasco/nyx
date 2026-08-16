@@ -13,7 +13,7 @@ import (
 	providers "github.com/jpvelasco/nyx/internal/providers"
 )
 
-const infoJSON = `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true}}`
+const infoJSON = `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true,"omadacCategory":"advanced"}}`
 
 // TestParseAPIResponse tests parsing API response
 func TestParseAPIResponse(t *testing.T) {
@@ -675,6 +675,9 @@ func TestProviderInventory(t *testing.T) {
 	}
 	if res.Site != "HQ" || res.ClientCount != 2 {
 		t.Errorf("site/count = %q/%d, want HQ/2", res.Site, res.ClientCount)
+	}
+	if res.Inventory.ControllerCategory != "advanced" {
+		t.Errorf("controller_category = %q, want advanced", res.Inventory.ControllerCategory)
 	}
 	if len(res.Inventory.Devices) != 2 || res.Inventory.Devices[0].Name != "GW-CORE" {
 		t.Errorf("devices = %+v, want gateway first (sorted)", res.Inventory.Devices)

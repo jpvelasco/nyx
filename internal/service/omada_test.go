@@ -16,7 +16,7 @@ import (
 	omadaprovider "github.com/jpvelasco/nyx/internal/providers/omada"
 )
 
-const omadaTestInfo = `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true}}`
+const omadaTestInfo = `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true,"omadacCategory":"advanced"}}`
 
 // omadaTestServer spins up a TLS test server that answers /api/info like a
 // real Omada controller; everything else is delegated to h.
@@ -74,6 +74,9 @@ func TestOmadaServiceInventory(t *testing.T) {
 	}
 	if inv.Site != "HQ" || inv.ClientCount != 2 || inv.ControllerVersion != "6.4.5.1" {
 		t.Errorf("summary = %s/%d/%s, want HQ/2/6.4.5.1", inv.Site, inv.ClientCount, inv.ControllerVersion)
+	}
+	if inv.ControllerCategory != "advanced" {
+		t.Errorf("controller_category = %q, want advanced", inv.ControllerCategory)
 	}
 	if len(inv.Devices) != 2 || inv.Devices[0].Name != "GW-CORE" || inv.Devices[0].Type != "gateway" {
 		t.Errorf("devices = %+v, want gateway first (sorted)", inv.Devices)

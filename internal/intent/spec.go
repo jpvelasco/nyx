@@ -25,10 +25,11 @@ type Spec struct {
 // populated by `nyx <provider> import`. It records what was seen at import
 // time; re-import refreshes it. It is optional — hand-written specs omit it.
 type Inventory struct {
-	ControllerVersion string            `yaml:"controller_version" json:"controller_version"`
-	Devices           []InventoryDevice `yaml:"devices" json:"devices"`
-	NetworkGateways   map[string]string `yaml:"network_gateways,omitempty" json:"network_gateways,omitempty"`
-	ACLScopes         []ACLScopeStatus  `yaml:"acl_scopes,omitempty" json:"acl_scopes,omitempty"`
+	ControllerVersion  string            `yaml:"controller_version" json:"controller_version"`
+	ControllerCategory string            `yaml:"controller_category,omitempty" json:"controller_category,omitempty"`
+	Devices            []InventoryDevice `yaml:"devices" json:"devices"`
+	NetworkGateways    map[string]string `yaml:"network_gateways,omitempty" json:"network_gateways,omitempty"`
+	ACLScopes          []ACLScopeStatus  `yaml:"acl_scopes,omitempty" json:"acl_scopes,omitempty"`
 }
 
 // InventoryDevice is one managed device observed at import time.
