@@ -2,6 +2,7 @@ package omada
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -26,14 +27,55 @@ func (s Site) EffectiveID() string {
 // Network represents a LAN network / VLAN from the Omada API.
 // Omada 6.x encodes the gateway+prefix in "gatewaySubnet" as "x.x.x.x/prefix".
 type Network struct {
+	ID            string
+	Name          string
+	Purpose       string
+	VLANID        int
+	GatewaySubnet string // e.g. "10.0.10.1/24"
+	Isolated      bool
+	DHCPEnabled   bool
+	DeviceMac     string // MAC of the device this LAN is bound to
+	// SSID is the wireless SSID clients join on this network. 6.x reports it
+	// as "origName" (e.g. "LAN" for the "LAN(Default)" LAN).
+	SSID string
+}
+
+// rawNetwork is the wire shape of a network entry (observed on controller
+// 6.2.14). There is no top-level "dhcpEnabled" field — the DHCP switch is
+// nested under "dhcpSettings".
+type rawNetwork struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	Purpose       string `json:"purpose"`
 	VLANID        int    `json:"vlan"`
-	GatewaySubnet string `json:"gatewaySubnet"` // e.g. "10.0.10.1/24"
+	GatewaySubnet string `json:"gatewaySubnet"`
 	Isolated      bool   `json:"isolation"`
-	DHCPEnabled   bool   `json:"dhcpEnabled"`
-	DeviceMac     string `json:"deviceMac"` // MAC of the device this LAN is bound to
+	DHCPSettings  struct {
+		Enable bool `json:"enable"`
+	} `json:"dhcpSettings"`
+	DeviceMac string `json:"deviceMac"`
+	OrigName  string `json:"origName"`
+}
+
+// UnmarshalJSON decodes the wire shape so fields that moved between
+// controller versions (dhcpSettings.enable, origName) keep their meaning.
+func (n *Network) UnmarshalJSON(data []byte) error {
+	var raw rawNetwork
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*n = Network{
+		ID:            raw.ID,
+		Name:          raw.Name,
+		Purpose:       raw.Purpose,
+		VLANID:        raw.VLANID,
+		GatewaySubnet: raw.GatewaySubnet,
+		Isolated:      raw.Isolated,
+		DHCPEnabled:   raw.DHCPSettings.Enable,
+		DeviceMac:     raw.DeviceMac,
+		SSID:          raw.OrigName,
+	}
+	return nil
 }
 
 // CIDR derives the network CIDR from GatewaySubnet.

@@ -64,6 +64,13 @@ func run(getenv func(string) string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// The wire has no per-client network name; resolve it from the site's
+	// LAN networks so the grouped output shows real VLAN membership.
+	nets, err := client.GetNetworks(ctx, site.EffectiveID())
+	if err != nil {
+		return err
+	}
+	omada.EnrichClients(clients, nets)
 
 	fmt.Fprint(stdout, omada.RenderClientInventory(site.Name, clients))
 	return nil

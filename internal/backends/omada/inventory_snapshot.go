@@ -66,6 +66,7 @@ func (c *Client) FetchInventory(ctx context.Context, siteID string) (*InventoryS
 	if err != nil {
 		snap.Warnings = append(snap.Warnings, fmt.Sprintf("clients unavailable: %v", err))
 	} else {
+		EnrichClients(clients, nets)
 		snap.Clients = clients
 	}
 	return snap, nil

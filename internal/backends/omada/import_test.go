@@ -180,14 +180,17 @@ func TestBuildAssertions(t *testing.T) {
 		{Name: "iot", CIDR: "10.0.1.0/24", Gateway: ""},
 	}
 	omadaNets := []Network{
-		{ID: "n1", Name: "Lan", GatewaySubnet: "10.0.0.1/24"},
-		{ID: "n2", Name: "IoT", GatewaySubnet: "10.0.1.1/24"},
+		{ID: "n1", Name: "Lan", SSID: "Lan", VLANID: 1, GatewaySubnet: "10.0.0.1/24"},
+		{ID: "n2", Name: "IoT", SSID: "IoT", VLANID: 2, GatewaySubnet: "10.0.1.1/24"},
 	}
+	// Live 6.x wire shape: clients carry ssid/vid, no networkName. They are
+	// enriched (EnrichClients) before buildAssertions counts them.
 	clients := []ConnectedClient{
-		{NetworkName: "Lan", IP: "10.0.0.10"},
-		{NetworkName: "Lan", IP: "10.0.0.11"},
-		{SSID: "IoT-Guest", IP: "10.0.1.10"},
+		{SSID: "Lan", IP: "10.0.0.10"},
+		{SSID: "Lan", IP: "10.0.0.11"},
+		{SSID: "IoT", IP: "10.0.1.10"},
 	}
+	EnrichClients(clients, omadaNets)
 	rules := []ACLRule{
 		{Name: "lan-iot-deny", Policy: ACLPolicyDeny, Status: true, SourceType: EndpointNetwork, SourceName: "lan", DestType: EndpointNetwork, DestName: "iot"},
 		{Name: "disabled", Policy: ACLPolicyDeny, Status: false},
@@ -250,9 +253,10 @@ func TestImportSpecEndToEnd(t *testing.T) {
 		case "/abc123/api/v2/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[{"id":"s1","name":"HQ"},{"id":"s2","name":"Branch"}]}`)
 		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			// live 6.x wire shape: nested dhcpSettings, SSID under origName
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
-				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24","vlan":10},
-				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.1.1/24","vlan":20}
+				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24","vlan":10,"origName":"Trusted","dhcpSettings":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"},
+				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.1.1/24","vlan":20,"origName":"IoT","dhcpSettings":{"enable":true}}
 			]}`)
 		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
 			if r.URL.Query().Get("type") == "0" {
@@ -265,8 +269,9 @@ func TestImportSpecEndToEnd(t *testing.T) {
 				{"id":"a3","name":"Disabled rule","status":false,"policy":0}
 			]}`)
 		case "/abc123/api/v2/sites/s1/clients":
+			// live 6.x wire shape: ssid/vid, no networkName
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
-				{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.0.50","networkName":"Trusted"}
+				{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.0.50","ssid":"Trusted","vid":10,"wireless":false,"vendor":"Synology","deviceType":"nas","active":true}
 			]}`)
 		case "/abc123/api/v2/sites/s1/devices":
 			writeEnvelope(w, 0, "", `[

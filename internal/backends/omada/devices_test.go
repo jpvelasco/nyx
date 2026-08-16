@@ -161,9 +161,12 @@ func TestFetchInventory(t *testing.T) {
 			case "/abc123/api/v2/login":
 				writeEnvelope(w, 0, "", `{"token":"t1"}`)
 			case "/abc123/api/v2/sites/s1/setting/lan/networks":
+				// Live 6.x wire shape: DHCP nested under "dhcpSettings", SSID
+				// as "origName" — no top-level dhcpEnabled or per-client
+				// networkName on the wire.
 				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
-					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24","deviceMac":"aa:bb:cc:dd:ee:00"},
-					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.1.1/24","deviceMac":"aa:bb:cc:dd:ee:00"}
+					{"id":"n1","name":"Trusted","vlan":10,"purpose":"interface","gatewaySubnet":"10.0.0.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettings":{"enable":true},"origName":"Trusted"},
+					{"id":"n2","name":"IoT","vlan":20,"purpose":"interface","gatewaySubnet":"10.0.1.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettings":{"enable":false},"origName":"IoT"}
 				]}`)
 			case "/abc123/api/v2/sites/s1/devices":
 				if failDevices {
@@ -186,7 +189,10 @@ func TestFetchInventory(t *testing.T) {
 					writeEnvelope(w, -1, "boom", "null")
 					return
 				}
-				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"mac":"aa","ip":"10.0.0.50","networkName":"Trusted"}]}`)
+				// Live 6.x wire shape: no "networkName" field; the client only
+				// reports its SSID (vid is often omitted), so FetchInventory
+				// must resolve the network from the LAN list.
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"mac":"aa","ip":"10.0.0.50","ssid":"Trusted","wireless":true}]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -205,6 +211,12 @@ func TestFetchInventory(t *testing.T) {
 		}
 		if len(snap.Devices) != 1 || len(snap.Networks) != 2 || len(snap.Clients) != 1 {
 			t.Errorf("counts = %d/%d/%d, want 1/2/1", len(snap.Devices), len(snap.Networks), len(snap.Clients))
+		}
+		// The wire carries no per-client networkName: FetchInventory must
+		// resolve it from the LAN networks (SSID match) and backfill the VLAN.
+		nc := snap.Clients[0]
+		if nc.NetworkName != "Trusted" || nc.VLANID != 10 {
+			t.Errorf("client = %+v, want NetworkName Trusted, VLANID 10", nc)
 		}
 		if !snap.GatewayACLsOK || !snap.SwitchACLsOK {
 			t.Errorf("scopes = gw %v sw %v, want both OK", snap.GatewayACLsOK, snap.SwitchACLsOK)

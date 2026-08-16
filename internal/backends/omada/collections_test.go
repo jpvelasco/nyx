@@ -29,6 +29,41 @@ func TestGetNetworksEndpointFallback(t *testing.T) {
 	}
 }
 
+func TestGetNetworksLiveWireShape(t *testing.T) {
+	// Fixture mirrors the live 6.2.14 payload: DHCP state is nested under
+	// "dhcpSettings" and the SSID is reported as "origName". There is no
+	// top-level "dhcpEnabled" or "ssid" field on the wire.
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+			{"id":"n1","name":"LAN(Default)","purpose":"interface","vlan":1,
+				"gatewaySubnet":"10.0.0.254/24","isolation":false,
+				"dhcpSettings":{"enable":true,"leasetime":120},"deviceMac":"aa:bb:cc:dd:ee:00",
+				"origName":"LAN","primary":true},
+			{"id":"n2","name":"Trusted","purpose":"interface","vlan":10,
+				"gatewaySubnet":"10.0.0.1/24","isolation":true,
+				"dhcpSettings":{"enable":false},"deviceMac":"aa:bb:cc:dd:ee:00",
+				"origName":"Trusted"}
+		]}`)
+	}))
+	nets, err := c.GetNetworks(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("GetNetworks: %v", err)
+	}
+	if len(nets) != 2 {
+		t.Fatalf("networks = %d, want 2", len(nets))
+	}
+	nf, op := nets[0], nets[1]
+	if !nf.DHCPEnabled || nf.SSID != "LAN" {
+		t.Errorf("LAN = dhcp %v ssid %q, want dhcp on and SSID LAN", nf.DHCPEnabled, nf.SSID)
+	}
+	if op.DHCPEnabled || op.SSID != "Trusted" || !op.Isolated || op.VLANID != 10 {
+		t.Errorf("Trusted = %+v, want dhcp off, SSID Trusted, isolated, vlan 10", op)
+	}
+	if nf.DeviceMac != "aa:bb:cc:dd:ee:00" || nf.CIDR() != "10.0.0.0/24" {
+		t.Errorf("LAN deviceMac/cidr = %q/%q", nf.DeviceMac, nf.CIDR())
+	}
+}
+
 func TestGetNetworksResponseShapes(t *testing.T) {
 	t.Run("direct array", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

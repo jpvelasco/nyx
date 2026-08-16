@@ -51,11 +51,16 @@ func TestRun_Success(t *testing.T) {
 			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"token":"tok123"}}`) //nosem // test mock
 		case strings.Contains(r.URL.Path, "/logout"):
 			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":null}`) //nosem // test mock
+		case strings.Contains(r.URL.Path, "/setting/lan/networks"):
+			//nosem // test mock — live 6.x shape (dhcpSettings nested, origName)
+			fmt.Fprint(w, envelope(`{"totalRows":1,"data":[
+				{"id":"n1","name":"LAN","origName":"LAN","vlan":1,"gatewaySubnet":"10.0.20.1/24","isolation":false,"dhcpSettings":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:ff"}
+			]}`))
 		case strings.Contains(r.URL.Path, "/clients"):
-			//nosem // test mock
+			//nosem // test mock — live 6.x client rows carry ssid/vid, no networkName
 			fmt.Fprint(w, envelope(`{"totalRows":2,"data":[
-				{"mac":"aa:bb:cc:dd:ee:01","ip":"10.0.20.10","name":"PC1","hostName":"pc1","networkName":"LAN","vid":1,"wireless":false,"vendor":"Dell","deviceType":"Computer","active":true,"uptime":100},
-				{"mac":"aa:bb:cc:dd:ee:02","ip":"10.0.20.20","name":"PC2","hostName":"pc2","networkName":"LAN","vid":1,"wireless":true,"vendor":"Apple","deviceType":"Laptop","active":true,"uptime":200}
+				{"mac":"aa:bb:cc:dd:ee:01","ip":"10.0.20.10","name":"PC1","hostName":"pc1","ssid":"LAN","vid":1,"wireless":true,"vendor":"Dell","deviceType":"Computer","active":true,"uptime":100},
+				{"mac":"aa:bb:cc:dd:ee:02","ip":"10.0.20.20","name":"PC2","hostName":"pc2","vid":1,"wireless":false,"vendor":"Apple","deviceType":"Laptop","active":true,"uptime":200}
 			]}`))
 		case strings.Contains(r.URL.Path, "/sites"):
 			fmt.Fprint(w, envelope(`{"totalRows":1,"data":[{"id":"site1","name":"Home","type":0}]}`)) //nosem // test mock
@@ -84,8 +89,9 @@ func TestRun_Success(t *testing.T) {
 		t.Fatalf("run() error: %v", err)
 	}
 
+	// PC1 resolves via SSID "LAN"; PC2 (wired, no SSID) resolves via vid 1.
 	out := stdout.String()
-	for _, want := range []string{"Site: Home", "LAN", "pc1", "pc2", "10.0.20.10", "10.0.20.20"} {
+	for _, want := range []string{"Site: Home", "LAN (VLAN 1)", "pc1", "pc2", "10.0.20.10", "10.0.20.20"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}

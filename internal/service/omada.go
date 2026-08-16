@@ -267,6 +267,13 @@ func (s *OmadaService) ListClients(ctx context.Context, opts OmadaOptions) ([]Om
 	if err != nil {
 		return nil, fmt.Errorf("fetching clients: %w", err)
 	}
+	// The wire has no per-client "networkName" field; resolve each client's
+	// network and VLAN from the site's LAN networks. Best-effort, matching
+	// the name-resolution policy in ListACLs: on a networks failure the
+	// clients are returned with the wire fields as-is.
+	if nets, nerr := client.GetNetworks(ctx, site.EffectiveID()); nerr == nil {
+		omadabackend.EnrichClients(clients, nets)
+	}
 	out := make([]OmadaClient, 0, len(clients))
 	for _, c := range clients {
 		out = append(out, OmadaClient{

@@ -90,6 +90,9 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string, 
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("could not fetch connected clients: %v", err))
 	}
+	// The 6.x wire has no per-client network name: resolve each client's
+	// network and VLAN from the site's LAN networks (SSID first, then vid).
+	EnrichClients(clients, omadaNets)
 	result.ClientCount = len(clients)
 
 	devices, err := client.GetDevices(ctx, siteID)
@@ -183,13 +186,12 @@ func buildAssertions(networks []intent.Network, omadaNets []Network, clients []C
 	var assertions []intent.Assertion
 
 	// Count clients per network using the raw Omada network name
-	// (before sanitization) since that's what clients report
+	// (before sanitization) — clients arrive enriched via EnrichClients,
+	// so NetworkName is populated for every client the controller reports.
 	clientsPerNet := make(map[string]int)
 	for _, c := range clients {
 		if c.NetworkName != "" {
 			clientsPerNet[c.NetworkName]++
-		} else if c.SSID != "" {
-			clientsPerNet[c.SSID]++
 		}
 	}
 

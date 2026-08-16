@@ -163,9 +163,10 @@ func TestOmadaServiceListNetworks(t *testing.T) {
 		case "/abc123/api/v2/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			// live 6.x shape: DHCP flag nested under dhcpSettings
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
-				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"dhcpEnabled":true},
-				{"id":"n2","name":"IoT","purpose":"lan","vlan":20,"gatewaySubnet":"10.0.20.1/24","isolation":true,"dhcpEnabled":false}]}`)
+				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"origName":"Trusted","dhcpSettings":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"},
+				{"id":"n2","name":"IoT","purpose":"lan","vlan":20,"gatewaySubnet":"10.0.20.1/24","isolation":true,"origName":"IoT","dhcpSettings":{"enable":false},"deviceMac":"aa:bb:cc:dd:ee:00"}]}`)
 		case "/abc123/api/v2/logout":
 			loggedOut = true
 			writeOmadaEnvelope(w, 0, "null")
@@ -451,8 +452,12 @@ func TestOmadaServiceListClients(t *testing.T) {
 			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
 		case "/abc123/api/v2/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			// live 6.x shape: nested dhcpSettings, no top-level dhcpEnabled
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"origName":"Trusted","dhcpSettings":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"}]}`)
 		case "/abc123/api/v2/sites/s1/clients":
-			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","name":"nas","hostName":"nas.local","networkName":"Trusted","ssid":"","vid":10,"wireless":false,"vendor":"Synology","deviceType":"nas","active":true,"uptime":86400}]}`)
+			// live 6.x shape: ssid + vid, no networkName on the wire
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","name":"nas","hostName":"nas.local","ssid":"Trusted","vid":10,"wireless":false,"vendor":"Synology","deviceType":"nas","active":true,"uptime":86400}]}`)
 		case "/abc123/api/v2/logout":
 			writeOmadaEnvelope(w, 0, "null")
 		default:
@@ -473,6 +478,8 @@ func TestOmadaServiceListClients(t *testing.T) {
 	if cl.MAC != "aa:bb:cc:dd:ee:ff" || cl.IP != "10.0.10.5" || cl.Name != "nas" || cl.Hostname != "nas.local" {
 		t.Errorf("client identity = %+v", cl)
 	}
+	// NetworkName is resolved from the site's networks (SSID "Trusted"),
+	// not decoded from the wire.
 	if cl.NetworkName != "Trusted" || cl.VLANID != 10 || cl.Wireless || cl.Vendor != "Synology" || cl.DeviceType != "nas" || !cl.Active {
 		t.Errorf("client attributes = %+v", cl)
 	}
@@ -490,8 +497,8 @@ func TestOmadaServiceImport(t *testing.T) {
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		case "/abc123/api/v2/sites/s1/setting/lan/networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
-				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"dhcpEnabled":true},
-				{"id":"n2","name":"IoT","purpose":"lan","vlan":20,"gatewaySubnet":"10.0.20.1/24","isolation":true,"dhcpEnabled":false}]}`)
+				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"origName":"Trusted","dhcpSettings":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"},
+				{"id":"n2","name":"IoT","purpose":"lan","vlan":20,"gatewaySubnet":"10.0.20.1/24","isolation":true,"origName":"IoT","dhcpSettings":{"enable":false},"deviceMac":"aa:bb:cc:dd:ee:00"}]}`)
 		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
 			if r.URL.Query().Get("type") == "0" {
 				writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
@@ -501,7 +508,8 @@ func TestOmadaServiceImport(t *testing.T) {
 		case "/abc123/api/v2/sites/s1/devices":
 			writeOmadaEnvelope(w, 0, `[{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254"}]`)
 		case "/abc123/api/v2/sites/s1/clients":
-			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","name":"nas","networkName":"Trusted"}]}`)
+			// live 6.x shape: ssid + vid, no networkName on the wire
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","name":"nas","hostName":"nas.local","ssid":"Trusted","vid":10,"wireless":false,"vendor":"Synology","deviceType":"nas","active":true,"uptime":86400}]}`)
 		case "/abc123/api/v2/logout":
 			writeOmadaEnvelope(w, 0, "null")
 		default:

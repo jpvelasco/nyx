@@ -135,8 +135,9 @@ func TestProviderImportSpec(t *testing.T) {
 			case "/abc123/api/v2/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			case "/abc123/api/v2/sites/s1/setting/lan/networks":
+				// Live 6.x wire shape: nested dhcpSettings, SSID as origName.
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
-					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24"}
+					{"id":"n1","name":"Trusted","vlan":10,"purpose":"interface","gatewaySubnet":"10.0.0.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettings":{"enable":true},"origName":"Trusted"}
 				]}`)
 			case "/abc123/api/v2/sites/s1/setting/firewall/acls":
 				if r.URL.Query().Get("type") == "0" {
@@ -147,8 +148,10 @@ func TestProviderImportSpec(t *testing.T) {
 					{"id":"a1","name":"Deny IoT","status":true,"policy":0}
 				]}`)
 			case "/abc123/api/v2/sites/s1/clients":
+				// Live 6.x wire shape: no networkName field; the import must
+				// resolve it from the LAN list via SSID.
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
-					{"mac":"aa","ip":"10.0.0.10","networkName":"Trusted"}
+					{"mac":"aa","ip":"10.0.0.10","ssid":"Trusted","wireless":true}
 				]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -636,9 +639,10 @@ func TestProviderInventory(t *testing.T) {
 		case "/abc123/api/v2/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[{"id":"s1","name":"HQ"},{"id":"s2","name":"Branch"}]}`)
 		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			// Live 6.x wire shape: nested dhcpSettings, SSID as origName.
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
-				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24","vlan":10,"deviceMac":"aa:bb:cc:dd:ee:00"},
-				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.1.1/24","vlan":20,"deviceMac":"aa:bb:cc:dd:ee:00"}
+				{"id":"n1","name":"Trusted","vlan":10,"purpose":"interface","gatewaySubnet":"10.0.0.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettings":{"enable":true},"origName":"Trusted"},
+				{"id":"n2","name":"IoT","vlan":20,"purpose":"interface","gatewaySubnet":"10.0.1.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettings":{"enable":false},"origName":"IoT"}
 			]}`)
 		case "/abc123/api/v2/sites/s1/devices":
 			writeEnvelope(w, 0, "", `[
@@ -652,9 +656,11 @@ func TestProviderInventory(t *testing.T) {
 			}
 			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 		case "/abc123/api/v2/sites/s1/clients":
+			// Live 6.x wire shape: no networkName field; enrichment resolves
+			// the network from SSID / vid against the LAN list.
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
-				{"mac":"aa","ip":"10.0.0.50","networkName":"Trusted"},
-				{"mac":"bb","ip":"10.0.0.51","networkName":"Trusted"}
+				{"mac":"aa","ip":"10.0.0.50","ssid":"Trusted","wireless":true},
+				{"mac":"bb","ip":"10.0.1.51","vid":20,"wireless":false}
 			]}`)
 		default:
 			w.WriteHeader(http.StatusNotFound)
