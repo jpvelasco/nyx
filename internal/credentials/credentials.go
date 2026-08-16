@@ -136,8 +136,8 @@ func (s *Store) Providers() []string {
 
 // loadKey reads the 32-byte AES key, generating and persisting it on first use.
 func (s *Store) loadKey() error {
-	keyPath := s.path + ".key"
-	if data, err := os.ReadFile(keyPath); err == nil {
+	keyPath := s.keyPath()
+	if data, err := s.readKey(); err == nil {
 		if len(data) == 32 {
 			s.key = data
 			return nil
@@ -155,6 +155,28 @@ func (s *Store) loadKey() error {
 	}
 	s.key = key
 	return nil
+}
+
+// readKey reads the sibling key through an os.Root anchored at the store's
+// directory. This prevents path components in the configured store name from
+// escaping that directory while preserving support for custom store paths.
+func (s *Store) readKey() ([]byte, error) {
+	cleanPath := filepath.Clean(s.path)
+	root, err := os.OpenRoot(filepath.Dir(cleanPath))
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	return root.ReadFile(filepath.Base(cleanPath) + ".key")
+}
+
+// keyPath returns the key file beside the configured store file. Constructing
+// it from the cleaned directory and base name keeps the key as a sibling of
+// the store without allowing path components from the store name to escape
+// that directory.
+func (s *Store) keyPath() string {
+	cleanPath := filepath.Clean(s.path)
+	return filepath.Join(filepath.Dir(cleanPath), filepath.Base(cleanPath)+".key")
 }
 
 // load reads and decrypts the store file. A missing file means an empty store.
