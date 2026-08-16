@@ -59,25 +59,41 @@ func TestSanitizeName(t *testing.T) {
 	}
 }
 
+func TestFindNetwork(t *testing.T) {
+	nets := []Network{
+		{ID: "n1", Name: "LAN(Default)"},
+		{ID: "n2", Name: "Trusted"},
+	}
+	if n, ok := FindNetwork(nets, "lan"); !ok || n.ID != "n1" {
+		t.Errorf("slug match = %+v, %v; want LAN(Default)", n, ok)
+	}
+	if n, ok := FindNetwork(nets, "Trusted"); !ok || n.ID != "n2" {
+		t.Errorf("display match = %+v, %v; want Trusted", n, ok)
+	}
+	if _, ok := FindNetwork(nets, "missing"); ok {
+		t.Error("missing name should not match")
+	}
+}
+
 func TestResolveRuleEndpoint(t *testing.T) {
 	nets := map[string]intent.Network{"net-1": {Name: "lan"}}
 	cases := []struct {
 		name   string
 		epType string
 		nameEP string
-		id     string
+		ids    []string
 		want   string
 	}{
-		{"name wins", "inet", "Guest", "net-1", "guest"},
-		{"known network id", "inet", "", "net-1", "lan"},
-		{"unknown id kept", "inet", "", "other", "other"},
-		{"fallback to type", "inet", "", "", "inet"},
+		{"name wins", "inet", "Guest", []string{"net-1"}, "guest"},
+		{"known network id", "inet", "", []string{"net-1"}, "lan"},
+		{"unknown id kept", "inet", "", []string{"other"}, "other"},
+		{"fallback to type", "inet", "", nil, "inet"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveRuleEndpoint(tc.epType, tc.nameEP, tc.id, nets)
+			got := resolveRuleEndpoint(tc.epType, tc.nameEP, tc.ids, nets)
 			if got != tc.want {
-				t.Errorf("resolveRuleEndpoint(%q,%q,%q) = %q, want %q", tc.epType, tc.nameEP, tc.id, got, tc.want)
+				t.Errorf("resolveRuleEndpoint(%q,%q,%v) = %q, want %q", tc.epType, tc.nameEP, tc.ids, got, tc.want)
 			}
 		})
 	}
@@ -123,10 +139,10 @@ func TestPoliciesFromRules(t *testing.T) {
 		{ID: "n2", Name: "IoT", GatewaySubnet: "10.0.1.1/24"},
 	}
 	rules := []ACLRule{
-		{Name: "Block IoT", Policy: "drop", Status: true, SourceType: "network", SourceName: "IoT", DestType: "network", DestName: "Trusted"},
-		{Name: "Allow Web", Policy: "accept", Status: true, SourceType: "network", SourceID: "n2", DestType: "network", DestID: "n1"},
-		{Name: "Disabled", Policy: "drop", Status: false},
-		{Name: "Unresolved", Policy: "drop", Status: true, SourceType: "inet"},
+		{Name: "Block IoT", Policy: ACLPolicyDeny, Status: true, SourceType: "network", SourceName: "IoT", DestType: "network", DestName: "Trusted"},
+		{Name: "Allow Web", Policy: ACLPolicyPermit, Status: true, SourceType: "network", SourceIDs: []string{"n2"}, DestType: "network", DestIDs: []string{"n1"}},
+		{Name: "Disabled", Policy: ACLPolicyDeny, Status: false},
+		{Name: "Unresolved", Policy: ACLPolicyDeny, Status: true, SourceType: "inet"},
 	}
 
 	got := PoliciesFromRules(rules, networks)
@@ -148,6 +164,15 @@ func TestPoliciesFromRules(t *testing.T) {
 	}
 }
 
+func TestPoliciesFromRulesUnknownPolicyDefaultsDeny(t *testing.T) {
+	got := PoliciesFromRules([]ACLRule{{
+		Name: "odd", Policy: ACLPolicy(9), Status: true, SourceType: "network", SourceName: "a", DestType: "network", DestName: "b",
+	}}, nil)
+	if len(got) != 1 || got[0].Action != "deny" {
+		t.Errorf("unknown policy = %+v, want deny fallback", got)
+	}
+}
+
 func TestBuildAssertions(t *testing.T) {
 	networks := []intent.Network{
 		{Name: "lan", CIDR: "10.0.0.0/24", Gateway: "10.0.0.1"},
@@ -163,10 +188,10 @@ func TestBuildAssertions(t *testing.T) {
 		{SSID: "IoT-Guest", IP: "10.0.1.10"},
 	}
 	rules := []ACLRule{
-		{Name: "lan-iot-deny", Policy: "drop", Status: true, SourceType: "network", SourceName: "lan", DestType: "network", DestName: "iot"},
-		{Name: "disabled", Policy: "drop", Status: false},
-		{Name: "allow-web", Policy: "accept", Status: true, SourceType: "network", SourceName: "lan", DestType: "network", DestName: "iot"},
-		{Name: "unresolved", Policy: "drop", Status: true},
+		{Name: "lan-iot-deny", Policy: ACLPolicyDeny, Status: true, SourceType: "network", SourceName: "lan", DestType: "network", DestName: "iot"},
+		{Name: "disabled", Policy: ACLPolicyDeny, Status: false},
+		{Name: "allow-web", Policy: ACLPolicyPermit, Status: true, SourceType: "network", SourceName: "lan", DestType: "network", DestName: "iot"},
+		{Name: "unresolved", Policy: ACLPolicyDeny, Status: true},
 	}
 	netsByID := map[string]intent.Network{"n1": networks[0], "n2": networks[1]}
 
@@ -228,14 +253,16 @@ func TestImportSpecEndToEnd(t *testing.T) {
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24","vlan":10},
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.1.1/24","vlan":20}
 			]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acl":
+		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			if r.URL.Query().Get("type") == "0" {
+				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
+				return
+			}
 			writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
-				{"id":"a1","name":"IoT to Trusted", "status":true,"policy":"deny","srcName":"IoT","dstName":"Trusted"},
-				{"id":"a2","name":"Trusted to IoT web", "status":true,"policy":"accept","srcName":"Trusted","dstName":"IoT"},
-				{"id":"a3","name":"Disabled rule", "status":false,"policy":"drop"}
+				{"id":"a1","name":"IoT to Trusted","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]},
+				{"id":"a2","name":"Trusted to IoT web","status":true,"policy":1,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]},
+				{"id":"a3","name":"Disabled rule","status":false,"policy":0}
 			]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/gwacl":
-			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 		case "/abc123/api/v2/sites/s1/clients":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 				{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.0.50","networkName":"Trusted"}
@@ -398,9 +425,7 @@ func TestImportSpecWarnings(t *testing.T) {
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24"},
 				{"id":"n2","name":"IoT-NoSubnet"}
 			]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acl":
-			writeEnvelope(w, -1000, "expired", "null")
-		case "/abc123/api/v2/sites/s1/setting/firewall/gwacl":
+		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
 			writeEnvelope(w, -1000, "expired", "null")
 		case "/abc123/api/v2/sites/s1/clients":
 			writeEnvelope(w, -1000, "expired", "null")
@@ -436,6 +461,48 @@ func TestImportSpecWarnings(t *testing.T) {
 	if !hasACLWarn || !hasGwWarn || !hasClientWarn || !hasSubnetWarn {
 		t.Errorf("warnings = %v, want ACL, gateway ACL, client, and subnet warnings (%v/%v/%v/%v)",
 			got.Warnings, hasACLWarn, hasGwWarn, hasClientWarn, hasSubnetWarn)
+	}
+}
+
+func TestImportSpecGatewayACLDisabledWarning(t *testing.T) {
+	ts := serverResponding(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/info":
+			w.Write([]byte(testInfoResponse))
+		case "/abc123/api/v2/login":
+			writeEnvelope(w, 0, "", `{"token":"t"}`)
+		case "/abc123/api/v2/logout":
+			writeEnvelope(w, 0, "", "null")
+		case "/abc123/api/v2/sites":
+			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"n1","name":"LAN","gatewaySubnet":"10.0.0.1/24"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			if r.URL.Query().Get("type") == "0" {
+				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[],"aclDisable":true}`)
+				return
+			}
+			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
+		case "/abc123/api/v2/sites/s1/clients":
+			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	defer ts.Close()
+
+	got, err := ImportSpec(context.Background(), ts.URL, "a", "b", "", false, true, "", nil)
+	if err != nil {
+		t.Fatalf("ImportSpec: %v", err)
+	}
+	found := false
+	for _, w := range got.Warnings {
+		if strings.Contains(w, "gateway ACL feature is disabled") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %v, want aclDisable warning", got.Warnings)
 	}
 }
 

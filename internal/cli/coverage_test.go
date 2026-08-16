@@ -673,6 +673,29 @@ func TestBuildInfoCmd_RunJSON(t *testing.T) {
 	}
 }
 
+func TestBuildInfoCmd_HostFromEnv(t *testing.T) {
+	registerFakeProvider(t)
+	saveRestoreGlobals(t)
+	t.Setenv("OMADA_HOST", "10.0.0.9")
+	t.Setenv("OMADA_USERNAME", "env-user")
+	t.Setenv("OMADA_PASSWORD", "env-pass")
+	cmd := buildInfoCmd(&fakeProvider{name: "fake"})
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("info with OMADA_HOST: %v", err)
+	}
+}
+
+func TestBuildInfoCmd_MissingHostError(t *testing.T) {
+	saveRestoreGlobals(t)
+	t.Setenv("OMADA_HOST", "")
+	t.Setenv("NYX_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+	cmd := buildInfoCmd(&fakeProvider{name: "fake"})
+	err := cmd.RunE(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "OMADA_HOST") {
+		t.Fatalf("error = %v, want missing-host message naming OMADA_HOST", err)
+	}
+}
+
 func TestBuildInfoCmd_ProviderError(t *testing.T) {
 	saveRestoreGlobals(t)
 	errCmd := buildInfoCmd(&errProvider{})

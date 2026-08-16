@@ -86,46 +86,60 @@ func TestGetNetworksAllPathsFail(t *testing.T) {
 	}
 }
 
-func TestGetACLRulesEndpointFallback(t *testing.T) {
+func TestGetACLRulesRequiresTypeQuery(t *testing.T) {
+	var queries []string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/abc123/api/v2/sites/s1/setting/firewall/acl":
+		if r.URL.Path != "/abc123/api/v2/sites/s1/setting/firewall/acls" {
 			w.WriteHeader(http.StatusNotFound)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
-			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
-				{"id":"a1","name":"Deny IoT","status":true,"policy":"drop"},
-				{"id":"a2","name":"Allow Web","status":true,"policy":"accept"}
-			]}`)
-		default:
-			w.WriteHeader(http.StatusNotFound)
+			return
 		}
+		queries = append(queries, r.URL.RawQuery)
+		if r.URL.Query().Get("type") != "1" {
+			writeEnvelope(w, -1, "General error.", "null")
+			return
+		}
+		writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+			{"id":"a1","name":"Deny IoT","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]},
+			{"id":"a2","name":"Allow Web","status":true,"policy":1,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]}
+		]}`)
 	}))
 	rules, err := c.GetACLRules(context.Background(), "s1")
 	if err != nil {
 		t.Fatalf("GetACLRules: %v", err)
 	}
-	if len(rules) != 2 || rules[1].Policy != "accept" {
-		t.Errorf("rules = %+v, want two rules", rules)
+	if len(rules) != 2 || rules[1].Policy != ACLPolicyPermit || rules[0].Type != ACLTypeSwitch {
+		t.Errorf("rules = %+v, want two switch rules with permit on the second", rules)
+	}
+	if len(queries) == 0 || !strings.Contains(queries[0], "type=1") {
+		t.Errorf("queries = %v, want type=1 on the switch ACL fetch", queries)
 	}
 }
 
-func TestGetGatewayACLRulesDirectArray(t *testing.T) {
+func TestGetGatewayACLRulesAndDisableFlag(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/abc123/api/v2/sites/s1/setting/firewall/gwacl":
+		if r.URL.Path != "/abc123/api/v2/sites/s1/setting/firewall/acls" {
 			w.WriteHeader(http.StatusNotFound)
-		case "/abc123/api/v2/sites/s1/setting/firewall/gwacls":
-			writeEnvelope(w, 0, "", `[{"id":"g1","name":"WAN block","status":false,"policy":"drop"}]`)
-		default:
-			w.WriteHeader(http.StatusNotFound)
+			return
 		}
+		if r.URL.Query().Get("type") != "0" {
+			writeEnvelope(w, -1, "General error.", "null")
+			return
+		}
+		writeEnvelope(w, 0, "", `{"totalRows":0,"currentPage":1,"currentSize":10,"data":[],"aclDisable":true}`)
 	}))
+	list, err := c.FetchACLs(context.Background(), "s1", ACLTypeGateway)
+	if err != nil {
+		t.Fatalf("FetchACLs: %v", err)
+	}
+	if !list.ACLDisable || len(list.Rules) != 0 || list.Type != ACLTypeGateway {
+		t.Errorf("list = %+v, want empty gateway list with aclDisable", list)
+	}
 	rules, err := c.GetGatewayACLRules(context.Background(), "s1")
 	if err != nil {
 		t.Fatalf("GetGatewayACLRules: %v", err)
 	}
-	if len(rules) != 1 || rules[0].ID != "g1" {
-		t.Errorf("rules = %+v, want one g1 rule", rules)
+	if rules == nil {
+		t.Error("rules = nil, want empty slice so JSON evidence is [] not null")
 	}
 }
 
@@ -224,13 +238,23 @@ func TestGetClientsPaginatesAllPages(t *testing.T) {
 	}
 }
 
-func TestTryACLPathsAllFail(t *testing.T) {
+func TestGetGatewayACLRulesFetchError(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, -1101, "nope", "null")
+	}))
+	_, err := c.GetGatewayACLRules(context.Background(), "s1")
+	if err == nil || !strings.Contains(err.Error(), "fetching ACL rules (type 0)") {
+		t.Errorf("error = %v, want typed gateway fetch error", err)
+	}
+}
+
+func TestGetACLRulesFetchError(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeEnvelope(w, -1101, "nope", "null")
 	}))
 	_, err := c.GetACLRules(context.Background(), "s1")
-	if err == nil || !strings.Contains(err.Error(), "no ACL endpoint responded") {
-		t.Errorf("error = %v, want no-ACL-endpoint error", err)
+	if err == nil || !strings.Contains(err.Error(), "fetching ACL rules (type 1)") {
+		t.Errorf("error = %v, want typed fetch error", err)
 	}
 }
 

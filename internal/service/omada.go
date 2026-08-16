@@ -223,23 +223,28 @@ func (s *OmadaService) ListACLs(ctx context.Context, opts OmadaOptions) ([]Omada
 	}
 	defer client.Logout(ctx) //nolint:errcheck
 
-	rules, err := client.GetACLRules(ctx, site.EffectiveID())
+	siteID := site.EffectiveID()
+	rules, err := client.GetACLRules(ctx, siteID)
 	if err != nil {
 		return nil, fmt.Errorf("fetching ACL rules: %w", err)
 	}
-	gwRules, err := client.GetGatewayACLRules(ctx, site.EffectiveID())
+	gwRules, err := client.GetGatewayACLRules(ctx, siteID)
 	if err != nil {
 		return nil, fmt.Errorf("fetching gateway ACL rules: %w", err)
 	}
+	all := append(rules, gwRules...)
+	if nets, nerr := client.GetNetworks(ctx, siteID); nerr == nil {
+		omadabackend.ResolveRules(all, nets)
+	}
 
-	out := make([]OmadaACLRule, 0, len(rules)+len(gwRules))
-	for _, r := range append(rules, gwRules...) {
+	out := make([]OmadaACLRule, 0, len(all))
+	for _, r := range all {
 		out = append(out, OmadaACLRule{
 			ID:         r.ID,
 			Name:       r.Name,
 			Enabled:    r.Status,
-			Policy:     r.Policy,
-			Protocols:  r.Protocols,
+			Policy:     r.Policy.String(),
+			Protocols:  omadabackend.ProtocolsLabel(r.Protocols),
 			SourceType: r.SourceType,
 			SourceName: r.SourceName,
 			DestType:   r.DestType,

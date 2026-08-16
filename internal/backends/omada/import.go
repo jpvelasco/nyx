@@ -65,18 +65,22 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string, 
 	}
 	result.NetworkCount = len(omadaNets)
 
-	aclRules, err := client.GetACLRules(ctx, site.EffectiveID())
+	siteID := site.EffectiveID()
+	aclList, err := client.FetchACLs(ctx, siteID, ACLTypeSwitch)
 	if err != nil {
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("could not fetch ACL rules: %v", err))
 	}
 
-	gwRules, err := client.GetGatewayACLRules(ctx, site.EffectiveID())
+	gwList, err := client.FetchACLs(ctx, siteID, ACLTypeGateway)
 	if err != nil {
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("could not fetch gateway ACL rules: %v", err))
+	} else if gwList.ACLDisable {
+		result.Warnings = append(result.Warnings,
+			"gateway ACL feature is disabled on this site")
 	}
-	allRules := append(aclRules, gwRules...)
+	allRules := append(aclList.Rules, gwList.Rules...)
 	result.ACLRuleCount = len(allRules)
 
 	clients, err := client.GetClients(ctx, site.EffectiveID())
@@ -136,12 +140,12 @@ func PoliciesFromRules(rules []ACLRule, networks []Network) []intent.Policy {
 		if !rule.Status {
 			continue // skip disabled rules
 		}
-		action := "deny"
-		if strings.EqualFold(rule.Policy, "accept") {
-			action = "allow"
+		action := rule.Policy.Action()
+		if action == "" {
+			action = "deny"
 		}
-		from := resolveRuleEndpoint(rule.SourceType, rule.SourceName, rule.SourceID, netsByID)
-		to := resolveRuleEndpoint(rule.DestType, rule.DestName, rule.DestID, netsByID)
+		from := resolveRuleEndpoint(rule.SourceType, rule.SourceName, rule.SourceIDs, netsByID)
+		to := resolveRuleEndpoint(rule.DestType, rule.DestName, rule.DestIDs, netsByID)
 		policies = append(policies, intent.Policy{
 			Name:   sanitizeName(rule.Name),
 			From:   from,
@@ -203,11 +207,11 @@ func buildAssertions(networks []intent.Network, omadaNets []Network, clients []C
 		if !rule.Status {
 			continue
 		}
-		if !strings.EqualFold(rule.Policy, "drop") && !strings.EqualFold(rule.Policy, "deny") {
+		if !rule.Policy.IsDeny() {
 			continue
 		}
-		from := resolveRuleEndpoint(rule.SourceType, rule.SourceName, rule.SourceID, netsByID)
-		to := resolveRuleEndpoint(rule.DestType, rule.DestName, rule.DestID, netsByID)
+		from := resolveRuleEndpoint(rule.SourceType, rule.SourceName, rule.SourceIDs, netsByID)
+		to := resolveRuleEndpoint(rule.DestType, rule.DestName, rule.DestIDs, netsByID)
 		if from == "" || to == "" {
 			continue
 		}
@@ -255,18 +259,24 @@ func inferZone(n Network) string {
 }
 
 // resolveRuleEndpoint returns a human-readable zone/network name for an ACL
-// rule source or destination.
-func resolveRuleEndpoint(epType, name, id string, netsByID map[string]intent.Network) string {
+// rule source or destination. Names win; otherwise IDs are resolved against
+// the network map (joined with commas when a rule has several).
+func resolveRuleEndpoint(epType, name string, ids []string, netsByID map[string]intent.Network) string {
 	if name != "" {
 		return sanitizeName(name)
 	}
-	if n, ok := netsByID[id]; ok {
-		return n.Name
+	if len(ids) == 0 {
+		return epType
 	}
-	if id != "" {
-		return id
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if n, ok := netsByID[id]; ok {
+			parts = append(parts, n.Name)
+			continue
+		}
+		parts = append(parts, id)
 	}
-	return epType
+	return strings.Join(parts, ",")
 }
 
 // sanitizeName converts an Omada display name to a lowercase slug safe for

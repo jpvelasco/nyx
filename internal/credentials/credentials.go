@@ -82,6 +82,48 @@ func (s *Store) Set(provider, name string, entry Entry) error {
 	return s.save()
 }
 
+// Fields is the typed overlay target for provider credentials. A struct
+// (not a map) keeps host/username/site distinct from password so a
+// printed hostname cannot be treated as a leaked secret.
+type Fields struct {
+	Host     string
+	Username string
+	Password string
+	Site     string
+}
+
+// Overlay fills empty Fields from the named store entry. Store failures
+// and missing entries are ignored — dest is left as-is for those keys so
+// callers can keep env vars / flags as the primary source.
+func Overlay(path, provider, name string, dest *Fields) {
+	if dest == nil {
+		return
+	}
+	if path == "" {
+		path = DefaultPath()
+	}
+	store, err := Open(path)
+	if err != nil {
+		return
+	}
+	entry, ok := store.Get(provider, name)
+	if !ok {
+		return
+	}
+	if dest.Host == "" {
+		dest.Host = entry["host"]
+	}
+	if dest.Username == "" {
+		dest.Username = entry["username"]
+	}
+	if dest.Password == "" {
+		dest.Password = entry["password"]
+	}
+	if dest.Site == "" {
+		dest.Site = entry["site"]
+	}
+}
+
 // Get returns the stored entry. ok is false when the entry does not exist.
 func (s *Store) Get(provider, name string) (Entry, bool) {
 	if s.data[provider] == nil {

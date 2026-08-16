@@ -777,29 +777,17 @@ func aclCheckErrorResult(provider, policy string, summary string) *models.CheckR
 // silently ignored — env vars remain the primary source and the caller
 // still reports missing credentials.
 func fillFromCredentialStore(opts providers.ImportOptions, provider, path string) providers.ImportOptions {
-	if path == "" {
-		path = credentials.DefaultPath()
+	fields := credentials.Fields{
+		Host:     opts.Host,
+		Username: opts.Username,
+		Password: opts.Password,
+		Site:     opts.Site,
 	}
-	store, err := credentials.Open(path)
-	if err != nil {
-		return opts
-	}
-	entry, ok := store.Get(provider, "default")
-	if !ok {
-		return opts
-	}
-	if opts.Host == "" {
-		opts.Host = entry["host"]
-	}
-	if opts.Username == "" {
-		opts.Username = entry["username"]
-	}
-	if opts.Password == "" {
-		opts.Password = entry["password"]
-	}
-	if opts.Site == "" {
-		opts.Site = entry["site"]
-	}
+	credentials.Overlay(path, provider, "default", &fields)
+	opts.Host = fields.Host
+	opts.Username = fields.Username
+	opts.Password = fields.Password
+	opts.Site = fields.Site
 	return opts
 }
 

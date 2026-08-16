@@ -375,7 +375,7 @@ func (c *Client) doRequestLocked(ctx context.Context, method, path string, body 
 		if err != nil {
 			return err
 		}
-		if method == http.MethodPost || method == http.MethodPatch {
+		if method == http.MethodPost || method == http.MethodPatch || method == http.MethodPut {
 			req.Header.Set("Content-Type", "application/json")
 		}
 		c.addAuthHeaders(req)

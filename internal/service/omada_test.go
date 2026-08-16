@@ -282,10 +282,17 @@ func TestOmadaServiceListACLs(t *testing.T) {
 			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
 		case "/abc123/api/v2/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acl":
-			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block IoT","status":true,"policy":"drop","protocols":"all","srcType":"network","srcName":"IoT","dstType":"network","dstName":"Trusted","index":1}]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/gwacl":
-			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"g1","name":"Deny Guest","status":false,"policy":"drop","protocols":"tcp","srcType":"network","srcName":"Guest","dstType":"network","dstName":"Trusted","index":5}]}`)
+		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			writeOmadaEnvelope(w, 0, `{"totalRows":3,"data":[
+				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
+				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
+				{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			if r.URL.Query().Get("type") == "0" {
+				writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"g1","name":"Deny Guest","status":false,"policy":0,"protocols":[6],"sourceType":"network","sourceIds":["n3"],"destinationType":"network","destinationIds":["n1"],"index":5}]}`)
+				return
+			}
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block IoT","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":1}]}`)
 		case "/abc123/api/v2/logout":
 			writeOmadaEnvelope(w, 0, "null")
 		default:
@@ -310,8 +317,8 @@ func TestOmadaServiceListACLs(t *testing.T) {
 		t.Errorf("switch rule endpoints = %+v", sw)
 	}
 	gw := rules[1]
-	if gw.Name != "Deny Guest" || gw.Enabled || gw.Protocols != "tcp" || gw.Index != 5 {
-		t.Errorf("gateway rule = %+v, want disabled tcp rule index 5", gw)
+	if gw.Name != "Deny Guest" || gw.Enabled || gw.Protocols != "6" || gw.Index != 5 {
+		t.Errorf("gateway rule = %+v, want disabled proto-6 rule index 5", gw)
 	}
 }
 
@@ -322,7 +329,11 @@ func TestOmadaServiceListACLs_GatewayFetchFails(t *testing.T) {
 			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
 		case "/abc123/api/v2/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acl":
+		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			if r.URL.Query().Get("type") == "0" {
+				http.NotFound(w, r)
+				return
+			}
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block IoT"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -405,10 +416,12 @@ func TestOmadaServiceImport(t *testing.T) {
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"dhcpEnabled":true},
 				{"id":"n2","name":"IoT","purpose":"lan","vlan":20,"gatewaySubnet":"10.0.20.1/24","isolation":true,"dhcpEnabled":false}]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acl":
-			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block IoT","status":true,"policy":"drop","srcType":"network","srcId":"n2","srcName":"IoT","dstType":"network","dstId":"n1","dstName":"Trusted","index":1}]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/gwacl":
-			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
+		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			if r.URL.Query().Get("type") == "0" {
+				writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
+				return
+			}
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block IoT","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":1}]}`)
 		case "/abc123/api/v2/sites/s1/clients":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","name":"nas","networkName":"Trusted"}]}`)
 		case "/abc123/api/v2/logout":
@@ -573,12 +586,14 @@ func TestOmadaServicePlan(t *testing.T) {
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 				{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"},
 				{"id":"n4","name":"WAN","gatewaySubnet":"10.0.0.1/24"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acl":
-			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block IoT","status":true,"policy":"drop","srcType":"network","srcName":"IoT","dstType":"network","dstName":"Trusted","index":1}]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/gwacl":
-			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
-				{"id":"g1","name":"Block IoT Guest","status":true,"policy":"drop","srcType":"network","srcName":"IoT","dstType":"network","dstName":"Guest","index":1},
-				{"id":"g2","name":"IoT WAN","status":true,"policy":"accept","srcType":"network","srcName":"IoT","dstType":"network","dstName":"WAN","index":2}]}`)
+		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			if r.URL.Query().Get("type") == "0" {
+				writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
+					{"id":"g1","name":"Block IoT Guest","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n3"],"index":1},
+					{"id":"g2","name":"IoT WAN","status":true,"policy":1,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n4"],"index":2}]}`)
+				return
+			}
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block IoT","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":1}]}`)
 		case "/abc123/api/v2/logout":
 			loggedOut = true
 			writeOmadaEnvelope(w, 0, "null")
@@ -667,8 +682,12 @@ func TestOmadaServicePlan_GatewayACLsFetchFails(t *testing.T) {
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		case "/abc123/api/v2/sites/s1/setting/lan/networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acl":
-			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block","status":true,"policy":"drop"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			if r.URL.Query().Get("type") == "0" {
+				http.NotFound(w, r)
+				return
+			}
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block","status":true,"policy":0}]}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -823,14 +842,18 @@ func omadaApplyServer(t *testing.T, initialRules string) *httptest.Server {
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"}]}`)
-		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acl" && r.Method == http.MethodGet:
+		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
+			if r.URL.Query().Get("type") == "0" {
+				writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
+				return
+			}
 			writeOmadaEnvelope(w, 0, state)
-		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acl" && r.Method == http.MethodPost:
-			writeOmadaEnvelope(w, 0, `{"id":"a9","name":"block-iot","status":true,"policy":"drop","protocols":"all","srcType":"network","srcId":"n2","srcName":"IoT","dstType":"network","dstId":"n1","dstName":"Trusted","index":4}`)
-			state = `{"totalRows":1,"data":[{"id":"a9","name":"block-iot","status":true,"policy":"drop","protocols":"all","srcType":"network","srcId":"n2","srcName":"IoT","dstType":"network","dstId":"n1","dstName":"Trusted","index":4}]}`
-		case strings.HasPrefix(r.URL.Path, "/abc123/api/v2/sites/s1/setting/firewall/acl/") && r.Method == http.MethodPatch:
-			writeOmadaEnvelope(w, 0, `{"id":"a1","name":"block-iot","status":true,"policy":"drop","protocols":"all","srcType":"network","srcId":"n2","srcName":"IoT","dstType":"network","dstId":"n1","dstName":"Trusted","index":4}`)
-			state = `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":"drop","protocols":"all","srcType":"network","srcId":"n2","srcName":"IoT","dstType":"network","dstId":"n1","dstName":"Trusted","index":4}]}`
+		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
+			writeOmadaEnvelope(w, 0, `{"id":"a9","name":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`)
+			state = `{"totalRows":1,"data":[{"id":"a9","name":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
+		case strings.HasPrefix(r.URL.Path, "/abc123/api/v2/sites/s1/setting/firewall/acls/") && r.Method == http.MethodPut:
+			writeOmadaEnvelope(w, 0, `{"id":"a1","name":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`)
+			state = `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
 		case r.URL.Path == "/abc123/api/v2/logout":
 			writeOmadaEnvelope(w, 0, "null")
 		default:
@@ -911,7 +934,7 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 	})
 
 	t.Run("unchanged skips post-audit", func(t *testing.T) {
-		ts := omadaApplyServer(t, `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":"drop","srcType":"network","srcId":"n2","srcName":"IoT","dstType":"network","dstId":"n1","dstName":"Trusted","index":4}]}`)
+		ts := omadaApplyServer(t, `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`)
 		svc := NewOmadaService()
 		svc.PostAudit = func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
 			t.Error("post-audit must not run when nothing changed")

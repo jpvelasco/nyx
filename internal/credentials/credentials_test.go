@@ -46,6 +46,35 @@ func TestSetGetRoundtrip(t *testing.T) {
 	}
 }
 
+func TestOverlayFillsEmptyKeysOnly(t *testing.T) {
+	s, path := newTestStore(t)
+	if err := s.Set("omada", "default", Entry{
+		"host":     "192.168.1.1",
+		"username": "admin",
+		"password": "secret",
+		"site":     "Home",
+	}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	dest := Fields{Host: "flag-host"}
+	Overlay(path, "omada", "default", &dest)
+	if dest.Host != "flag-host" {
+		t.Errorf("host = %q, want flag value preserved", dest.Host)
+	}
+	if dest.Username != "admin" || dest.Password != "secret" || dest.Site != "Home" {
+		t.Errorf("dest = %+v, want store fill for empty keys", dest)
+	}
+
+	Overlay(path, "omada", "missing", &dest)
+	if dest.Username != "admin" {
+		t.Error("missing entry must not clear dest")
+	}
+
+	Overlay(filepath.Join(t.TempDir(), "nope.json"), "omada", "default", &dest)
+	Overlay("", "omada", "default", nil)
+}
+
 func TestGetMissing(t *testing.T) {
 	s, _ := newTestStore(t)
 	if _, ok := s.Get("omada", "default"); ok {

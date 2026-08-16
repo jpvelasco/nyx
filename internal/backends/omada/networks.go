@@ -58,6 +58,18 @@ func (n Network) Gateway() string {
 	return parts[0]
 }
 
+// FindNetwork resolves a network by display name or sanitized slug
+// (e.g. "LAN(Default)" and "lan" are the same network).
+func FindNetwork(nets []Network, name string) (Network, bool) {
+	slug := sanitizeName(name)
+	for _, n := range nets {
+		if strings.EqualFold(n.Name, name) || sanitizeName(n.Name) == slug {
+			return n, true
+		}
+	}
+	return Network{}, false
+}
+
 // GetSites returns all sites managed by the controller, walking every page.
 func (c *Client) GetSites(ctx context.Context) ([]Site, error) {
 	sites, _, err := fetchPaged[Site](ctx, c, "sites", defaultPageSize)

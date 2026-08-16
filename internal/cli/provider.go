@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/jpvelasco/nyx/internal/credentials"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/report"
 	"github.com/spf13/cobra"
@@ -104,16 +105,13 @@ func buildInfoCmd(p providers.Provider) *cobra.Command {
 		Use:   "info",
 		Short: fmt.Sprintf("Show %s controller version and connection info", p.Name()),
 		RunE: func(_ *cobra.Command, _ []string) error {
+			opts := providerImportOptions(p.Name())
+			if err := requireProviderHost(opts); err != nil {
+				return err
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			info, err := p.Info(ctx, providers.ImportOptions{
-				Host:          providerHost,
-				Username:      providerUsername,
-				Password:      providerPassword,
-				SkipTLSVerify: providerSkipTLS,
-				CACertPath:    providerCACertPath,
-				Logger:        log,
-			})
+			info, err := p.Info(ctx, opts)
 			if err != nil {
 				return err
 			}
@@ -150,16 +148,12 @@ func buildImportCmd(p providers.Provider) *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), dur)
 			defer cancel()
 
-			result, err := p.ImportSpec(ctx, providers.ImportOptions{
-				Host:          providerHost,
-				Username:      providerUsername,
-				Password:      providerPassword,
-				Site:          providerSite,
-				Debug:         providerDebug,
-				SkipTLSVerify: providerSkipTLS,
-				CACertPath:    providerCACertPath,
-				Logger:        log,
-			})
+			opts := providerImportOptions(p.Name())
+			opts.Debug = providerDebug
+			if err := requireProviderHost(opts); err != nil {
+				return err
+			}
+			result, err := p.ImportSpec(ctx, opts)
 			if err != nil {
 				return err
 			}
@@ -207,16 +201,12 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), dur)
 			defer cancel()
 
-			result, err := p.Check(ctx, providers.ImportOptions{
-				Host:          providerHost,
-				Username:      providerUsername,
-				Password:      providerPassword,
-				Site:          providerSite,
-				Debug:         providerDebug,
-				SkipTLSVerify: providerSkipTLS,
-				CACertPath:    providerCACertPath,
-				Logger:        log,
-			})
+			opts := providerImportOptions(p.Name())
+			opts.Debug = providerDebug
+			if err := requireProviderHost(opts); err != nil {
+				return err
+			}
+			result, err := p.Check(ctx, opts)
 			if err != nil {
 				return err
 			}
@@ -242,6 +232,52 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name")
 	cmd.Flags().BoolVar(&providerDebug, "debug", false, "Print raw API responses to stderr")
 	return cmd
+}
+
+// providerImportOptions builds ImportOptions from flags, then OMADA_* env
+// vars, then the encrypted credential store. Flags win over env; env wins
+// over the store. Missing host after all three is left empty so the
+// provider surfaces its own connection error.
+func providerImportOptions(providerName string) providers.ImportOptions {
+	opts := providers.ImportOptions{
+		Host:          firstNonEmpty(providerHost, os.Getenv("OMADA_HOST")),
+		Username:      firstNonEmpty(providerUsername, os.Getenv("OMADA_USERNAME")),
+		Password:      firstNonEmpty(providerPassword, os.Getenv("OMADA_PASSWORD")),
+		Site:          firstNonEmpty(providerSite, os.Getenv("OMADA_SITE")),
+		SkipTLSVerify: providerSkipTLS,
+		CACertPath:    providerCACertPath,
+		Logger:        log,
+	}
+	if opts.Host == "" || opts.Username == "" || opts.Password == "" {
+		fields := credentials.Fields{
+			Host:     opts.Host,
+			Username: opts.Username,
+			Password: opts.Password,
+			Site:     opts.Site,
+		}
+		credentials.Overlay(storePath(), providerName, "default", &fields)
+		opts.Host = fields.Host
+		opts.Username = fields.Username
+		opts.Password = fields.Password
+		opts.Site = fields.Site
+	}
+	return opts
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func requireProviderHost(opts providers.ImportOptions) error {
+	if opts.Host != "" {
+		return nil
+	}
+	return fmt.Errorf("controller host is required: pass --host, set OMADA_HOST, or run `nyx credentials set omada --set host=...`")
 }
 
 func addProviderFlags(cmd *cobra.Command) {

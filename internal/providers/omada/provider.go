@@ -132,6 +132,10 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 	gwRules, gwErr := client.GetGatewayACLRules(ctx, siteID)
 	allRules := append(rules, gwRules...)
 
+	if nets, nerr := client.GetNetworks(ctx, siteID); nerr == nil {
+		omadabackend.ResolveRules(allRules, nets)
+	}
+
 	// A failed gateway ACL fetch leaves the negative verdicts incomplete: a
 	// gateway-scoped rule we could not enumerate would flip them. Surface the
 	// error and downgrade instead of failing on partial evidence.
@@ -146,11 +150,7 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 		if !rule.Status {
 			continue // skip disabled rules
 		}
-		fromMatch := rule.SourceName == req.From || strings.EqualFold(rule.SourceName, req.From)
-		toMatch := rule.DestName == req.To || strings.EqualFold(rule.DestName, req.To)
-		actionMatch := (req.Action == "deny" && rule.Policy == "drop") ||
-			(req.Action == "allow" && rule.Policy == "accept")
-		if fromMatch && toMatch && actionMatch {
+		if omadabackend.RuleMatchesNames(rule, req.From, req.To) && rule.Policy.MatchesAction(req.Action) {
 			found = true
 			break
 		}
@@ -209,8 +209,8 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 	if req.To == "" {
 		return nil, fmt.Errorf("apply ACL: to is required")
 	}
-	policy := aclPolicyForAction(req.Action)
-	if policy == "" {
+	policy, ok := omadabackend.PolicyFromAction(req.Action)
+	if !ok {
 		return nil, fmt.Errorf("apply ACL: action must be 'allow' or 'deny', got %q", req.Action)
 	}
 
@@ -252,9 +252,11 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 		return nil, fmt.Errorf("fetching ACL rules: %w", err)
 	}
 
+	omadabackend.ResolveRules(rules, nets)
+
 	var existing *omadabackend.ACLRule
 	for i := range rules {
-		if strings.EqualFold(rules[i].SourceName, src.Name) && strings.EqualFold(rules[i].DestName, dst.Name) {
+		if omadabackend.RuleMatchesEndpoints(rules[i], src, dst) {
 			existing = &rules[i]
 			break
 		}
@@ -266,27 +268,28 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 	case existing == nil:
 		rule = omadabackend.ACLRule{
 			Name:       aclRuleName(req),
+			Type:       omadabackend.ACLTypeSwitch,
 			Status:     true,
 			Policy:     policy,
-			Protocols:  "all",
+			Protocols:  []int{omadabackend.ProtocolAll},
 			SourceType: "network",
-			SourceID:   src.ID,
+			SourceIDs:  []string{src.ID},
 			SourceName: src.Name,
 			DestType:   "network",
-			DestID:     dst.ID,
+			DestIDs:    []string{dst.ID},
 			DestName:   dst.Name,
 		}
-	case rulePolicyMatches(existing.Policy, req.Action) && existing.Status:
+	case existing.Policy.MatchesAction(req.Action) && existing.Status:
 		outcome = "unchanged"
 		rule = *existing
-	case rulePolicyMatches(existing.Policy, req.Action) && !existing.Status:
+	case existing.Policy.MatchesAction(req.Action) && !existing.Status:
 		outcome = "enabled"
 		rule = *existing
 		rule.Status = true
 	default:
 		return nil, fmt.Errorf(
 			"conflicting ACL rule %q already exists for %s -> %s with policy %q; use the omada_plan tool to reconcile",
-			existing.Name, src.Name, dst.Name, existing.Policy)
+			existing.Name, src.Name, dst.Name, existing.Policy.String())
 	}
 
 	ruleID := rule.ID
@@ -313,10 +316,10 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 		after = string(afterJSON)
 		if outcome == "created" {
 			ruleID = ""
+			omadabackend.ResolveRules(refreshed, nets)
 			for i := range refreshed {
-				if strings.EqualFold(refreshed[i].SourceName, src.Name) &&
-					strings.EqualFold(refreshed[i].DestName, dst.Name) &&
-					rulePolicyMatches(refreshed[i].Policy, req.Action) {
+				if omadabackend.RuleMatchesEndpoints(refreshed[i], src, dst) &&
+					refreshed[i].Policy.MatchesAction(req.Action) {
 					ruleID = refreshed[i].ID
 					break
 				}
@@ -337,27 +340,6 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 	}, nil
 }
 
-// aclPolicyForAction maps an intent action to the controller policy string.
-// It returns "" for unknown actions.
-func aclPolicyForAction(action string) string {
-	switch action {
-	case "allow":
-		return "accept"
-	case "deny":
-		return "drop"
-	}
-	return ""
-}
-
-// rulePolicyMatches reports whether a controller policy implements the
-// intent action (accept == allow, drop == deny).
-func rulePolicyMatches(policy, action string) bool {
-	if action == "deny" && strings.EqualFold(policy, "drop") {
-		return true
-	}
-	return action == "allow" && strings.EqualFold(policy, "accept")
-}
-
 // aclRuleName derives a rule name from the request, defaulting to a
 // deterministic from-to-action pattern.
 func aclRuleName(req providers.ACLApplyRequest) string {
@@ -370,10 +352,8 @@ func aclRuleName(req providers.ACLApplyRequest) string {
 // networkByName resolves a network name case-insensitively, listing the
 // available names in the error for agents.
 func networkByName(nets []omadabackend.Network, name string) (omadabackend.Network, error) {
-	for _, n := range nets {
-		if strings.EqualFold(n.Name, name) {
-			return n, nil
-		}
+	if n, ok := omadabackend.FindNetwork(nets, name); ok {
+		return n, nil
 	}
 	names := make([]string, 0, len(nets))
 	for _, n := range nets {
