@@ -66,20 +66,22 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string, 
 	result.NetworkCount = len(omadaNets)
 
 	siteID := site.EffectiveID()
-	aclList, err := client.FetchACLs(ctx, siteID, ACLTypeSwitch)
-	if err != nil {
+	aclList, aclErr := client.FetchACLs(ctx, siteID, ACLTypeSwitch)
+	if aclErr != nil {
 		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("could not fetch ACL rules: %v", err))
+			fmt.Sprintf("could not fetch ACL rules: %v", aclErr))
 	}
+	aclListOK := aclErr == nil
 
-	gwList, err := client.FetchACLs(ctx, siteID, ACLTypeGateway)
-	if err != nil {
+	gwList, gwErr := client.FetchACLs(ctx, siteID, ACLTypeGateway)
+	if gwErr != nil {
 		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("could not fetch gateway ACL rules: %v", err))
+			fmt.Sprintf("could not fetch gateway ACL rules: %v", gwErr))
 	} else if gwList.ACLDisable {
 		result.Warnings = append(result.Warnings,
 			"gateway ACL feature is disabled on this site")
 	}
+	gwListOK := gwErr == nil
 	allRules := append(aclList.Rules, gwList.Rules...)
 	result.ACLRuleCount = len(allRules)
 
@@ -89,6 +91,12 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string, 
 			fmt.Sprintf("could not fetch connected clients: %v", err))
 	}
 	result.ClientCount = len(clients)
+
+	devices, err := client.GetDevices(ctx, siteID)
+	if err != nil {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("could not fetch device inventory: %v", err))
+	}
 
 	// Build the spec
 	spec := &intent.Spec{
@@ -122,6 +130,20 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string, 
 
 	// Generate assertions
 	spec.Assertions = buildAssertions(spec.Networks, omadaNets, clients, allRules, netsByID)
+
+	// Inventory snapshot: what the controller's devices and ACL scopes look
+	// like right now, so audits can flag drift (e.g. ACL scope disabled).
+	spec.Inventory = BuildSpecInventory(&InventorySnapshot{
+		ControllerVersion: result.ControllerVersion,
+		Devices:           devices,
+		Networks:          omadaNets,
+		Bindings:          BuildNetworkBindings(omadaNets),
+		GatewayACLs:       gwList,
+		GatewayACLsOK:     gwListOK,
+		SwitchACLs:        aclList,
+		SwitchACLsOK:      aclListOK,
+		Clients:           clients,
+	})
 
 	result.Spec = spec
 	return result, nil
@@ -200,6 +222,22 @@ func buildAssertions(networks []intent.Network, omadaNets []Network, clients []C
 				Target: n.Gateway,
 			})
 		}
+	}
+
+	// Enforced-state assertions: one acl_check per enabled ACL rule, keyed
+	// off the sanitized rule name (the spec's policy name). This is what
+	// makes a stored-but-unenforced gateway ACL (aclDisable) a FAIL instead
+	// of a silent pass.
+	for _, rule := range rules {
+		if !rule.Status {
+			continue
+		}
+		assertions = append(assertions, intent.Assertion{
+			Type:     "acl_check",
+			Provider: "omada",
+			Policy:   sanitizeName(rule.Name),
+			Expect:   "enforced",
+		})
 	}
 
 	// Isolation assertions derived from deny ACL rules
@@ -281,6 +319,12 @@ func resolveRuleEndpoint(epType, name string, ids []string, netsByID map[string]
 		parts = append(parts, id)
 	}
 	return strings.Join(parts, ",")
+}
+
+// SanitizeName is the cross-package form of sanitizeName: the provider layer
+// matches spec names (sanitized slugs) against raw controller rule names.
+func SanitizeName(s string) string {
+	return sanitizeName(s)
 }
 
 // sanitizeName converts an Omada display name to a lowercase slug safe for

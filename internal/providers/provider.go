@@ -82,6 +82,24 @@ type ACLApplyResult struct {
 	After       string `json:"after"`
 }
 
+// ProviderInventory is the provider's point-in-time observation of a site:
+// the device inventory, LAN networks with their gateway bindings, both ACL
+// scopes and their enabled state, and the active client count. Human is a
+// stable, human-readable rendering.
+type ProviderInventory struct {
+	Site        string            `json:"site"`
+	Human       string            `json:"human"`
+	Inventory   *intent.Inventory `json:"inventory"`
+	ClientCount int               `json:"client_count"`
+	Warnings    []string          `json:"warnings,omitempty"`
+}
+
+// InventoryProvider is the optional observation surface behind
+// `nyx <vendor> inventory` and the MCP inventory tool.
+type InventoryProvider interface {
+	Inventory(ctx context.Context, opts ImportOptions) (*ProviderInventory, error)
+}
+
 // ACLApplier is the optional mutation surface a provider may implement.
 // Providers that cannot mutate return ErrCapabilityUnsupported behaviour
 // through the service layer when ApplyACL is requested.

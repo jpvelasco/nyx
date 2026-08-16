@@ -92,8 +92,8 @@ func TestProviderIdentity(t *testing.T) {
 		t.Errorf("Name() = %q, want omada", p.Name())
 	}
 	caps := p.Capabilities()
-	if len(caps) != 3 || caps[0] != "info" || caps[1] != "import" || caps[2] != "check" {
-		t.Errorf("Capabilities() = %v, want [info import check]", caps)
+	if len(caps) != 4 || caps[0] != "info" || caps[1] != "import" || caps[2] != "check" || caps[3] != "inventory" {
+		t.Errorf("Capabilities() = %v, want [info import check inventory]", caps)
 	}
 }
 
@@ -534,6 +534,191 @@ func TestProviderCheckACL(t *testing.T) {
 		}
 		if !foundEvidence {
 			t.Errorf("evidence = %v, want gateway fetch error surfaced", res.Evidence)
+		}
+	})
+}
+
+func TestProviderCheckACL_ScopeDisabled(t *testing.T) {
+	// Gateway scope is globally disabled (aclDisable=true) while a switch
+	// rule exists and is enabled. This is the live-trusted scenario: a stored
+	// gateway rule must FAIL, an enabled switch rule must PASS.
+	ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/abc123/api/v2/login":
+			writeEnvelope(w, 0, "", `{"token":"t1"}`)
+		case "/abc123/api/v2/logout":
+			writeEnvelope(w, 0, "", "null")
+		case "/abc123/api/v2/sites":
+			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24"},
+				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.1.1/24"}
+			]}`)
+		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			if r.URL.Query().Get("type") == "0" {
+				writeEnvelope(w, 0, "", `{"totalRows":1,"aclDisable":true,"supportLanToLan":true,"data":[
+					{"id":"g1","name":"Trusted Deny","status":true,"policy":0,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]}
+				]}`)
+				return
+			}
+			writeEnvelope(w, 0, "", `{"totalRows":1,"aclDisable":false,"data":[
+				{"id":"s1r","name":"IoT Deny","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]}
+			]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	p := &OmadaProvider{}
+	opts := providers.ImportOptions{Host: ts.URL, Username: "admin", Password: "pw", Site: "HQ", SkipTLSVerify: true}
+
+	t.Run("gateway rule in disabled scope fails", func(t *testing.T) {
+		res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{
+			PolicyName: "trusted-deny", From: "trusted", To: "iot", Action: "deny", ExpectEnforced: true,
+		}, opts)
+		if err != nil {
+			t.Fatalf("CheckACL: %v", err)
+		}
+		if res.Status != "fail" {
+			t.Errorf("status = %s (summary %q), want fail — stored but unenforced", res.Status, res.Summary)
+		}
+		if !strings.Contains(res.Summary, "NOT enforced") || !strings.Contains(res.Summary, "gateway") {
+			t.Errorf("summary = %q, want gateway scope disabled callout", res.Summary)
+		}
+		if len(res.Violations) == 0 {
+			t.Error("violations empty, want scope-off explanation")
+		}
+		if res.Observed["scope"] != "gateway" || res.Observed["scope_disabled"] != true {
+			t.Errorf("observed = %v, want scope gateway + disabled", res.Observed)
+		}
+		if res.Observed["rule_count"] != 2 {
+			t.Errorf("rule_count = %v, want 2 (both scopes)", res.Observed["rule_count"])
+		}
+	})
+
+	t.Run("switch rule in enabled scope passes", func(t *testing.T) {
+		res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{
+			PolicyName: "iot-deny", From: "iot", To: "trusted", Action: "deny", ExpectEnforced: true,
+		}, opts)
+		if err != nil {
+			t.Fatalf("CheckACL: %v", err)
+		}
+		if res.Status != "pass" {
+			t.Errorf("status = %s (summary %q), want pass — switch scope is enabled", res.Status, res.Summary)
+		}
+		if res.Observed["scope"] != "switch" || res.Observed["scope_disabled"] != false {
+			t.Errorf("observed = %v, want scope switch + enabled", res.Observed)
+		}
+	})
+
+	t.Run("not-enforced expectation unaffected by scope", func(t *testing.T) {
+		res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{
+			PolicyName: "missing", From: "trusted", To: "iot", Action: "deny", ExpectEnforced: false,
+		}, opts)
+		if err != nil {
+			t.Fatalf("CheckACL: %v", err)
+		}
+		// "trusted→iot deny" actually matches the disabled-scope gateway rule:
+		// the policy IS present, so a not-enforced expectation fails.
+		if res.Status != "fail" {
+			t.Errorf("status = %s, want fail (rule present but not expected)", res.Status)
+		}
+	})
+}
+
+func TestProviderInventory(t *testing.T) {
+	ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/abc123/api/v2/login":
+			writeEnvelope(w, 0, "", `{"token":"t1"}`)
+		case "/abc123/api/v2/logout":
+			writeEnvelope(w, 0, "", "null")
+		case "/abc123/api/v2/sites":
+			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[{"id":"s1","name":"HQ"},{"id":"s2","name":"Branch"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24","vlan":10,"deviceMac":"aa:bb:cc:dd:ee:00"},
+				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.1.1/24","vlan":20,"deviceMac":"aa:bb:cc:dd:ee:00"}
+			]}`)
+		case "/abc123/api/v2/sites/s1/devices":
+			writeEnvelope(w, 0, "", `[
+				{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254","firmwareVersion":"2.2.3","needUpgrade":true},
+				{"id":"d2","name":"SW-2428P","model":"SW-2428P","type":"switch","mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.253"}
+			]`)
+		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			if r.URL.Query().Get("type") == "0" {
+				writeEnvelope(w, 0, "", `{"totalRows":1,"aclDisable":true,"supportLanToLan":true,"data":[{"id":"g1","name":"Trusted Deny","status":true,"policy":0}]}`)
+				return
+			}
+			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
+		case "/abc123/api/v2/sites/s1/clients":
+			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+				{"mac":"aa","ip":"10.0.0.50","networkName":"Trusted"},
+				{"mac":"bb","ip":"10.0.0.51","networkName":"Trusted"}
+			]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	p := &OmadaProvider{}
+	res, err := p.Inventory(context.Background(), providers.ImportOptions{
+		Host: ts.URL, Username: "admin", Password: "pw", Site: "hq", SkipTLSVerify: true,
+	})
+	if err != nil {
+		t.Fatalf("Inventory: %v", err)
+	}
+	if res.Site != "HQ" || res.ClientCount != 2 {
+		t.Errorf("site/count = %q/%d, want HQ/2", res.Site, res.ClientCount)
+	}
+	if len(res.Inventory.Devices) != 2 || res.Inventory.Devices[0].Name != "GW-CORE" {
+		t.Errorf("devices = %+v, want gateway first (sorted)", res.Inventory.Devices)
+	}
+	if res.Inventory.Devices[0].Type != "gateway" || !res.Inventory.Devices[0].Upgrade {
+		t.Errorf("gateway device = %+v, want type gateway + upgrade flag", res.Inventory.Devices[0])
+	}
+	if len(res.Inventory.Devices[0].Networks) != 2 {
+		t.Errorf("gateway networks = %v, want both LANs bound via deviceMac", res.Inventory.Devices[0].Networks)
+	}
+	if res.Inventory.NetworkGateways["trusted"] != "GW-CORE" || res.Inventory.NetworkGateways["iot"] != "GW-CORE" {
+		t.Errorf("NetworkGateways = %v", res.Inventory.NetworkGateways)
+	}
+	if len(res.Inventory.ACLScopes) != 2 {
+		t.Fatalf("ACLScopes = %+v, want 2", res.Inventory.ACLScopes)
+	}
+	gw, sw := res.Inventory.ACLScopes[0], res.Inventory.ACLScopes[1]
+	if gw.Scope != "gateway" || gw.Enabled || gw.RuleCount != 1 {
+		t.Errorf("gateway scope = %+v, want disabled, 1 rule", gw)
+	}
+	if sw.Scope != "switch" || !sw.Enabled || sw.RuleCount != 0 {
+		t.Errorf("switch scope = %+v, want enabled, 0 rules", sw)
+	}
+	for _, want := range []string{"Site: HQ", "== Devices (2) ==", "== Networks (2) ==", "DISABLED — stored rules are not enforced", "2 active clients"} {
+		if !strings.Contains(res.Human, want) {
+			t.Errorf("human output missing %q:\n%s", want, res.Human)
+		}
+	}
+	if len(res.Warnings) != 0 {
+		t.Errorf("warnings = %v, want none", res.Warnings)
+	}
+
+	t.Run("login failure propagates", func(t *testing.T) {
+		bad := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/abc123/api/v2/login" {
+				writeEnvelope(w, -30109, "bad creds", "null")
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		_, err := p.Inventory(context.Background(), providers.ImportOptions{Host: bad.URL, Username: "admin", Password: "bad", SkipTLSVerify: true})
+		if err == nil || !strings.Contains(err.Error(), "login failed") {
+			t.Errorf("error = %v, want login failed", err)
+		}
+	})
+
+	t.Run("site selection error propagates", func(t *testing.T) {
+		_, err := p.Inventory(context.Background(), providers.ImportOptions{Host: ts.URL, Username: "admin", Password: "pw", Site: "nope", SkipTLSVerify: true})
+		if err == nil || !strings.Contains(err.Error(), "not found") {
+			t.Errorf("error = %v, want site not found", err)
 		}
 	})
 }

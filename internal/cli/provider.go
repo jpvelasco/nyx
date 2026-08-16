@@ -95,6 +95,9 @@ func BuildProviderSubcommands(root *cobra.Command) {
 		if caps["check"] {
 			vendorCmd.AddCommand(buildCheckCmd(p))
 		}
+		if caps["inventory"] {
+			vendorCmd.AddCommand(buildInventoryCmd(p))
+		}
 
 		root.AddCommand(vendorCmd)
 	}
@@ -231,6 +234,50 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 	addProviderFlags(cmd)
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name")
 	cmd.Flags().BoolVar(&providerDebug, "debug", false, "Print raw API responses to stderr")
+	return cmd
+}
+
+func buildInventoryCmd(p providers.Provider) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "inventory",
+		Short: fmt.Sprintf("Show the current %s site inventory (devices, networks, ACL scopes, clients)", p.Name()),
+		RunE: func(_ *cobra.Command, _ []string) error {
+			inv, ok := p.(providers.InventoryProvider)
+			if !ok {
+				return fmt.Errorf("provider %q does not support inventory", p.Name())
+			}
+			dur, err := parseTimeoutFlag(timeout)
+			if err != nil {
+				return err
+			}
+			if dur == 0 {
+				dur = 60 * time.Second
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), dur)
+			defer cancel()
+
+			opts := providerImportOptions(p.Name())
+			if err := requireProviderHost(opts); err != nil {
+				return err
+			}
+			res, err := inv.Inventory(ctx, opts)
+			if err != nil {
+				return err
+			}
+			for _, w := range res.Warnings {
+				fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
+			}
+			if jsonOutput {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(res)
+			}
+			fmt.Print(res.Human)
+			return nil
+		},
+	}
+	addProviderFlags(cmd)
+	cmd.Flags().StringVar(&providerSite, "site", "", "Site name (defaults to first site)")
 	return cmd
 }
 

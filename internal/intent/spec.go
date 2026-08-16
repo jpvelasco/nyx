@@ -18,6 +18,39 @@ type Spec struct {
 	Probes     []Probe     `yaml:"probes,omitempty" json:"probes,omitempty"`
 	Policies   []Policy    `yaml:"policies" json:"policies"`
 	Assertions []Assertion `yaml:"assertions" json:"assertions"`
+	Inventory  *Inventory  `yaml:"inventory,omitempty" json:"inventory,omitempty"`
+}
+
+// Inventory is an observation snapshot of the controller's device inventory,
+// populated by `nyx <provider> import`. It records what was seen at import
+// time; re-import refreshes it. It is optional — hand-written specs omit it.
+type Inventory struct {
+	ControllerVersion string            `yaml:"controller_version" json:"controller_version"`
+	Devices           []InventoryDevice `yaml:"devices" json:"devices"`
+	NetworkGateways   map[string]string `yaml:"network_gateways,omitempty" json:"network_gateways,omitempty"`
+	ACLScopes         []ACLScopeStatus  `yaml:"acl_scopes,omitempty" json:"acl_scopes,omitempty"`
+}
+
+// InventoryDevice is one managed device observed at import time.
+// Name and IP are raw controller values (including hostnames), unlike the
+// sanitized network names used elsewhere in the spec.
+type InventoryDevice struct {
+	Type     string   `yaml:"type" json:"type"` // gateway | switch | ap
+	Name     string   `yaml:"name" json:"name"`
+	Model    string   `yaml:"model" json:"model"`
+	IP       string   `yaml:"ip,omitempty" json:"ip,omitempty"`
+	Firmware string   `yaml:"firmware,omitempty" json:"firmware,omitempty"`
+	Upgrade  bool     `yaml:"upgrade_available,omitempty" json:"upgrade_available,omitempty"`
+	Networks []string `yaml:"networks,omitempty" json:"networks,omitempty"`
+}
+
+// ACLScopeStatus captures whether a controller ACL scope is active.
+// Enabled=false means stored rules of that scope are not enforced.
+type ACLScopeStatus struct {
+	Scope           string `yaml:"scope" json:"scope"` // "gateway" | "switch"
+	Enabled         bool   `yaml:"enabled" json:"enabled"`
+	RuleCount       int    `yaml:"rule_count" json:"rule_count"`
+	SupportLanToLan *bool  `yaml:"support_lan_to_lan,omitempty" json:"support_lan_to_lan,omitempty"`
 }
 
 // Network defines a named CIDR block
@@ -177,6 +210,23 @@ func ValidateSpec(spec *Spec) error {
 		}
 		if p.Action != "allow" && p.Action != "deny" {
 			return fmt.Errorf("policy %q: action must be 'allow' or 'deny'", p.Name)
+		}
+	}
+	// Validate inventory snapshot (optional)
+	if spec.Inventory != nil {
+		validDeviceTypes := map[string]bool{"gateway": true, "switch": true, "ap": true}
+		for i, d := range spec.Inventory.Devices {
+			if d.Name == "" {
+				return fmt.Errorf("inventory.devices[%d]: name is required", i)
+			}
+			if !validDeviceTypes[d.Type] {
+				return fmt.Errorf("inventory.devices[%d]: type must be gateway, switch, or ap (got %q)", i, d.Type)
+			}
+		}
+		for i, s := range spec.Inventory.ACLScopes {
+			if s.Scope != "gateway" && s.Scope != "switch" {
+				return fmt.Errorf("inventory.acl_scopes[%d]: scope must be 'gateway' or 'switch' (got %q)", i, s.Scope)
+			}
 		}
 	}
 	// Validate assertions

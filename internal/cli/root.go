@@ -21,6 +21,8 @@ var (
 	interfaceOpt      string
 	warnVirtual       bool
 	skipHostKeyVerify bool
+	skipTLSVerify     bool
+	caCertPath        string
 	log               *logger.Logger
 	slogLog           *slog.Logger
 
@@ -57,6 +59,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&interfaceOpt, "interface", "", "Network interface to use for local checks (e.g. \"Ethernet\", \"Wi-Fi\"). Leave empty for automatic selection.")
 	auditCmd.Flags().BoolVar(&warnVirtual, "warn-virtual", false, "Always warn on virtual subnets, even if previously acknowledged")
 	auditCmd.Flags().BoolVar(&skipHostKeyVerify, "skip-host-key-verify", false, "Skip SSH host key verification for probes (like ssh -o StrictHostKeyChecking=no)")
+	auditCmd.Flags().BoolVar(&skipTLSVerify, "skip-tls-verify", false, "Skip TLS certificate verification for controller checks (like curl -k)")
+	auditCmd.Flags().StringVar(&caCertPath, "ca-cert", "", "Path to custom CA certificate PEM file for controller checks")
 
 	rootCmd.AddCommand(discoverCmd)
 	rootCmd.AddCommand(checkRoutesCmd)

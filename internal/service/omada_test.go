@@ -38,6 +38,82 @@ func writeOmadaEnvelope(w http.ResponseWriter, errorCode int, result string) {
 	w.Write([]byte(`{"errorCode":` + strconv.Itoa(errorCode) + `,"msg":"","result":` + result + `}`)) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 }
 
+func TestOmadaServiceInventory(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/abc123/api/v2/login":
+			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
+		case "/abc123/api/v2/logout":
+			writeOmadaEnvelope(w, 0, `null`)
+		case "/abc123/api/v2/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
+				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","deviceMac":"aa:bb:cc:dd:ee:00"},
+				{"id":"n2","name":"IoT","purpose":"lan","vlan":20,"gatewaySubnet":"10.0.20.1/24","deviceMac":"aa:bb:cc:dd:ee:00"}]}`)
+		case "/abc123/api/v2/sites/s1/devices":
+			writeOmadaEnvelope(w, 0, `[
+				{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254","firmwareVersion":"2.2.3","needUpgrade":true},
+				{"id":"d2","name":"SW-2428P","model":"SW-2428P","type":"switch","mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.253"}]`)
+		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			if r.URL.Query().Get("type") == "0" {
+				writeOmadaEnvelope(w, 0, `{"totalRows":1,"aclDisable":true,"supportLanToLan":true,"data":[{"id":"g1","name":"Trusted Deny","status":true,"policy":0}]}`)
+				return
+			}
+			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
+		case "/abc123/api/v2/sites/s1/clients":
+			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[{"mac":"aa","ip":"10.0.10.5"},{"mac":"bb","ip":"10.0.10.6"}]}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	inv, err := NewOmadaService().Inventory(context.Background(), OmadaOptions{Host: ts.URL, SkipTLSVerify: true})
+	if err != nil {
+		t.Fatalf("Inventory: %v", err)
+	}
+	if inv.Site != "HQ" || inv.ClientCount != 2 || inv.ControllerVersion != "6.4.5.1" {
+		t.Errorf("summary = %s/%d/%s, want HQ/2/6.4.5.1", inv.Site, inv.ClientCount, inv.ControllerVersion)
+	}
+	if len(inv.Devices) != 2 || inv.Devices[0].Name != "GW-CORE" || inv.Devices[0].Type != "gateway" {
+		t.Errorf("devices = %+v, want gateway first (sorted)", inv.Devices)
+	}
+	if len(inv.Devices[0].Networks) != 2 || inv.Devices[0].Networks[0] != "trusted" {
+		t.Errorf("gateway networks = %v, want [trusted iot] via deviceMac binding", inv.Devices[0].Networks)
+	}
+	if inv.NetworkGateways["trusted"] != "GW-CORE" || inv.NetworkGateways["iot"] != "GW-CORE" {
+		t.Errorf("network_gateways = %v", inv.NetworkGateways)
+	}
+	if len(inv.ACLScopes) != 2 {
+		t.Fatalf("acl_scopes = %+v, want 2", inv.ACLScopes)
+	}
+	gw, sw := inv.ACLScopes[0], inv.ACLScopes[1]
+	if gw.Scope != "gateway" || gw.Enabled || gw.RuleCount != 1 {
+		t.Errorf("gateway scope = %+v, want disabled/1 rule", gw)
+	}
+	if sw.Scope != "switch" || !sw.Enabled || sw.RuleCount != 0 {
+		t.Errorf("switch scope = %+v, want enabled/0 rules", sw)
+	}
+	if len(inv.Warnings) != 0 {
+		t.Errorf("warnings = %v, want none", inv.Warnings)
+	}
+}
+
+func TestOmadaServiceInventoryErrors(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/abc123/api/v2/login":
+			writeOmadaEnvelope(w, -30109, `null`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	_, err := NewOmadaService().Inventory(context.Background(), OmadaOptions{Host: ts.URL, Username: "a", Password: "b", SkipTLSVerify: true})
+	if err == nil {
+		t.Error("expected login failure to propagate")
+	}
+}
+
 func TestOmadaServiceInfo(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected authenticated request: %s %s", r.Method, r.URL.Path)
@@ -422,6 +498,8 @@ func TestOmadaServiceImport(t *testing.T) {
 				return
 			}
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block IoT","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":1}]}`)
+		case "/abc123/api/v2/sites/s1/devices":
+			writeOmadaEnvelope(w, 0, `[{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254"}]`)
 		case "/abc123/api/v2/sites/s1/clients":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","name":"nas","networkName":"Trusted"}]}`)
 		case "/abc123/api/v2/logout":
@@ -480,6 +558,8 @@ func TestOmadaServiceImport_Warnings(t *testing.T) {
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"}]}`)
 		case "/abc123/api/v2/sites/s1/clients":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5"}]}`)
+		case "/abc123/api/v2/sites/s1/devices":
+			writeOmadaEnvelope(w, 0, `[]`)
 		case "/abc123/api/v2/logout":
 			writeOmadaEnvelope(w, 0, "null")
 		default:
@@ -495,6 +575,11 @@ func TestOmadaServiceImport_Warnings(t *testing.T) {
 	}
 	if len(imp.Warnings) != 2 {
 		t.Fatalf("warnings = %v, want ACL + gateway ACL fetch warnings", imp.Warnings)
+	}
+	for _, w := range imp.Warnings {
+		if strings.Contains(w, "device inventory") {
+			t.Errorf("warnings = %v, want no device inventory warning", imp.Warnings)
+		}
 	}
 	if imp.ACLRuleCount != 0 || imp.NetworkCount != 1 {
 		t.Errorf("counts = acls %d, nets %d; want 0/1", imp.ACLRuleCount, imp.NetworkCount)

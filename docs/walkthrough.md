@@ -164,6 +164,38 @@ You've now got a repeatable, automated way to verify that your network is doing 
 
 The spec is your contract with reality. nyx enforces it.
 
+## The Inventory Block (Site Map)
+
+An `acl_check` failure can mean two very different things: the rule is missing, or the rule is stored but its ACL scope is switched off on the controller. The optional `inventory:` block in your spec exists to tell those apart — it records what's physically in the site:
+
+```yaml
+inventory:
+  controller_version: 6.4.5.1
+  devices:
+    - type: gateway
+      name: GW-CORE
+      model: GW-CORE
+      ip: 10.0.0.254
+      firmware: 2.2.3
+      upgrade_available: true
+      networks: [trusted, iot]
+  network_gateways:
+    trusted: GW-CORE
+    iot: GW-CORE
+  acl_scopes:
+    - scope: gateway
+      enabled: false
+      rule_count: 1
+      support_lan_to_lan: true
+    - scope: switch
+      enabled: true
+      rule_count: 1
+```
+
+You don't write it by hand. `nyx omada inventory` (or the MCP `omada_inventory` tool) fetches the live snapshot — devices, networks, both ACL scopes, clients — and prints it or emits JSON. `nyx omada import` fills the block into the generated spec automatically, and emits one `acl_check` assertion per enabled rule so the audit flags any rule stored in a disabled scope.
+
+When an `acl_check` fails, read `inventory.acl_scopes` first: `enabled: false` means the master switch for that scope is off on the controller — the rule is intact but not being applied.
+
 ## Tips
 
 - **Vantage point matters.** Isolation checks run from your local machine. If you're on the trusted LAN, checking `from: iot` tests whether IoT can reach you — not whether IoT can reach management. Use `runner:` with a probe to run checks from inside the source VLAN.

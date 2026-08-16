@@ -53,6 +53,8 @@ var auditCmd = &cobra.Command{
 		engine.Interface = GetSelectedInterface()
 		engine.WarnVirtual = warnVirtual
 		engine.SkipHostKeyVerify = skipHostKeyVerify
+		engine.SkipTLSVerify = skipTLSVerify
+		engine.CACertPath = caCertPath
 		if slogLog != nil {
 			engine.Logger = slogLog
 		}

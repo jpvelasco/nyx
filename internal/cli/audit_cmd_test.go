@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func TestAuditControllerTLSFlags(t *testing.T) {
+	if f := auditCmd.Flags().Lookup("skip-tls-verify"); f == nil || f.Value.Type() != "bool" {
+		t.Errorf("audit --skip-tls-verify flag missing or not bool")
+	}
+	if f := auditCmd.Flags().Lookup("ca-cert"); f == nil || f.Value.Type() != "string" {
+		t.Errorf("audit --ca-cert flag missing or not string")
+	}
+}
+
 func TestAuditMissingSpecError(t *testing.T) {
 	// Set specFile to a path that definitely doesn't exist
 	original := specFile

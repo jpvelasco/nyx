@@ -268,6 +268,10 @@ func TestImportSpecEndToEnd(t *testing.T) {
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 				{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.0.50","networkName":"Trusted"}
 			]}`)
+		case "/abc123/api/v2/sites/s1/devices":
+			writeEnvelope(w, 0, "", `[
+				{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254","firmwareVersion":"2.2.3","needUpgrade":true}
+			]`)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			writeEnvelope(w, -1101, "not found", "null")
@@ -314,6 +318,28 @@ func TestImportSpecEndToEnd(t *testing.T) {
 	}
 	if len(got.Spec.Assertions) < 4 {
 		t.Errorf("assertions = %+v, want at least subnet+route+isolation+internet", got.Spec.Assertions)
+	}
+	aclChecks := 0
+	for _, a := range got.Spec.Assertions {
+		if a.Type == "acl_check" && a.Expect == "enforced" {
+			aclChecks++
+		}
+	}
+	if aclChecks != 2 {
+		t.Errorf("acl_check assertions = %d, want 2 (one per enabled rule; disabled skipped)", aclChecks)
+	}
+	if got.Spec.Inventory == nil {
+		t.Fatal("spec.inventory is nil, want populated by import")
+	}
+	if len(got.Spec.Inventory.Devices) != 1 || got.Spec.Inventory.Devices[0].Name != "GW-CORE" ||
+		got.Spec.Inventory.Devices[0].Type != "gateway" {
+		t.Errorf("inventory devices = %+v, want 1 gateway GW-CORE", got.Spec.Inventory.Devices)
+	}
+	if got.Spec.Inventory.Devices[0].Upgrade != true {
+		t.Errorf("inventory device upgrade = %v, want true", got.Spec.Inventory.Devices[0].Upgrade)
+	}
+	if len(got.Spec.Inventory.ACLScopes) != 2 {
+		t.Errorf("inventory acl scopes = %+v, want 2 (gateway + switch)", got.Spec.Inventory.ACLScopes)
 	}
 	if len(got.Warnings) != 0 {
 		t.Errorf("warnings = %v, want none", got.Warnings)

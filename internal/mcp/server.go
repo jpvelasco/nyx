@@ -110,6 +110,7 @@ type omadaSurface interface {
 	ListNetworks(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaNetwork, error)
 	ListACLs(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaACLRule, error)
 	ListClients(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaClient, error)
+	Inventory(ctx context.Context, opts service.OmadaOptions) (*service.OmadaInventory, error)
 	Import(ctx context.Context, opts service.OmadaOptions) (*service.OmadaImport, error)
 	Plan(ctx context.Context, opts service.OmadaOptions, proposedYAML string) (*service.OmadaPlan, error)
 	ApplyACL(ctx context.Context, opts service.OmadaOptions, req service.OmadaACLApplyRequest) (*service.OmadaACLApplyResult, error)
@@ -437,6 +438,22 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		{
 			Name:        "omada_list_clients",
 			Description: "List currently connected clients on an Omada SDN controller site.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]propSchema{
+					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
+					"username":        {Type: "string", Description: "Omada account username"},
+					"password":        {Type: "string", Description: "Omada account password"},
+					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
+					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
+					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
+				},
+				Required: []string{"host", "username", "password"},
+			},
+		},
+		{
+			Name:        "omada_inventory",
+			Description: "Observe the Omada site point-in-time: managed devices (with firmware + upgrade flags), LAN networks with their gateway bindings, both ACL scopes and their enabled state, and the active client count. Read-only.",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]propSchema{
@@ -856,6 +873,17 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 			return fmt.Sprintf("omada clients request failed: %v", err), true
 		}
 		return toJSON(clients), false
+
+	case "omada_inventory":
+		opts, msg := omadaOptionsFromArgs(args, true)
+		if msg != "" {
+			return msg, true
+		}
+		inv, err := s.omadaSvc.Inventory(ctx, opts)
+		if err != nil {
+			return fmt.Sprintf("omada inventory request failed: %v", err), true
+		}
+		return toJSON(inv), false
 
 	case "omada_import":
 		opts, msg := omadaOptionsFromArgs(args, true)

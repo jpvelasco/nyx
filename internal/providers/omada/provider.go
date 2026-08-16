@@ -25,7 +25,7 @@ func (o *OmadaProvider) Name() string { return ProviderName }
 
 // Capabilities lists the supported operations for this provider.
 func (o *OmadaProvider) Capabilities() []string {
-	return []string{"info", "import", "check"}
+	return []string{"info", "import", "check", "inventory"}
 }
 
 // Info returns basic controller information without requiring authentication.
@@ -84,6 +84,43 @@ func (o *OmadaProvider) Check(ctx context.Context, opts providers.ImportOptions)
 	}, nil
 }
 
+// Inventory returns the site's point-in-time observation: device inventory,
+// LAN networks with their gateway bindings, both ACL scopes and their
+// enabled state, and the active client count. It is read-only and never
+// mutates.
+func (o *OmadaProvider) Inventory(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInventory, error) {
+	client, err := omadabackend.NewClient(ctx, opts.Host, opts.SkipTLSVerify, opts.CACertPath)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to omada controller: %w", err)
+	}
+	client.SetLogger(opts.Logger)
+	if err := client.Login(ctx, opts.Username, opts.Password); err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+
+	sites, err := client.GetSites(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching sites: %w", err)
+	}
+	site, err := omadabackend.SelectSite(sites, opts.Site)
+	if err != nil {
+		return nil, err
+	}
+
+	snap, err := client.FetchInventory(ctx, site.EffectiveID())
+	if err != nil {
+		return nil, err
+	}
+	return &providers.ProviderInventory{
+		Site:        site.Name,
+		Human:       omadabackend.RenderInventory(snap, site.Name),
+		Inventory:   omadabackend.BuildSpecInventory(snap),
+		ClientCount: len(snap.Clients),
+		Warnings:    snap.Warnings,
+	}, nil
+}
+
 // CheckACL verifies that an ACL policy is enforced (or not) on the Omada controller.
 func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequest, opts providers.ImportOptions) (*models.CheckResult, error) {
 	result := models.NewCheckResult("omada", "acl_check", "omada", req.PolicyName)
@@ -122,15 +159,18 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 	}
 	siteID := site.EffectiveID()
 
-	rules, err := client.GetACLRules(ctx, siteID)
-	if err != nil {
+	// Fetch both ACL scopes with their capability flags. A scope's
+	// aclDisable master switch means its rules are stored but not enforced —
+	// the verdict must reflect that, so the raw FetchACLs meta is kept.
+	swList, swErr := client.FetchACLs(ctx, siteID, omadabackend.ACLTypeSwitch)
+	gwList, gwErr := client.FetchACLs(ctx, siteID, omadabackend.ACLTypeGateway)
+	if swErr != nil {
 		result.Status = models.StatusError
-		result.Summary = fmt.Sprintf("failed to fetch ACL rules: %v", err)
+		result.Summary = fmt.Sprintf("failed to fetch switch ACL rules: %v", swErr)
 		result.Finish()
 		return result, nil
 	}
-	gwRules, gwErr := client.GetGatewayACLRules(ctx, siteID)
-	allRules := append(rules, gwRules...)
+	allRules := append(swList.Rules, gwList.Rules...)
 
 	if nets, nerr := client.GetNetworks(ctx, siteID); nerr == nil {
 		omadabackend.ResolveRules(allRules, nets)
@@ -144,36 +184,39 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 			fmt.Sprintf("gateway ACL rules could not be fetched: %v — verdict covers switch ACLs only", gwErr))
 	}
 
-	// Check if a matching ACL rule exists
-	found := false
-	for _, rule := range allRules {
-		if !rule.Status {
-			continue // skip disabled rules
-		}
-		if omadabackend.RuleMatchesNames(rule, req.From, req.To) && rule.Policy.MatchesAction(req.Action) {
-			found = true
-			break
-		}
-	}
-
+	// Match by policy (rule) name first — the spec keys acl_check off the
+	// policy, which is the sanitized rule name — then fall back to
+	// from/to/action matching for hand-written specs.
+	match := lookupACLMatch(allRules, req)
 	rulesJSON, _ := json.Marshal(allRules)
 	result.Evidence = append(result.Evidence, string(rulesJSON))
 	result.Observed["rule_count"] = len(allRules)
+	if match != nil {
+		match.Scope, match.Disabled = aclScopeFlags(swList, gwList, match.Rule)
+		result.Observed["scope"] = match.Scope
+		result.Observed["scope_disabled"] = match.Disabled
+	}
 	result.Expected["policy"] = req.PolicyName
 	result.Expected["expect"] = "enforced"
 
-	if req.ExpectEnforced && found {
+	switch {
+	case req.ExpectEnforced && match != nil && !match.Disabled:
 		result.Status = models.StatusPass
 		result.Summary = fmt.Sprintf("ACL policy %q is enforced in Omada", req.PolicyName)
-	} else if req.ExpectEnforced && !found {
+	case req.ExpectEnforced && match != nil && match.Disabled:
+		result.Status = models.StatusFail
+		result.Summary = fmt.Sprintf("ACL policy %q is stored but NOT enforced: its %s ACL scope is disabled (aclDisable=true)", req.PolicyName, match.Scope)
+		result.Violations = append(result.Violations,
+			fmt.Sprintf("rule %q exists (status enabled) but the %s ACL master switch is off on the controller — enable the scope before relying on this rule", match.Rule.Name, match.Scope))
+	case req.ExpectEnforced && match == nil:
 		result.Status = models.StatusFail
 		result.Summary = fmt.Sprintf("ACL policy %q is NOT enforced in Omada", req.PolicyName)
 		result.Violations = append(result.Violations,
 			fmt.Sprintf("no matching ACL rule found for policy %q (%s → %s %s)", req.PolicyName, req.From, req.To, req.Action))
-	} else if !req.ExpectEnforced && !found {
+	case !req.ExpectEnforced && match == nil:
 		result.Status = models.StatusPass
 		result.Summary = fmt.Sprintf("ACL policy %q is correctly not enforced", req.PolicyName)
-	} else {
+	default:
 		result.Status = models.StatusFail
 		result.Summary = fmt.Sprintf("ACL policy %q is enforced but expected not_enforced", req.PolicyName)
 	}
@@ -189,8 +232,55 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 	return result, nil
 }
 
+// aclCheckMatch identifies the rule a policy refers to, plus whether the
+// scope that rule lives in is disabled (stored but not enforced).
+type aclCheckMatch struct {
+	Rule      omadabackend.ACLRule
+	Scope     string // "gateway" | "switch"
+	Disabled  bool   // the scope's aclDisable master switch is on
+	MatchedBy string // "name" | "endpoints"
+}
+
+// lookupACLMatch finds the active rule implementing the requested policy.
+// The rule name (sanitized) is the primary key; from/to/action matching is
+// the fallback for hand-written specs that name policies freely.
+func lookupACLMatch(rules []omadabackend.ACLRule, req providers.ACLCheckRequest) *aclCheckMatch {
+	for i := range rules {
+		r := rules[i]
+		if !r.Status {
+			continue
+		}
+		if strings.EqualFold(omadabackend.SanitizeName(r.Name), req.PolicyName) &&
+			r.Policy.MatchesAction(req.Action) {
+			return &aclCheckMatch{Rule: r, MatchedBy: "name"}
+		}
+	}
+	for i := range rules {
+		r := rules[i]
+		if !r.Status {
+			continue
+		}
+		if omadabackend.RuleMatchesNames(r, req.From, req.To) && r.Policy.MatchesAction(req.Action) {
+			return &aclCheckMatch{Rule: r, MatchedBy: "endpoints"}
+		}
+	}
+	return nil
+}
+
+// aclScopeFlags reports the scope label and disabled flag of the list a rule
+// was found in.
+func aclScopeFlags(sw, gw omadabackend.ACLList, rule omadabackend.ACLRule) (string, bool) {
+	switch rule.Type {
+	case omadabackend.ACLTypeGateway:
+		return "gateway", gw.ACLDisable
+	default:
+		return "switch", sw.ACLDisable
+	}
+}
+
 var _ providers.Provider = (*OmadaProvider)(nil)
 var _ providers.ACLApplier = (*OmadaProvider)(nil)
+var _ providers.InventoryProvider = (*OmadaProvider)(nil)
 
 func init() {
 	_ = providers.Register(&OmadaProvider{})

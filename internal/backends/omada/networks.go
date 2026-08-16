@@ -33,6 +33,7 @@ type Network struct {
 	GatewaySubnet string `json:"gatewaySubnet"` // e.g. "10.0.10.1/24"
 	Isolated      bool   `json:"isolation"`
 	DHCPEnabled   bool   `json:"dhcpEnabled"`
+	DeviceMac     string `json:"deviceMac"` // MAC of the device this LAN is bound to
 }
 
 // CIDR derives the network CIDR from GatewaySubnet.

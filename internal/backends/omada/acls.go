@@ -166,15 +166,21 @@ type ACLRule struct {
 }
 
 // ACLList is a typed fetch of the unified ACL endpoint, including the
-// capability flags the controller returns on page 1.
+// capability flags the controller returns on page 1. ACLDisable is the
+// site-level master switch for the ACL scope: when true, rules of this type
+// are stored but not enforced.
 type ACLList struct {
-	Type       ACLType
-	Rules      []ACLRule
-	ACLDisable bool
+	Type            ACLType
+	Rules           []ACLRule
+	ACLDisable      bool
+	SupportLanToLan bool
+	ExistLanToLan   bool
 }
 
 type aclListMeta struct {
-	ACLDisable bool `json:"aclDisable"`
+	ACLDisable      bool `json:"aclDisable"`
+	SupportLanToLan bool `json:"supportLanToLan"`
+	ExistLanToLan   bool `json:"existLanToLan"`
 }
 
 // FetchACLs loads every page of sites/<id>/setting/firewall/acls?type=N.
@@ -193,7 +199,13 @@ func (c *Client) FetchACLs(ctx context.Context, siteID string, typ ACLType) (ACL
 	for i := range rules {
 		rules[i].Type = typ
 	}
-	return ACLList{Type: typ, Rules: rules, ACLDisable: meta.ACLDisable}, nil
+	return ACLList{
+		Type:            typ,
+		Rules:           rules,
+		ACLDisable:      meta.ACLDisable,
+		SupportLanToLan: meta.SupportLanToLan,
+		ExistLanToLan:   meta.ExistLanToLan,
+	}, nil
 }
 
 // GetACLRules returns switch (inter-VLAN) ACL rules (type=1).
@@ -205,9 +217,9 @@ func (c *Client) GetACLRules(ctx context.Context, siteID string) ([]ACLRule, err
 	return list.Rules, nil
 }
 
-// GetGatewayACLRules returns gateway ACL rules (type=0). A feature-disabled
-// site (aclDisable) returns an empty list, not an error — inspect
-// FetchACLs for the flag.
+// GetGatewayACLRules returns gateway ACL rules (type=0). Rules are returned
+// even when the scope is globally disabled (aclDisable) — they are stored
+// but not enforced; inspect FetchACLs for the flag.
 func (c *Client) GetGatewayACLRules(ctx context.Context, siteID string) ([]ACLRule, error) {
 	list, err := c.FetchACLs(ctx, siteID, ACLTypeGateway)
 	if err != nil {
@@ -263,20 +275,37 @@ func RuleMatchesEndpoints(rule ACLRule, src, dst Network) bool {
 	return strings.EqualFold(rule.SourceName, src.Name) && strings.EqualFold(rule.DestName, dst.Name)
 }
 
-// RuleMatchesNames reports whether a rule's resolved endpoints match the
-// given names (case-insensitive). Used by acl_check, which keys off spec names.
+// RuleMatchesNames reports whether the rule covers the given from/to
+// endpoints (case-insensitive, sanitized). Used by acl_check, which keys
+// off spec names. Resolved names are comma-joined when a rule side spans
+// several networks, so each side is matched as a set: the requested name
+// must be a member of the rule's endpoint set.
 func RuleMatchesNames(rule ACLRule, from, to string) bool {
-	return namesMatch(rule.SourceName, from) && namesMatch(rule.DestName, to)
+	return nameInSet(splitNames(rule.SourceName), from) && nameInSet(splitNames(rule.DestName), to)
 }
 
-func namesMatch(got, want string) bool {
-	if got == "" || want == "" {
+// splitNames breaks a comma-joined resolved name list into its members.
+func splitNames(joined string) []string {
+	parts := strings.Split(joined, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func nameInSet(candidates []string, want string) bool {
+	if want == "" || len(candidates) == 0 {
 		return false
 	}
-	if strings.EqualFold(got, want) {
-		return true
+	for _, got := range candidates {
+		if strings.EqualFold(got, want) || strings.EqualFold(sanitizeName(got), sanitizeName(want)) {
+			return true
+		}
 	}
-	return strings.EqualFold(sanitizeName(got), sanitizeName(want))
+	return false
 }
 
 func idsContain(ids []string, want string) bool {

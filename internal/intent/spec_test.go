@@ -307,6 +307,49 @@ func TestValidateSpec_ACLCheckValid(t *testing.T) {
 	}
 }
 
+func TestValidateSpec_InventoryValid(t *testing.T) {
+	lanToLan := true
+	spec := &Spec{Version: 1, Site: "test", Inventory: &Inventory{
+		ControllerVersion: "6.4.5.1",
+		Devices:           []InventoryDevice{{Type: "gateway", Name: "GW-CORE", Upgrade: true}},
+		NetworkGateways:   map[string]string{"trusted": "GW-CORE"},
+		ACLScopes:         []ACLScopeStatus{{Scope: "gateway", Enabled: false, RuleCount: 1, SupportLanToLan: &lanToLan}},
+	}}
+	if err := ValidateSpec(spec); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateSpec_InventoryDeviceMissingName(t *testing.T) {
+	spec := &Spec{Version: 1, Site: "test", Inventory: &Inventory{
+		Devices: []InventoryDevice{{Type: "gateway"}},
+	}}
+	err := ValidateSpec(spec)
+	if err == nil || !contains(err.Error(), "inventory.devices[0]") {
+		t.Errorf("error = %v, want inventory.devices[0] name required", err)
+	}
+}
+
+func TestValidateSpec_InventoryBadDeviceType(t *testing.T) {
+	spec := &Spec{Version: 1, Site: "test", Inventory: &Inventory{
+		Devices: []InventoryDevice{{Type: "router", Name: "x"}},
+	}}
+	err := ValidateSpec(spec)
+	if err == nil || !contains(err.Error(), "type must be gateway, switch, or ap") {
+		t.Errorf("error = %v, want bad device type", err)
+	}
+}
+
+func TestValidateSpec_InventoryBadScope(t *testing.T) {
+	spec := &Spec{Version: 1, Site: "test", Inventory: &Inventory{
+		ACLScopes: []ACLScopeStatus{{Scope: "wan"}},
+	}}
+	err := ValidateSpec(spec)
+	if err == nil || !contains(err.Error(), "scope must be 'gateway' or 'switch'") {
+		t.Errorf("error = %v, want bad acl scope", err)
+	}
+}
+
 // --- Runner validation ---
 
 func TestValidateSpec_BadRunnerReference(t *testing.T) {

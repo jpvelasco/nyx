@@ -287,6 +287,84 @@ func (s *OmadaService) ListClients(ctx context.Context, opts OmadaOptions) ([]Om
 	return out, nil
 }
 
+// OmadaInventory is the site's point-in-time observation in a flat,
+// agent-friendly shape: devices, networks with gateway bindings, ACL scope
+// states, and the active client count.
+type OmadaInventory struct {
+	Site              string            `json:"site"`
+	ControllerVersion string            `json:"controller_version"`
+	Devices           []serviceDevice   `json:"devices"`
+	NetworkGateways   map[string]string `json:"network_gateways,omitempty"`
+	ACLScopes         []serviceACLScope `json:"acl_scopes,omitempty"`
+	ClientCount       int               `json:"client_count"`
+	Warnings          []string          `json:"warnings,omitempty"`
+}
+
+// serviceDevice is one managed device (gateway, switch, or AP).
+type serviceDevice struct {
+	Type     string   `json:"type"`
+	Name     string   `json:"name"`
+	Model    string   `json:"model"`
+	IP       string   `json:"ip,omitempty"`
+	Firmware string   `json:"firmware,omitempty"`
+	Upgrade  bool     `json:"upgrade_available,omitempty"`
+	Networks []string `json:"networks,omitempty"`
+}
+
+// serviceACLScope is the enabled state of one ACL scope (gateway | switch).
+type serviceACLScope struct {
+	Scope           string `json:"scope"`
+	Enabled         bool   `json:"enabled"`
+	RuleCount       int    `json:"rule_count"`
+	SupportLanToLan *bool  `json:"support_lan_to_lan,omitempty"`
+}
+
+// Inventory returns the site's device/network/ACL-scope/client observation.
+// It is read-only: no controller state is mutated.
+func (s *OmadaService) Inventory(ctx context.Context, opts OmadaOptions) (*OmadaInventory, error) {
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+
+	snap, err := client.FetchInventory(ctx, site.EffectiveID())
+	if err != nil {
+		return nil, err
+	}
+	inv := &OmadaInventory{
+		Site:              site.Name,
+		ControllerVersion: snap.ControllerVersion,
+		Devices:           []serviceDevice{},
+		ACLScopes:         []serviceACLScope{},
+		ClientCount:       len(snap.Clients),
+		Warnings:          snap.Warnings,
+		NetworkGateways:   map[string]string{},
+	}
+	specInv := omadabackend.BuildSpecInventory(snap)
+	inv.NetworkGateways = specInv.NetworkGateways
+	for _, d := range specInv.Devices {
+		inv.Devices = append(inv.Devices, serviceDevice{
+			Type:     d.Type,
+			Name:     d.Name,
+			Model:    d.Model,
+			IP:       d.IP,
+			Firmware: d.Firmware,
+			Upgrade:  d.Upgrade,
+			Networks: d.Networks,
+		})
+	}
+	for _, sc := range specInv.ACLScopes {
+		inv.ACLScopes = append(inv.ACLScopes, serviceACLScope{
+			Scope:           sc.Scope,
+			Enabled:         sc.Enabled,
+			RuleCount:       sc.RuleCount,
+			SupportLanToLan: sc.SupportLanToLan,
+		})
+	}
+	return inv, nil
+}
+
 // Import connects, imports the controller state, and produces an intent
 // spec reflecting the observed design (networks, policies, assertions).
 func (s *OmadaService) Import(ctx context.Context, opts OmadaOptions) (*OmadaImport, error) {

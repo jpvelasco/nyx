@@ -264,8 +264,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 21 {
-		t.Fatalf("expected 21 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 22 {
+		t.Fatalf("expected 22 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -274,7 +274,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_import", "omada_plan", "omada_apply_acl", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -864,6 +864,64 @@ func TestDispatchOmadaListClients_ServiceError(t *testing.T) {
 	}
 }
 
+func TestDispatchOmadaInventory_Success(t *testing.T) {
+	stub := &stubOmadaSvc{inventory: &service.OmadaInventory{
+		Site:              "HQ",
+		ControllerVersion: "6.4.5.1",
+		NetworkGateways:   map[string]string{"trusted": "GW-CORE"},
+		ClientCount:       7,
+		Warnings:          []string{"clients unavailable: timeout"},
+	}}
+	server := serverWithOmadaStub(stub)
+	text, isErr := server.DispatchToolForTest(context.Background(), "omada_inventory", map[string]interface{}{
+		"host":     "omada.local",
+		"username": "admin",
+		"password": "pw",
+		"site":     "HQ",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	for _, want := range []string{
+		`"site": "HQ"`,
+		`"controller_version": "6.4.5.1"`,
+		`"trusted": "GW-CORE"`,
+		`"client_count": 7`,
+		`"clients unavailable: timeout"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("expected %s in output, got: %s", want, text)
+		}
+	}
+	if stub.calls != 1 || stub.lastOpts.Site != "HQ" {
+		t.Errorf("calls = %d, site = %q", stub.calls, stub.lastOpts.Site)
+	}
+	if strings.Contains(text, "pw") {
+		t.Error("tool output must not echo the password")
+	}
+}
+
+func TestDispatchOmadaInventory_MissingCredentials(t *testing.T) {
+	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "omada_inventory", map[string]interface{}{
+		"host": "omada.local",
+	})
+	if !isErr || !strings.Contains(text, "username and password parameters are required") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchOmadaInventory_ServiceError(t *testing.T) {
+	stub := &stubOmadaSvc{err: errors.New("controller unreachable")}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_inventory", map[string]interface{}{
+		"host":     "omada.local",
+		"username": "admin",
+		"password": "pw",
+	})
+	if !isErr || !strings.Contains(text, "omada inventory request failed") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+}
+
 func TestDispatchOmadaImport_MissingParams(t *testing.T) {
 	server := newTestServer()
 	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_import", map[string]interface{}{}); !isErr || !strings.Contains(text, "host parameter is required") {
@@ -1224,6 +1282,7 @@ type stubOmadaSvc struct {
 	networks     []service.OmadaNetwork
 	acls         []service.OmadaACLRule
 	clients      []service.OmadaClient
+	inventory    *service.OmadaInventory
 	imp          *service.OmadaImport
 	plan         *service.OmadaPlan
 	apply        *service.OmadaACLApplyResult
@@ -1255,6 +1314,12 @@ func (s *stubOmadaSvc) ListClients(_ context.Context, opts service.OmadaOptions)
 	s.calls++
 	s.lastOpts = opts
 	return s.clients, s.err
+}
+
+func (s *stubOmadaSvc) Inventory(_ context.Context, opts service.OmadaOptions) (*service.OmadaInventory, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.inventory, s.err
 }
 
 func (s *stubOmadaSvc) Import(_ context.Context, opts service.OmadaOptions) (*service.OmadaImport, error) {

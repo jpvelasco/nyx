@@ -153,8 +153,24 @@ func TestResolveRulesAndMatch(t *testing.T) {
 	if !RuleMatchesEndpoints(named, Network{Name: "IoT"}, Network{Name: "Trusted"}) {
 		t.Error("RuleMatchesEndpoints should fall back to names when IDs are absent")
 	}
-	if idsContain(nil, "") || namesMatch("", "x") || namesForIDs(nil, nil) != "" {
+	if idsContain(nil, "") || nameInSet(nil, "x") || nameInSet([]string{"iot"}, "") || namesForIDs(nil, nil) != "" {
 		t.Error("empty-input helpers should be false/empty")
+	}
+
+	// Multi-endpoint rules: a rule side resolves to a comma-joined name list,
+	// and the requested name must be a member of that set.
+	multi := ACLRule{SourceName: "iot", DestName: "lan,lab,mgmt,camera,guest"}
+	if !RuleMatchesNames(multi, "iot", "mgmt") {
+		t.Error("RuleMatchesNames should match a member of a multi-dest rule")
+	}
+	if !RuleMatchesNames(multi, "IoT", "GUEST") {
+		t.Error("RuleMatchesNames should be case-insensitive on multi-dest rules")
+	}
+	if RuleMatchesNames(multi, "iot", "trusted") {
+		t.Error("RuleMatchesNames should reject a non-member destination")
+	}
+	if RuleMatchesNames(multi, "lab", "mgmt") {
+		t.Error("RuleMatchesNames should reject a non-member source")
 	}
 
 	already := []ACLRule{{SourceName: "keep", DestName: "keep", SourceIDs: []string{"n2"}, DestIDs: []string{"n1"}}}
