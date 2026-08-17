@@ -1055,7 +1055,7 @@ func TestDispatchOmadaApplyACL_MissingParams(t *testing.T) {
 func TestDispatchOmadaApplyACL_Success(t *testing.T) {
 	stub := &stubOmadaSvc{apply: &service.OmadaACLApplyResult{
 		DryRun: true, Outcome: "created", RuleID: "a9",
-		FromCIDR: "10.0.20.0/24", ToCIDR: "10.0.10.0/24",
+		FromCIDRs: []string{"10.0.20.0/24"}, ToCIDRs: []string{"10.0.10.0/24"},
 		Before: "[]", After: "[]",
 	}}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
@@ -1071,7 +1071,7 @@ func TestDispatchOmadaApplyACL_Success(t *testing.T) {
 	if !stub.lastApplyReq.DryRun {
 		t.Error("dry_run must default to true when the argument is absent")
 	}
-	if stub.lastApplyReq.From != "iot" || stub.lastApplyReq.To != "trusted" || stub.lastApplyReq.Action != "deny" {
+	if !sliceEq(stub.lastApplyReq.From, []string{"iot"}) || !sliceEq(stub.lastApplyReq.To, []string{"trusted"}) || stub.lastApplyReq.Action != "deny" {
 		t.Errorf("apply request = %+v", stub.lastApplyReq)
 	}
 	if strings.Contains(text, "pw") {
@@ -1081,9 +1081,10 @@ func TestDispatchOmadaApplyACL_Success(t *testing.T) {
 
 func TestDispatchOmadaApplyACL_ExplicitApply(t *testing.T) {
 	stub := &stubOmadaSvc{apply: &service.OmadaACLApplyResult{
-		Outcome: "created", RuleID: "a9", FromCIDR: "10.0.20.0/24", ToCIDR: "10.0.10.0/24",
+		Outcome: "created", RuleID: "a9", FromCIDRs: []string{"10.0.20.0/24"}, ToCIDRs: []string{"10.0.10.0/24"},
 		Before: "[]", After: "[{\"id\":\"a9\"}]",
-		PostAudit: &service.OmadaPostAudit{Status: "pass", Summary: "isolation confirmed"},
+		PostAudit: &service.OmadaPostAudit{Status: "pass", Summary: "isolation confirmed",
+			Findings: []models.CheckResult{{CheckType: "isolation", Status: models.StatusPass, Summary: "isolation confirmed"}}},
 	}}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
 		"host": "omada.local", "username": "admin", "password": "pw",
@@ -1100,6 +1101,45 @@ func TestDispatchOmadaApplyACL_ExplicitApply(t *testing.T) {
 	}
 	if !strings.Contains(text, `"outcome": "created"`) {
 		t.Errorf("expected apply JSON, got: %s", text)
+	}
+}
+
+func TestDispatchOmadaApplyACL_ScopeProtocolsAndList(t *testing.T) {
+	stub := &stubOmadaSvc{apply: &service.OmadaACLApplyResult{
+		Outcome: "created", RuleID: "a9", Scope: "gateway",
+		FromCIDRs: []string{"10.0.20.0/24"}, ToCIDRs: []string{"10.0.10.0/24", "10.0.30.0/24"},
+		Before: "[]", After: "[{\"id\":\"a9\"}]",
+	}}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
+		"host": "omada.local", "username": "admin", "password": "pw",
+		"from": "iot", "to": "trusted, guest", "action": "deny",
+		"scope": "gateway", "protocols": "6, 17", "dry_run": true,
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !sliceEq(stub.lastApplyReq.To, []string{"trusted", "guest"}) {
+		t.Errorf("to = %v, want comma list split and trimmed", stub.lastApplyReq.To)
+	}
+	if stub.lastApplyReq.Scope != "gateway" {
+		t.Errorf("scope = %q, want gateway", stub.lastApplyReq.Scope)
+	}
+	if !sliceEqInt(stub.lastApplyReq.Protocols, []int{6, 17}) {
+		t.Errorf("protocols = %v, want [6 17]", stub.lastApplyReq.Protocols)
+	}
+}
+
+func TestDispatchOmadaApplyACL_InvalidProtocols(t *testing.T) {
+	stub := &stubOmadaSvc{}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
+		"host": "omada.local", "username": "admin", "password": "pw",
+		"from": "iot", "to": "trusted", "action": "deny", "protocols": "6, tcp",
+	})
+	if !isErr || !strings.Contains(text, "protocols") {
+		t.Errorf("got (%q, %v), want protocols parse error", text, isErr)
+	}
+	if stub.calls != 0 {
+		t.Error("service must not be called for a malformed request")
 	}
 }
 
@@ -1341,6 +1381,30 @@ func (s *stubOmadaSvc) ApplyACL(_ context.Context, opts service.OmadaOptions, re
 	s.lastOpts = opts
 	s.lastApplyReq = req
 	return s.apply, s.err
+}
+
+func sliceEq(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func sliceEqInt(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // stubOpnsenseSvc is a hermetic stand-in for the OPNsense observation surface.

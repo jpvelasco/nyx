@@ -1240,6 +1240,76 @@ func TestRunIsolation_TargetAsNetworkName(t *testing.T) {
 	}
 }
 
+func TestRunIsolation_CommaListTarget(t *testing.T) {
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Networks: []intent.Network{
+			{Name: "fromnet", CIDR: "10.0.0.0/24", Gateway: "10.0.0.1", Zone: "fromzone"},
+			{Name: "tonet", CIDR: "10.0.1.0/24", Gateway: "10.0.1.1"},
+			{Name: "twonet", CIDR: "10.0.2.0/24", Gateway: "10.0.2.1"},
+		},
+	}
+	newEng := func(mock *backends.MockBackend) *Engine {
+		eng := NewEngine(spec)
+		eng.Backend = mock
+		eng.runnerCtx = models.RunnerContext{Networks: []string{"fromnet"}}
+		return eng
+	}
+
+	t.Run("deny with all targets blocked passes", func(t *testing.T) {
+		mock := &backends.MockBackend{
+			PingResultFunc: func(string) *system.PingResult { return &system.PingResult{} },
+		}
+		a := intent.Assertion{Type: "isolation", From: "fromzone", To: "tonet, twonet", Expect: "deny"}
+		result, err := newEng(mock).runIsolation(context.Background(), a)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Status != models.StatusPass {
+			t.Fatalf("expected pass (deny + all blocked), got %s: %s", result.Status, result.Summary)
+		}
+		// Both target gateways must have been pinged (comma list resolved).
+		if len(result.Evidence) != 2 ||
+			!strings.Contains(result.Evidence[0], "10.0.1.1") ||
+			!strings.Contains(result.Evidence[1], "10.0.2.1") {
+			t.Errorf("evidence = %v, want both target gateways pinged", result.Evidence)
+		}
+	})
+
+	t.Run("deny with any target reachable fails", func(t *testing.T) {
+		mock := &backends.MockBackend{
+			PingResultFunc: func(target string) *system.PingResult {
+				return &system.PingResult{Reachable: target == "10.0.2.1"}
+			},
+		}
+		a := intent.Assertion{Type: "isolation", From: "fromzone", To: "tonet, twonet", Expect: "deny"}
+		result, err := newEng(mock).runIsolation(context.Background(), a)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Status != models.StatusFail {
+			t.Errorf("expected fail (deny + reachable gateway), got %s: %s", result.Status, result.Summary)
+		}
+	})
+
+	t.Run("duplicate names resolve once", func(t *testing.T) {
+		mock := &backends.MockBackend{
+			PingResultFunc: func(string) *system.PingResult { return &system.PingResult{} },
+		}
+		a := intent.Assertion{Type: "isolation", From: "fromzone", To: "tonet,tonet,twonet", Expect: "deny"}
+		result, err := newEng(mock).runIsolation(context.Background(), a)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Status != models.StatusPass {
+			t.Fatalf("expected pass, got %s: %s", result.Status, result.Summary)
+		}
+		if len(result.Evidence) != 2 {
+			t.Errorf("evidence = %v, want 2 entries (duplicates dropped)", result.Evidence)
+		}
+	})
+}
+
 func TestRunIsolation_UnverifiableFromZone(t *testing.T) {
 	spec := &intent.Spec{
 		Version: 1, Site: "test",

@@ -25,8 +25,61 @@ const (
 // ProtocolAll is the Omada sentinel for "all IP protocols" ([256]).
 const ProtocolAll = 256
 
+// NormalizeProtocols returns the canonical protocol set for a rule: the
+// [256] sentinel when the set is empty or already contains all-protocols,
+// otherwise the set unchanged.
+func NormalizeProtocols(protocols []int) []int {
+	if len(protocols) == 0 {
+		return []int{ProtocolAll}
+	}
+	for _, p := range protocols {
+		if p == ProtocolAll {
+			return []int{ProtocolAll}
+		}
+	}
+	return protocols
+}
+
+// ProtocolsEqual reports whether two protocol sets describe the same
+// surface after normalization (order-independent, all-protocols ≡ empty).
+func ProtocolsEqual(a, b []int) bool {
+	na, nb := NormalizeProtocols(a), NormalizeProtocols(b)
+	if len(na) != len(nb) {
+		return false
+	}
+	for _, p := range na {
+		if !intsContain(nb, p) {
+			return false
+		}
+	}
+	return true
+}
+
+func intsContain(set []int, want int) bool {
+	for _, p := range set {
+		if p == want {
+			return true
+		}
+	}
+	return false
+}
+
 // ACLType is the controller's ACL scope: gateway, switch, or EAP.
 type ACLType int
+
+// ScopeFromLabel maps an agent-facing scope label to its ACL type. EAP
+// rules are not supported by the mutation surface (their wire shape has not
+// been observed), so it is deliberately not accepted here.
+func ScopeFromLabel(label string) (ACLType, bool) {
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "gateway":
+		return ACLTypeGateway, true
+	case "switch", "":
+		return ACLTypeSwitch, true
+	default:
+		return 0, false
+	}
+}
 
 // ACLPolicy is the controller's numeric policy (0=deny, 1=permit).
 type ACLPolicy int
@@ -266,22 +319,85 @@ func namesForIDs(ids []string, byID map[string]Network) string {
 	return strings.Join(parts, ",")
 }
 
+// RuleCovers reports whether the rule's endpoint sets include all of the
+// given source and destination networks. A multi-endpoint rule (several
+// sourceIds/destinationIds) therefore covers any request whose endpoints are
+// a subset of its sets. IDs are tried first, with a resolved-name fallback
+// for rules fetched before resolution or with unknown IDs.
+func RuleCovers(rule ACLRule, srcs, dsts []Network) bool {
+	if !allIn(rule.SourceIDs, srcs) || !allIn(rule.DestIDs, dsts) {
+		return false
+	}
+	if allResolved(srcs) && allResolved(dsts) {
+		return true
+	}
+	// Name fallback: every requested network must be a member of the rule's
+	// resolved name list on its side.
+	return allNameInSet(srcs, splitNames(rule.SourceName)) && allNameInSet(dsts, splitNames(rule.DestName))
+}
+
 // RuleMatchesEndpoints reports whether a rule is the from→to pair identified
 // by the given networks (IDs first, then resolved names).
 func RuleMatchesEndpoints(rule ACLRule, src, dst Network) bool {
-	if idsContain(rule.SourceIDs, src.ID) && idsContain(rule.DestIDs, dst.ID) {
-		return true
+	return RuleCovers(rule, []Network{src}, []Network{dst})
+}
+
+// allIn reports whether every network's ID is present in ids. A requested
+// network without an ID is not covered (IDs are the primary identity).
+func allIn(ids []string, nets []Network) bool {
+	for _, n := range nets {
+		if n.ID != "" && !idsContain(ids, n.ID) {
+			return false
+		}
 	}
-	return strings.EqualFold(rule.SourceName, src.Name) && strings.EqualFold(rule.DestName, dst.Name)
+	return true
+}
+
+// allResolved reports whether every network carries a resolved ID.
+func allResolved(nets []Network) bool {
+	for _, n := range nets {
+		if n.ID == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// allNameInSet reports whether every network's name is a member of the
+// comma-resolved rule side (case-insensitive, sanitized).
+func allNameInSet(nets []Network, set []string) bool {
+	for _, n := range nets {
+		if !nameInSet(set, n.Name) {
+			return false
+		}
+	}
+	return true
 }
 
 // RuleMatchesNames reports whether the rule covers the given from/to
 // endpoints (case-insensitive, sanitized). Used by acl_check, which keys
-// off spec names. Resolved names are comma-joined when a rule side spans
-// several networks, so each side is matched as a set: the requested name
-// must be a member of the rule's endpoint set.
+// off spec names. Both the rule sides (resolved names of a multi-endpoint
+// rule) and the request sides (spec policies address several networks) are
+// comma-joined lists, so coverage is set membership per side: every
+// requested member must be a member of the rule's endpoint set.
 func RuleMatchesNames(rule ACLRule, from, to string) bool {
-	return nameInSet(splitNames(rule.SourceName), from) && nameInSet(splitNames(rule.DestName), to)
+	return namesInSet(splitNames(from), splitNames(rule.SourceName)) &&
+		namesInSet(splitNames(to), splitNames(rule.DestName))
+}
+
+// namesInSet reports whether every wanted name (case-insensitive,
+// sanitized) is a member of the candidate set. An empty want list never
+// matches: a rule with no endpoint on that side covers nothing.
+func namesInSet(wants, candidates []string) bool {
+	if len(wants) == 0 {
+		return false
+	}
+	for _, want := range wants {
+		if !nameInSet(candidates, want) {
+			return false
+		}
+	}
+	return true
 }
 
 // splitNames breaks a comma-joined resolved name list into its members.

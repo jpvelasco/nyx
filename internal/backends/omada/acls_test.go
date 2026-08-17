@@ -172,6 +172,15 @@ func TestResolveRulesAndMatch(t *testing.T) {
 	if RuleMatchesNames(multi, "lab", "mgmt") {
 		t.Error("RuleMatchesNames should reject a non-member source")
 	}
+	// The request side is also a comma-joined list (a spec policy can address
+	// several networks): covered only when every requested member is in the
+	// rule's set.
+	if !RuleMatchesNames(multi, "iot", "lan,lab") {
+		t.Error("RuleMatchesNames should accept a multi-dest request fully in the rule")
+	}
+	if RuleMatchesNames(multi, "iot", "lan,trusted") {
+		t.Error("RuleMatchesNames should reject a multi-dest request with one non-member")
+	}
 
 	already := []ACLRule{{SourceName: "keep", DestName: "keep", SourceIDs: []string{"n2"}, DestIDs: []string{"n1"}}}
 	ResolveRules(already, nets)
@@ -193,5 +202,102 @@ func TestResolveRuleEndpointIDs(t *testing.T) {
 	got = resolveRuleEndpoint("inet", "", nil, nets)
 	if got != "inet" {
 		t.Errorf("empty ids fallback = %q, want inet", got)
+	}
+}
+
+func TestRuleCovers(t *testing.T) {
+	rule := ACLRule{
+		SourceIDs:  []string{"n-iot"},
+		DestIDs:    []string{"n-lan", "n-guest", "n-camera"},
+		SourceName: "iot",
+		DestName:   "lan,guest,camera",
+	}
+	src := Network{ID: "n-iot", Name: "iot"}
+	cases := []struct {
+		name string
+		srcs []Network
+		dsts []Network
+		want bool
+	}{
+		{"exact pair", []Network{src}, []Network{{ID: "n-lan", Name: "lan"}}, true},
+		{"multi-dest rule covers singleton request", []Network{src}, []Network{{ID: "n-guest", Name: "guest"}}, true},
+		{"subset of multi-dest rule", []Network{src}, []Network{{ID: "n-lan", Name: "lan"}, {ID: "n-camera", Name: "camera"}}, true},
+		{"request endpoint missing from rule", []Network{src}, []Network{{ID: "n-trusted", Name: "trusted"}}, false},
+		{"different source", []Network{{ID: "n-lab", Name: "lab"}}, []Network{{ID: "n-lan", Name: "lan"}}, false},
+		{"unresolved request falls back to names", []Network{{Name: "iot"}}, []Network{{Name: "guest"}}, true},
+		{"name fallback rejects non-member", []Network{{Name: "iot"}}, []Network{{Name: "trusted"}}, false},
+		{"nameless request is never covered", []Network{{}}, []Network{{Name: "lan"}}, false},
+	}
+	for _, tc := range cases {
+		if got := RuleCovers(rule, tc.srcs, tc.dsts); got != tc.want {
+			t.Errorf("%s: RuleCovers = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	// A rule with no IDs (fetched before resolution) still covers by name.
+	if !RuleCovers(
+		ACLRule{SourceName: "lab", DestName: "lan,guest"},
+		[]Network{{Name: "lab"}}, []Network{{Name: "guest"}},
+	) {
+		t.Error("name-only rule should cover a matching name request")
+	}
+}
+
+func TestNormalizeProtocols(t *testing.T) {
+	cases := []struct {
+		in   []int
+		want []int
+	}{
+		{nil, []int{ProtocolAll}},
+		{[]int{}, []int{ProtocolAll}},
+		{[]int{6, 17}, []int{6, 17}},
+		{[]int{6, ProtocolAll, 17}, []int{ProtocolAll}},
+		{[]int{ProtocolAll}, []int{ProtocolAll}},
+	}
+	for _, tc := range cases {
+		if got := NormalizeProtocols(tc.in); !ProtocolsEqual(got, tc.want) {
+			t.Errorf("NormalizeProtocols(%v) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestProtocolsEqual(t *testing.T) {
+	cases := []struct {
+		a, b []int
+		want bool
+	}{
+		{nil, nil, true},
+		{nil, []int{ProtocolAll}, true},                   // empty ≡ all
+		{[]int{6, 17}, []int{17, 6}, true},                // order-independent
+		{[]int{6, ProtocolAll}, []int{ProtocolAll}, true}, // any set with 256 ≡ {256}
+		{[]int{ProtocolAll}, []int{ProtocolAll, ProtocolAll}, true},
+		{[]int{6}, nil, false}, // narrower ≠ all (no cover)
+		{[]int{6, 17}, []int{6}, false},
+		{[]int{6}, []int{6, 17}, false},
+	}
+	for _, tc := range cases {
+		if got := ProtocolsEqual(tc.a, tc.b); got != tc.want {
+			t.Errorf("ProtocolsEqual(%v, %v) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+func TestScopeFromLabel(t *testing.T) {
+	cases := []struct {
+		label string
+		want  ACLType
+		ok    bool
+	}{
+		{"gateway", ACLTypeGateway, true},
+		{" GATEWAY ", ACLTypeGateway, true},
+		{"switch", ACLTypeSwitch, true},
+		{"", ACLTypeSwitch, true}, // default scope
+		{"eap", 0, false},         // not supported by the mutation surface
+		{"bogus", 0, false},
+	}
+	for _, tc := range cases {
+		got, ok := ScopeFromLabel(tc.label)
+		if ok != tc.ok || (ok && got != tc.want) {
+			t.Errorf("ScopeFromLabel(%q) = %v, %v; want %v, %v", tc.label, got, ok, tc.want, tc.ok)
+		}
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/audit"
@@ -502,7 +504,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		},
 		{
 			Name:        "omada_apply_acl",
-			Description: "Apply an ACL policy change on the controller: create the rule or enable a disabled matching rule. Dry-run is the default: set dry_run=false to apply for real. A real apply is followed by a targeted isolation audit of the changed endpoints (disable with post_audit=false).",
+			Description: "Apply an ACL policy change on the controller: create the rule or enable a disabled matching rule, across every from-to pair. Dry-run is the default: set dry_run=false to apply for real. A real apply is followed by a targeted isolation audit of the changed endpoints (disable with post_audit=false).",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]propSchema{
@@ -512,10 +514,12 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
-					"from":            {Type: "string", Description: "Source network name"},
-					"to":              {Type: "string", Description: "Destination network name"},
+					"from":            {Type: "string", Description: "Source network name(s), comma-separated for one-to-many or many-to-many"},
+					"to":              {Type: "string", Description: "Destination network name(s), comma-separated for one-to-many or many-to-many"},
 					"action":          {Type: "string", Description: "Policy action: allow or deny"},
 					"policy_name":     {Type: "string", Description: "Optional rule name; a from-to-action name is derived when empty"},
+					"scope":           {Type: "string", Description: "ACL scope: switch (default) or gateway. eap is not supported."},
+					"protocols":       {Type: "string", Description: "Optional comma-separated IP protocol numbers (e.g. 6,17). Empty means all protocols."},
 					"dry_run":         {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
 					"post_audit":      {Type: "boolean", Description: "Run a targeted isolation audit after a real apply. Default true."},
 				},
@@ -916,18 +920,26 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 		if msg != "" {
 			return msg, true
 		}
+		fromList := splitCSV(argString(args, "from"))
+		toList := splitCSV(argString(args, "to"))
+		protocols, perr := parseProtocols(argString(args, "protocols"))
+		if perr != "" {
+			return perr, true
+		}
 		req := service.OmadaACLApplyRequest{
 			PolicyName: argString(args, "policy_name"),
-			From:       argString(args, "from"),
-			To:         argString(args, "to"),
+			From:       fromList,
+			To:         toList,
 			Action:     argString(args, "action"),
+			Scope:      argString(args, "scope"),
+			Protocols:  protocols,
 			DryRun:     argBoolDefault(args, "dry_run", true),
 			PostAudit:  argBoolDefault(args, "post_audit", true),
 		}
-		if req.From == "" {
+		if len(fromList) == 0 {
 			return "from parameter is required", true
 		}
-		if req.To == "" {
+		if len(toList) == 0 {
 			return "to parameter is required", true
 		}
 		if req.Action == "" {
@@ -1013,6 +1025,41 @@ func omadaOptionsFromArgs(args map[string]interface{}, needCredentials bool) (se
 func argString(args map[string]interface{}, key string) string {
 	s, _ := args[key].(string)
 	return s
+}
+
+// splitCSV splits a comma-separated list argument, trimming whitespace and
+// dropping empty items. An empty or blank argument yields no elements.
+func splitCSV(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// parseProtocols parses a comma-separated list of IP protocol numbers. An
+// empty string means all protocols and yields nil. The returned message is
+// non-empty when a component is not a number.
+func parseProtocols(s string) ([]int, string) {
+	parts := splitCSV(s)
+	if len(parts) == 0 {
+		return nil, ""
+	}
+	out := make([]int, 0, len(parts))
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 {
+			return nil, fmt.Sprintf("protocols must be a comma-separated list of protocol numbers, got %q", s)
+		}
+		out = append(out, n)
+	}
+	return out, ""
 }
 
 // argBoolDefault returns a boolean tool argument, or the default when absent.

@@ -57,29 +57,39 @@ type ACLCheckRequest struct {
 }
 
 // ACLApplyRequest describes a single desired ACL policy change: ensure a
-// rule exists from From to To with the given action.
+// rule exists from every source in From to every destination in To with the
+// given action, on the given scope. Matching against existing rules is
+// cover-based: a request is satisfied when the same-action, status-on rule
+// of the same scope already covers all requested endpoints with the same
+// protocol set.
 type ACLApplyRequest struct {
-	PolicyName string // rule name; a default is derived when empty
-	From       string // source network name
-	To         string // destination network name
-	Action     string // "allow" or "deny"
-	DryRun     bool   // preview the change without mutating
+	PolicyName string   // rule name; a default is derived when empty
+	From       []string // source network names
+	To         []string // destination network names
+	Action     string   // "allow" or "deny"
+	Scope      string   // "switch" (default) or "gateway"; "eap" is not supported
+	Protocols  []int    // IP protocols; empty means all
+	DryRun     bool     // preview the change without mutating
 }
 
 // ACLApplyResult is the structured outcome of an apply attempt, with
 // before/after evidence for auditing. Before and After hold the JSON arrays
 // of ACL rules as seen by the controller; they are identical when nothing
-// was mutated.
+// was mutated. ScopeDisabled is the scope's master switch at observation
+// time: when true, the rule is stored but not enforced.
 type ACLApplyResult struct {
-	DryRun      bool   `json:"dry_run"`
-	Outcome     string `json:"outcome"` // "created" | "enabled" | "unchanged"
-	RuleID      string `json:"rule_id,omitempty"`
-	FromCIDR    string `json:"from_cidr"` // resolved network CIDRs for re-audit
-	ToCIDR      string `json:"to_cidr"`
-	FromGateway string `json:"from_gateway,omitempty"` // gateway IPs for re-audit
-	ToGateway   string `json:"to_gateway,omitempty"`
-	Before      string `json:"before"`
-	After       string `json:"after"`
+	DryRun        bool     `json:"dry_run"`
+	Outcome       string   `json:"outcome"` // "created" | "enabled" | "unchanged"
+	RuleID        string   `json:"rule_id,omitempty"`
+	RuleName      string   `json:"rule_name,omitempty"`
+	Scope         string   `json:"scope"` // "switch" or "gateway"
+	ScopeDisabled bool     `json:"scope_disabled,omitempty"`
+	FromCIDRs     []string `json:"from_cidrs"` // resolved network CIDRs for re-audit
+	ToCIDRs       []string `json:"to_cidrs"`
+	FromGateways  []string `json:"from_gateways,omitempty"` // gateway IPs for re-audit
+	ToGateways    []string `json:"to_gateways,omitempty"`
+	Before        string   `json:"before"`
+	After         string   `json:"after"`
 }
 
 // ProviderInventory is the provider's point-in-time observation of a site:

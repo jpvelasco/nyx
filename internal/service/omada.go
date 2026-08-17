@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/jpvelasco/nyx/internal/audit"
 	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
@@ -116,38 +117,47 @@ type OmadaPlan struct {
 	Warnings      []string          `json:"warnings"`
 }
 
-// OmadaACLApplyRequest describes a single desired ACL change on the site.
-// DryRun previews without mutating; PostAudit (default true) runs a targeted
-// isolation audit after a real apply.
+// OmadaACLApplyRequest describes a desired ACL change on the site: the
+// action to take between each From endpoint and each To endpoint
+// (one-to-many and many-to-many supported). DryRun previews without
+// mutating; PostAudit (default true) runs a targeted isolation audit after
+// a real apply.
 type OmadaACLApplyRequest struct {
 	PolicyName string
-	From       string
-	To         string
-	Action     string // "allow" or "deny"
+	From       []string // source network names
+	To         []string // destination network names
+	Action     string   // "allow" or "deny"
+	Scope      string   // "switch" (default) or "gateway"; "eap" is refused
+	Protocols  []int    // IP protocols; empty means all
 	DryRun     bool
 	PostAudit  bool
 }
 
-// OmadaPostAudit is the targeted re-verification run after a real apply.
+// OmadaPostAudit is the targeted re-verification run after a real apply:
+// one isolation finding per source endpoint, against the destination set.
 type OmadaPostAudit struct {
-	Status  string              `json:"status"`
-	Summary string              `json:"summary"`
-	Finding *models.CheckResult `json:"finding,omitempty"`
+	Status   string               `json:"status"`
+	Summary  string               `json:"summary"`
+	Findings []models.CheckResult `json:"findings,omitempty"`
 }
 
 // OmadaACLApplyResult is the structured outcome of an apply with
-// before/after evidence and the post-apply audit.
+// before/after evidence and the post-apply audit. FromCIDRs/ToCIDRs and the
+// gateway slices are in request order of the endpoints.
 type OmadaACLApplyResult struct {
-	DryRun      bool            `json:"dry_run"`
-	Outcome     string          `json:"outcome"` // "created" | "enabled" | "unchanged"
-	RuleID      string          `json:"rule_id,omitempty"`
-	FromCIDR    string          `json:"from_cidr"`
-	ToCIDR      string          `json:"to_cidr"`
-	FromGateway string          `json:"from_gateway,omitempty"`
-	ToGateway   string          `json:"to_gateway,omitempty"`
-	Before      string          `json:"before"`
-	After       string          `json:"after"`
-	PostAudit   *OmadaPostAudit `json:"post_audit,omitempty"`
+	DryRun        bool            `json:"dry_run"`
+	Outcome       string          `json:"outcome"` // "created" | "enabled" | "unchanged"
+	RuleID        string          `json:"rule_id,omitempty"`
+	RuleName      string          `json:"rule_name,omitempty"`
+	Scope         string          `json:"scope"`
+	ScopeDisabled bool            `json:"scope_disabled,omitempty"`
+	FromCIDRs     []string        `json:"from_cidrs"`
+	ToCIDRs       []string        `json:"to_cidrs"`
+	FromGateways  []string        `json:"from_gateways,omitempty"`
+	ToGateways    []string        `json:"to_gateways,omitempty"`
+	Before        string          `json:"before"`
+	After         string          `json:"after"`
+	PostAudit     *OmadaPostAudit `json:"post_audit,omitempty"`
 }
 
 // OmadaService exposes the Omada observation surface shared by the MCP server
@@ -437,11 +447,17 @@ func (s *OmadaService) ApplyACL(ctx context.Context, opts OmadaOptions, req Omad
 	if err != nil {
 		return nil, err
 	}
+	// Normalise endpoint sets once, before the provider and the post-audit
+	// spec both consume them.
+	req.From = dedupeNames(req.From)
+	req.To = dedupeNames(req.To)
 	res, err := applier.ApplyACL(ctx, providers.ACLApplyRequest{
 		PolicyName: req.PolicyName,
 		From:       req.From,
 		To:         req.To,
 		Action:     req.Action,
+		Scope:      req.Scope,
+		Protocols:  req.Protocols,
 		DryRun:     req.DryRun,
 	}, providers.ImportOptions{
 		Host:          opts.Host,
@@ -455,15 +471,18 @@ func (s *OmadaService) ApplyACL(ctx context.Context, opts OmadaOptions, req Omad
 		return nil, err
 	}
 	out := &OmadaACLApplyResult{
-		DryRun:      res.DryRun,
-		Outcome:     res.Outcome,
-		RuleID:      res.RuleID,
-		FromCIDR:    res.FromCIDR,
-		ToCIDR:      res.ToCIDR,
-		FromGateway: res.FromGateway,
-		ToGateway:   res.ToGateway,
-		Before:      res.Before,
-		After:       res.After,
+		DryRun:        res.DryRun,
+		Outcome:       res.Outcome,
+		RuleID:        res.RuleID,
+		RuleName:      res.RuleName,
+		Scope:         res.Scope,
+		ScopeDisabled: res.ScopeDisabled,
+		FromCIDRs:     res.FromCIDRs,
+		ToCIDRs:       res.ToCIDRs,
+		FromGateways:  res.FromGateways,
+		ToGateways:    res.ToGateways,
+		Before:        res.Before,
+		After:         res.After,
 	}
 	if !res.DryRun && res.Outcome != "unchanged" && req.PostAudit {
 		out.PostAudit = s.runPostAudit(ctx, req, res)
@@ -484,24 +503,34 @@ func (s *OmadaService) newApplier() (providers.ACLApplier, error) {
 }
 
 // runPostAudit builds a targeted spec for the changed endpoints and runs the
-// isolation assertion through the configured audit engine. The gateways from
-// the apply result are mandatory: without them runIsolation has no target to
-// ping and the audit is unverifiable by construction.
+// isolation assertions through the configured audit engine: one assertion
+// per source endpoint, each checked against the full comma-joined
+// destination set. The gateways from the apply result are mandatory:
+// without them runIsolation has no target to ping and the audit is
+// unverifiable by construction.
 func (s *OmadaService) runPostAudit(ctx context.Context, req OmadaACLApplyRequest, res *providers.ACLApplyResult) *OmadaPostAudit {
-	spec := &intent.Spec{
-		Version: 1,
-		Site:    "post-mutation",
-		Networks: []intent.Network{
-			{Name: req.From, CIDR: res.FromCIDR, Gateway: res.FromGateway},
-			{Name: req.To, CIDR: res.ToCIDR, Gateway: res.ToGateway},
-		},
-		Assertions: []intent.Assertion{{
-			Type:   "isolation",
-			From:   req.From,
-			To:     req.To,
-			Expect: req.Action,
-		}},
+	// A spec may not declare duplicate network names, so merge the endpoint
+	// sets; From endpoints come first (the assertions name them).
+	networks := make([]intent.Network, 0, len(req.From)+len(req.To))
+	added := make(map[string]bool, len(req.From)+len(req.To))
+	add := func(n intent.Network) {
+		key := strings.ToLower(n.Name)
+		if added[key] {
+			return
+		}
+		added[key] = true
+		networks = append(networks, n)
 	}
+	destNames := strings.Join(req.To, ",")
+	assertions := make([]intent.Assertion, 0, len(req.From))
+	for i, name := range req.From {
+		add(intent.Network{Name: name, CIDR: at(res.FromCIDRs, i), Gateway: at(res.FromGateways, i)})
+		assertions = append(assertions, intent.Assertion{Type: "isolation", From: name, To: destNames, Expect: req.Action})
+	}
+	for i, name := range req.To {
+		add(intent.Network{Name: name, CIDR: at(res.ToCIDRs, i), Gateway: at(res.ToGateways, i)})
+	}
+	spec := &intent.Spec{Version: 1, Site: "post-mutation", Networks: networks, Assertions: assertions}
 	if s.PostAudit == nil {
 		return &OmadaPostAudit{Status: string(models.StatusError), Summary: "post-mutation audit unavailable"}
 	}
@@ -509,13 +538,46 @@ func (s *OmadaService) runPostAudit(ctx context.Context, req OmadaACLApplyReques
 	if err != nil {
 		return &OmadaPostAudit{Status: string(models.StatusError), Summary: fmt.Sprintf("post-mutation audit failed: %v", err)}
 	}
+	findings := make([]models.CheckResult, 0, len(assertions))
 	for _, f := range report.Findings {
 		if f.CheckType == "isolation" {
-			finding := f
-			return &OmadaPostAudit{Status: string(f.Status), Summary: f.Summary, Finding: &finding}
+			findings = append(findings, f)
 		}
 	}
-	return &OmadaPostAudit{Status: string(models.StatusError), Summary: "post-mutation audit returned no isolation finding"}
+	if len(findings) == 0 {
+		return &OmadaPostAudit{Status: string(models.StatusError), Summary: "post-mutation audit returned no isolation finding"}
+	}
+	return &OmadaPostAudit{
+		Status:   string(models.ComputeOverallStatus(findings)),
+		Summary:  fmt.Sprintf("post-mutation audit: %d isolation check(s), overall %s", len(findings), models.ComputeOverallStatus(findings)),
+		Findings: findings,
+	}
+}
+
+// at returns s[i] when in range, "" otherwise: result slices are
+// positional against the request endpoints, and an absent value must not
+// crash the post-audit.
+func at(s []string, i int) string {
+	if i >= 0 && i < len(s) {
+		return s[i]
+	}
+	return ""
+}
+
+// dedupeNames drops empty and repeated endpoint names (case-insensitive,
+// matching the controller's name resolution), keeping the first spelling.
+func dedupeNames(names []string) []string {
+	seen := make(map[string]bool, len(names))
+	out := names[:0]
+	for _, n := range names {
+		key := strings.ToLower(strings.TrimSpace(n))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, strings.TrimSpace(n))
+	}
+	return out
 }
 
 // networkNames returns the declared network names of a spec.

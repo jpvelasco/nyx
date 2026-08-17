@@ -23,6 +23,7 @@ type MockBackend struct {
 
 	// --- System ---
 	PingResult         *system.PingResult
+	PingResultFunc     func(target string) *system.PingResult
 	PingErr            error
 	RouteResult        *system.Route
 	RouteErr           error
@@ -78,8 +79,12 @@ func (m *MockBackend) PortScan(_ context.Context, _ string, _ []int, _ string, _
 
 // --- System ---
 
-// Ping returns the pre-configured ping result.
-func (m *MockBackend) Ping(_ context.Context, _ string) (*system.PingResult, error) {
+// Ping returns the pre-configured ping result, or the per-target
+// PingResultFunc if set.
+func (m *MockBackend) Ping(_ context.Context, target string) (*system.PingResult, error) {
+	if m.PingResultFunc != nil {
+		return m.PingResultFunc(target), m.PingErr
+	}
 	return m.PingResult, m.PingErr
 }
 

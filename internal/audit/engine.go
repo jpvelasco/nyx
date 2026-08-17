@@ -457,6 +457,21 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 			toNets = []intent.Network{*net}
 		}
 	}
+	// Fall back to a comma-separated list of network names (one-to-many
+	// isolation, e.g. from post-mutation audits). Duplicates are dropped.
+	if len(toNets) == 0 && strings.Contains(a.To, ",") {
+		seen := make(map[string]bool, len(a.To))
+		for _, name := range strings.Split(a.To, ",") {
+			name = strings.TrimSpace(name)
+			if name == "" || seen[name] {
+				continue
+			}
+			if net := e.Spec.NetworkByName(name); net != nil {
+				toNets = append(toNets, *net)
+				seen[name] = true
+			}
+		}
+	}
 
 	if len(toNets) == 0 {
 		result.Status = models.StatusError

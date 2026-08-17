@@ -935,9 +935,10 @@ func omadaApplyServer(t *testing.T, initialRules string) *httptest.Server {
 		case r.URL.Path == "/abc123/api/v2/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
-			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
+			writeOmadaEnvelope(w, 0, `{"totalRows":3,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
-				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"}]}`)
+				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
+				{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
 		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 			if r.URL.Query().Get("type") == "0" {
 				writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
@@ -959,33 +960,59 @@ func omadaApplyServer(t *testing.T, initialRules string) *httptest.Server {
 	return ts
 }
 
-func cannedPostAudit(t *testing.T, wantFrom, wantTo, wantExpect string) func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
+// cannedPostAudit returns a PostAudit seam that pins the N-to-M post-audit
+// spec: every endpoint declared exactly once (sources first), one isolation
+// assertion per source checked against the full comma-joined destination set.
+// It then returns a pass finding per assertion.
+func cannedPostAudit(t *testing.T, wantFrom, wantTo []string, wantExpect string) func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
 	t.Helper()
+	// Resolved CIDR/gateway per endpoint, matching omadaApplyServer networks.
+	cidr := map[string]struct{ cidr, gw string }{
+		"trusted": {"10.0.10.0/24", "10.0.10.1"},
+		"iot":     {"10.0.20.0/24", "10.0.20.1"},
+		"guest":   {"10.0.30.0/24", "10.0.30.1"},
+	}
+	// Expected network order: sources first, then destinations, deduped.
+	wantNets := []string{}
+	seen := map[string]bool{}
+	for _, n := range append(append([]string{}, wantFrom...), wantTo...) {
+		key := strings.ToLower(n)
+		if !seen[key] {
+			seen[key] = true
+			wantNets = append(wantNets, n)
+		}
+	}
+	dest := strings.Join(wantTo, ",")
 	return func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
-		if len(spec.Networks) != 2 {
-			t.Errorf("post-audit spec has %d networks, want 2", len(spec.Networks))
+		if len(spec.Networks) != len(wantNets) {
+			got := make([]string, 0, len(spec.Networks))
+			for _, n := range spec.Networks {
+				got = append(got, n.Name)
+			}
+			t.Errorf("post-audit spec has networks %v, want %v", got, wantNets)
 		}
-		if spec.Networks[0].Name != wantFrom || spec.Networks[0].CIDR != "10.0.20.0/24" ||
-			spec.Networks[0].Gateway != "10.0.20.1" {
-			t.Errorf("post-audit network[0] = %+v, want %s/10.0.20.0/24 gw 10.0.20.1", spec.Networks[0], wantFrom)
+		for i, n := range spec.Networks {
+			want := wantNets[i]
+			c := cidr[strings.ToLower(want)]
+			if !strings.EqualFold(n.Name, want) || n.CIDR != c.cidr || n.Gateway != c.gw {
+				t.Errorf("post-audit network[%d] = %+v, want %s %s gw %s", i, n, want, c.cidr, c.gw)
+			}
 		}
-		if spec.Networks[1].Name != wantTo || spec.Networks[1].CIDR != "10.0.10.0/24" ||
-			spec.Networks[1].Gateway != "10.0.10.1" {
-			t.Errorf("post-audit network[1] = %+v, want %s/10.0.10.0/24 gw 10.0.10.1", spec.Networks[1], wantTo)
+		if len(spec.Assertions) != len(wantFrom) {
+			t.Fatalf("post-audit assertions = %d, want %d", len(spec.Assertions), len(wantFrom))
 		}
-		if len(spec.Assertions) != 1 || spec.Assertions[0].Type != "isolation" ||
-			spec.Assertions[0].From != wantFrom || spec.Assertions[0].To != wantTo || spec.Assertions[0].Expect != wantExpect {
-			t.Errorf("post-audit assertions = %+v, want isolation %s -> %s expect %s", spec.Assertions, wantFrom, wantTo, wantExpect)
-		}
-		return &models.AuditReport{
-			Audit:  "post-mutation",
-			Status: models.StatusPass,
-			Findings: []models.CheckResult{{
+		findings := make([]models.CheckResult, 0, len(wantFrom))
+		for i, a := range spec.Assertions {
+			if a.Type != "isolation" || a.From != wantFrom[i] || a.To != dest || a.Expect != wantExpect {
+				t.Errorf("post-audit assertion[%d] = %+v, want isolation %s -> %s expect %s", i, a, wantFrom[i], dest, wantExpect)
+			}
+			findings = append(findings, models.CheckResult{
 				Tool: "system", CheckType: "isolation", Runner: "local",
-				Target: wantFrom + " -> " + wantTo, Status: models.StatusPass,
+				Target: wantFrom[i] + " -> " + dest, Status: models.StatusPass,
 				Summary: "isolation confirmed",
-			}},
-		}, nil
+			})
+		}
+		return &models.AuditReport{Audit: "post-mutation", Status: models.StatusPass, Findings: findings}, nil
 	}
 }
 
@@ -993,10 +1020,10 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 	t.Run("real apply runs post-audit", func(t *testing.T) {
 		ts := omadaApplyServer(t, `{"totalRows":0,"data":[]}`)
 		svc := NewOmadaService()
-		svc.PostAudit = cannedPostAudit(t, "iot", "trusted", "deny")
+		svc.PostAudit = cannedPostAudit(t, []string{"iot"}, []string{"trusted"}, "deny")
 		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
 			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
-		}, OmadaACLApplyRequest{From: "iot", To: "trusted", Action: "deny", PostAudit: true})
+		}, OmadaACLApplyRequest{From: []string{"iot"}, To: []string{"trusted"}, Action: "deny", PostAudit: true})
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
 		}
@@ -1006,8 +1033,52 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 		if res.PostAudit == nil || res.PostAudit.Status != string(models.StatusPass) {
 			t.Fatalf("post_audit = %+v, want pass finding", res.PostAudit)
 		}
-		if res.PostAudit.Finding == nil || res.PostAudit.Finding.CheckType != "isolation" {
-			t.Errorf("post_audit finding = %+v, want isolation check", res.PostAudit.Finding)
+		if len(res.PostAudit.Findings) != 1 || res.PostAudit.Findings[0].CheckType != "isolation" {
+			t.Errorf("post_audit findings = %+v, want one isolation check", res.PostAudit.Findings)
+		}
+		// Result surfaces the resolved endpoint set in request order.
+		if !sliceEqStr(res.FromCIDRs, []string{"10.0.20.0/24"}) || !sliceEqStr(res.ToCIDRs, []string{"10.0.10.0/24"}) {
+			t.Errorf("cidrs = from %v to %v", res.FromCIDRs, res.ToCIDRs)
+		}
+		if res.Scope != "switch" || res.RuleName != "iot-trusted-deny" {
+			t.Errorf("scope/rule = %q %q, want switch iot-trusted-deny", res.Scope, res.RuleName)
+		}
+	})
+
+	t.Run("one-to-many apply runs per-source post-audit", func(t *testing.T) {
+		ts := omadaApplyServer(t, `{"totalRows":0,"data":[]}`)
+		svc := NewOmadaService()
+		svc.PostAudit = cannedPostAudit(t, []string{"iot"}, []string{"trusted", "guest"}, "deny")
+		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
+			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		}, OmadaACLApplyRequest{From: []string{"iot"}, To: []string{"trusted", "guest"}, Action: "deny", PostAudit: true})
+		if err != nil {
+			t.Fatalf("ApplyACL: %v", err)
+		}
+		if res.Outcome != "created" || res.PostAudit == nil || res.PostAudit.Status != string(models.StatusPass) {
+			t.Fatalf("post_audit = %+v, want pass", res)
+		}
+		// One isolation finding per source, each pinging the full destination set.
+		if len(res.PostAudit.Findings) != 1 {
+			t.Fatalf("post_audit findings = %d, want 1 (one source)", len(res.PostAudit.Findings))
+		}
+		if !sliceEqStr(res.ToCIDRs, []string{"10.0.10.0/24", "10.0.30.0/24"}) {
+			t.Errorf("to_cidrs = %v, want trusted then guest in request order", res.ToCIDRs)
+		}
+	})
+
+	t.Run("many-to-many apply emits one assertion per source", func(t *testing.T) {
+		ts := omadaApplyServer(t, `{"totalRows":0,"data":[]}`)
+		svc := NewOmadaService()
+		svc.PostAudit = cannedPostAudit(t, []string{"iot", "guest"}, []string{"trusted"}, "deny")
+		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
+			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		}, OmadaACLApplyRequest{From: []string{"iot", "guest"}, To: []string{"trusted"}, Action: "deny", PostAudit: true})
+		if err != nil {
+			t.Fatalf("ApplyACL: %v", err)
+		}
+		if res.PostAudit == nil || len(res.PostAudit.Findings) != 2 {
+			t.Fatalf("post_audit = %+v, want 2 findings (one per source)", res.PostAudit)
 		}
 	})
 
@@ -1020,7 +1091,7 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 		}
 		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
 			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
-		}, OmadaACLApplyRequest{From: "iot", To: "trusted", Action: "deny", DryRun: true})
+		}, OmadaACLApplyRequest{From: []string{"iot"}, To: []string{"trusted"}, Action: "deny", DryRun: true})
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
 		}
@@ -1038,7 +1109,7 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 		}
 		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
 			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
-		}, OmadaACLApplyRequest{From: "iot", To: "trusted", Action: "deny", PostAudit: true})
+		}, OmadaACLApplyRequest{From: []string{"iot"}, To: []string{"trusted"}, Action: "deny", PostAudit: true})
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
 		}
@@ -1056,7 +1127,7 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 		}
 		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
 			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
-		}, OmadaACLApplyRequest{From: "iot", To: "trusted", Action: "deny", PostAudit: false})
+		}, OmadaACLApplyRequest{From: []string{"iot"}, To: []string{"trusted"}, Action: "deny", PostAudit: false})
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
 		}
@@ -1073,7 +1144,7 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 		}
 		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
 			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
-		}, OmadaACLApplyRequest{From: "iot", To: "trusted", Action: "deny", PostAudit: true})
+		}, OmadaACLApplyRequest{From: []string{"iot"}, To: []string{"trusted"}, Action: "deny", PostAudit: true})
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
 		}
@@ -1091,11 +1162,24 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 			return nil, errors.New("unexpected client")
 		}}
 		_, err := svc.ApplyACL(context.Background(), OmadaOptions{Host: "https://omada.local"},
-			OmadaACLApplyRequest{From: "a", To: "b", Action: "drop"})
+			OmadaACLApplyRequest{From: []string{"a"}, To: []string{"b"}, Action: "drop"})
 		if err == nil || !strings.Contains(err.Error(), "action") {
 			t.Fatalf("ApplyACL error = %v, want action validation failure", err)
 		}
 	})
+}
+
+// sliceEqStr reports whether two string slices are equal element by element.
+func sliceEqStr(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // nonMutatingProvider is a registry stand-in that lacks the ACLApplier
@@ -1128,7 +1212,7 @@ func TestOmadaServiceApplyACL_ProviderLacksMutation(t *testing.T) {
 	}
 	svc := NewOmadaService()
 	_, err := svc.ApplyACL(context.Background(), OmadaOptions{Host: "https://omada.local"},
-		OmadaACLApplyRequest{From: "a", To: "b", Action: "deny"})
+		OmadaACLApplyRequest{From: []string{"a"}, To: []string{"b"}, Action: "deny"})
 	if err == nil || !strings.Contains(err.Error(), "does not implement ACL mutation") {
 		t.Fatalf("ApplyACL error = %v, want missing-mutation capability error", err)
 	}

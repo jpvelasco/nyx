@@ -286,22 +286,29 @@ func init() {
 	_ = providers.Register(&OmadaProvider{})
 }
 
-// ApplyACL ensures a switch ACL rule exists from req.From to req.To with the
-// requested action. It is idempotent: an already-active matching rule yields
-// outcome "unchanged" without a write. Dry-run previews the planned change
-// and never mutates. A conflicting rule with a different policy is refused
-// with a message pointing at the plan tool. Before/after evidence is the
-// controller's rule list as JSON.
+// ApplyACL ensures a rule of the requested scope exists covering every
+// from→to network pair with the requested action and protocol set. It is
+// idempotent: a same-action, status-on rule of the same scope that already
+// covers the request with an equal normalized protocol set yields outcome
+// "unchanged" without a write, and a covering status-off rule is enabled.
+// A covering rule with a different action is refused as a conflict with a
+// pointer at the plan tool. Dry-run previews the planned change and never
+// mutates. Before/after evidence is the controller's rule list of the
+// requested scope, as JSON.
 func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequest, opts providers.ImportOptions) (*providers.ACLApplyResult, error) {
-	if req.From == "" {
+	if len(req.From) == 0 {
 		return nil, fmt.Errorf("apply ACL: from is required")
 	}
-	if req.To == "" {
+	if len(req.To) == 0 {
 		return nil, fmt.Errorf("apply ACL: to is required")
 	}
 	policy, ok := omadabackend.PolicyFromAction(req.Action)
 	if !ok {
 		return nil, fmt.Errorf("apply ACL: action must be 'allow' or 'deny', got %q", req.Action)
+	}
+	scopeType, ok := omadabackend.ScopeFromLabel(req.Scope)
+	if !ok {
+		return nil, fmt.Errorf("apply ACL: scope %q is not supported; use 'switch' or 'gateway'", req.Scope)
 	}
 
 	client, err := omadabackend.NewClient(ctx, opts.Host, opts.SkipTLSVerify, opts.CACertPath)
@@ -328,63 +335,29 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 	if err != nil {
 		return nil, fmt.Errorf("fetching networks: %w", err)
 	}
-	src, err := networkByName(nets, req.From)
+	srcs, err := networksByName(nets, req.From)
 	if err != nil {
 		return nil, err
 	}
-	dst, err := networkByName(nets, req.To)
+	dsts, err := networksByName(nets, req.To)
 	if err != nil {
 		return nil, err
 	}
 
-	rules, err := client.GetACLRules(ctx, siteID)
+	list, err := client.FetchACLs(ctx, siteID, scopeType)
 	if err != nil {
 		return nil, fmt.Errorf("fetching ACL rules: %w", err)
 	}
-
+	rules := list.Rules
 	omadabackend.ResolveRules(rules, nets)
 
-	var existing *omadabackend.ACLRule
-	for i := range rules {
-		if omadabackend.RuleMatchesEndpoints(rules[i], src, dst) {
-			existing = &rules[i]
-			break
-		}
-	}
-
-	outcome := "created"
-	var rule omadabackend.ACLRule
-	switch {
-	case existing == nil:
-		rule = omadabackend.ACLRule{
-			Name:       aclRuleName(req),
-			Type:       omadabackend.ACLTypeSwitch,
-			Status:     true,
-			Policy:     policy,
-			Protocols:  []int{omadabackend.ProtocolAll},
-			SourceType: omadabackend.EndpointNetwork,
-			SourceIDs:  []string{src.ID},
-			SourceName: src.Name,
-			DestType:   omadabackend.EndpointNetwork,
-			DestIDs:    []string{dst.ID},
-			DestName:   dst.Name,
-		}
-	case existing.Policy.MatchesAction(req.Action) && existing.Status:
-		outcome = "unchanged"
-		rule = *existing
-	case existing.Policy.MatchesAction(req.Action) && !existing.Status:
-		outcome = "enabled"
-		rule = *existing
-		rule.Status = true
-	default:
-		return nil, fmt.Errorf(
-			"conflicting ACL rule %q already exists for %s -> %s with policy %q; use the omada_plan tool to reconcile",
-			existing.Name, src.Name, dst.Name, existing.Policy.String())
+	outcome, rule, err := classifyApply(rules, srcs, dsts, req, policy, scopeType)
+	if err != nil {
+		return nil, err
 	}
 
 	ruleID := rule.ID
 	if !req.DryRun && outcome != "unchanged" {
-		var err error
 		if outcome == "created" {
 			_, err = client.CreateACLRule(ctx, siteID, rule)
 		} else {
@@ -398,18 +371,20 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 	before, _ := json.Marshal(rules)
 	after := string(before)
 	if !req.DryRun && outcome != "unchanged" {
-		refreshed, err := client.GetACLRules(ctx, siteID)
+		refreshedList, err := client.FetchACLs(ctx, siteID, scopeType)
 		if err != nil {
 			return nil, fmt.Errorf("refetching ACL rules after %s: %w", outcome, err)
 		}
+		refreshed := refreshedList.Rules
 		afterJSON, _ := json.Marshal(refreshed)
 		after = string(afterJSON)
 		if outcome == "created" {
 			ruleID = ""
 			omadabackend.ResolveRules(refreshed, nets)
 			for i := range refreshed {
-				if omadabackend.RuleMatchesEndpoints(refreshed[i], src, dst) &&
-					refreshed[i].Policy.MatchesAction(req.Action) {
+				if refreshed[i].Policy.MatchesAction(req.Action) &&
+					omadabackend.ProtocolsEqual(refreshed[i].Protocols, req.Protocols) &&
+					omadabackend.RuleCovers(refreshed[i], srcs, dsts) {
 					ruleID = refreshed[i].ID
 					break
 				}
@@ -418,25 +393,132 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 	}
 
 	return &providers.ACLApplyResult{
-		DryRun:      req.DryRun,
-		Outcome:     outcome,
-		RuleID:      ruleID,
-		FromCIDR:    src.CIDR(),
-		ToCIDR:      dst.CIDR(),
-		FromGateway: src.Gateway(),
-		ToGateway:   dst.Gateway(),
-		Before:      string(before),
-		After:       after,
+		DryRun:        req.DryRun,
+		Outcome:       outcome,
+		RuleID:        ruleID,
+		RuleName:      rule.Name,
+		Scope:         scopeLabel(scopeType),
+		ScopeDisabled: list.ACLDisable,
+		FromCIDRs:     networkList(srcs, func(n omadabackend.Network) string { return n.CIDR() }),
+		ToCIDRs:       networkList(dsts, func(n omadabackend.Network) string { return n.CIDR() }),
+		FromGateways:  networkList(srcs, func(n omadabackend.Network) string { return n.Gateway() }),
+		ToGateways:    networkList(dsts, func(n omadabackend.Network) string { return n.Gateway() }),
+		Before:        string(before),
+		After:         after,
 	}, nil
 }
 
+// classifyApply decides the outcome for a cover-based apply over one scope:
+// a covering rule with a different action is a conflict; a covering
+// same-action rule is "unchanged" when on and "enabled" when off; otherwise
+// a new rule is created.
+func classifyApply(rules []omadabackend.ACLRule, srcs, dsts []omadabackend.Network, req providers.ACLApplyRequest, policy omadabackend.ACLPolicy, scopeType omadabackend.ACLType) (string, omadabackend.ACLRule, error) {
+	var toEnable *omadabackend.ACLRule
+	for i := range rules {
+		r := rules[i]
+		if !omadabackend.RuleCovers(r, srcs, dsts) || !omadabackend.ProtocolsEqual(r.Protocols, req.Protocols) {
+			continue
+		}
+		if !r.Policy.MatchesAction(req.Action) {
+			return "", omadabackend.ACLRule{}, fmt.Errorf(
+				"conflicting ACL rule %q already covers %s -> %s with policy %q; use the omada_plan tool to reconcile",
+				r.Name, joinNames(srcs), joinNames(dsts), r.Policy.String())
+		}
+		if r.Status {
+			return "unchanged", r, nil
+		}
+		if toEnable == nil {
+			toEnable = &rules[i]
+		}
+	}
+	if toEnable != nil {
+		r := *toEnable
+		r.Status = true
+		return "enabled", r, nil
+	}
+
+	rule := omadabackend.ACLRule{
+		Name:       aclRuleName(req),
+		Type:       scopeType,
+		Status:     true,
+		Policy:     policy,
+		Protocols:  omadabackend.NormalizeProtocols(req.Protocols),
+		SourceType: omadabackend.EndpointNetwork,
+		SourceIDs:  idList(srcs),
+		SourceName: joinNames(srcs),
+		DestType:   omadabackend.EndpointNetwork,
+		DestIDs:    idList(dsts),
+		DestName:   joinNames(dsts),
+	}
+	if scopeType == omadabackend.ACLTypeGateway {
+		// Gateway rules declare their path; the from→to pair is always LAN.
+		rule.Direction = omadabackend.ACLDirection{LANToLAN: true}
+	}
+	return "created", rule, nil
+}
+
+// scopeLabel renders an ACL type as the agent-facing scope label.
+func scopeLabel(typ omadabackend.ACLType) string {
+	if typ == omadabackend.ACLTypeGateway {
+		return "gateway"
+	}
+	return "switch"
+}
+
+// joinNames renders a network set as a comma-joined name list.
+func joinNames(nets []omadabackend.Network) string {
+	names := make([]string, len(nets))
+	for i, n := range nets {
+		names[i] = n.Name
+	}
+	return strings.Join(names, ",")
+}
+
+// idList collects the network IDs in order.
+func idList(nets []omadabackend.Network) []string {
+	ids := make([]string, len(nets))
+	for i, n := range nets {
+		ids[i] = n.ID
+	}
+	return ids
+}
+
+// networkList collects one network attribute per network in request
+// order. An empty value is kept in place (as "") so callers can pair the
+// slice positionally with the requested endpoint names; a network without
+// a gateway subnet simply yields an empty pair.
+func networkList(nets []omadabackend.Network, value func(omadabackend.Network) string) []string {
+	out := make([]string, len(nets))
+	for i, n := range nets {
+		out[i] = value(n)
+	}
+	return out
+}
+
 // aclRuleName derives a rule name from the request, defaulting to a
-// deterministic from-to-action pattern.
+// deterministic from-to-action pattern over the full endpoint sets.
 func aclRuleName(req providers.ACLApplyRequest) string {
 	if req.PolicyName != "" {
 		return req.PolicyName
 	}
-	return fmt.Sprintf("%s-%s-%s", strings.ToLower(req.From), strings.ToLower(req.To), req.Action)
+	return fmt.Sprintf("%s-%s-%s",
+		strings.ToLower(strings.Join(req.From, "-")),
+		strings.ToLower(strings.Join(req.To, "-")),
+		req.Action)
+}
+
+// networksByName resolves every requested network name case-insensitively,
+// listing the available names in the error for agents.
+func networksByName(nets []omadabackend.Network, names []string) ([]omadabackend.Network, error) {
+	out := make([]omadabackend.Network, 0, len(names))
+	for _, name := range names {
+		n, err := networkByName(nets, name)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 // networkByName resolves a network name case-insensitively, listing the

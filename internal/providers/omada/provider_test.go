@@ -732,13 +732,31 @@ func TestProviderInventory(t *testing.T) {
 	})
 }
 
-// applyACLServer serves networks n1/n2 plus a mutable ACL rule list for
-// ApplyACL tests. The rule list starts with the given JSON rules and updates
-// as writes arrive; any write on an unexpected path or a write when
-// writesAllowed is false fails the test.
-func applyACLServer(t *testing.T, initialRules string, writesAllowed bool) *httptest.Server {
+func TestNetworkList_Positional(t *testing.T) {
+	nets := []omadabackend.Network{
+		{Name: "lan", GatewaySubnet: "10.0.0.1/24"},
+		{Name: "bare"},
+		{Name: "iot", GatewaySubnet: "10.0.1.1/24"},
+	}
+	if got := networkList(nets, func(n omadabackend.Network) string { return n.CIDR() }); len(got) != 3 || got[0] != "10.0.0.0/24" || got[1] != "" || got[2] != "10.0.1.0/24" {
+		t.Errorf("cidrs = %v, want positional with empty slot", got)
+	}
+	if got := networkList(nets, func(n omadabackend.Network) string { return n.Gateway() }); len(got) != 3 || got[1] != "" || got[2] != "10.0.1.1" {
+		t.Errorf("gateways = %v, want positional with empty slot", got)
+	}
+}
+
+// applyACLServer serves networks n1/n2/n3 plus mutable, per-scope ACL rule
+// lists for ApplyACL tests. The switch and gateway lists start with the
+// given JSON rules and update as writes arrive; any write on an unexpected
+// path or a write when writesAllowed is false fails the test.
+func applyACLServer(t *testing.T, initialSwitch, initialGateway string, writesAllowed bool) *httptest.Server {
 	t.Helper()
-	state := initialRules
+	switchRules := initialSwitch
+	gatewayRules := initialGateway
+	postCreate := `{"id":"a9","name":"block-iot","status":true,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`
+	postState := `{"totalRows":1,"data":[` + postCreate + `]}`
+	putState := `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
 	ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/abc123/api/v2/login":
@@ -748,27 +766,36 @@ func applyACLServer(t *testing.T, initialRules string, writesAllowed bool) *http
 		case r.URL.Path == "/abc123/api/v2/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
-			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+			writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
-				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"}]}`)
+				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
+				{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
 		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 			if r.URL.Query().Get("type") == "0" {
-				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
+				writeEnvelope(w, 0, "", gatewayRules)
 				return
 			}
-			writeEnvelope(w, 0, "", state)
+			writeEnvelope(w, 0, "", switchRules)
 		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
 			if !writesAllowed {
 				t.Error("unexpected POST create when writes are not allowed")
 			}
-			writeEnvelope(w, 0, "", `{"id":"a9","name":"block-iot","status":true,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`)
-			state = `{"totalRows":1,"data":[{"id":"a9","name":"block-iot","status":true,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
+			writeEnvelope(w, 0, "", postCreate)
+			if r.URL.Query().Get("type") == "0" {
+				gatewayRules = postState
+			} else {
+				switchRules = postState
+			}
 		case strings.HasPrefix(r.URL.Path, "/abc123/api/v2/sites/s1/setting/firewall/acls/") && r.Method == http.MethodPut:
 			if !writesAllowed {
 				t.Error("unexpected PUT update when writes are not allowed")
 			}
 			writeEnvelope(w, 0, "", `{"id":"a1","name":"block-iot","status":true,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`)
-			state = `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
+			if r.URL.Query().Get("type") == "0" {
+				gatewayRules = putState
+			} else {
+				switchRules = putState
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -780,24 +807,30 @@ func applyOpts(ts *httptest.Server) providers.ImportOptions {
 	return providers.ImportOptions{Host: ts.URL, Username: "admin", Password: "pw", Site: "HQ", SkipTLSVerify: true}
 }
 
+func aclApplyReq(policyName, action string, from, to []string) providers.ACLApplyRequest {
+	return providers.ACLApplyRequest{PolicyName: policyName, From: from, To: to, Action: action}
+}
+
 func TestProviderApplyACL(t *testing.T) {
+	const emptyList = `{"totalRows":0,"data":[]}`
 	t.Run("creates a rule with resolved network ids", func(t *testing.T) {
-		ts := applyACLServer(t, `{"totalRows":0,"data":[]}`, true)
+		ts := applyACLServer(t, emptyList, emptyList, true)
 		p := &OmadaProvider{}
-		res, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			PolicyName: "block-iot", From: "IoT", To: "Trusted", Action: "deny",
-		}, applyOpts(ts))
+		res, err := p.ApplyACL(context.Background(), aclApplyReq("block-iot", "deny", []string{"IoT"}, []string{"Trusted"}), applyOpts(ts))
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
 		}
 		if res.DryRun || res.Outcome != "created" || res.RuleID != "a9" {
 			t.Errorf("result = %+v, want real created rule a9", res)
 		}
-		if res.FromCIDR != "10.0.20.0/24" || res.ToCIDR != "10.0.10.0/24" {
-			t.Errorf("cidrs = from %q to %q, want resolved network CIDRs", res.FromCIDR, res.ToCIDR)
+		if res.Scope != "switch" || res.RuleName != "block-iot" {
+			t.Errorf("scope/rule_name = %q %q, want switch block-iot", res.Scope, res.RuleName)
 		}
-		if res.FromGateway != "10.0.20.1" || res.ToGateway != "10.0.10.1" {
-			t.Errorf("gateways = from %q to %q, want resolved network gateways", res.FromGateway, res.ToGateway)
+		if len(res.FromCIDRs) != 1 || res.FromCIDRs[0] != "10.0.20.0/24" || len(res.ToCIDRs) != 1 || res.ToCIDRs[0] != "10.0.10.0/24" {
+			t.Errorf("cidrs = from %v to %v, want resolved network CIDRs", res.FromCIDRs, res.ToCIDRs)
+		}
+		if len(res.FromGateways) != 1 || res.FromGateways[0] != "10.0.20.1" || len(res.ToGateways) != 1 || res.ToGateways[0] != "10.0.10.1" {
+			t.Errorf("gateways = from %v to %v, want resolved network gateways", res.FromGateways, res.ToGateways)
 		}
 		if res.Before == res.After {
 			t.Error("before/after evidence must differ after a real create")
@@ -814,12 +847,67 @@ func TestProviderApplyACL(t *testing.T) {
 		}
 	})
 
-	t.Run("idempotent when rule already active", func(t *testing.T) {
-		ts := applyACLServer(t, `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`, false)
+	t.Run("creates a gateway scope rule with direction", func(t *testing.T) {
+		var gotBody string
+		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.URL.Path == "/abc123/api/v2/login":
+				writeEnvelope(w, 0, "", `{"token":"t1"}`)
+			case r.URL.Path == "/abc123/api/v2/sites":
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
+				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
+					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
+					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
+					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
+			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
+				if r.URL.Query().Get("type") == "0" {
+					writeEnvelope(w, 0, "", `{"totalRows":0,"data":[],"aclDisable":true}`)
+					return
+				}
+				writeEnvelope(w, 0, "", emptyList)
+			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
+				gotBody = readReqBody(t, r)
+				writeEnvelope(w, 0, "", `{"id":"a7","status":true,"policy":0,"protocols":[256],"sourceIds":["n2"],"destinationIds":["n1","n3"]}`)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
 		p := &OmadaProvider{}
 		res, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			From: "IoT", To: "Trusted", Action: "deny",
+			From: []string{"IoT"}, To: []string{"Trusted", "Guest"}, Action: "deny", Scope: "gateway",
 		}, applyOpts(ts))
+		if err != nil {
+			t.Fatalf("ApplyACL: %v", err)
+		}
+		if res.Scope != "gateway" || !res.ScopeDisabled {
+			t.Errorf("scope = %q disabled %v, want gateway disabled (aclDisable true)", res.Scope, res.ScopeDisabled)
+		}
+		var body struct {
+			Type      int                       `json:"type"`
+			SourceIDs []string                  `json:"sourceIds"`
+			DestIDs   []string                  `json:"destinationIds"`
+			Protocols []int                     `json:"protocols"`
+			Direction omadabackend.ACLDirection `json:"direction"`
+		}
+		if err := json.Unmarshal([]byte(gotBody), &body); err != nil {
+			t.Fatalf("request body %q: %v", gotBody, err)
+		}
+		if body.Type != 0 || !body.Direction.LANToLAN || body.Direction.LANToWAN {
+			t.Errorf("wire = type %v direction %+v, want gateway type 0 lanToLan", body.Type, body.Direction)
+		}
+		if len(body.SourceIDs) != 1 || body.SourceIDs[0] != "n2" || len(body.DestIDs) != 2 {
+			t.Errorf("wire endpoints = %v -> %v, want n2 -> n1,n3", body.SourceIDs, body.DestIDs)
+		}
+		if !omadabackend.ProtocolsEqual(body.Protocols, []int{omadabackend.ProtocolAll}) {
+			t.Errorf("wire protocols = %v, want [256]", body.Protocols)
+		}
+	})
+
+	t.Run("idempotent when rule already active", func(t *testing.T) {
+		ts := applyACLServer(t, `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`, emptyList, false)
+		p := &OmadaProvider{}
+		res, err := p.ApplyACL(context.Background(), aclApplyReq("", "deny", []string{"IoT"}, []string{"Trusted"}), applyOpts(ts))
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
 		}
@@ -831,12 +919,94 @@ func TestProviderApplyACL(t *testing.T) {
 		}
 	})
 
-	t.Run("enables a matching disabled rule", func(t *testing.T) {
-		ts := applyACLServer(t, `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":false,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`, true)
+	t.Run("multi-dest cover of a singleton request is unchanged", func(t *testing.T) {
+		// A same-action status-on rule covering more destinations than the
+		// request satisfies the request: no write, outcome unchanged.
+		ts := applyACLServer(t, `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1","n3"],"index":4}]}`, emptyList, false)
+		p := &OmadaProvider{}
+		res, err := p.ApplyACL(context.Background(), aclApplyReq("", "deny", []string{"IoT"}, []string{"Trusted"}), applyOpts(ts))
+		if err != nil {
+			t.Fatalf("ApplyACL: %v", err)
+		}
+		if res.Outcome != "unchanged" || res.RuleID != "a1" {
+			t.Errorf("result = %+v, want unchanged covering rule a1", res)
+		}
+		if res.Before != res.After {
+			t.Error("covered request must not mutate")
+		}
+	})
+
+	t.Run("narrower protocol request against an all-protocols rule creates", func(t *testing.T) {
+		// The existing rule is broader (all protocols), so it does not cover
+		// the narrower request: a new rule is created instead of fighting it.
+		var gotBody string
+		var wrote bool
+		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.URL.Path == "/abc123/api/v2/login":
+				writeEnvelope(w, 0, "", `{"token":"t1"}`)
+			case r.URL.Path == "/abc123/api/v2/sites":
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
+				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
+					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
+					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
+					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
+			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
+				if r.URL.Query().Get("type") == "0" {
+					writeEnvelope(w, 0, "", emptyList)
+					return
+				}
+				if wrote {
+					writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a9","status":true,"policy":0,"protocols":[6],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]}]}`)
+					return
+				}
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`)
+			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
+				wrote = true
+				gotBody = readReqBody(t, r)
+				writeEnvelope(w, 0, "", `{"id":"a9","status":true,"policy":0}`)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
 		p := &OmadaProvider{}
 		res, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			From: "IoT", To: "Trusted", Action: "deny",
+			From: []string{"IoT"}, To: []string{"Trusted"}, Action: "deny", Protocols: []int{6},
 		}, applyOpts(ts))
+		if err != nil {
+			t.Fatalf("ApplyACL: %v", err)
+		}
+		if res.Outcome != "created" || res.RuleID != "a9" {
+			t.Errorf("result = %+v, want created a9 (broader rule never covers)", res)
+		}
+		var body struct {
+			Protocols []int `json:"protocols"`
+		}
+		if err := json.Unmarshal([]byte(gotBody), &body); err != nil {
+			t.Fatalf("request body %q: %v", gotBody, err)
+		}
+		if !omadabackend.ProtocolsEqual(body.Protocols, []int{6}) {
+			t.Errorf("wire protocols = %v, want [6]", body.Protocols)
+		}
+	})
+
+	t.Run("empty protocols equals an all-protocols rule", func(t *testing.T) {
+		ts := applyACLServer(t, `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`, emptyList, false)
+		p := &OmadaProvider{}
+		res, err := p.ApplyACL(context.Background(), aclApplyReq("", "deny", []string{"IoT"}, []string{"Trusted"}), applyOpts(ts))
+		if err != nil {
+			t.Fatalf("ApplyACL: %v", err)
+		}
+		if res.Outcome != "unchanged" {
+			t.Errorf("result = %+v, want unchanged (empty ≡ [256])", res)
+		}
+	})
+
+	t.Run("enables a matching disabled rule", func(t *testing.T) {
+		ts := applyACLServer(t, `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":false,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`, emptyList, true)
+		p := &OmadaProvider{}
+		res, err := p.ApplyACL(context.Background(), aclApplyReq("", "deny", []string{"IoT"}, []string{"Trusted"}), applyOpts(ts))
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
 		}
@@ -846,21 +1016,62 @@ func TestProviderApplyACL(t *testing.T) {
 	})
 
 	t.Run("rejects conflicting action", func(t *testing.T) {
-		ts := applyACLServer(t, `{"totalRows":1,"data":[{"id":"a1","name":"allow-iot","status":true,"policy":1,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`, false)
+		ts := applyACLServer(t, `{"totalRows":1,"data":[{"id":"a1","name":"allow-iot","status":true,"policy":1,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`, emptyList, false)
 		p := &OmadaProvider{}
-		_, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			From: "IoT", To: "Trusted", Action: "deny",
-		}, applyOpts(ts))
+		_, err := p.ApplyACL(context.Background(), aclApplyReq("", "deny", []string{"IoT"}, []string{"Trusted"}), applyOpts(ts))
 		if err == nil || !strings.Contains(err.Error(), "conflicting") {
 			t.Fatalf("ApplyACL error = %v, want conflicting rule error", err)
 		}
 	})
 
-	t.Run("dry run never mutates", func(t *testing.T) {
-		ts := applyACLServer(t, `{"totalRows":0,"data":[]}`, false)
+	t.Run("scopes never cover each other", func(t *testing.T) {
+		// A covering switch rule must not satisfy a gateway-scope request.
+		var wrote bool
+		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.URL.Path == "/abc123/api/v2/login":
+				writeEnvelope(w, 0, "", `{"token":"t1"}`)
+			case r.URL.Path == "/abc123/api/v2/sites":
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
+				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
+					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
+					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
+					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
+			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
+				if r.URL.Query().Get("type") == "0" {
+					if wrote {
+						writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a7","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]}]}`)
+						return
+					}
+					writeEnvelope(w, 0, "", emptyList)
+					return
+				}
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`)
+			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
+				wrote = true
+				writeEnvelope(w, 0, "", `{"id":"a7","status":true,"policy":0,"protocols":[256],"sourceIds":["n2"],"destinationIds":["n1"]}`)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
 		p := &OmadaProvider{}
 		res, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			From: "IoT", To: "Trusted", Action: "deny", DryRun: true,
+			From: []string{"IoT"}, To: []string{"Trusted"}, Action: "deny", Scope: "gateway",
+		}, applyOpts(ts))
+		if err != nil {
+			t.Fatalf("ApplyACL: %v", err)
+		}
+		if res.Outcome != "created" || res.Scope != "gateway" || res.RuleID != "a7" {
+			t.Errorf("result = %+v, want created a7 in the gateway scope", res)
+		}
+	})
+
+	t.Run("dry run never mutates", func(t *testing.T) {
+		ts := applyACLServer(t, emptyList, emptyList, false)
+		p := &OmadaProvider{}
+		res, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
+			From: []string{"IoT"}, To: []string{"Trusted"}, Action: "deny", DryRun: true,
 		}, applyOpts(ts))
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
@@ -874,11 +1085,9 @@ func TestProviderApplyACL(t *testing.T) {
 	})
 
 	t.Run("unknown network name lists available names", func(t *testing.T) {
-		ts := applyACLServer(t, `{"totalRows":0,"data":[]}`, false)
+		ts := applyACLServer(t, emptyList, emptyList, false)
 		p := &OmadaProvider{}
-		_, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			From: "Missing", To: "Trusted", Action: "deny",
-		}, applyOpts(ts))
+		_, err := p.ApplyACL(context.Background(), aclApplyReq("", "deny", []string{"Missing"}, []string{"Trusted"}), applyOpts(ts))
 		if err == nil || !strings.Contains(err.Error(), "Trusted") || !strings.Contains(err.Error(), "IoT") {
 			t.Fatalf("ApplyACL error = %v, want available network names listed", err)
 		}
@@ -892,9 +1101,11 @@ func TestProviderApplyACL(t *testing.T) {
 			req  providers.ACLApplyRequest
 			want string
 		}{
-			{"empty from", providers.ACLApplyRequest{From: "", To: "b", Action: "deny"}, "from is required"},
-			{"empty to", providers.ACLApplyRequest{From: "a", To: "", Action: "deny"}, "to is required"},
-			{"bad action", providers.ACLApplyRequest{From: "a", To: "b", Action: "drop"}, "action"},
+			{"empty from", providers.ACLApplyRequest{From: nil, To: []string{"b"}, Action: "deny"}, "from is required"},
+			{"empty to", providers.ACLApplyRequest{From: []string{"a"}, To: nil, Action: "deny"}, "to is required"},
+			{"bad action", providers.ACLApplyRequest{From: []string{"a"}, To: []string{"b"}, Action: "drop"}, "action"},
+			{"eap scope refused", providers.ACLApplyRequest{From: []string{"a"}, To: []string{"b"}, Action: "deny", Scope: "eap"}, "not supported"},
+			{"bogus scope refused", providers.ACLApplyRequest{From: []string{"a"}, To: []string{"b"}, Action: "deny", Scope: "bogus"}, "not supported"},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -909,7 +1120,7 @@ func TestProviderApplyACL(t *testing.T) {
 	t.Run("session failures propagate", func(t *testing.T) {
 		p := &OmadaProvider{}
 		_, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			From: "a", To: "b", Action: "deny",
+			From: []string{"a"}, To: []string{"b"}, Action: "deny",
 		}, providers.ImportOptions{Host: "https://127.0.0.1:1", Username: "u", Password: "p"})
 		if err == nil {
 			t.Fatal("expected session failure to propagate")
@@ -926,9 +1137,7 @@ func TestProviderApplyACL(t *testing.T) {
 			}
 		}))
 		p := &OmadaProvider{}
-		_, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			From: "IoT", To: "Trusted", Action: "deny",
-		}, applyOpts(ts))
+		_, err := p.ApplyACL(context.Background(), aclApplyReq("", "deny", []string{"IoT"}, []string{"Trusted"}), applyOpts(ts))
 		if err == nil || !strings.Contains(err.Error(), "fetching sites") {
 			t.Fatalf("ApplyACL error = %v, want sites fetch failure", err)
 		}
@@ -946,9 +1155,7 @@ func TestProviderApplyACL(t *testing.T) {
 			}
 		}))
 		p := &OmadaProvider{}
-		_, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			From: "IoT", To: "Trusted", Action: "deny",
-		}, applyOpts(ts))
+		_, err := p.ApplyACL(context.Background(), aclApplyReq("", "deny", []string{"IoT"}, []string{"Trusted"}), applyOpts(ts))
 		if err == nil || !strings.Contains(err.Error(), "fetching networks") {
 			t.Fatalf("ApplyACL error = %v, want networks fetch failure", err)
 		}
@@ -962,17 +1169,16 @@ func TestProviderApplyACL(t *testing.T) {
 			case "/abc123/api/v2/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			case "/abc123/api/v2/sites/s1/setting/lan/networks":
-				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
-					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"}]}`)
+					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
+					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
 		}))
 		p := &OmadaProvider{}
-		_, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			From: "IoT", To: "Trusted", Action: "deny",
-		}, applyOpts(ts))
+		_, err := p.ApplyACL(context.Background(), aclApplyReq("", "deny", []string{"IoT"}, []string{"Trusted"}), applyOpts(ts))
 		if err == nil || !strings.Contains(err.Error(), "fetching ACL rules") {
 			t.Fatalf("ApplyACL error = %v, want ACL fetch failure", err)
 		}
@@ -986,11 +1192,12 @@ func TestProviderApplyACL(t *testing.T) {
 			case r.URL.Path == "/abc123/api/v2/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
-				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
-					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"}]}`)
+					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
+					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
 			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
-				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
+				writeEnvelope(w, 0, "", emptyList)
 			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
 				writeEnvelope(w, -1005, "no permission", "null")
 			default:
@@ -998,9 +1205,7 @@ func TestProviderApplyACL(t *testing.T) {
 			}
 		}))
 		p := &OmadaProvider{}
-		_, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			From: "IoT", To: "Trusted", Action: "deny",
-		}, applyOpts(ts))
+		_, err := p.ApplyACL(context.Background(), aclApplyReq("", "deny", []string{"IoT"}, []string{"Trusted"}), applyOpts(ts))
 		if err == nil || !strings.Contains(err.Error(), "creating ACL rule") {
 			t.Fatalf("ApplyACL error = %v, want create failure", err)
 		}
@@ -1014,9 +1219,10 @@ func TestProviderApplyACL(t *testing.T) {
 			case r.URL.Path == "/abc123/api/v2/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
-				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
-					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"}]}`)
+					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
+					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
 			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":false,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`)
 			case strings.HasPrefix(r.URL.Path, "/abc123/api/v2/sites/s1/setting/firewall/acls/") && r.Method == http.MethodPut:
@@ -1026,9 +1232,7 @@ func TestProviderApplyACL(t *testing.T) {
 			}
 		}))
 		p := &OmadaProvider{}
-		_, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			From: "IoT", To: "Trusted", Action: "deny",
-		}, applyOpts(ts))
+		_, err := p.ApplyACL(context.Background(), aclApplyReq("", "deny", []string{"IoT"}, []string{"Trusted"}), applyOpts(ts))
 		if err == nil || !strings.Contains(err.Error(), "updating ACL rule") {
 			t.Fatalf("ApplyACL error = %v, want enable failure", err)
 		}
@@ -1043,15 +1247,16 @@ func TestProviderApplyACL(t *testing.T) {
 			case r.URL.Path == "/abc123/api/v2/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
-				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
-					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"}]}`)
+					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
+					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
 			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 				if wrote {
 					w.WriteHeader(http.StatusNotFound)
 					return
 				}
-				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
+				writeEnvelope(w, 0, "", emptyList)
 			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
 				wrote = true
 				writeEnvelope(w, 0, "", `{"id":"a9","status":true,"policy":0}`)
@@ -1060,9 +1265,7 @@ func TestProviderApplyACL(t *testing.T) {
 			}
 		}))
 		p := &OmadaProvider{}
-		_, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			From: "IoT", To: "Trusted", Action: "deny",
-		}, applyOpts(ts))
+		_, err := p.ApplyACL(context.Background(), aclApplyReq("", "deny", []string{"IoT"}, []string{"Trusted"}), applyOpts(ts))
 		if err == nil || !strings.Contains(err.Error(), "refetching ACL rules") {
 			t.Fatalf("ApplyACL error = %v, want refetch failure", err)
 		}
@@ -1078,19 +1281,20 @@ func TestProviderApplyACL(t *testing.T) {
 			case r.URL.Path == "/abc123/api/v2/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
-				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
-					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"}]}`)
+					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
+					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
 			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 				if r.URL.Query().Get("type") == "0" {
-					writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
+					writeEnvelope(w, 0, "", emptyList)
 					return
 				}
 				if wrote {
 					writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a8","status":true,"policy":1,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]}]}`)
 					return
 				}
-				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
+				writeEnvelope(w, 0, "", emptyList)
 			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
 				wrote = true
 				gotBody = readReqBody(t, r)
@@ -1100,9 +1304,7 @@ func TestProviderApplyACL(t *testing.T) {
 			}
 		}))
 		p := &OmadaProvider{}
-		res, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			From: "Trusted", To: "IoT", Action: "allow",
-		}, applyOpts(ts))
+		res, err := p.ApplyACL(context.Background(), aclApplyReq("", "allow", []string{"Trusted"}, []string{"IoT"}), applyOpts(ts))
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
 		}
@@ -1120,7 +1322,7 @@ func TestProviderApplyACL(t *testing.T) {
 		}
 	})
 
-	t.Run("policy name default derives from endpoints", func(t *testing.T) {
+	t.Run("policy name default derives from endpoint sets", func(t *testing.T) {
 		var gotBody string
 		var wrote bool
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1130,19 +1332,20 @@ func TestProviderApplyACL(t *testing.T) {
 			case r.URL.Path == "/abc123/api/v2/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
-				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
-					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"}]}`)
+					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
+					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
 			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 				if r.URL.Query().Get("type") == "0" {
-					writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
+					writeEnvelope(w, 0, "", emptyList)
 					return
 				}
 				if wrote {
-					writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a9","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]}]}`)
+					writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a9","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1","n3"]}]}`)
 					return
 				}
-				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
+				writeEnvelope(w, 0, "", emptyList)
 			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
 				wrote = true
 				gotBody = readReqBody(t, r)
@@ -1152,9 +1355,7 @@ func TestProviderApplyACL(t *testing.T) {
 			}
 		}))
 		p := &OmadaProvider{}
-		res, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
-			From: "IoT", To: "Trusted", Action: "deny",
-		}, applyOpts(ts))
+		res, err := p.ApplyACL(context.Background(), aclApplyReq("", "deny", []string{"IoT"}, []string{"Trusted", "Guest"}), applyOpts(ts))
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
 		}
@@ -1164,8 +1365,8 @@ func TestProviderApplyACL(t *testing.T) {
 		if err := json.Unmarshal([]byte(gotBody), &body); err != nil {
 			t.Fatalf("request body %q: %v", gotBody, err)
 		}
-		if body.Name != "iot-trusted-deny" {
-			t.Errorf("derived rule name = %q, want iot-trusted-deny", body.Name)
+		if body.Name != "iot-trusted-guest-deny" {
+			t.Errorf("derived rule name = %q, want iot-trusted-guest-deny", body.Name)
 		}
 		if res.RuleID != "a9" {
 			t.Errorf("rule_id = %q, want a9 from refetch", res.RuleID)
