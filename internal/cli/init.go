@@ -465,7 +465,9 @@ func buildInitSpec(nets []initNet) initSpec {
 			Type:           "subnet_discovery",
 			Network:        name,
 			ExpectHostsMax: &maxH,
-			ScanMode:       "normal",
+			// Polite scans (T2, 50-100 pps) by default: normal/aggressive
+			// modes trigger SYN-flood alarms on SDN controllers.
+			ScanMode: "polite",
 		}
 		if n.hosts > 0 {
 			minHosts := 1

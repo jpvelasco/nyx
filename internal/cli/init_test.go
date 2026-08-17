@@ -6,6 +6,32 @@ import (
 	"github.com/jpvelasco/nyx/internal/models"
 )
 
+func TestBuildInitSpec_ScanModePolite(t *testing.T) {
+	nets := []initNet{
+		{cidr: "10.0.0.0/24", gateway: "10.0.0.1", localIP: "10.0.0.5", hosts: 3, ifaceName: "eth0"},
+		{cidr: "10.0.10.0/24", gateway: "10.0.10.1", localIP: "10.0.10.5", hosts: 0, ifaceName: "eth1"},
+	}
+	spec := buildInitSpec(nets)
+	if len(spec.Networks) != 2 {
+		t.Fatalf("networks = %d, want 2", len(spec.Networks))
+	}
+	found := false
+	for _, a := range spec.Assertions {
+		if a.Type != "subnet_discovery" {
+			continue
+		}
+		found = true
+		// Generated specs must default to polite scans: normal/aggressive
+		// modes trigger SYN-flood alarms on SDN controllers.
+		if a.ScanMode != "polite" {
+			t.Errorf("subnet_discovery %q scan_mode = %q, want %q", a.Network, a.ScanMode, "polite")
+		}
+	}
+	if !found {
+		t.Errorf("no subnet_discovery assertions in generated spec")
+	}
+}
+
 func TestHostCountFrom(t *testing.T) {
 	tests := []struct {
 		name   string

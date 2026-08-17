@@ -191,6 +191,11 @@ func TestProviderImportSpec(t *testing.T) {
 		if len(spec.Assertions) < 5 {
 			t.Errorf("assertions = %+v, want subnet_discovery+network_health per net + 2 isolation", spec.Assertions)
 		}
+		for _, a := range spec.Assertions {
+			if a.Type == "subnet_discovery" && a.ScanMode != "polite" {
+				t.Errorf("subnet_discovery %q scan_mode = %q, want %q (SYN-flood safe default)", a.Network, a.ScanMode, "polite")
+			}
+		}
 		if len(res.Warnings) != 2 {
 			t.Errorf("warnings = %v, want 2", res.Warnings)
 		}
