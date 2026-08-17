@@ -205,4 +205,6 @@ When an `acl_check` fails, read `inventory.acl_scopes` first: `enabled: false` m
 
 - **Save your spec.** Put it in `specs/` (which is `.gitignore`d), and version-control it separately. Your network intent is a living document — treat it like one.
 
+- **Names are roles, not identities.** Specs, docs, and examples in this repo use the generic role names shown here (`trusted`, `management`, `iot`, ...) and `10.0.x` test addresses. When you copy them into your own spec, rename the roles to match your real topology — but keep real hostnames, subnets, and MACs out of shared files. See `docs/naming.md`.
+
 - **Drift is your friend.** A "no drift" report is the best feeling. It means everything is still holding.

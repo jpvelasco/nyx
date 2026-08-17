@@ -32,6 +32,9 @@ terminals/
 # Put any personal/generated specs inside the specs/ directory.
 # The specs/ directory contains its own .gitignore to ignore content.
 
+# Throwaway scratch helpers/scripts (never commit)
+scratch*/
+
 # OS
 .DS_Store
 Thumbs.db
