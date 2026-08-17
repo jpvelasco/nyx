@@ -110,7 +110,9 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 			Type:           "subnet_discovery",
 			Network:        n.Name,
 			ExpectHostsMax: ptrInt(50),
-			ScanMode:       "normal",
+			// Polite scans (T2, 50-100 pps) by default: normal/aggressive
+			// modes trigger SYN-flood alarms on SDN controllers.
+			ScanMode: "polite",
 		})
 
 		assertions = append(assertions, intent.Assertion{
