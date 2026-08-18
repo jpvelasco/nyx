@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-18
+
+**Patch release.** Release-pipeline fix only; no user-facing behavior changes from 0.3.0.
+
+### Changed
+
+- **Release pipeline hardened.** The npm publish step is decoupled from GoReleaser's exit code (a `422 already_exists` on pre-existing release assets no longer strands npm), and a new asset-verification gate requires all 7 release artifacts (6 platform archives + `checksums.txt`) before the npm package is embedded and published.
+
+### Other
+
+- The manually published `nyx-audit-cli@0.3.0` npm package (published outside CI, without SLSA provenance attestation) was unpublished and replaced by `nyx-audit-cli@0.3.1`, published through the CI pipeline with full provenance.
+
 ## [0.3.0] - 2026-08-18
 
 **Feature release.** Omada 6.x workflow, MCP agent tools, encrypted credential store, and structured logging.
@@ -196,7 +208,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.3.1
 [0.3.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.3.0
 [0.2.8]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.8
 [0.2.7]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.7
