@@ -38,6 +38,26 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true # pre-existing assets (422 already_exists) must not strand the npm publish
+
+      - name: Verify release assets
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.assets[].name' | sort > /tmp/asset_names.txt
+          EXPECTED="checksums.txt
+          nyx_${TAG#v}_darwin_amd64.tar.gz
+          nyx_${TAG#v}_darwin_arm64.tar.gz
+          nyx_${TAG#v}_linux_amd64.tar.gz
+          nyx_${TAG#v}_linux_arm64.tar.gz
+          nyx_${TAG#v}_windows_amd64.zip
+          nyx_${TAG#v}_windows_arm64.zip"
+          printf '%s\n' "$EXPECTED" | sort > /tmp/expected.txt
+          if ! diff -u /tmp/expected.txt /tmp/asset_names.txt; then
+            echo "release is missing assets (or has unexpected extras) — refusing to publish npm" >&2
+            exit 1
+          fi
+          echo "all 7 expected assets present"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
