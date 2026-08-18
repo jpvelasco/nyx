@@ -41,6 +41,8 @@ jobs:
         continue-on-error: true # pre-existing assets (422 already_exists) must not strand the npm publish
 
       - name: Verify release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
