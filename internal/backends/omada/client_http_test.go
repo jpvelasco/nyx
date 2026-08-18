@@ -3,12 +3,15 @@ package omada
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
 const testInfoResponse = `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true,"omadacCategory":"advanced"}}`
@@ -19,7 +22,7 @@ func newTestClient(t *testing.T, h http.HandlerFunc) (*Client, *httptest.Server)
 	t.Helper()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/info" {
-			w.Write([]byte(testInfoResponse))
+			testutil.WriteBody(w, testInfoResponse)
 			return
 		}
 		h(w, r)
@@ -35,8 +38,8 @@ func newTestClient(t *testing.T, h http.HandlerFunc) (*Client, *httptest.Server)
 	return c, ts
 }
 
-func writeEnvelope(w http.ResponseWriter, errorCode int, msg, result string) {
-	w.Write([]byte(`{"errorCode":` + strconv.Itoa(errorCode) + `,"msg":"` + msg + `","result":` + result + `}`))
+func writeEnvelope(w io.Writer, errorCode int, msg, result string) {
+	testutil.WriteBody(w, `{"errorCode":`+strconv.Itoa(errorCode)+`,"msg":"`+msg+`","result":`+result+`}`)
 }
 
 func TestNewClientInfoErrors(t *testing.T) {
@@ -53,7 +56,7 @@ func TestNewClientInfoErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Write([]byte(tc.infoBody))
+				testutil.WriteBody(w, tc.infoBody)
 			}))
 			defer ts.Close()
 			_, err := NewClient(context.Background(), ts.URL, true, "")
@@ -76,7 +79,7 @@ func TestNewClientFetchFailure(t *testing.T) {
 
 func TestNewClientNormalisesHost(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(testInfoResponse))
+		testutil.WriteBody(w, testInfoResponse)
 	}))
 	defer ts.Close()
 	host := strings.TrimPrefix(ts.URL, "https://")
@@ -274,7 +277,7 @@ func TestDoRequestUnauthorized(t *testing.T) {
 
 func TestDoRequestBadJSON(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{not json`))
+		testutil.WriteBody(w, `{not json`)
 	}))
 	err := c.get(context.Background(), "sites?currentPage=1&currentPageSize=100", nil)
 	if err == nil || !strings.Contains(err.Error(), "decoding response") {

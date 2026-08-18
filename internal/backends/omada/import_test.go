@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
 func TestInferZone(t *testing.T) {
@@ -245,7 +246,7 @@ func TestImportSpecEndToEnd(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/api/info":
-			w.Write([]byte(testInfoResponse))
+			testutil.WriteBody(w, testInfoResponse)
 		case "/abc123/api/v2/login":
 			writeEnvelope(w, 0, "", `{"token":"t1"}`)
 		case "/abc123/api/v2/logout":
@@ -369,7 +370,7 @@ func TestImportSpecErrors(t *testing.T) {
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/api/info":
-				w.Write([]byte(testInfoResponse))
+				testutil.WriteBody(w, testInfoResponse)
 			case "/abc123/api/v2/login":
 				writeEnvelope(w, -30109, "bad", "null")
 			default:
@@ -387,7 +388,7 @@ func TestImportSpecErrors(t *testing.T) {
 		ts := serverResponding(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/api/info":
-				w.Write([]byte(testInfoResponse))
+				testutil.WriteBody(w, testInfoResponse)
 			case "/abc123/api/v2/login":
 				writeEnvelope(w, 0, "", `{"token":"t"}`)
 			case "/abc123/api/v2/sites":
@@ -405,7 +406,7 @@ func TestImportSpecErrors(t *testing.T) {
 		ts := serverResponding(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/api/info":
-				w.Write([]byte(testInfoResponse))
+				testutil.WriteBody(w, testInfoResponse)
 			case "/abc123/api/v2/login":
 				writeEnvelope(w, 0, "", `{"token":"t"}`)
 			case "/abc123/api/v2/sites":
@@ -425,7 +426,7 @@ func TestImportSpecErrors(t *testing.T) {
 		ts := serverResponding(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/api/info":
-				w.Write([]byte(testInfoResponse))
+				testutil.WriteBody(w, testInfoResponse)
 			case "/abc123/api/v2/login":
 				writeEnvelope(w, 0, "", `{"token":"t"}`)
 			case "/abc123/api/v2/sites":
@@ -448,7 +449,7 @@ func TestImportSpecWarnings(t *testing.T) {
 	ts := serverResponding(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/info":
-			w.Write([]byte(testInfoResponse))
+			testutil.WriteBody(w, testInfoResponse)
 		case "/abc123/api/v2/login":
 			writeEnvelope(w, 0, "", `{"token":"t"}`)
 		case "/abc123/api/v2/logout":
@@ -503,7 +504,7 @@ func TestImportSpecGatewayACLDisabledWarning(t *testing.T) {
 	ts := serverResponding(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/info":
-			w.Write([]byte(testInfoResponse))
+			testutil.WriteBody(w, testInfoResponse)
 		case "/abc123/api/v2/login":
 			writeEnvelope(w, 0, "", `{"token":"t"}`)
 		case "/abc123/api/v2/logout":

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jpvelasco/nyx/internal/intent"
 	providers "github.com/jpvelasco/nyx/internal/providers"
+	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
 // TestParseAPIResponse tests parsing API response
@@ -71,7 +72,7 @@ func TestProviderInfo(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte(firmwareJSON))
+			testutil.WriteBody(w, firmwareJSON)
 		}))
 		defer ts.Close()
 
@@ -112,24 +113,24 @@ func opnsenseServer(t *testing.T, leases string) *httptest.Server {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/core/firmware/running":
-			w.Write([]byte(firmwareJSON))
+			testutil.WriteBody(w, firmwareJSON)
 		case "/api/interfaces/overview/interfaces_info":
-			w.Write([]byte(`{"interfaces":{
+			testutil.WriteBody(w, `{"interfaces":{
 				"lan":{"description":"LAN","dhcp":false,"ipv4":"10.0.0.1/24","ipv4_gateway":"10.0.0.254"},
 				"wan":{"description":"WAN","dhcp":true,"ipv4":"203.0.113.1/24","ipv4_gateway":"203.0.113.254"},
 				"no-ip":{"description":"","dhcp":false,"ipv4":"","ipv4_gateway":""},
 				"bad-cidr":{"description":"","dhcp":false,"ipv4":"999.1.1.1/99","ipv4_gateway":""}
-			}}`))
+			}}`)
 		case "/api/firewall/filter/searchRule":
-			w.Write([]byte(`{"total":5,"rows":[
+			testutil.WriteBody(w, `{"total":5,"rows":[
 				{"uuid":"u1","enabled":"1","action":"block","description":"Deny LAN to IOT","interface":["lan"],"source_net":"10.0.0.5","destination_net":"203.0.113.9"},
 				{"uuid":"u2","enabled":"1","action":"reject","interface":["lan"],"source_net":"10.0.0.6","destination_net":"203.0.113.10"},
 				{"uuid":"u3","enabled":"1","action":"pass","description":"allow dns","interface":["lan"],"source_net":"any","destination_net":"any"},
 				{"uuid":"u4","enabled":"0","action":"block","interface":["lan"],"source_net":"10.0.0.7","destination_net":"203.0.113.11"},
 				{"uuid":"u5","enabled":"1","action":"block","description":"unresolvable endpoints","interface":["lan"],"source_net":"any","destination_net":"203.0.113.9"}
-			]}`))
+			]}`)
 		case "/api/dhcpd/leases":
-			w.Write([]byte(leases))
+			testutil.WriteBody(w, leases)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -216,7 +217,7 @@ func TestProviderImportSpec(t *testing.T) {
 	t.Run("interfaces fail", func(t *testing.T) {
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/api/core/firmware/running" {
-				w.Write([]byte(firmwareJSON))
+				testutil.WriteBody(w, firmwareJSON)
 				return
 			}
 			w.WriteHeader(http.StatusInternalServerError)
@@ -235,9 +236,9 @@ func TestProviderImportSpec(t *testing.T) {
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/api/core/firmware/running":
-				w.Write([]byte(firmwareJSON))
+				testutil.WriteBody(w, firmwareJSON)
 			case "/api/interfaces/overview/interfaces_info":
-				w.Write([]byte(`{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`))
+				testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`)
 			case "/api/firewall/filter/searchRule":
 				w.WriteHeader(http.StatusInternalServerError)
 			default:
@@ -256,11 +257,11 @@ func TestProviderImportSpec(t *testing.T) {
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/api/core/firmware/running":
-				w.Write([]byte(firmwareJSON))
+				testutil.WriteBody(w, firmwareJSON)
 			case "/api/interfaces/overview/interfaces_info":
-				w.Write([]byte(`{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`))
+				testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`)
 			case "/api/firewall/filter/searchRule":
-				w.Write([]byte(`{"total":0,"rows":[]}`))
+				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
 			case "/api/dhcpd/leases":
 				w.WriteHeader(http.StatusInternalServerError)
 			default:
@@ -283,13 +284,13 @@ func TestProviderCheck(t *testing.T) {
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/api/core/firmware/running":
-				w.Write([]byte(firmwareJSON))
+				testutil.WriteBody(w, firmwareJSON)
 			case "/api/interfaces/overview/interfaces_info":
-				w.Write([]byte(`{"interfaces":{}}`))
+				testutil.WriteBody(w, `{"interfaces":{}}`)
 			case "/api/firewall/filter/searchRule":
-				w.Write([]byte(`{"total":0,"rows":[]}`))
+				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
 			case "/api/dhcpd/leases":
-				w.Write([]byte(`{"leases":[]}`))
+				testutil.WriteBody(w, `{"leases":[]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}

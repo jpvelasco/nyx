@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
 // opnsenseTestServer spins up a TLS test server that asserts the basic-auth
@@ -16,7 +18,7 @@ func opnsenseTestServer(t *testing.T, h http.HandlerFunc) *httptest.Server {
 		user, pass, ok := r.BasicAuth()
 		if !ok || user != "key1" || pass != "secret1" {
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"message":"auth required"}`))
+			testutil.WriteBody(w, `{"message":"auth required"}`)
 			return
 		}
 		h(w, r)
@@ -34,7 +36,7 @@ func TestOpnsenseServiceInfo(t *testing.T) {
 		if r.URL.Path != "/api/core/firmware/running" {
 			t.Errorf("path = %s, want /api/core/firmware/running", r.URL.Path)
 		}
-		w.Write([]byte(`{"product_version":"24.7.11","product_name":"OPNsense","product_arch":"amd64"}`))
+		testutil.WriteBody(w, `{"product_version":"24.7.11","product_name":"OPNsense","product_arch":"amd64"}`)
 	})
 
 	info, err := NewOpnsenseService().Info(context.Background(), opnsenseOptions(ts))
@@ -49,7 +51,7 @@ func TestOpnsenseServiceInfo(t *testing.T) {
 func TestOpnsenseServiceInfo_BadCredentials(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{}`))
+		testutil.WriteBody(w, `{}`)
 	}))
 	t.Cleanup(ts.Close)
 
@@ -69,10 +71,10 @@ func TestOpnsenseServiceListInterfaces(t *testing.T) {
 		if r.URL.Path != "/api/interfaces/overview/interfaces_info" {
 			t.Errorf("path = %s, want interfaces_info", r.URL.Path)
 		}
-		w.Write([]byte(`{"interfaces":{
+		testutil.WriteBody(w, `{"interfaces":{
 			"opt2": {"description":"IoT","dhcp":false,"ipv4":"10.0.20.1/24","ipv4_gateway":"10.0.20.1"},
 			"lan": {"description":"LAN","dhcp":true,"ipv4":"10.0.10.1/24","ipv4_gateway":"10.0.10.1"}
-		}}`))
+		}}`)
 	})
 
 	ifaces, err := NewOpnsenseService().ListInterfaces(context.Background(), opnsenseOptions(ts))
@@ -96,10 +98,10 @@ func TestOpnsenseServiceListFirewallRules(t *testing.T) {
 		if r.URL.Path != "/api/firewall/filter/searchRule" {
 			t.Errorf("path = %s, want searchRule", r.URL.Path)
 		}
-		w.Write([]byte(`{"total":2,"rows":[
+		testutil.WriteBody(w, `{"total":2,"rows":[
 			{"uuid":"u1","enabled":"1","action":"block","interface":["lan"],"protocol":"tcp","source_net":"10.0.20.0/24","destination_net":"10.0.10.0/24","description":"Block IoT"},
 			{"uuid":"u2","enabled":"0","action":"pass","interface":["lan","wan"],"protocol":"any","source_net":"any","destination_net":"any","description":""}
-		]}`))
+		]}`)
 	})
 
 	rules, err := NewOpnsenseService().ListFirewallRules(context.Background(), opnsenseOptions(ts))
@@ -131,10 +133,10 @@ func TestOpnsenseServiceListClients(t *testing.T) {
 					t.Errorf("path = %s, want dhcpd/leases", r.URL.Path)
 				}
 				if shape == "leases" {
-					w.Write([]byte(`{"leases":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","hostname":"nas"}]}`))
+					testutil.WriteBody(w, `{"leases":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","hostname":"nas"}]}`)
 					return
 				}
-				w.Write([]byte(`{"rows":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","hostname":"nas"}]}`))
+				testutil.WriteBody(w, `{"rows":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","hostname":"nas"}]}`)
 			})
 
 			clients, err := NewOpnsenseService().ListClients(context.Background(), opnsenseOptions(ts))
@@ -161,7 +163,7 @@ func TestOpnsenseService_StatusErrors(t *testing.T) {
 
 func TestOpnsenseService_DecodeError(t *testing.T) {
 	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`not-json`))
+		testutil.WriteBody(w, `not-json`)
 	})
 
 	_, err := NewOpnsenseService().ListInterfaces(context.Background(), opnsenseOptions(ts))
