@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-18
+
+**Patch release.** No user-facing behavior changes.
+
+### Fixed
+
+- **npm install reliability.** Corrected the binary checksums shipped with the `nyx-audit-cli` npm package so `npm install -g nyx-audit-cli` completes cleanly across all platforms.
+
 ## [0.3.1] - 2026-08-18
 
 **Patch release.** Release-pipeline fix only; no user-facing behavior changes from 0.3.0.
