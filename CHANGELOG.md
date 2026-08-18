@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-18
+
+**Feature release.** Omada 6.x workflow, MCP agent tools, encrypted credential store, and structured logging.
+
+### New Features
+
+- **Omada 6.x unified ACL API.** The Omada client now speaks the 6.x unified ACL endpoint — reads via the required `type` query (`0` gateway, `1` switch, `2` EAP) and the full switch-ACL write surface (`CreateACLRule`, `UpdateACLRule`, `DeleteACLRule`), with decoding aligned to the live 6.x wire.
+- **Omada network inventory + `acl_check` enforcement.** `omada import` builds a baseline spec from live inventory; `acl_check` assertions verify enforcement against the controller.
+- **`omada_apply_acl` MCP tool.** The single mutation surface — `create` or `enable`, idempotent (matches existing rules by from/to network names), dry-run by default, with a built-in post-apply isolation audit of the changed endpoints.
+- **`omada_plan` MCP tool.** Read-only ACL diff preview — previews what `omada_apply_acl` would change without touching the controller.
+- **MCP observation tools.** Read-only tools for both providers: Omada (networks, ACLs, clients, info), OPNsense (info, interfaces, firewall rules, DHCP clients).
+- **`nyx omada-clients` inventory CLI.** Groups live Omada clients for review before import.
+- **Encrypted-at-rest credential store.** New credential store with CLI commands; sibling key path is constrained.
+- **Structured logging.** slog-based structured logging with per-run trace IDs.
+- **Typed probe errors + doctor checks.** SSH handshake failures return typed, actionable errors (`HostKeyError`, `AuthError`, `TransportError`), and `nyx doctor --spec` / MCP `run_doctor` emit a per-probe reachability check.
+
+### Changed
+
+- **Naming and PII boundary.** Canonical generic naming vocabulary and PII boundary rules documented; all machine-specific data removed from tests, docs, and examples.
+- **Agent-loop docs.** The observe → import → plan → apply → re-audit workflow and its safety rails are now documented.
+- **CI hardened to fleet standard.** 3-OS test/build matrix with `-race`, Codacy blocking on findings, Codecov upload via OIDC, macOS legs on PRs, gosec/Trivy/CodeQL/Socket/vuln gates.
+
+### Fixed
+
+- **`nyx init` / OPNsense import default to polite scan mode.**
+- **Isolation verdicts require the runner inside the source zone.** Local (non-probe) isolation results are only definitive from the source zone; otherwise the engine emits "unverifiable"/"unconfirmed" instead of a hard violation. Closed-port and partial-scan semantics corrected.
+- **Exit-code contract across CLI and MCP.** All commands now honor the documented exit codes (0 pass, 1 fail, 2 execution error, 3 warnings).
+- **`nyx init` real host counts + virtual adapter skip.** Discovery reads real host counts and skips virtual/host-only adapters.
+- **DNS backend.** Honors the network parameter and explicit server ports in resolver dial; stable TCP fallback for truncated responses.
+- **Snapshot/drift.** Baseline fallback to the most recent saved snapshot, unique filenames, skip transitions never count as drift improvement or degradation, drift disambiguators populated.
+- **Recommendations engine.** Recommendations now reach JSON output; failures classified by CIDR/IP targets; honors real `Expected` keys with deterministic zones.
+- **Omada client hardening.** Retries with backoff, automatic single re-login on session expiry, concurrency safety, paged fetch caps with page-repeat detection, site-ID resolution for `acl_check`.
+- **Windows probe/doctor.** SSH agent named pipe, locale-independent ping, no-home doctor panic fixed.
+- **OPNsense client.** Real API endpoints, error surfacing, pagination.
+- **`network_health` dead-host handling.** Dead hosts fail the assertion instead of erroring the run.
+- **Traceroute hop validation.** Hops without timing samples are rejected.
+
+### Verification
+
+- Focused coverage raised across the codebase: mcp 91.6%, logger 92.5%, nmap 89.2%, health 93.8%, dns 78.4%, cli 81.9%, opnsense provider 98.2%, omada provider 98.6%, omada backend 97.7%, plus probe SSH, seendb, and system backend coverage; audit integration scan targets shrunk to keep the suite under ~2 minutes.
+
+### Other
+
+- Go toolchain bumped to 1.25.13 (stdlib CVEs), CI action dependency bumps, and `internal/backends/batfish` documented as an unwired v2 placeholder.
+- Test-only: `httptest` fixture writes consolidated into a single `testutil.WriteBody` helper.
+
 ## [0.2.8] - 2026-06-18
 
 **Patch release.** Improves first-run experience by clarifying that nyx never needs sudo/root, and by surfacing an actionable error when `audit` is run against a spec file that doesn't exist yet.
@@ -150,7 +196,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.2.8...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.3.0
 [0.2.8]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.8
 [0.2.7]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.7
 [0.2.6]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.6
