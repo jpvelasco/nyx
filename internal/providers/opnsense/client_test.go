@@ -2,6 +2,7 @@ package opnsense
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,7 +22,7 @@ func newTestClient(t *testing.T, h http.HandlerFunc) (*Client, *httptest.Server)
 
 func TestNewClientNormalisesHost(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(firmwareJSON))
+		io.WriteString(w, firmwareJSON)
 	}))
 	defer ts.Close()
 	host := strings.TrimPrefix(ts.URL, "https://")
@@ -42,7 +43,7 @@ func TestDoRequest(t *testing.T) {
 			if k, s, ok := r.BasicAuth(); ok {
 				sawKey, sawSecret = k, s
 			}
-			w.Write([]byte(firmwareJSON))
+			io.WriteString(w, firmwareJSON)
 		}))
 		resp, err := c.doRequest(context.Background(), "/core/firmware/running")
 		if err != nil {
@@ -86,7 +87,7 @@ func TestDoRequest(t *testing.T) {
 func TestGetFirmwareInfo(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte(firmwareJSON))
+			io.WriteString(w, firmwareJSON)
 		}))
 		info, err := c.GetFirmwareInfo(context.Background())
 		if err != nil {
@@ -99,7 +100,7 @@ func TestGetFirmwareInfo(t *testing.T) {
 
 	t.Run("bad json", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte(`not json`))
+			io.WriteString(w, `not json`)
 		}))
 		_, err := c.GetFirmwareInfo(context.Background())
 		if err == nil || !strings.Contains(err.Error(), "decoding firmware response") {
@@ -114,11 +115,11 @@ func TestGetInterfaces(t *testing.T) {
 			if r.URL.Path != "/api/interfaces/overview/interfaces_info" {
 				t.Errorf("path = %q, want /api/interfaces/overview/interfaces_info", r.URL.Path)
 			}
-			w.Write([]byte(`{"interfaces":{
+			io.WriteString(w, `{"interfaces":{
 				"lan":{"description":"LAN","dhcp":false,"ipv4":"10.0.0.1/24","ipv4_gateway":"10.0.0.254"},
 				"wan":{"description":"WAN","dhcp":true,"ipv4":"203.0.113.1/24","ipv4_gateway":"203.0.113.254"},
 				"no-ip":{"description":"","dhcp":false,"ipv4":"","ipv4_gateway":""}
-			}}`))
+			}}`)
 		}))
 		ifaces, err := c.GetInterfaces(context.Background())
 		if err != nil {
@@ -141,7 +142,7 @@ func TestGetInterfaces(t *testing.T) {
 
 	t.Run("bad json", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte(`not json`))
+			io.WriteString(w, `not json`)
 		}))
 		_, err := c.GetInterfaces(context.Background())
 		if err == nil || !strings.Contains(err.Error(), "decoding interfaces response") {
@@ -156,11 +157,11 @@ func TestGetFirewallRules(t *testing.T) {
 			if r.URL.Path != "/api/firewall/filter/searchRule" {
 				t.Errorf("path = %q, want /api/firewall/filter/searchRule", r.URL.Path)
 			}
-			w.Write([]byte(`{"total":3,"rows":[
+			io.WriteString(w, `{"total":3,"rows":[
 				{"uuid":"u1","enabled":"1","action":"block","description":"deny lan to iot","interface":["lan"],"source_net":"10.0.0.5","destination_net":"203.0.113.9"},
 				{"uuid":"u2","enabled":"1","action":"pass","description":"allow dns","interface":["lan","wan"],"source_net":"any","destination_net":"any"},
 				{"uuid":"u3","enabled":"0","action":"block","description":"disabled rule","interface":["opt1"],"source_net":"10.0.0.7","destination_net":"203.0.113.11"}
-			]}`))
+			]}`)
 		}))
 		rules, err := c.GetFirewallRules(context.Background())
 		if err != nil {
@@ -192,7 +193,7 @@ func TestGetFirewallRules(t *testing.T) {
 
 	t.Run("bad json", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte(`not json`))
+			io.WriteString(w, `not json`)
 		}))
 		_, err := c.GetFirewallRules(context.Background())
 		if err == nil || !strings.Contains(err.Error(), "decoding firewall rules response") {
@@ -207,9 +208,9 @@ func TestGetDHCPLeases(t *testing.T) {
 			if r.URL.Path != "/api/dhcpd/leases" {
 				t.Errorf("path = %q, want /api/dhcpd/leases", r.URL.Path)
 			}
-			w.Write([]byte(`{"total":1,"rows":[
+			io.WriteString(w, `{"total":1,"rows":[
 				{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.0.10","hostname":"laptop"}
-			]}`))
+			]}`)
 		}))
 		leases, err := c.GetDHCPLeases(context.Background())
 		if err != nil {
@@ -222,9 +223,9 @@ func TestGetDHCPLeases(t *testing.T) {
 
 	t.Run("success leases shape", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte(`{"leases":[
+			io.WriteString(w, `{"leases":[
 				{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.0.10","hostname":"laptop"}
-			]}`))
+			]}`)
 		}))
 		leases, err := c.GetDHCPLeases(context.Background())
 		if err != nil {
@@ -237,7 +238,7 @@ func TestGetDHCPLeases(t *testing.T) {
 
 	t.Run("bad json", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte(`not json`))
+			io.WriteString(w, `not json`)
 		}))
 		_, err := c.GetDHCPLeases(context.Background())
 		if err == nil || !strings.Contains(err.Error(), "decoding DHCP leases response") {

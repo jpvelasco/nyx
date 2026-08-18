@@ -53,7 +53,7 @@ func TestParseAPIResponse(t *testing.T) {
 }
 
 func writeEnvelope(w http.ResponseWriter, errorCode int, msg, result string) {
-	w.Write([]byte(`{"errorCode":` + itoa(errorCode) + `,"msg":"` + msg + `","result":` + result + `}`))
+	io.WriteString(w, `{"errorCode":`+itoa(errorCode)+`,"msg":"`+msg+`","result":`+result+`}`)
 }
 
 func readReqBody(t *testing.T, r *http.Request) string {
@@ -77,7 +77,7 @@ func omadaServer(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/info" {
-			w.Write([]byte(infoJSON))
+			io.WriteString(w, infoJSON)
 			return
 		}
 		h(w, r)

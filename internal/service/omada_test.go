@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -24,7 +25,7 @@ func omadaTestServer(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/info" {
-			w.Write([]byte(omadaTestInfo))
+			io.WriteString(w, omadaTestInfo)
 			return
 		}
 		h(w, r)
@@ -34,8 +35,7 @@ func omadaTestServer(t *testing.T, h http.HandlerFunc) *httptest.Server {
 }
 
 func writeOmadaEnvelope(w http.ResponseWriter, errorCode int, result string) {
-	// Codacy false positive: this test-only JSON fixture receives only test-controlled payloads.
-	w.Write([]byte(`{"errorCode":` + strconv.Itoa(errorCode) + `,"msg":"","result":` + result + `}`)) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+	io.WriteString(w, `{"errorCode":`+strconv.Itoa(errorCode)+`,"msg":"","result":`+result+`}`)
 }
 
 func TestOmadaServiceInventory(t *testing.T) {

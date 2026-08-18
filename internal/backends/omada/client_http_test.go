@@ -3,6 +3,7 @@ package omada
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -19,7 +20,7 @@ func newTestClient(t *testing.T, h http.HandlerFunc) (*Client, *httptest.Server)
 	t.Helper()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/info" {
-			w.Write([]byte(testInfoResponse))
+			io.WriteString(w, testInfoResponse)
 			return
 		}
 		h(w, r)
@@ -36,7 +37,7 @@ func newTestClient(t *testing.T, h http.HandlerFunc) (*Client, *httptest.Server)
 }
 
 func writeEnvelope(w http.ResponseWriter, errorCode int, msg, result string) {
-	w.Write([]byte(`{"errorCode":` + strconv.Itoa(errorCode) + `,"msg":"` + msg + `","result":` + result + `}`))
+	io.WriteString(w, `{"errorCode":`+strconv.Itoa(errorCode)+`,"msg":"`+msg+`","result":`+result+`}`)
 }
 
 func TestNewClientInfoErrors(t *testing.T) {
@@ -53,7 +54,7 @@ func TestNewClientInfoErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Write([]byte(tc.infoBody))
+				io.WriteString(w, tc.infoBody)
 			}))
 			defer ts.Close()
 			_, err := NewClient(context.Background(), ts.URL, true, "")
@@ -76,7 +77,7 @@ func TestNewClientFetchFailure(t *testing.T) {
 
 func TestNewClientNormalisesHost(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(testInfoResponse))
+		io.WriteString(w, testInfoResponse)
 	}))
 	defer ts.Close()
 	host := strings.TrimPrefix(ts.URL, "https://")
@@ -274,7 +275,7 @@ func TestDoRequestUnauthorized(t *testing.T) {
 
 func TestDoRequestBadJSON(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{not json`))
+		io.WriteString(w, `{not json`)
 	}))
 	err := c.get(context.Background(), "sites?currentPage=1&currentPageSize=100", nil)
 	if err == nil || !strings.Contains(err.Error(), "decoding response") {
