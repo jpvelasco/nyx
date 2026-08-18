@@ -60,6 +60,13 @@ jobs:
             exit 1
           fi
           echo "all 7 expected assets present"
+          # Embed from the published asset, not the local rebuild: on a re-run
+          # GoReleaser rebuilds archives with different bytes (mtime-embedded)
+          # while the release keeps the first run's assets, so dist/ drifts.
+          URL="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            --jq '.assets[] | select(.name=="checksums.txt") | .browser_download_url')"
+          curl -fsSL "$URL" -o dist/checksums.txt
+          echo "embedded checksums synced to published asset"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
