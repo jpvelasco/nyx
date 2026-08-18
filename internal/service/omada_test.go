@@ -15,6 +15,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/models"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 	omadaprovider "github.com/jpvelasco/nyx/internal/providers/omada"
+	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
 const omadaTestInfo = `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true,"omadacCategory":"advanced"}}`
@@ -25,7 +26,7 @@ func omadaTestServer(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/info" {
-			io.WriteString(w, omadaTestInfo)
+			testutil.WriteBody(w, omadaTestInfo)
 			return
 		}
 		h(w, r)
@@ -34,8 +35,8 @@ func omadaTestServer(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	return ts
 }
 
-func writeOmadaEnvelope(w http.ResponseWriter, errorCode int, result string) {
-	io.WriteString(w, `{"errorCode":`+strconv.Itoa(errorCode)+`,"msg":"","result":`+result+`}`)
+func writeOmadaEnvelope(w io.Writer, errorCode int, result string) {
+	testutil.WriteBody(w, `{"errorCode":`+strconv.Itoa(errorCode)+`,"msg":"","result":`+result+`}`)
 }
 
 func TestOmadaServiceInventory(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 
 	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
 	providers "github.com/jpvelasco/nyx/internal/providers"
+	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
 const infoJSON = `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true,"omadacCategory":"advanced"}}`
@@ -52,8 +53,8 @@ func TestParseAPIResponse(t *testing.T) {
 	}
 }
 
-func writeEnvelope(w http.ResponseWriter, errorCode int, msg, result string) {
-	io.WriteString(w, `{"errorCode":`+itoa(errorCode)+`,"msg":"`+msg+`","result":`+result+`}`)
+func writeEnvelope(w io.Writer, errorCode int, msg, result string) {
+	testutil.WriteBody(w, `{"errorCode":`+itoa(errorCode)+`,"msg":"`+msg+`","result":`+result+`}`)
 }
 
 func readReqBody(t *testing.T, r *http.Request) string {
@@ -77,7 +78,7 @@ func omadaServer(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/info" {
-			io.WriteString(w, infoJSON)
+			testutil.WriteBody(w, infoJSON)
 			return
 		}
 		h(w, r)
