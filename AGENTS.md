@@ -110,6 +110,8 @@ The `nmap` backend spawns `nmap` as a subprocess. Tests in `backends/nmap` call 
 
 ## Omada Backend
 
+The official Omada Open API (`/openapi/v1`) research notes — endpoints, auth, the gateway-ACL scope flag dead end, and the TLS renegotiation quirk — are in `docs/omada-openapi.md`.
+
 - The HTTP client (`internal/backends/omada`) is **concurrency-safe**: requests are serialised through an internal mutex. It retries transient failures (network errors, HTTP 5xx) with exponential backoff (3 retries, 500ms base capped at 5s) and, on a session-expired response, performs a **single automatic re-login** using the credentials from the last successful `Login` before retrying the request.
 - `Login` retains the username/password in memory for automatic session refresh; `Logout` clears them. Credentials are **never** written to logs, evidence, or recommendations.
 - Optional structured operation logging (login, re-login, session expiry, retries) via `Client.SetLogger(*logger.Logger)`; wired from the CLI through `providers.ImportOptions.Logger`. Log fields never include credentials, hostnames, or IP addresses.
