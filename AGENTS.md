@@ -25,19 +25,21 @@ Local (Windows) gotchas:
 - `-race` cannot run locally (no C compiler/cgo). CI runs `-race` on all 3 OS legs; do not treat local non-race runs as full coverage.
 - The `gh` CLI token in the Windows keyring expires periodically (HTTP 401 on API calls) — restore with `gh auth login`, then continue.
 
-CI runs a matrix of jobs: `lint` (golangci-lint v2), `vuln` (govulncheck — a hard gate; stdlib vulnerabilities fail the check and require a `go.mod` toolchain bump), `build` (3-OS matrix), `test` (race + coverage + Codecov upload, 3-OS matrix — protect-main requires `Test (macos-latest)`), `goreleaser` (snapshot build + smoke test), `lint-windows`, `gosec`, and `trivy`. A separate `codacy-coverage.yml` workflow uploads coverage to Codacy via trusted handoff. CodeQL and Socket run on push/PR.
+CI (`.github/workflows/ci.yml`) jobs: `Lint`, `Lint (Windows)`, `Vulnerability scan` (govulncheck — a hard gate; stdlib vulnerabilities fail the check and require a `go.mod` toolchain bump), `Build` (3-OS matrix), `Test` (3-OS, `-race`, per-OS coverage uploads that Codecov merges; branch protection requires the macOS leg), `gosec`, and `Trivy`. There is no goreleaser snapshot job anymore. The `Test` job saves coverage as an artifact; `codacy-coverage.yml` (a `workflow_run` trusted handoff — PR jobs never receive the Codacy token) downloads and uploads it. CodeQL and Socket run on push/PR; an external Octopus Review bot posts AI review comments on PRs (`octopus.yml`).
 
 `.golangci.yml` enables only `govet`, `ineffassign`, `staticcheck`, `unused`, `misspell` (+ `gofmt` formatter) — revive is intentionally disabled to avoid pre-existing style churn.
 
 ### Release flow
 
-Release workflow (`.github/workflows/release.yml`) runs GoReleaser. Tag `vX.Y.Z` or use `workflow_dispatch` with the version input. The workflow builds all 6 binaries, generates SHA-256 checksums, extracts release notes from `CHANGELOG.md`, and creates the GitHub Release with attached artifacts. The npm package `nyx-audit-cli` (`npm/`) is a thin platform-aware wrapper that downloads the matching prebuilt binary from the GitHub Release on `postinstall`.
+Release workflow (`.github/workflows/release.yml`) runs GoReleaser, then **verifies all 7 release assets exist** (6 platform archives + `checksums.txt`) before continuing. npm publish is decoupled from GoReleaser's exit code, so a benign `422 already_exists` on pre-existing assets cannot strand it. `scripts/embed-checksums.js` embeds the published checksums into `npm/package.json`, then the workflow publishes `nyx-audit-cli` through CI with SLSA provenance — never publish manually; a manual publish lacks provenance and must be unpublished and re-cut through CI.
 
-Coverage data is uploaded to Codecov via OIDC (no token) after tests in CI.
+Coverage data is uploaded to Codecov via OIDC (no token) after tests in CI; per-OS uploads are merged by Codecov.
 
-**codecov/patch target is 90%** and CI runners have no nmap. Production code exercised only through nmap-gated tests (e.g. `internal/audit` virtual-adapter helpers) shows as uncovered on CI — add focused unit tests that run on every platform.
+The npm package `nyx-audit-cli` (`npm/`) is a thin platform-aware wrapper: `postinstall` (`npm/install.js`) downloads the matching prebuilt binary from the GitHub Release and verifies it against the embedded checksums.
 
-PRs do not edit `CHANGELOG.md`; it is populated only at release time.
+**Codecov is a soft gate** (`codecov.yml`): project target auto with 1% threshold, patch target 90% — intentionally kept OUT of required checks so App lag/outage can't deadlock merges. CI runners have no nmap. Production code exercised only through nmap-gated tests (e.g. `internal/audit` virtual-adapter helpers) shows as uncovered on CI — add focused unit tests that run on every platform.
+
+Feature PRs do not edit `CHANGELOG.md`; it is populated only at release time (release-prep PRs add the entry).
 
 ## Codacy CLI (codacy-cli-v2)
 
@@ -60,7 +62,7 @@ Token only needed for `init` / `config reset` / remote-ruleset pulls; local anal
 
 ## Entrypoint
 
-`cmd/nyx/main.go` calls `cli.Execute()`. If it returns an error, `os.Exit(2)`. Exit code 1 is set inside the audit command when status is `StatusFail`.
+`cmd/nyx/main.go` calls `cli.Execute()`. If it returns an error, `os.Exit(2)`. Commands map check status to exit code centrally via `ExitError` (`internal/cli/exit.go`: fail→1, error→2, warn→3) after rendering, so deferred cleanup still runs.
 
 Audit flow: `YAML spec → intent.LoadSpec → audit.Engine.Run → []CheckResult → report.Render`.
 
@@ -74,11 +76,17 @@ New providers require **two changes**:
 
 Omitting the blank import means the provider is silently absent at runtime.
 
-Provider-specific CLI commands (`nyx <vendor> info|import|check`) are built dynamically from the provider's `Capabilities()` — no separate CLI wiring needed.
+Provider-specific CLI commands (`nyx <vendor> info|import|check|inventory`) are built dynamically from the provider's `Capabilities()` — no separate CLI wiring needed. Providers that can mutate implement the optional `providers.ACLApplier`; read-only inventory is `providers.InventoryProvider` (`nyx omada inventory` shows devices, networks, ACL scopes, clients).
 
 ### OPNsense Provider
 
-Fully implements `Info`, `ImportSpec`, and `Check`. Uses API key/secret auth (not username/password). TLS verification is disabled (self-signed cert). ImportSpec builds networks from interfaces, policies from deny/block/reject firewall rules, and estimates host counts from **Dynamic Host Configuration Protocol (DHCP)** leases only.
+Fully implements `Info`, `ImportSpec`, and `Check`. Uses API key/secret auth (not username/password). TLS verification is **on by default**; opt out per-run with `--skip-tls-verify` (self-signed cert) or pin the controller CA with `--ca-cert <pem>`. ImportSpec builds networks from interfaces, policies from deny/block/reject firewall rules, and estimates host counts from **Dynamic Host Configuration Protocol (DHCP)** leases only.
+
+## Credential Resolution
+
+Provider credentials resolve in order: **flags → env vars → encrypted store** (`credentials.Overlay`). The store lives at `~/.nyx/credentials.json` (override with `NYX_CREDENTIALS_FILE`) as entry `<provider>/default`, managed by `nyx credentials set|list|remove|verify` (`internal/cli/credentials.go`, package `internal/credentials`). Store read failures are silently ignored — callers just see missing credentials.
+
+Security posture (per the package doc): entries are AES-256-GCM encrypted, but the 32-byte key sits **beside the ciphertext** (`<path>.key`) — this protects against casual/plaintext exposure, NOT against a local attacker who reads the key file or backups containing it. The OS keyring is the planned hardening path. Values are never printed, logged, or written into specs/evidence; `list` shows names only.
 
 ## Assertion Timeouts
 
@@ -105,8 +113,8 @@ The `nmap` backend spawns `nmap` as a subprocess. Tests in `backends/nmap` call 
 - The HTTP client (`internal/backends/omada`) is **concurrency-safe**: requests are serialised through an internal mutex. It retries transient failures (network errors, HTTP 5xx) with exponential backoff (3 retries, 500ms base capped at 5s) and, on a session-expired response, performs a **single automatic re-login** using the credentials from the last successful `Login` before retrying the request.
 - `Login` retains the username/password in memory for automatic session refresh; `Logout` clears them. Credentials are **never** written to logs, evidence, or recommendations.
 - Optional structured operation logging (login, re-login, session expiry, retries) via `Client.SetLogger(*logger.Logger)`; wired from the CLI through `providers.ImportOptions.Logger`. Log fields never include credentials, hostnames, or IP addresses.
-- `acl_check` assertions read Omada credentials from env vars (`OMADA_HOST`, `OMADA_USERNAME`, `OMADA_PASSWORD`, `OMADA_SITE`), not from spec or flags.
-- TLS verification is intentionally disabled (self-signed cert).
+- `acl_check` assertions resolve Omada credentials from env vars (`OMADA_HOST`, `OMADA_USERNAME`, `OMADA_PASSWORD`, `OMADA_SITE`), falling back to the encrypted credential store (see Credential Resolution) — never from the spec.
+- TLS verification is **on by default** (`buildTLSConfig`: system CA pool). Opt out per-run with `--skip-tls-verify` (self-signed cert, like `curl -k`) or pin the controller CA with `--ca-cert <pem>`; `nyx audit` accepts the same flags for controller checks.
 - The client has a **write surface** for switch ACLs on the unified 6.x endpoint: `CreateACLRule` (POST `setting/firewall/acls`), `UpdateACLRule` (PUT `setting/firewall/acls/<id>` with the full writable payload), and `DeleteACLRule` (DELETE). Reads use the same path with a required `type` query (`0` gateway, `1` switch, `2` EAP). The Omada provider implements the optional `providers.ACLApplier` interface; the service looks it up with a type-assertion safety rail (`provider "omada" does not implement ACL mutation` if absent).
 - `omada_apply_acl` supports **N-to-M / many-to-many** in one call: multiple `from` and `to` network names per request. It is **idempotent** with **cover-match per scope** — a rule matches when every requested source/destination is a member of the rule's endpoint set (IDs first, resolved names case-insensitive as fallback) — with outcomes `created`/`enabled`/`unchanged` (covering same-action rule already on → `unchanged`, off → `enabled`). A covering rule with a **different action is a conflict** and errors out, pointing to `omada_plan`. Protocols are normalized: empty ≡ all (256), any set containing 256 ≡ all; exact set match is required for cover-match, so a narrower request against an all-protocols rule creates a new rule. `scope` defaults to `switch`; `eap` is refused with an explicit error (`scope "eap" is not supported; use 'switch' or 'gateway'`). The result carries `scope` and `scope_disabled` (evidence that the controller stores the rule but the scope is disabled, `aclDisable=true`). **Dry-run by default** (MCP layer defaults `dry_run=true`; the service treats `PostAudit` as strict zero-value-false), and follows a real apply with a **targeted isolation audit** — one isolation assertion per source, comma-joined `to` (`post_audit` default true; a post-audit failure is reported, never fatal).
 - MCP `omada_apply_acl` takes `from`/`to` as **comma-separated network-name strings**, optional `scope` (default `switch`) and optional `protocols` comma-list (empty = all); **breaking rename** `from_cidr`→`from_cidrs`, `to_cidr`→`to_cidrs`.
@@ -116,7 +124,7 @@ The `nmap` backend spawns `nmap` as a subprocess. Tests in `backends/nmap` call 
 End-to-end agent workflow: **observe → import → plan → apply (dry-run) → apply → re-audit**.
 
 - `omada_import` produces a baseline spec; `omada_plan` previews ACL diffs (read-only); `omada_apply_acl` is the only mutation surface (N-to-M/many-to-many, `created`/`enabled`/`unchanged`), dry-run by default, with a built-in post-apply isolation audit.
-- The MCP server is the only thing that talks to the controller on the agent's behalf — the controller API is never exposed to agents directly, and credentials stay in env vars, never in spec, flags, tool output, logs, evidence, or recommendations.
+- The MCP server is the only thing that talks to the controller on the agent's behalf — the controller API is never exposed to agents directly, and credentials stay in env vars or the encrypted store, never in spec, tool output, logs, evidence, or recommendations.
 - Do not broaden a mutation after a post-apply audit failure; surface the evidence and let the agent reconcile via `omada_plan`.
 
 ## Probe System
@@ -207,9 +215,12 @@ Version 1 intent spec: `networks`, `vpn`, `probes`, `policies`, `assertions`. Ei
 
 ## Other CLI Commands Worth Knowing
 
+- Every command accepts a global `--timeout` (default 120s); an unparseable value is an error (exit 2), never a silent fallback.
 - `nyx doctor --spec <file>` also validates the spec structure.
 - `nyx interfaces --spec <file>` lists active interfaces with spec network matching.
 - `nyx check-vpn` supports `--expect split-tunnel|full-tunnel`.
+- `nyx verify-isolation --from zone:<name>|<cidr> --to <zone|cidr>` runs one ad-hoc isolation check (`--spec` optional).
+- `nyx credentials set|list|remove|verify` manage the encrypted store (see Credential Resolution).
 
 ## SeenDB (Virtual Network Acknowledgement)
 
@@ -227,13 +238,13 @@ Version 1 intent spec: `networks`, `vpn`, `probes`, `policies`, `assertions`. Ei
 - `system/` — platform-specific system commands (`system_linux.go`, `system_darwin.go`, `system_windows.go`). Only `system.go` is shared.
 - `dns/` — DNS resolution checks, including optional DNSSEC validation. `TestResolve_TruncatedResponse_TCPFallback` retries 50 port binds because Windows runners reserve wide ephemeral port ranges (a 20-attempt version flaked in CI).
 - `health/` — latency, packet loss, and MTU probing.
-- `omada/` — REST client for Omada SDN 6.x (reads + switch-ACL writes). **Concurrency-safe** with retry/backoff and automatic re-login — see the Omada Backend section. TLS verification disabled (self-signed).
+- `omada/` — REST client for Omada SDN 6.x (reads + switch-ACL writes). **Concurrency-safe** with retry/backoff and automatic re-login — see the Omada Backend section. TLS verification on by default; `--skip-tls-verify` / `--ca-cert` opt out.
 - `batfish/` — stub returning `ErrNotImplemented`; `Available()` returns `false`.
 
 ## Other Core Packages
 
 - `internal/models` — the `CheckResult` envelope used by every backend and assertion (Status, Summary, Observed, Expected, Violations, Evidence). Callers must call `result.Finish()` before rendering; `AuditReport` aggregates.
-- `internal/logger` — JSON-lines append logger with rotation, writes to `~/.nyx/nyx.log` (5MB max, 3 rotated files). Best-effort — never fails a command.
+- `internal/logger` — JSON-lines append logger with rotation, writes to `~/.nyx/nyx.log` (5MB max, 3 rotated files), plus an slog handler (`logger.NewSlog`) writing the same file so both pipelines share one audit trail; per-run random trace IDs correlate log lines. Configured via `NYX_LOG_FILE` and `NYX_LOG_LEVEL` (debug|info|warn|error). Best-effort — never fails a command.
 - `internal/report` — `RenderJSON`, `RenderHuman`, `RenderRecommendations` output renderers.
 - `internal/version` — single-source version constant, injected via `-ldflags` at release build time; read by `nyx version` and MCP `serverInfo.Version`.
-- `internal/mcp` — **MCP (Model Context Protocol)** stdio server (`server.go`). All tools return `CheckResult`-shaped JSON consistent with CLI `--json` output. Only stdio transport is implemented; HTTP is stubbed.
+- `internal/mcp` — **MCP (Model Context Protocol)** stdio server (`server.go`). Tools: `discover_subnet`, `check_routes`, `check_vpn`, `verify_isolation`, `run_audit`, `load_spec`, `get_interfaces`, `ping_target`, `run_doctor`, `provider_list`, Omada (`omada_get_info/list_networks/list_acls/list_clients/inventory/import/plan/apply_acl`) and OPNsense observation tools (`opnsense_get_info/list_interfaces/list_firewall_rules/list_clients`). All tools return `CheckResult`-shaped JSON consistent with CLI `--json` output. Only stdio transport is implemented; HTTP is stubbed. Each `tools/call` is bounded by a 5-minute timeout (`toolCallTimeout`).
