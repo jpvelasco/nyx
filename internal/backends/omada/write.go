@@ -22,6 +22,9 @@ type aclRuleWrite struct {
 	DestIDs     []string     `json:"destinationIds"`
 	Direction   ACLDirection `json:"direction,omitempty"`
 	TimeRangeID string       `json:"timeRangeId,omitempty"`
+	// BindingType is required on switch-scope creates: 0 = all ports,
+	// 1 = the customAclPorts list. Nil (omitted) for gateway scope.
+	BindingType *int `json:"bindingType,omitempty"`
 }
 
 func ruleToWrite(rule ACLRule) aclRuleWrite {
@@ -29,7 +32,7 @@ func ruleToWrite(rule ACLRule) aclRuleWrite {
 	if len(protocols) == 0 {
 		protocols = []int{ProtocolAll}
 	}
-	return aclRuleWrite{
+	w := aclRuleWrite{
 		Name:        rule.Name,
 		Type:        rule.Type,
 		Status:      rule.Status,
@@ -42,6 +45,13 @@ func ruleToWrite(rule ACLRule) aclRuleWrite {
 		Direction:   rule.Direction,
 		TimeRangeID: rule.TimeRangeID,
 	}
+	if rule.Type == ACLTypeSwitch {
+		// Switch-scope rules require the bindingType field (0 = all
+		// ports, 1 = custom ports); gateway-scope rules do not carry
+		// it. Fresh rules default to 0; updates preserve the read value.
+		w.BindingType = &rule.BindingType
+	}
+	return w
 }
 
 // CreateACLRule POSTs a rule to the unified ACL collection.

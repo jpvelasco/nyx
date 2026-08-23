@@ -885,14 +885,18 @@ func TestProviderApplyACL(t *testing.T) {
 			t.Errorf("scope = %q disabled %v, want gateway disabled (aclDisable true)", res.Scope, res.ScopeDisabled)
 		}
 		var body struct {
-			Type      int                       `json:"type"`
-			SourceIDs []string                  `json:"sourceIds"`
-			DestIDs   []string                  `json:"destinationIds"`
-			Protocols []int                     `json:"protocols"`
-			Direction omadabackend.ACLDirection `json:"direction"`
+			Type        int                       `json:"type"`
+			SourceIDs   []string                  `json:"sourceIds"`
+			DestIDs     []string                  `json:"destinationIds"`
+			Protocols   []int                     `json:"protocols"`
+			Direction   omadabackend.ACLDirection `json:"direction"`
+			BindingType *int                      `json:"bindingType"`
 		}
 		if err := json.Unmarshal([]byte(gotBody), &body); err != nil {
 			t.Fatalf("request body %q: %v", gotBody, err)
+		}
+		if body.BindingType != nil {
+			t.Errorf("gateway wire body bindingType = %v, want omitted", *body.BindingType)
 		}
 		if body.Type != 0 || !body.Direction.LANToLAN || body.Direction.LANToWAN {
 			t.Errorf("wire = type %v direction %+v, want gateway type 0 lanToLan", body.Type, body.Direction)

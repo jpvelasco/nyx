@@ -79,8 +79,31 @@ func TestCreateACLRule(t *testing.T) {
 	if !strings.Contains(gotBody, `"sourceType":0`) {
 		t.Errorf("body = %q, want sourceType encoded as 0", gotBody)
 	}
+	if !strings.Contains(gotBody, `"bindingType":0`) {
+		t.Errorf("body = %q, want bindingType 0 (all ports) on switch-scope create", gotBody)
+	}
 	if strings.Contains(gotBody, `"srcName"`) || strings.Contains(gotBody, `"sourceName"`) {
 		t.Errorf("body = %q, must not include resolved names", gotBody)
+	}
+}
+
+func TestRuleToWrite_BindingTypePerScope(t *testing.T) {
+	gw := ruleToWrite(ACLRule{Name: "g", Type: ACLTypeGateway})
+	if gw.BindingType != nil {
+		t.Errorf("gateway body bindingType = %v, want omitted (nil)", *gw.BindingType)
+	}
+
+	sw := ruleToWrite(sampleSwitchRule())
+	if sw.BindingType == nil || *sw.BindingType != 0 {
+		t.Errorf("switch create bindingType = %v, want 0 (all ports)", sw.BindingType)
+	}
+
+	// Updates must preserve a non-zero read value (e.g. custom ports).
+	custom := sampleSwitchRule()
+	custom.BindingType = 1
+	got := ruleToWrite(custom)
+	if got.BindingType == nil || *got.BindingType != 1 {
+		t.Errorf("switch update bindingType = %v, want preserved 1", got.BindingType)
 	}
 }
 
