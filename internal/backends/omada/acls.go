@@ -212,6 +212,11 @@ type ACLRule struct {
 	Direction   ACLDirection `json:"direction"`
 	Index       int          `json:"index"`
 	TimeRangeID string       `json:"timeRangeId,omitempty"`
+	// BindingType is switch-scope only (0 = all ports, 1 = custom ports,
+	// 2 = all switch VLAN, 3 = custom switch VLAN). The controller
+	// rejects switch-scope creates that omit it (errorCode -1); it is
+	// absent on gateway-scope rules and reads as 0.
+	BindingType int `json:"bindingType"`
 
 	// Resolved from LAN networks; omitted on the wire.
 	SourceName string `json:"-"`
