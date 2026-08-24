@@ -44,23 +44,23 @@ func TestOmadaServiceInventory(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/openapi/v1/sites/s1/lan-networks":
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettingsVO":{"enable":true}},
 				{"id":"n2","name":"IoT","purpose":"lan","vlan":20,"gatewaySubnet":"10.0.20.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettingsVO":{"enable":false}}]}`)
-		case "/abc123/openapi/v1/sites/s1/networks/devices":
+		case "/openapi/v1/abc123/sites/s1/networks/devices":
 			writeOmadaEnvelope(w, 0, `[
 				{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254","firmwareVersion":"2.2.3","needUpgrade":true},
 				{"id":"d2","name":"SW-2428P","model":"SW-2428P","type":"switch","mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.253"}]`)
-		case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"g1","description":"Trusted Deny","status":true,"policy":0}]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
-		case "/abc123/openapi/v1/sites/s1/networks/client":
+		case "/openapi/v1/abc123/sites/s1/networks/client":
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[{"mac":"aa","name":"PC-01","type":"wired"},{"mac":"bb","name":"PC-02","type":"wired"}]}`)
-		case "/abc123/openapi/v1/sites/s1/setting/service/dhcp/user-list":
+		case "/openapi/v1/abc123/sites/s1/setting/service/dhcp/user-list":
 			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
@@ -161,9 +161,9 @@ func TestOmadaServiceListNetworks(t *testing.T) {
 				t.Errorf("login method = %s, want POST", r.Method)
 			}
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/openapi/v1/sites/s1/lan-networks":
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			// Open API shape: DHCP flag nested under dhcpSettingsVO
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"dhcpSettingsVO":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"},
@@ -200,13 +200,13 @@ func TestOmadaServiceListNetworks_SiteSelection(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
 				{"id":"s1","name":"HQ"},
 				{"id":"s2","name":"Branch"}]}`)
-		case "/abc123/openapi/v1/sites/s1/lan-networks":
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n-hq","name":"HQ Net"}]}`)
-		case "/abc123/openapi/v1/sites/s2/lan-networks":
+		case "/openapi/v1/abc123/sites/s2/lan-networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n-branch","name":"Branch Net"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -330,7 +330,7 @@ func TestOmadaServiceListNetworks_FetchFails(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -350,16 +350,16 @@ func TestOmadaServiceListACLs(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/openapi/v1/sites/s1/lan-networks":
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":3,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 				{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"g1","description":"Deny Guest","status":false,"policy":0,"protocols":[6],"sourceType":"network","sourceIds":["n3"],"destinationType":"network","destinationIds":["n1"],"index":5}]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","description":"Block IoT","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":1}]}`)
 		default:
 			http.NotFound(w, r)
@@ -393,12 +393,12 @@ func TestOmadaServiceListACLs_GatewayFetchFails(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 			http.NotFound(w, r)
 			return
-		case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","description":"Block IoT"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -418,7 +418,7 @@ func TestOmadaServiceListACLs_SwitchFetchFails(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -438,15 +438,15 @@ func TestOmadaServiceListClients(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/openapi/v1/sites/s1/lan-networks":
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			// Open API shape: nested dhcpSettingsVO, no top-level dhcpEnabled
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"dhcpSettingsVO":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"}]}`)
-		case "/abc123/openapi/v1/sites/s1/networks/client":
+		case "/openapi/v1/abc123/sites/s1/networks/client":
 			// thin rows: the wire carries only mac/name/type
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","name":"NAS-01","type":"wired"}]}`)
-		case "/abc123/openapi/v1/sites/s1/setting/service/dhcp/user-list":
+		case "/openapi/v1/abc123/sites/s1/setting/service/dhcp/user-list":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"ipAddress":"10.0.10.5","macAddress":"aa:bb:cc:dd:ee:ff","name":"NAS-01","netId":"n1","netName":"Trusted"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -477,22 +477,22 @@ func TestOmadaServiceImport(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/openapi/v1/sites/s1/lan-networks":
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"dhcpSettingsVO":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"},
 				{"id":"n2","name":"IoT","purpose":"lan","vlan":20,"gatewaySubnet":"10.0.20.1/24","isolation":true,"dhcpSettingsVO":{"enable":false},"deviceMac":"aa:bb:cc:dd:ee:00"}]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","description":"Block IoT","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":1}]}`)
-		case "/abc123/openapi/v1/sites/s1/networks/devices":
+		case "/openapi/v1/abc123/sites/s1/networks/devices":
 			writeOmadaEnvelope(w, 0, `[{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254"}]`)
-		case "/abc123/openapi/v1/sites/s1/networks/client":
+		case "/openapi/v1/abc123/sites/s1/networks/client":
 			// thin rows: the wire carries only mac/name/type
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","name":"NAS-01","type":"wired"}]}`)
-		case "/abc123/openapi/v1/sites/s1/setting/service/dhcp/user-list":
+		case "/openapi/v1/abc123/sites/s1/setting/service/dhcp/user-list":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"ipAddress":"10.0.10.5","macAddress":"aa:bb:cc:dd:ee:ff","name":"NAS-01","netId":"n1","netName":"Trusted"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -542,17 +542,17 @@ func TestOmadaServiceImport_Warnings(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/openapi/v1/sites/s1/lan-networks":
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"}]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osg-acls", "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osg-acls", "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 			writeOmadaEnvelope(w, -1000, "null")
-		case "/abc123/openapi/v1/sites/s1/networks/client":
+		case "/openapi/v1/abc123/sites/s1/networks/client":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","name":"NAS-01","type":"wired"}]}`)
-		case "/abc123/openapi/v1/sites/s1/setting/service/dhcp/user-list":
+		case "/openapi/v1/abc123/sites/s1/setting/service/dhcp/user-list":
 			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
-		case "/abc123/openapi/v1/sites/s1/networks/devices":
+		case "/openapi/v1/abc123/sites/s1/networks/devices":
 			writeOmadaEnvelope(w, 0, `[]`)
 		default:
 			http.NotFound(w, r)
@@ -583,7 +583,7 @@ func TestOmadaServiceImport_NetworksFetchFails(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -603,7 +603,7 @@ func TestOmadaServiceListClients_FetchFails(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -654,19 +654,19 @@ func TestOmadaServicePlan(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/openapi/v1/sites/s1/lan-networks":
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":4,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 				{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"},
 				{"id":"n4","name":"WAN","gatewaySubnet":"10.0.0.1/24"}]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
 				{"id":"g1","description":"Block IoT Guest","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n3"],"index":1},
 				{"id":"g2","description":"IoT WAN","status":true,"policy":1,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n4"],"index":2}]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","description":"Block IoT","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":1}]}`)
 		default:
 			http.NotFound(w, r)
@@ -726,7 +726,7 @@ func TestOmadaServicePlan_NetworksFetchFails(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -746,14 +746,14 @@ func TestOmadaServicePlan_GatewayACLsFetchFails(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/openapi/v1/sites/s1/lan-networks":
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"}]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 			http.NotFound(w, r)
 			return
-		case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","description":"Block","status":true,"policy":0}]}`)
 		default:
 			http.NotFound(w, r)
@@ -773,9 +773,9 @@ func TestOmadaServicePlan_ACLsFetchFails(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/openapi/v1/sites/s1/lan-networks":
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -903,9 +903,9 @@ func omadaApplyServer(t *testing.T, initialRules string) *httptest.Server {
 		switch {
 		case r.URL.Path == "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
-		case r.URL.Path == "/abc123/openapi/v1/sites":
+		case r.URL.Path == "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
+		case r.URL.Path == "/openapi/v1/abc123/sites/s1/lan-networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":3,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
@@ -913,15 +913,15 @@ func omadaApplyServer(t *testing.T, initialRules string) *httptest.Server {
 		// Reads and writes use the per-scope Open API paths (BDD §4);
 		// creates return no payload, so the post-create refetch serves
 		// the updated list.
-		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
+		case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
 			writeOmadaEnvelope(w, 0, "null")
 			state = `{"totalRows":1,"data":[{"id":"a9","description":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
-		case strings.HasPrefix(r.URL.Path, "/abc123/openapi/v1/sites/s1/acls/osw-acls/") && r.Method == http.MethodPut:
+		case strings.HasPrefix(r.URL.Path, "/openapi/v1/abc123/sites/s1/acls/osw-acls/") && r.Method == http.MethodPut:
 			writeOmadaEnvelope(w, 0, "null")
 			state = `{"totalRows":1,"data":[{"id":"a1","description":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
-		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+		case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
-		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+		case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 			writeOmadaEnvelope(w, 0, state)
 		default:
 			http.NotFound(w, r)

@@ -90,7 +90,7 @@ func TestRetryTransientThenSuccess(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeEnvelope(w, 0, "", `{"accessToken":"tok1"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			calls++
 			if calls < 3 {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -180,7 +180,7 @@ func TestTokenExpiryRemintAndRetry(t *testing.T) {
 			tok := fmt.Sprintf("AT-%d", len(mintBodies))
 			mu.Unlock()
 			writeEnvelope(w, 0, "", `{"accessToken":"`+tok+`"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			mu.Lock()
 			getTokens = append(getTokens, r.Header.Get("Authorization"))
 			expire := !expired
@@ -478,7 +478,7 @@ func TestOperationLogging(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeEnvelope(w, 0, "", `{"accessToken":"AT-1"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			mu.Lock()
 			expire := !expiredFirst
 			expiredFirst = true
@@ -488,7 +488,7 @@ func TestOperationLogging(t *testing.T) {
 				return
 			}
 			writeEnvelope(w, 0, "", `{"data":[]}`)
-		case "/abc123/openapi/v1/clients":
+		case "/openapi/v1/abc123/clients":
 			mu.Lock()
 			clientCalls++
 			first := clientCalls == 1

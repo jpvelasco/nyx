@@ -40,7 +40,7 @@ func sampleSwitchRule() ACLRule {
 func TestCreateACLRule_Switch(t *testing.T) {
 	var gotMethod, gotCT, gotBody string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/abc123/openapi/v1/sites/s1/acls/osw-acls" {
+		if r.URL.Path != "/openapi/v1/abc123/sites/s1/acls/osw-acls" {
 			t.Errorf("path = %q, want switch create path", r.URL.Path)
 		}
 		gotMethod = r.Method
@@ -100,7 +100,7 @@ func TestCreateACLRule_Switch(t *testing.T) {
 func TestCreateACLRule_Gateway(t *testing.T) {
 	var gotBody string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/abc123/openapi/v1/sites/s1/acls/osg-acls" {
+		if r.URL.Path != "/openapi/v1/abc123/sites/s1/acls/osg-acls" {
 			t.Errorf("path = %q, want gateway create path", r.URL.Path)
 		}
 		gotBody = readBody(t, r)
@@ -199,7 +199,7 @@ func TestCreateACLRule_DefaultsEmptyProtocolsToAll(t *testing.T) {
 func TestUpdateACLRule(t *testing.T) {
 	var gotMethod, gotBody string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/abc123/openapi/v1/sites/s1/acls/osw-acls/a1" {
+		if r.URL.Path != "/openapi/v1/abc123/sites/s1/acls/osw-acls/a1" {
 			t.Errorf("path = %q, want per-scope ACL update path", r.URL.Path)
 		}
 		gotMethod = r.Method
@@ -259,7 +259,7 @@ func TestDeleteACLRule(t *testing.T) {
 	if gotMethod != http.MethodDelete {
 		t.Errorf("method = %q, want DELETE", gotMethod)
 	}
-	if gotPath != "/abc123/openapi/v1/sites/s1/acls/a1" {
+	if gotPath != "/openapi/v1/abc123/sites/s1/acls/a1" {
 		t.Errorf("path = %q, want scope-agnostic delete path", gotPath)
 	}
 }

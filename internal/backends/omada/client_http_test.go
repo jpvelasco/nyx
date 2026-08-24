@@ -254,6 +254,27 @@ func TestGetErrorCodes(t *testing.T) {
 	}
 }
 
+// BDD S3.2 — authenticated requests target /openapi/v1/{omadacId}/..., the
+// official Omada Open API path order. A controller answers the inverted
+// /{omadacId}/openapi/v1/... order with 404, so pin the exact path here.
+func TestGetSitesBasePathOrder(t *testing.T) {
+	var got string
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Path
+		if got != "/openapi/v1/abc123/sites" {
+			testutil.WriteBody(w, `{"error":{"code":404,"message":"Not Found"}}`)
+			return
+		}
+		writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"siteId":"s1","name":"HQ"}]}`)
+	}))
+	if _, err := c.GetSites(context.Background()); err != nil {
+		t.Fatalf("GetSites: %v (request hit %q)", err, got)
+	}
+	if got != "/openapi/v1/abc123/sites" {
+		t.Errorf("path = %q, want /openapi/v1/abc123/sites", got)
+	}
+}
+
 func TestGetSitesResponseShapes(t *testing.T) {
 	t.Run("paged", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

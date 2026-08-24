@@ -13,7 +13,7 @@ import (
 // deviceMac/origName are optional and decode to zero values when absent.
 func TestGetNetworksLiveWireShape(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/abc123/openapi/v1/sites/s1/lan-networks" {
+		if r.URL.Path != "/openapi/v1/abc123/sites/s1/lan-networks" {
 			t.Errorf("unexpected path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -90,7 +90,7 @@ func TestGetNetworksFetchError(t *testing.T) {
 func TestGetACLRulesUsesSwitchScopePath(t *testing.T) {
 	var queries []string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/abc123/openapi/v1/sites/s1/acls/osw-acls" {
+		if r.URL.Path != "/openapi/v1/abc123/sites/s1/acls/osw-acls" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -123,7 +123,7 @@ func TestGetACLRulesUsesSwitchScopePath(t *testing.T) {
 // just the scope type and its rules.
 func TestGetGatewayACLRulesNoCapabilityFlags(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/abc123/openapi/v1/sites/s1/acls/osg-acls" {
+		if r.URL.Path != "/openapi/v1/abc123/sites/s1/acls/osg-acls" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -201,7 +201,7 @@ func TestGetSitesPaginatesAllPages(t *testing.T) {
 func TestGetACLRulesPaginatesAllPages(t *testing.T) {
 	var pages []string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/abc123/openapi/v1/sites/s1/acls/osw-acls" {
+		if r.URL.Path != "/openapi/v1/abc123/sites/s1/acls/osw-acls" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -230,7 +230,7 @@ func TestGetACLRulesPaginatesAllPages(t *testing.T) {
 func TestGetClientsPaginatesAllPages(t *testing.T) {
 	var pages []string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/abc123/openapi/v1/sites/s1/networks/client" {
+		if r.URL.Path != "/openapi/v1/abc123/sites/s1/networks/client" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
