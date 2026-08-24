@@ -11,7 +11,7 @@ import (
 // paged envelope (a bare array is still accepted).
 func TestGetDevicesFlatArray(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/abc123/openapi/v1/sites/s1/networks/devices" {
+		if r.URL.Path == "/openapi/v1/abc123/sites/s1/networks/devices" {
 			writeEnvelope(w, 0, "", `[
 				{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254","firmwareVersion":"2.2.3","needUpgrade":true},
 				{"id":"d2","name":"SW-2428P","model":"SW-2428P","type":"switch","mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.253","firmwareVersion":"1.1.15","needUpgrade":false},
@@ -40,7 +40,7 @@ func TestGetDevicesFlatArray(t *testing.T) {
 func TestGetDevicesPagedWrapper(t *testing.T) {
 	var gotQuery string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/abc123/openapi/v1/sites/s1/networks/devices" {
+		if r.URL.Path == "/openapi/v1/abc123/sites/s1/networks/devices" {
 			gotQuery = r.URL.RawQuery
 			writeEnvelope(w, 0, "", `{"totalRows":1,"currentPage":1,"currentSize":1,"data":[{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254"}]}`)
 			return
@@ -61,7 +61,7 @@ func TestGetDevicesPagedWrapper(t *testing.T) {
 
 func TestGetDevicesErrors(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/abc123/openapi/v1/sites/s1/networks/devices" {
+		if r.URL.Path == "/openapi/v1/abc123/sites/s1/networks/devices" {
 			writeEnvelope(w, 0, "", `[{"id":"d1","name":123}]`)
 			return
 		}
@@ -147,31 +147,31 @@ func TestFetchInventory(t *testing.T) {
 	newClient := func(failDevices, failACLs, failClients bool) *Client {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/openapi/v1/sites/s1/lan-networks":
+			case "/openapi/v1/abc123/sites/s1/lan-networks":
 				// Open API wire shape: DHCP nested under "dhcpSettingsVO".
 				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 					{"id":"n1","name":"Trusted","vlan":10,"purpose":"interface","gatewaySubnet":"10.0.0.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettingsVO":{"enable":true}},
 					{"id":"n2","name":"IoT","vlan":20,"purpose":"interface","gatewaySubnet":"10.0.1.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettingsVO":{"enable":false}}
 				]}`)
-			case "/abc123/openapi/v1/sites/s1/networks/devices":
+			case "/openapi/v1/abc123/sites/s1/networks/devices":
 				if failDevices {
 					writeEnvelope(w, -1, "boom", "null")
 					return
 				}
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254"}]}`)
-			case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+			case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 				if failACLs {
 					writeEnvelope(w, -1, "boom", "null")
 					return
 				}
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","description":"deny","status":true,"policy":0}]}`)
-			case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 				if failACLs {
 					writeEnvelope(w, -1, "boom", "null")
 					return
 				}
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-			case "/abc123/openapi/v1/sites/s1/networks/client":
+			case "/openapi/v1/abc123/sites/s1/networks/client":
 				if failClients {
 					writeEnvelope(w, -1, "boom", "null")
 					return
@@ -179,7 +179,7 @@ func TestFetchInventory(t *testing.T) {
 				// Thin rows: the wire carries only mac/name/type; FetchInventory
 				// must enrich from the DHCP user list.
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"mac":"aa","name":"PC-01","type":"wired"}]}`)
-			case "/abc123/openapi/v1/sites/s1/setting/service/dhcp/user-list":
+			case "/openapi/v1/abc123/sites/s1/setting/service/dhcp/user-list":
 				if failClients {
 					writeEnvelope(w, -1, "boom", "null")
 					return

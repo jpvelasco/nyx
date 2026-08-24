@@ -245,32 +245,32 @@ func TestImportSpecEndToEnd(t *testing.T) {
 			testutil.WriteBody(w, testInfoResponse)
 		case "/openapi/authorize/token":
 			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[{"id":"s1","name":"HQ"},{"id":"s2","name":"Branch"}]}`)
-		case "/abc123/openapi/v1/sites/s1/lan-networks":
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			// open API wire shape: DHCP nested under dhcpSettingsVO
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24","vlan":10,"dhcpSettingsVO":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"},
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.1.1/24","vlan":20,"dhcpSettingsVO":{"enable":true}}
 			]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 			writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 				{"id":"a1","description":"IoT to Trusted","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]},
 				{"id":"a2","description":"Trusted to IoT web","status":true,"policy":1,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]},
 				{"id":"a3","description":"Disabled rule","status":false,"policy":0}
 			]}`)
-		case "/abc123/openapi/v1/sites/s1/networks/client":
+		case "/openapi/v1/abc123/sites/s1/networks/client":
 			// thin rows: mac/name/type only; enrichment comes from the DHCP list
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 				{"mac":"aa:bb:cc:dd:ee:ff","name":"NAS-01","type":"wired"}
 			]}`)
-		case "/abc123/openapi/v1/sites/s1/setting/service/dhcp/user-list":
+		case "/openapi/v1/abc123/sites/s1/setting/service/dhcp/user-list":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 				{"ipAddress":"10.0.0.50","macAddress":"aa:bb:cc:dd:ee:ff","name":"NAS-01","netId":"n1","netName":"Trusted"}
 			]}`)
-		case "/abc123/openapi/v1/sites/s1/networks/devices":
+		case "/openapi/v1/abc123/sites/s1/networks/devices":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 				{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254","firmwareVersion":"2.2.3","needUpgrade":true}
 			]}`)
@@ -384,7 +384,7 @@ func TestImportSpecErrors(t *testing.T) {
 				testutil.WriteBody(w, testInfoResponse)
 			case "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t"}`)
-			case "/abc123/openapi/v1/sites":
+			case "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 			}
 		})
@@ -402,7 +402,7 @@ func TestImportSpecErrors(t *testing.T) {
 				testutil.WriteBody(w, testInfoResponse)
 			case "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t"}`)
-			case "/abc123/openapi/v1/sites":
+			case "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			default:
 				writeEnvelope(w, 0, "", `{}`)
@@ -423,7 +423,7 @@ func TestImportSpecErrors(t *testing.T) {
 				testutil.WriteBody(w, testInfoResponse)
 			case "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t"}`)
-			case "/abc123/openapi/v1/sites":
+			case "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -444,18 +444,18 @@ func TestImportSpecWarnings(t *testing.T) {
 			testutil.WriteBody(w, testInfoResponse)
 		case "/openapi/authorize/token":
 			writeEnvelope(w, 0, "", `{"accessToken":"t"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/openapi/v1/sites/s1/lan-networks":
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24"},
 				{"id":"n2","name":"IoT-NoSubnet"}
 			]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osg-acls", "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osg-acls", "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 			writeEnvelope(w, -1000, "expired", "null")
-		case "/abc123/openapi/v1/sites/s1/networks/client":
+		case "/openapi/v1/abc123/sites/s1/networks/client":
 			writeEnvelope(w, -1000, "expired", "null")
-		case "/abc123/openapi/v1/sites/s1/setting/service/dhcp/user-list":
+		case "/openapi/v1/abc123/sites/s1/setting/service/dhcp/user-list":
 			// Succeed with zero rows: only the two ACL fetches and the client
 			// fetch should warn, so the DHCP enrichment must not add a third.
 			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)

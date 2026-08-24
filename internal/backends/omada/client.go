@@ -14,7 +14,7 @@
 // 5xx) are retried with exponential backoff.
 //
 // Minimum supported controller version: 6.0
-// API base path: https://<host>/<omadacId>/openapi/v1
+// API base path: https://<host>/openapi/v1/<omadacId>
 package omada
 
 import (
@@ -305,8 +305,10 @@ func logSafeError(err error) string {
 // -----------------------------------------------------------------------
 
 // baseURL returns the versioned base URL for authenticated API calls.
+// The official path order is /openapi/v1/{omadacId}/... — the controller
+// answers the inverted order with a 404.
 func (c *Client) baseURL() string {
-	return fmt.Sprintf("https://%s/%s/%s", c.host, c.omadaCID, openAPIBase)
+	return fmt.Sprintf("https://%s/%s/%s", c.host, openAPIBase, c.omadaCID)
 }
 
 // mintURL returns the token-mint endpoint. It lives outside the versioned

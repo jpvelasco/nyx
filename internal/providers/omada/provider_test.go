@@ -129,30 +129,30 @@ func TestProviderImportSpec(t *testing.T) {
 			switch r.URL.Path {
 			case "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case "/abc123/openapi/v1/sites":
+			case "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case "/abc123/openapi/v1/sites/s1/lan-networks":
+			case "/openapi/v1/abc123/sites/s1/lan-networks":
 				// Open API shape: nested dhcpSettingsVO, no origName.
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 					{"id":"n1","name":"Trusted","vlan":10,"purpose":"interface","gatewaySubnet":"10.0.0.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettingsVO":{"enable":true}}
 				]}`)
-			case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 					{"id":"a1","description":"Deny IoT","status":true,"policy":0}
 				]}`)
-			case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+			case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-			case "/abc123/openapi/v1/sites/s1/networks/client":
+			case "/openapi/v1/abc123/sites/s1/networks/client":
 				// Thin client rows (mac/name/type); the DHCP user list joins
 				// back the IP and network name.
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 					{"mac":"aa","name":"trusted-pc","type":"wired"}
 				]}`)
-			case "/abc123/openapi/v1/sites/s1/setting/service/dhcp/user-list":
+			case "/openapi/v1/abc123/sites/s1/setting/service/dhcp/user-list":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 					{"ipAddress":"10.0.0.10","macAddress":"aa","name":"trusted-pc","netId":"n1","netName":"Trusted"}
 				]}`)
-			case "/abc123/openapi/v1/sites/s1/networks/devices":
+			case "/openapi/v1/abc123/sites/s1/networks/devices":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -203,17 +203,17 @@ func TestProviderCheck(t *testing.T) {
 			switch r.URL.Path {
 			case "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case "/abc123/openapi/v1/sites":
+			case "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case "/abc123/openapi/v1/sites/s1/lan-networks":
+			case "/openapi/v1/abc123/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-			case "/abc123/openapi/v1/sites/s1/acls/osg-acls", "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			case "/openapi/v1/abc123/sites/s1/acls/osg-acls", "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-			case "/abc123/openapi/v1/sites/s1/networks/client":
+			case "/openapi/v1/abc123/sites/s1/networks/client":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-			case "/abc123/openapi/v1/sites/s1/setting/service/dhcp/user-list":
+			case "/openapi/v1/abc123/sites/s1/setting/service/dhcp/user-list":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-			case "/abc123/openapi/v1/sites/s1/networks/devices":
+			case "/openapi/v1/abc123/sites/s1/networks/devices":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -247,16 +247,16 @@ func TestProviderCheckACL(t *testing.T) {
 			switch r.URL.Path {
 			case "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case "/abc123/openapi/v1/sites":
+			case "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case "/abc123/openapi/v1/sites/s1/lan-networks":
+			case "/openapi/v1/abc123/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 					{"id":"n-lan","name":"lan","gatewaySubnet":"10.0.0.1/24"},
 					{"id":"n-iot","name":"iot","gatewaySubnet":"10.0.1.1/24"}
 				]}`)
-			case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+			case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-			case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 					{"id":"a1","description":"Deny Lan to IoT","status":true,"policy":0,"sourceType":"network","sourceIds":["n-lan"],"destinationType":"network","destinationIds":["n-iot"]},
 					{"id":"a2","description":"Disabled rule","status":false,"policy":0,"sourceType":"network","sourceIds":["n-lan"],"destinationType":"network","destinationIds":["n-iot"]}
@@ -334,16 +334,16 @@ func TestProviderCheckACL(t *testing.T) {
 			switch r.URL.Path {
 			case "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case "/abc123/openapi/v1/sites":
+			case "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case "/abc123/openapi/v1/sites/s1/lan-networks":
+			case "/openapi/v1/abc123/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 					{"id":"n-lan","name":"LAN","gatewaySubnet":"10.0.0.1/24"},
 					{"id":"n-iot","name":"IoT","gatewaySubnet":"10.0.1.1/24"}
 				]}`)
-			case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+			case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-			case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 					{"id":"a1","description":"Allow Web","status":true,"policy":1,"sourceType":"network","sourceIds":["n-lan"],"destinationType":"network","destinationIds":["n-iot"]}
 				]}`)
@@ -401,7 +401,7 @@ func TestProviderCheckACL(t *testing.T) {
 			switch r.URL.Path {
 			case "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case "/abc123/openapi/v1/sites":
+			case "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -424,7 +424,7 @@ func TestProviderCheckACL(t *testing.T) {
 			switch r.URL.Path {
 			case "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case "/abc123/openapi/v1/sites":
+			case "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -447,7 +447,7 @@ func TestProviderCheckACL(t *testing.T) {
 			switch r.URL.Path {
 			case "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case "/abc123/openapi/v1/sites":
+			case "/openapi/v1/abc123/sites":
 				w.WriteHeader(http.StatusInternalServerError)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -470,17 +470,17 @@ func TestProviderCheckACL(t *testing.T) {
 			switch r.URL.Path {
 			case "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case "/abc123/openapi/v1/sites":
+			case "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case "/abc123/openapi/v1/sites/s1/lan-networks":
+			case "/openapi/v1/abc123/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 					{"id":"n-lan","name":"lan","gatewaySubnet":"10.0.0.1/24"},
 					{"id":"n-iot","name":"iot","gatewaySubnet":"10.0.1.1/24"}
 				]}`)
-			case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+			case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 				w.WriteHeader(http.StatusNotFound)
 				return
-			case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 					{"id":"a1","description":"Deny Lan to IoT","status":true,"policy":0,"sourceType":"network","sourceIds":["n-lan"],"destinationType":"network","destinationIds":["n-iot"]}
 				]}`)
@@ -534,18 +534,18 @@ func TestProviderCheckACL_PerScopePaths(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/openapi/v1/sites/s1/lan-networks":
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24"},
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.1.1/24"}
 			]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 				{"id":"g1","description":"Trusted Deny","status":true,"policy":0,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]}
 			]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 				{"id":"s1r","description":"IoT Deny","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]}
 			]}`)
@@ -609,30 +609,30 @@ func TestProviderInventory(t *testing.T) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-		case "/abc123/openapi/v1/sites":
+		case "/openapi/v1/abc123/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[{"id":"s1","name":"HQ"},{"id":"s2","name":"Branch"}]}`)
-		case "/abc123/openapi/v1/sites/s1/lan-networks":
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			// Open API shape: nested dhcpSettingsVO, no origName.
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","vlan":10,"purpose":"interface","gatewaySubnet":"10.0.0.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettingsVO":{"enable":true}},
 				{"id":"n2","name":"IoT","vlan":20,"purpose":"interface","gatewaySubnet":"10.0.1.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettingsVO":{"enable":false}}
 			]}`)
-		case "/abc123/openapi/v1/sites/s1/networks/devices":
+		case "/openapi/v1/abc123/sites/s1/networks/devices":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 				{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254","firmwareVersion":"2.2.3","needUpgrade":true},
 				{"id":"d2","name":"SW-2428P","model":"SW-2428P","type":"switch","mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.253"}
 			]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"g1","description":"Trusted Deny","status":true,"policy":0}]}`)
-		case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+		case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-		case "/abc123/openapi/v1/sites/s1/networks/client":
+		case "/openapi/v1/abc123/sites/s1/networks/client":
 			// Thin client rows; the DHCP user list joins back IP + network.
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 				{"mac":"aa","name":"trusted-pc","type":"wired"},
 				{"mac":"bb","name":"iot-pc","type":"wired"}
 			]}`)
-		case "/abc123/openapi/v1/sites/s1/setting/service/dhcp/user-list":
+		case "/openapi/v1/abc123/sites/s1/setting/service/dhcp/user-list":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 				{"ipAddress":"10.0.0.50","macAddress":"aa","name":"trusted-pc","netId":"n1","netName":"Trusted"},
 				{"ipAddress":"10.0.1.51","macAddress":"bb","name":"iot-pc","netId":"n2","netName":"IoT"}
@@ -738,31 +738,31 @@ func applyACLServer(t *testing.T, initialSwitch, initialGateway string, writesAl
 		switch {
 		case r.URL.Path == "/openapi/authorize/token":
 			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-		case r.URL.Path == "/abc123/openapi/v1/sites":
+		case r.URL.Path == "/openapi/v1/abc123/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
+		case r.URL.Path == "/openapi/v1/abc123/sites/s1/lan-networks":
 			writeEnvelope(w, 0, "", threeNetworksJSON)
-		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
+		case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
 			if !writesAllowed {
 				t.Error("unexpected POST create when writes are not allowed")
 			}
 			writeEnvelope(w, 0, "", "null")
 			switchState = switchAfterCreate
-		case strings.HasPrefix(r.URL.Path, "/abc123/openapi/v1/sites/s1/acls/osw-acls/") && r.Method == http.MethodPut:
+		case strings.HasPrefix(r.URL.Path, "/openapi/v1/abc123/sites/s1/acls/osw-acls/") && r.Method == http.MethodPut:
 			if !writesAllowed {
 				t.Error("unexpected PUT update when writes are not allowed")
 			}
 			writeEnvelope(w, 0, "", "null")
 			switchState = switchAfterUpdate
-		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+		case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 			writeEnvelope(w, 0, "", switchState)
-		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls" && r.Method == http.MethodPost:
+		case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osg-acls" && r.Method == http.MethodPost:
 			if !writesAllowed {
 				t.Error("unexpected POST create when writes are not allowed")
 			}
 			writeEnvelope(w, 0, "", "null")
 			gatewayState = gatewayAfterCreate
-		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+		case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 			writeEnvelope(w, 0, "", gatewayState)
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -822,17 +822,17 @@ func TestProviderApplyACL(t *testing.T) {
 			switch {
 			case r.URL.Path == "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites":
+			case r.URL.Path == "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", threeNetworksJSON)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls" && r.Method == http.MethodPost:
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osg-acls" && r.Method == http.MethodPost:
 				wrote = true
 				gotBody = readReqBody(t, r)
 				writeEnvelope(w, 0, "", "null")
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 				if wrote {
 					writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a7","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1","n3"]}]}`)
 					return
@@ -923,17 +923,17 @@ func TestProviderApplyACL(t *testing.T) {
 			switch {
 			case r.URL.Path == "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites":
+			case r.URL.Path == "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", threeNetworksJSON)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
 				wrote = true
 				gotBody = readReqBody(t, r)
 				writeEnvelope(w, 0, "", "null")
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 				if wrote {
 					writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a9","status":true,"policy":0,"protocols":[6],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]}]}`)
 					return
@@ -1004,20 +1004,20 @@ func TestProviderApplyACL(t *testing.T) {
 			switch {
 			case r.URL.Path == "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites":
+			case r.URL.Path == "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", threeNetworksJSON)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls" && r.Method == http.MethodPost:
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osg-acls" && r.Method == http.MethodPost:
 				wrote = true
 				writeEnvelope(w, 0, "", "null")
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 				if wrote {
 					writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a7","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]}]}`)
 					return
 				}
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 				// A covering switch rule exists, but it must not satisfy a
 				// gateway-scope request.
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","description":"block-iot","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`)
@@ -1118,7 +1118,7 @@ func TestProviderApplyACL(t *testing.T) {
 			switch r.URL.Path {
 			case "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case "/abc123/openapi/v1/sites":
+			case "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -1136,9 +1136,9 @@ func TestProviderApplyACL(t *testing.T) {
 			switch r.URL.Path {
 			case "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case "/abc123/openapi/v1/sites":
+			case "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case "/abc123/openapi/v1/sites/s1/lan-networks":
+			case "/openapi/v1/abc123/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
@@ -1159,13 +1159,13 @@ func TestProviderApplyACL(t *testing.T) {
 			switch {
 			case r.URL.Path == "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites":
+			case r.URL.Path == "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", threeNetworksJSON)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
 				writeEnvelope(w, -1005, "no permission", "null")
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 				writeEnvelope(w, 0, "", emptyList)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -1183,13 +1183,13 @@ func TestProviderApplyACL(t *testing.T) {
 			switch {
 			case r.URL.Path == "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites":
+			case r.URL.Path == "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", threeNetworksJSON)
-			case strings.HasPrefix(r.URL.Path, "/abc123/openapi/v1/sites/s1/acls/osw-acls/") && r.Method == http.MethodPut:
+			case strings.HasPrefix(r.URL.Path, "/openapi/v1/abc123/sites/s1/acls/osw-acls/") && r.Method == http.MethodPut:
 				writeEnvelope(w, -1005, "no permission", "null")
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","description":"block-iot","status":false,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -1208,14 +1208,14 @@ func TestProviderApplyACL(t *testing.T) {
 			switch {
 			case r.URL.Path == "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites":
+			case r.URL.Path == "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", threeNetworksJSON)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
 				wrote = true
 				writeEnvelope(w, 0, "", "null")
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 				if wrote {
 					w.WriteHeader(http.StatusNotFound)
 					return
@@ -1239,17 +1239,17 @@ func TestProviderApplyACL(t *testing.T) {
 			switch {
 			case r.URL.Path == "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites":
+			case r.URL.Path == "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", threeNetworksJSON)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
 				wrote = true
 				gotBody = readReqBody(t, r)
 				writeEnvelope(w, 0, "", "null")
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 				if wrote {
 					writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a8","status":true,"policy":1,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]}]}`)
 					return
@@ -1285,17 +1285,17 @@ func TestProviderApplyACL(t *testing.T) {
 			switch {
 			case r.URL.Path == "/openapi/authorize/token":
 				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites":
+			case r.URL.Path == "/openapi/v1/abc123/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", threeNetworksJSON)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
 				wrote = true
 				gotBody = readReqBody(t, r)
 				writeEnvelope(w, 0, "", "null")
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			case r.URL.Path == "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 				if wrote {
 					writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a9","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1","n3"]}]}`)
 					return

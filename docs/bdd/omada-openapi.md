@@ -16,6 +16,15 @@ verified against a live 6.2.x controller during their implementation.
 - Retry machinery is kept: mutex-serialized requests, exponential backoff on
   transient failures (5xx, network errors), single re-auth on expiry.
 
+### S0.1 Base path order
+
+- **Given** an authenticated request to any data endpoint
+- **When** the client builds the request URL
+- **Then** the path is `/openapi/v1/{omadacId}/...` (version segment before
+  the omadacId)
+- **And** the controller answers the inverted `/{omadacId}/openapi/v1/...`
+  order with HTTP 404 — pin this order in a test
+
 ### Phased rollout
 
 The cutover lands in three PRs, each red→green against its own scenarios:

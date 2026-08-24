@@ -12,7 +12,7 @@ import (
 // fills IP + network name + VLAN id (via netId -> the site's LAN networks).
 func TestEnrichFromDHCP_HitAndMiss(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/abc123/openapi/v1/sites/s1/setting/service/dhcp/user-list" {
+		if r.URL.Path != "/openapi/v1/abc123/sites/s1/setting/service/dhcp/user-list" {
 			t.Errorf("unexpected path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
