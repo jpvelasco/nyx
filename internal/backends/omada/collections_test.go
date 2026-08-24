@@ -32,6 +32,18 @@ func TestGetNetworksPurposeInteger(t *testing.T) {
 	}
 }
 
+// A network row whose purpose is neither integer nor string must surface
+// a decode error, not panic or silently drop the fetch.
+func TestGetNetworksPurposeWrongType(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","purpose":true}]}`)
+	}))
+	_, err := c.GetNetworks(context.Background(), "s1")
+	if err == nil || !strings.Contains(err.Error(), "decoding paged list response") {
+		t.Errorf("error = %v, want decode error", err)
+	}
+}
+
 // BDD S3.3 — an unknown purpose code stringifies instead of aborting the fetch.
 func TestGetNetworksPurposeUnknownInteger(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
