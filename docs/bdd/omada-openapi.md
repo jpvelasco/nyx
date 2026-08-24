@@ -147,6 +147,10 @@ uniformly across every layer.
 - **And** the DHCP switch is read from `dhcpSettingsVO.enable`
 - **And** absent `isolation`, `deviceMac`, and `origName` decode to their zero
   values without error
+- **And** `purpose` arrives as `integer(int32)` (0: VLAN, 1: interface) on
+  6.x controllers — the decoder accepts the documented integer and maps it to
+  the display string ("VLAN"/"interface"); the string form ("interface") must
+  keep decoding so fixtures and older controllers stay supported
 
 ### S3.4 Clients (thin rows)
 
