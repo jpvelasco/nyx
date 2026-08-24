@@ -185,17 +185,14 @@ inventory:
     iot: GW-CORE
   acl_scopes:
     - scope: gateway
-      enabled: false
       rule_count: 1
-      support_lan_to_lan: true
     - scope: switch
-      enabled: true
       rule_count: 1
 ```
 
-You don't write it by hand. `nyx omada inventory` (or the MCP `omada_inventory` tool) fetches the live snapshot — devices, networks, both ACL scopes, clients — and prints it or emits JSON. `nyx omada import` fills the block into the generated spec automatically, and emits one `acl_check` assertion per enabled rule so the audit flags any rule stored in a disabled scope.
+You don't write it by hand. `nyx omada inventory` (or the MCP `omada_inventory` tool) fetches the live snapshot — devices, networks, both ACL scopes, clients — and prints it or emits JSON. `nyx omada import` fills the block into the generated spec automatically, and emits one `acl_check` assertion per stored rule.
 
-When an `acl_check` fails, read `inventory.acl_scopes` first: `enabled: false` means the master switch for that scope is off on the controller — the rule is intact but not being applied.
+When an `acl_check` fails, read `inventory.acl_scopes` first: `rule_count: 0` means the rule is missing from the controller (it was deleted or never applied), while a non-zero count with the audit still failing points at rule contents or endpoints rather than a disabled scope. The Open API exposes no per-scope enable/disable flag, so a listed scope is active.
 
 ## Tips
 
