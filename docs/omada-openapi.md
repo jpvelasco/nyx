@@ -1,9 +1,10 @@
 # Omada Open API — Research Notes
 
 Findings from investigating TP-Link's **official Omada Open API** (a.k.a.
-"northbound API") as a candidate replacement for the internal v2 API that
-nyx's Omada backend currently uses. All endpoint paths and schema details
-below come from the officially published spec on
+"northbound API") during the migration of nyx's Omada backend off the
+undocumented internal v2 API (see "Status relative to nyx" — the backend
+now uses only the Open API). All endpoint paths and schema details below
+come from the officially published spec on
 `omada-northbound-docs.tplinkcloud.com` (per-version docs, e.g. the 6.2.x
 catalogs), cross-checked read-only against a live controller.
 
@@ -83,10 +84,11 @@ surface** on a standard (non-Pro) controller:
    disabled and its SSH CLI is troubleshooting-only (config writes are
    rejected in controller mode).
 
-Consequence for nyx: the correct feature shape is **detect-and-guide** —
-surface `scope_disabled` evidence (already done by `omada_apply_acl`) and
-explain in the recommendation that the scope cannot be enabled via any API
-surface; rule CRUD remains stored but inert at the gateway.
+Consequence for nyx: the post-migration feature shape is **surface-and-explain** —
+`omada_apply_acl` carries the per-scope `before`/`after` rule-list evidence,
+inventory records a `rule_count` per scope (a listed scope is active), and the
+recommendation engine explains that the gateway scope has no enable surface via
+any API; rule CRUD remains stored but inert at the gateway when unsupported.
 
 ## TLS quirk (Windows)
 
@@ -99,11 +101,14 @@ tests) — do not port the old PowerShell probe scripts verbatim.
 
 ## Status relative to nyx
 
-- nyx today uses the **internal v2 API** (`/api/v2`, session-cookie +
-  `Csrf-Token` login). It works, is undocumented, and can change without
-  notice.
-- The Open API is documented, versioned, and supported, and covers the full
-  ACL read/CRUD surface nyx needs. Migrating the Omada backend (auth →
-  client-credentials, paths → `/openapi/v1/...`) is a candidate refactor;
-  keep internal v2 for anything the Open API does not cover until parity is
-  confirmed per endpoint.
+- nyx's Omada backend is **fully migrated to the Open API**: auth is
+  client-credentials, and every read and write goes through
+  `/openapi/v1/{omadacId}/...` (base path order pinned in BDD S0.1).
+  The internal v2 API is no longer called.
+- The Open API exposes no per-scope ACL enable/disable flag (see above),
+  so inventory records `rule_count` per scope and `omada_apply_acl`
+  surfaces `before`/`after` evidence instead of a scope-disabled marker.
+- Wire shapes observed live: `sites` rows carry `siteId` (no `id`);
+  `lan-networks` rows carry `purpose` as `integer(int32)` (0: VLAN,
+  1: interface) — pinned in BDD S3.3; `acls/osw-acls` and `acls/osg-acls`
+  work without a `type` query.

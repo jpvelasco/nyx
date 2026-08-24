@@ -387,7 +387,7 @@
                     <div class="space-y-3 text-sm">
                         <div class="flex gap-4">
                             <div class="w-28 shrink-0 font-mono text-xs text-slate-500 dark:text-slate-300 pt-0.5">inventory</div>
-                            <div class="text-slate-600 dark:text-slate-100">What's physically in the site: devices, network→gateway bindings, and ACL scope state</div>
+                            <div class="text-slate-600 dark:text-slate-100">What's physically in the site: devices, network→gateway bindings, and per-scope ACL rule counts</div>
                         </div>
                     </div>
                 </div>
@@ -588,14 +588,14 @@ assertions:
                         <div class="text-xs text-cyan-600 dark:text-cyan-400 font-medium">SITE MAP</div>
                     </div>
                 </div>
-                <p class="text-sm text-slate-600 dark:text-slate-100">The optional <code class="bg-slate-100 dark:bg-slate-800 px-1 rounded">inventory:</code> block records what's physically in the site — devices, which device serves each network, and whether each ACL scope is actually switched on. Controller imports fill it automatically, so <code>acl_check</code> can tell the difference between a rule that's missing and a rule that's stored but sitting in a disabled scope.</p>
+                <p class="text-sm text-slate-600 dark:text-slate-100">The optional <code class="bg-slate-100 dark:bg-slate-800 px-1 rounded">inventory:</code> block records what's physically in the site — devices, which device serves each network, and the rule count of each ACL scope. Controller imports fill it automatically, so <code>acl_check</code> can tell the difference between a rule that's missing and a rule that's stored but misconfigured.</p>
                 <div class="mt-5 code-block text-emerald-700 dark:text-emerald-300 text-xs p-4 rounded-2xl font-mono">inventory:
   devices:
     - type: gateway
       name: GW-CORE
   acl_scopes:
     - scope: gateway
-      enabled: false</div>
+      rule_count: 1</div>
             </div>
         </div>
     </div>
