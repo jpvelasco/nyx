@@ -5,41 +5,81 @@ import (
 	"fmt"
 )
 
-// ConnectedClient represents a device currently connected to the network.
+// ConnectedClient represents a client connected to the network. The
+// networks/client endpoint returns thin rows (mac/name/type only); IP,
+// NetworkName, and VLANID are filled in by EnrichFromDHCP from the site's
+// DHCP user list.
 type ConnectedClient struct {
-	MAC      string `json:"mac"`
-	IP       string `json:"ip"`
-	Name     string `json:"name"`
-	Hostname string `json:"hostName"`
-	// SSID is the wireless SSID the client joined, as reported per-client
-	// (e.g. "Trusted"). Wired clients have no SSID.
-	SSID string `json:"ssid"`
-	// VLANID is the VLAN id the client's IP was assigned from. The 6.x
-	// controller omits "vid" on some entries (mostly wireless), so it
-	// decodes to 0; EnrichClients resolves it from the SSID.
-	VLANID int `json:"vid"`
-	// NetworkName is the raw LAN name the client belongs to (e.g.
-	// "Trusted"). The 6.x wire does not report a "networkName" field — this
-	// is populated by EnrichClients from the client's SSID or VLANID,
-	// and is left as decoded for controllers that do send it.
-	NetworkName string `json:"networkName"`
-	Wireless    bool   `json:"wireless"`
-	Vendor      string `json:"vendor"`
-	DeviceType  string `json:"deviceType"`
-	Active      bool   `json:"active"`
-	Uptime      int64  `json:"uptime"`
+	MAC         string `json:"mac"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	IP          string
+	NetworkName string
+	VLANID      int
 }
 
-// GetClients returns all active connected clients for the given site,
-// walking every page.
-//
-// The clients endpoint requires the filters.active=true query: without it
-// the 6.x controller returns errorCode -1 ("General error.").
+// dhcpUserRow is one row of the sites/{id}/setting/service/dhcp/user-list
+// endpoint: an active lease, keyed by MAC.
+type dhcpUserRow struct {
+	IPAddress  string `json:"ipAddress"`
+	MACAddress string `json:"macAddress"`
+	Name       string `json:"name"`
+	NetID      string `json:"netId"`
+	NetName    string `json:"netName"`
+}
+
+// GetClients returns all connected clients for the given site, walking every
+// page of the sites/{id}/networks/client endpoint.
 func (c *Client) GetClients(ctx context.Context, siteID string) ([]ConnectedClient, error) {
-	path := fmt.Sprintf("sites/%s/clients", siteID)
-	clients, _, err := fetchPaged[ConnectedClient](ctx, c, path, defaultPageSize, "filters.active=true")
+	path := fmt.Sprintf("sites/%s/networks/client", siteID)
+	clients, _, err := fetchPaged[ConnectedClient](ctx, c, path, defaultPageSize)
 	if err != nil {
 		return nil, fmt.Errorf("getting clients for site %s: %w", siteID, err)
 	}
 	return clients, nil
+}
+
+// EnrichFromDHCP joins the site's DHCP user list onto the client rows by
+// normalized MAC. On a hit the client's IP, network name, and VLAN id are
+// filled in (the VLAN id comes from the network matching the row's netId);
+// clients without a DHCP row keep their thin fields and no IP.
+func (c *Client) EnrichFromDHCP(ctx context.Context, siteID string, clients []ConnectedClient, networks []Network) error {
+	rows, _, err := fetchPaged[dhcpUserRow](ctx, c, fmt.Sprintf("sites/%s/setting/service/dhcp/user-list", siteID), defaultPageSize)
+	if err != nil {
+		return fmt.Errorf("getting DHCP user list for site %s: %w", siteID, err)
+	}
+
+	byNetID := make(map[string]Network, len(networks))
+	for _, n := range networks {
+		if n.ID != "" {
+			byNetID[n.ID] = n
+		}
+	}
+
+	byMAC := make(map[string]dhcpUserRow, len(rows))
+	for _, row := range rows {
+		key := normalizeMAC(row.MACAddress)
+		if key == "" {
+			continue
+		}
+		if _, taken := byMAC[key]; !taken {
+			byMAC[key] = row
+		}
+	}
+
+	for i := range clients {
+		cl := &clients[i]
+		row, ok := byMAC[normalizeMAC(cl.MAC)]
+		if !ok {
+			continue
+		}
+		cl.IP = row.IPAddress
+		if n, found := byNetID[row.NetID]; found {
+			cl.NetworkName = n.Name
+			cl.VLANID = n.VLANID
+		} else {
+			cl.NetworkName = row.NetName
+		}
+	}
+	return nil
 }

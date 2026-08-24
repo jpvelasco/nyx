@@ -43,7 +43,7 @@ func TestCreateACLRule(t *testing.T) {
 		gotMethod = r.Method
 		gotCT = r.Header.Get("Content-Type")
 		gotBody = readBody(t, r)
-		writeEnvelope(w, 0, "", `{"id":"a9","name":"block-iot","status":true,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`)
+		writeEnvelope(w, 0, "", `{"id":"a9","description":"block-iot","status":true,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`)
 	}))
 
 	created, err := c.CreateACLRule(context.Background(), "s1", sampleSwitchRule())
@@ -56,7 +56,7 @@ func TestCreateACLRule(t *testing.T) {
 	if !strings.Contains(gotCT, "application/json") {
 		t.Errorf("content-type = %q, want application/json", gotCT)
 	}
-	if created == nil || created.ID != "a9" || created.Policy != ACLPolicyDeny || created.Index != 4 {
+	if created == nil || created.ID != "a9" || created.Policy != ACLPolicyDeny || created.Index != 4 || created.Name != "block-iot" {
 		t.Fatalf("created = %+v, want decoded rule a9", created)
 	}
 
@@ -145,7 +145,7 @@ func TestUpdateACLRule(t *testing.T) {
 		}
 		gotMethod = r.Method
 		gotBody = readBody(t, r)
-		writeEnvelope(w, 0, "", `{"id":"a1","name":"block-iot","status":false,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`)
+		writeEnvelope(w, 0, "", `{"id":"a1","description":"block-iot","status":false,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`)
 	}))
 
 	rule := sampleSwitchRule()

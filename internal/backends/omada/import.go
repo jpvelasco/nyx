@@ -77,22 +77,23 @@ func ImportSpec(ctx context.Context, host, clientID, clientSecret, siteName stri
 	if gwErr != nil {
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("could not fetch gateway ACL rules: %v", gwErr))
-	} else if gwList.ACLDisable {
-		result.Warnings = append(result.Warnings,
-			"gateway ACL feature is disabled on this site")
 	}
 	gwListOK := gwErr == nil
 	allRules := append(aclList.Rules, gwList.Rules...)
 	result.ACLRuleCount = len(allRules)
 
-	clients, err := client.GetClients(ctx, site.EffectiveID())
+	clients, err := client.GetClients(ctx, siteID)
 	if err != nil {
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("could not fetch connected clients: %v", err))
 	}
-	// The 6.x wire has no per-client network name: resolve each client's
-	// network and VLAN from the site's LAN networks (SSID first, then vid).
-	EnrichClients(clients, omadaNets)
+	// The thin client wire has no IP or network name: best-effort
+	// enrichment from the site's DHCP user list fills IP, network name,
+	// and VLAN per MAC.
+	if err := client.EnrichFromDHCP(ctx, siteID, clients, omadaNets); err != nil {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("could not enrich clients from DHCP user list: %v", err))
+	}
 	result.ClientCount = len(clients)
 
 	devices, err := client.GetDevices(ctx, siteID)
@@ -187,7 +188,7 @@ func buildAssertions(networks []intent.Network, omadaNets []Network, clients []C
 	var assertions []intent.Assertion
 
 	// Count clients per network using the raw Omada network name
-	// (before sanitization) — clients arrive enriched via EnrichClients,
+	// (before sanitization) — clients arrive enriched via EnrichFromDHCP,
 	// so NetworkName is populated for every client the controller reports.
 	clientsPerNet := make(map[string]int)
 	for _, c := range clients {

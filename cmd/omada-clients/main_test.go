@@ -49,16 +49,22 @@ func TestRun_Success(t *testing.T) {
 			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"3","omadacId":"test","configured":true}}`) //nosem // test mock
 		case r.URL.Path == "/openapi/authorize/token":
 			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"accessToken":"tok123"}}`) //nosem // test mock
-		case strings.Contains(r.URL.Path, "/setting/lan/networks"):
-			//nosem // test mock — live 6.x shape (dhcpSettings nested, origName)
+		case strings.Contains(r.URL.Path, "/lan-networks"):
+			//nosem // test mock — Open API shape (dhcpSettingsVO nested, no origName)
 			fmt.Fprint(w, envelope(`{"totalRows":1,"data":[
-				{"id":"n1","name":"LAN","origName":"LAN","vlan":1,"gatewaySubnet":"10.0.20.1/24","isolation":false,"dhcpSettings":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:ff"}
+				{"id":"n1","name":"LAN","vlan":1,"gatewaySubnet":"10.0.20.1/24","isolation":false,"dhcpSettingsVO":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:ff"}
 			]}`))
-		case strings.Contains(r.URL.Path, "/clients"):
-			//nosem // test mock — live 6.x client rows carry ssid/vid, no networkName
+		case strings.Contains(r.URL.Path, "/networks/client"):
+			//nosem // test mock — thin client rows (mac/name/type only)
 			fmt.Fprint(w, envelope(`{"totalRows":2,"data":[
-				{"mac":"aa:bb:cc:dd:ee:01","ip":"10.0.20.10","name":"PC1","hostName":"pc1","ssid":"LAN","vid":1,"wireless":true,"vendor":"Dell","deviceType":"Computer","active":true,"uptime":100},
-				{"mac":"aa:bb:cc:dd:ee:02","ip":"10.0.20.20","name":"PC2","hostName":"pc2","vid":1,"wireless":false,"vendor":"Apple","deviceType":"Laptop","active":true,"uptime":200}
+				{"mac":"aa:bb:cc:dd:ee:01","name":"pc1","type":"wired"},
+				{"mac":"aa:bb:cc:dd:ee:02","name":"pc2","type":"wireless"}
+			]}`))
+		case strings.Contains(r.URL.Path, "/setting/service/dhcp/user-list"):
+			//nosem // test mock — DHCP leases join back onto client rows by MAC
+			fmt.Fprint(w, envelope(`{"totalRows":2,"data":[
+				{"ipAddress":"10.0.20.10","macAddress":"aa:bb:cc:dd:ee:01","name":"pc1","netId":"n1","netName":"LAN"},
+				{"ipAddress":"10.0.20.20","macAddress":"aa:bb:cc:dd:ee:02","name":"pc2","netId":"n1","netName":"LAN"}
 			]}`))
 		case strings.Contains(r.URL.Path, "/sites"):
 			fmt.Fprint(w, envelope(`{"totalRows":1,"data":[{"id":"site1","name":"Home","type":0}]}`)) //nosem // test mock
@@ -87,7 +93,7 @@ func TestRun_Success(t *testing.T) {
 		t.Fatalf("run() error: %v", err)
 	}
 
-	// PC1 resolves via SSID "LAN"; PC2 (wired, no SSID) resolves via vid 1.
+	// Both clients resolve IP and network "LAN" via the DHCP user list.
 	out := stdout.String()
 	for _, want := range []string{"Site: Home", "LAN (VLAN 1)", "pc1", "pc2", "10.0.20.10", "10.0.20.20"} {
 		if !strings.Contains(out, want) {
@@ -201,7 +207,7 @@ func TestRun_GetClientsFailure(t *testing.T) {
 			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"3","omadacId":"test","configured":true}}`) //nosem // test mock
 		case r.URL.Path == "/openapi/authorize/token":
 			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"accessToken":"tok123"}}`) //nosem // test mock
-		case strings.Contains(r.URL.Path, "/clients"):
+		case strings.Contains(r.URL.Path, "/networks/client"):
 			// Return an error for the clients endpoint.
 			fmt.Fprint(w, `{"errorCode":-1,"msg":"internal error","result":null}`) //nosem // test mock
 		case strings.Contains(r.URL.Path, "/sites"):
@@ -277,10 +283,20 @@ func TestRunMain_Success(t *testing.T) {
 			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"3","omadacId":"test","configured":true}}`) //nosem // test mock
 		case r.URL.Path == "/openapi/authorize/token":
 			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"accessToken":"tok123"}}`) //nosem // test mock
-		case strings.Contains(r.URL.Path, "/clients"):
+		case strings.Contains(r.URL.Path, "/lan-networks"):
 			//nosem // test mock
 			fmt.Fprint(w, envelope(`{"totalRows":1,"data":[
-				{"mac":"aa:bb:cc:dd:ee:01","ip":"10.0.20.10","name":"PC1","hostName":"pc1","networkName":"LAN","vid":1,"wireless":false,"vendor":"Dell","deviceType":"Computer","active":true,"uptime":100}
+				{"id":"n1","name":"LAN","vlan":1,"gatewaySubnet":"10.0.20.1/24","isolation":false,"dhcpSettingsVO":{"enable":true}}
+			]}`))
+		case strings.Contains(r.URL.Path, "/networks/client"):
+			//nosem // test mock
+			fmt.Fprint(w, envelope(`{"totalRows":1,"data":[
+				{"mac":"aa:bb:cc:dd:ee:01","name":"pc1","type":"wired"}
+			]}`))
+		case strings.Contains(r.URL.Path, "/setting/service/dhcp/user-list"):
+			//nosem // test mock
+			fmt.Fprint(w, envelope(`{"totalRows":1,"data":[
+				{"ipAddress":"10.0.20.10","macAddress":"aa:bb:cc:dd:ee:01","name":"pc1","netId":"n1","netName":"LAN"}
 			]}`))
 		case strings.Contains(r.URL.Path, "/sites"):
 			fmt.Fprint(w, envelope(`{"totalRows":1,"data":[{"id":"site1","name":"Home","type":0}]}`)) //nosem // test mock

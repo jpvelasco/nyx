@@ -2,15 +2,13 @@ package omada
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 )
 
 // Device is one managed device (gateway, switch, or AP) from the site's
-// device inventory. The devices endpoint returns a flat array in the result
-// field; a paged {"data":[...]} wrapper is accepted as a fallback.
+// device inventory.
 type Device struct {
 	Name            string `json:"name"`
 	Model           string `json:"model"`
@@ -32,22 +30,11 @@ func (d Device) IsAP() bool { return strings.EqualFold(d.Type, "ap") }
 
 // GetDevices returns the managed devices for a site.
 func (c *Client) GetDevices(ctx context.Context, siteID string) ([]Device, error) {
-	path := fmt.Sprintf("sites/%s/devices", siteID)
-	var raw json.RawMessage
-	if err := c.get(ctx, path, &raw); err != nil {
+	devices, _, err := fetchPaged[Device](ctx, c, fmt.Sprintf("sites/%s/networks/devices", siteID), defaultPageSize)
+	if err != nil {
 		return nil, fmt.Errorf("getting devices for site %s: %w", siteID, err)
 	}
-	var devices []Device
-	if err := json.Unmarshal(raw, &devices); err == nil {
-		return devices, nil
-	}
-	var paged struct {
-		Data []Device `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &paged); err != nil {
-		return nil, fmt.Errorf("decoding device inventory for site %s: %w", siteID, err)
-	}
-	return paged.Data, nil
+	return devices, nil
 }
 
 // NetworkBindings maps network IDs to the MAC of the device each LAN is

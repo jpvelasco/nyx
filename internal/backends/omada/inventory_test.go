@@ -7,17 +7,18 @@ import (
 
 func TestGroupClientsByNetwork(t *testing.T) {
 	clients := []ConnectedClient{
-		{IP: "10.0.0.100", Hostname: "OPNsense", NetworkName: "LAN(Default)", VLANID: 1, DeviceType: "Network Monitor", Vendor: "Unknown", Active: true},
-		{IP: "10.0.0.112", Hostname: "Desktop-01", NetworkName: "LAN(Default)", VLANID: 1, DeviceType: "Computer", Vendor: "Unknown", Active: true},
-		{IP: "10.0.0.110", Hostname: "Mac", NetworkName: "Trusted", VLANID: 10, DeviceType: "Laptop", Vendor: "Apple", Active: true},
-		{IP: "10.0.0.106", Hostname: "Ring", NetworkName: "IoT", VLANID: 60, DeviceType: "Doorbell", Vendor: "Amazon", Active: true},
-		{IP: "10.0.0.5", Hostname: "Mystery", NetworkName: "", VLANID: 0, DeviceType: "Unknown", Vendor: "Unknown", Active: true},
-		{IP: "10.0.0.200", Hostname: "Old", NetworkName: "LAN(Default)", VLANID: 1, DeviceType: "Laptop", Vendor: "Unknown", Active: false},
+		{IP: "10.0.0.100", Name: "OPNsense", Type: "wired", NetworkName: "LAN(Default)", VLANID: 1},
+		{IP: "10.0.0.112", Name: "Desktop-01", Type: "wired", NetworkName: "LAN(Default)", VLANID: 1},
+		{IP: "10.0.0.110", Name: "Mac", Type: "wireless", NetworkName: "Trusted", VLANID: 10},
+		{IP: "10.0.0.106", Name: "Ring", Type: "wireless", NetworkName: "IoT", VLANID: 60},
+		{IP: "10.0.0.5", Name: "Mystery", Type: "wired", NetworkName: "", VLANID: 0},
+		{IP: "10.0.0.200", Name: "Old", Type: "wired", NetworkName: "LAN(Default)", VLANID: 1},
 	}
 
 	groups := GroupClientsByNetwork(clients)
 
-	// Inactive clients are excluded; 4 active clients span 4 distinct networks.
+	// All clients group (the thin endpoint reports every client); 5 span
+	// 4 distinct networks.
 	if len(groups) != 4 {
 		t.Fatalf("expected 4 groups, got %d: %+v", len(groups), groups)
 	}
@@ -26,11 +27,11 @@ func TestGroupClientsByNetwork(t *testing.T) {
 	if nf == nil {
 		t.Fatal("missing LAN(Default) group")
 	}
-	if nf.Count != 2 {
-		t.Errorf("LAN count = %d, want 2 (inactive excluded)", nf.Count)
+	if nf.Count != 3 {
+		t.Errorf("LAN count = %d, want 3", nf.Count)
 	}
 	// Sorted by IP ascending (numeric).
-	if nf.Clients[0].IP != "10.0.0.100" || nf.Clients[1].IP != "10.0.0.112" {
+	if nf.Clients[0].IP != "10.0.0.100" || nf.Clients[1].IP != "10.0.0.112" || nf.Clients[2].IP != "10.0.0.200" {
 		t.Errorf("LAN clients not sorted by IP: %+v", nf.Clients)
 	}
 
@@ -45,9 +46,9 @@ func TestGroupClientsByNetwork_NumericIPSort(t *testing.T) {
 	// These IPs would sort incorrectly with lexicographic comparison:
 	// "10.0.0.9" > "10.0.0.100" lexicographically, but 9 < 100 numerically.
 	clients := []ConnectedClient{
-		{IP: "10.0.0.100", Hostname: "A", NetworkName: "LAN", VLANID: 1, Active: true},
-		{IP: "10.0.0.9", Hostname: "B", NetworkName: "LAN", VLANID: 1, Active: true},
-		{IP: "10.0.0.20", Hostname: "C", NetworkName: "LAN", VLANID: 1, Active: true},
+		{IP: "10.0.0.100", Name: "A", NetworkName: "LAN", VLANID: 1},
+		{IP: "10.0.0.9", Name: "B", NetworkName: "LAN", VLANID: 1},
+		{IP: "10.0.0.20", Name: "C", NetworkName: "LAN", VLANID: 1},
 	}
 	groups := GroupClientsByNetwork(clients)
 	g := findGroup(groups, "LAN")
@@ -70,13 +71,13 @@ func TestGroupClientsByNetwork_Empty(t *testing.T) {
 
 func TestRenderClientInventory(t *testing.T) {
 	clients := []ConnectedClient{
-		{IP: "10.0.0.100", Hostname: "OPNsense", NetworkName: "LAN(Default)", VLANID: 1, DeviceType: "Network Monitor", Vendor: "Unknown", Active: true},
-		{IP: "10.0.0.112", Hostname: "Desktop-01", NetworkName: "LAN(Default)", VLANID: 1, DeviceType: "Computer", Vendor: "Unknown", Active: true},
-		{IP: "10.0.0.110", Hostname: "Mac", NetworkName: "Trusted", VLANID: 10, DeviceType: "Laptop", Vendor: "Apple", Active: true},
+		{IP: "10.0.0.100", Name: "OPNsense", Type: "wired", NetworkName: "LAN(Default)", VLANID: 1},
+		{IP: "10.0.0.112", Name: "Desktop-01", Type: "wired", NetworkName: "LAN(Default)", VLANID: 1},
+		{IP: "10.0.0.110", Name: "Mac", Type: "wireless", NetworkName: "Trusted", VLANID: 10},
 	}
 	out := RenderClientInventory("Home", clients)
 
-	for _, want := range []string{"Site: Home", "LAN(Default)", "OPNsense", "Desktop-01", "Trusted", "Mac"} {
+	for _, want := range []string{"Site: Home", "LAN(Default)", "OPNsense", "Desktop-01", "Trusted", "Mac", "wired", "wireless"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered output missing %q:\n%s", want, out)
 		}
@@ -91,15 +92,15 @@ func TestRenderClientInventory(t *testing.T) {
 
 func TestRenderClientInventory_NoClients(t *testing.T) {
 	out := RenderClientInventory("Home", nil)
-	if !strings.Contains(out, "No active clients") {
-		t.Errorf("expected 'No active clients' message, got:\n%s", out)
+	if !strings.Contains(out, "No clients") {
+		t.Errorf("expected 'No clients' message, got:\n%s", out)
 	}
 }
 
 func TestRenderClientInventory_UnknownNetworkLabel(t *testing.T) {
 	// Clients with empty NetworkName should render as "unknown network".
 	clients := []ConnectedClient{
-		{IP: "10.0.0.1", Hostname: "Mystery", NetworkName: "", VLANID: 0, DeviceType: "Unknown", Vendor: "Unknown", Active: true},
+		{IP: "10.0.0.1", Name: "Mystery", Type: "wired", NetworkName: "", VLANID: 0},
 	}
 	out := RenderClientInventory("Home", clients)
 	if !strings.Contains(out, "unknown network") {
@@ -111,8 +112,8 @@ func TestGroupClientsByNetwork_SameVLANDifferentNames(t *testing.T) {
 	// Two groups with the same VLANID but different network names should be
 	// sorted by name (the tie-breaker at line 52).
 	clients := []ConnectedClient{
-		{IP: "192.168.1.1", Hostname: "A", NetworkName: "Zeta", VLANID: 10, Active: true},
-		{IP: "192.168.1.2", Hostname: "B", NetworkName: "Alpha", VLANID: 10, Active: true},
+		{IP: "192.168.1.1", Name: "A", NetworkName: "Zeta", VLANID: 10},
+		{IP: "192.168.1.2", Name: "B", NetworkName: "Alpha", VLANID: 10},
 	}
 	groups := GroupClientsByNetwork(clients)
 	if len(groups) != 2 {

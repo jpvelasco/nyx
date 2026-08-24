@@ -196,11 +196,13 @@ type ACLDirection struct {
 	VPNInIDs []string `json:"vpnInIds"`
 }
 
-// ACLRule is one row of the Omada 6.x unified ACL list. Endpoint names are
+// ACLRule is one row of the Omada Open API ACL list (per-scope paths). The
+// Open API list result carries no type field — the scope comes from the
+// path the rule was fetched from (set after fetching). Endpoint names are
 // not on the wire — resolve them with ResolveRules after fetching networks.
 type ACLRule struct {
 	ID          string       `json:"id"`
-	Name        string       `json:"name"`
+	Name        string       `json:"description"`
 	Type        ACLType      `json:"type"`
 	Status      bool         `json:"status"`
 	Policy      ACLPolicy    `json:"policy"`
@@ -223,10 +225,9 @@ type ACLRule struct {
 	DestName   string `json:"-"`
 }
 
-// ACLList is a typed fetch of the unified ACL endpoint, including the
-// capability flags the controller returns on page 1. ACLDisable is the
-// site-level master switch for the ACL scope: when true, rules of this type
-// are stored but not enforced.
+// ACLList is a typed fetch of one ACL scope. The meta fields are retained
+// for the legacy internal API; the Open API read paths carry no capability
+// flags, so they stay zero-valued.
 type ACLList struct {
 	Type            ACLType
 	Rules           []ACLRule
@@ -235,19 +236,11 @@ type ACLList struct {
 	ExistLanToLan   bool
 }
 
-type aclListMeta struct {
-	ACLDisable      bool `json:"aclDisable"`
-	SupportLanToLan bool `json:"supportLanToLan"`
-	ExistLanToLan   bool `json:"existLanToLan"`
-}
-
-// FetchACLs loads every page of sites/<id>/setting/firewall/acls?type=N.
-// An empty list is success (no rules of that type). The type query is
-// required: without it the controller returns errorCode -1.
+// FetchACLs loads every page of the ACL list for one scope: osw-acls for
+// switch rules, osg-acls for gateway rules. An empty list is success (no
+// rules in that scope).
 func (c *Client) FetchACLs(ctx context.Context, siteID string, typ ACLType) (ACLList, error) {
-	path := aclCollectionPath(siteID)
-	extra := "type=" + strconv.Itoa(int(typ))
-	rules, _, meta, err := fetchPagedMeta[ACLRule, aclListMeta](ctx, c, path, defaultPageSize, extra)
+	rules, _, err := fetchPaged[ACLRule](ctx, c, aclReadPath(siteID, typ), defaultPageSize)
 	if err != nil {
 		return ACLList{}, fmt.Errorf("fetching ACL rules (type %d): %w", typ, err)
 	}
@@ -257,13 +250,7 @@ func (c *Client) FetchACLs(ctx context.Context, siteID string, typ ACLType) (ACL
 	for i := range rules {
 		rules[i].Type = typ
 	}
-	return ACLList{
-		Type:            typ,
-		Rules:           rules,
-		ACLDisable:      meta.ACLDisable,
-		SupportLanToLan: meta.SupportLanToLan,
-		ExistLanToLan:   meta.ExistLanToLan,
-	}, nil
+	return ACLList{Type: typ, Rules: rules}, nil
 }
 
 // GetACLRules returns switch (inter-VLAN) ACL rules (type=1).
@@ -275,9 +262,7 @@ func (c *Client) GetACLRules(ctx context.Context, siteID string) ([]ACLRule, err
 	return list.Rules, nil
 }
 
-// GetGatewayACLRules returns gateway ACL rules (type=0). Rules are returned
-// even when the scope is globally disabled (aclDisable) — they are stored
-// but not enforced; inspect FetchACLs for the flag.
+// GetGatewayACLRules returns gateway ACL rules (type=0).
 func (c *Client) GetGatewayACLRules(ctx context.Context, siteID string) ([]ACLRule, error) {
 	list, err := c.FetchACLs(ctx, siteID, ACLTypeGateway)
 	if err != nil {
@@ -286,6 +271,17 @@ func (c *Client) GetGatewayACLRules(ctx context.Context, siteID string) ([]ACLRu
 	return list.Rules, nil
 }
 
+// aclReadPath is the Open API read path for one ACL scope. Writes still use
+// the unified setting/firewall/acls collection (see aclItemPath).
+func aclReadPath(siteID string, typ ACLType) string {
+	if typ == ACLTypeSwitch {
+		return fmt.Sprintf("sites/%s/acls/osw-acls", siteID)
+	}
+	return fmt.Sprintf("sites/%s/acls/osg-acls", siteID)
+}
+
+// aclCollectionPath is the unified write collection for ACL rules;
+// refactored to the per-scope Open API paths in ref5.
 func aclCollectionPath(siteID string) string {
 	return fmt.Sprintf("sites/%s/setting/firewall/acls", siteID)
 }

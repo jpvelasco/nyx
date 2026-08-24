@@ -837,7 +837,7 @@ func TestDispatchOmadaListACLs_ServiceError(t *testing.T) {
 
 func TestDispatchOmadaListClients_Success(t *testing.T) {
 	stub := &stubOmadaSvc{clients: []service.OmadaClient{
-		{MAC: "aa:bb:cc:dd:ee:ff", IP: "10.0.10.5", Name: "nas", NetworkName: "Trusted", Active: true},
+		{MAC: "aa:bb:cc:dd:ee:ff", IP: "10.0.10.5", Name: "nas", NetworkName: "Trusted", Type: "wired"},
 	}}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_clients", map[string]interface{}{
 		"host":          "omada.local",

@@ -62,20 +62,16 @@ type OmadaACLRule struct {
 	Index      int    `json:"index"`
 }
 
-// OmadaClient is a connected client in a flat, agent-friendly shape.
+// OmadaClient is a connected client in a flat, agent-friendly shape. The
+// controller reports thin rows (MAC, name, type); IP, network name, and VLAN
+// id are filled in from the site's DHCP user list on a best-effort basis.
 type OmadaClient struct {
 	MAC         string `json:"mac"`
 	IP          string `json:"ip"`
 	Name        string `json:"name"`
-	Hostname    string `json:"hostname"`
+	Type        string `json:"type"`
 	NetworkName string `json:"network_name"`
-	SSID        string `json:"ssid"`
 	VLANID      int    `json:"vlan_id"`
-	Wireless    bool   `json:"wireless"`
-	Vendor      string `json:"vendor"`
-	DeviceType  string `json:"device_type"`
-	Active      bool   `json:"active"`
-	Uptime      int64  `json:"uptime_seconds"`
 }
 
 // OmadaImport is the generated intent spec plus the fetch summary, letting
@@ -273,32 +269,30 @@ func (s *OmadaService) ListClients(ctx context.Context, opts OmadaOptions) ([]Om
 	}
 	defer client.Logout(ctx) //nolint:errcheck
 
-	clients, err := client.GetClients(ctx, site.EffectiveID())
+	siteID := site.EffectiveID()
+	clients, err := client.GetClients(ctx, siteID)
 	if err != nil {
 		return nil, fmt.Errorf("fetching clients: %w", err)
 	}
-	// The wire has no per-client "networkName" field; resolve each client's
-	// network and VLAN from the site's LAN networks. Best-effort, matching
-	// the name-resolution policy in ListACLs: on a networks failure the
-	// clients are returned with the wire fields as-is.
-	if nets, nerr := client.GetNetworks(ctx, site.EffectiveID()); nerr == nil {
-		omadabackend.EnrichClients(clients, nets)
+	// The thin client wire has no IP or network name. Enrichment from the
+	// DHCP user list is best-effort: on a failure the clients are returned
+	// with the wire fields as-is.
+	var nets []omadabackend.Network
+	if netList, nerr := client.GetNetworks(ctx, siteID); nerr == nil {
+		nets = netList
 	}
+	// Best-effort: on a fetch or decode failure the clients keep their
+	// thin wire fields.
+	_ = client.EnrichFromDHCP(ctx, siteID, clients, nets)
 	out := make([]OmadaClient, 0, len(clients))
 	for _, c := range clients {
 		out = append(out, OmadaClient{
 			MAC:         c.MAC,
 			IP:          c.IP,
 			Name:        c.Name,
-			Hostname:    c.Hostname,
+			Type:        c.Type,
 			NetworkName: c.NetworkName,
-			SSID:        c.SSID,
 			VLANID:      c.VLANID,
-			Wireless:    c.Wireless,
-			Vendor:      c.Vendor,
-			DeviceType:  c.DeviceType,
-			Active:      c.Active,
-			Uptime:      c.Uptime,
 		})
 	}
 	return out, nil

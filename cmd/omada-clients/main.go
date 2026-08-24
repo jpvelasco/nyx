@@ -60,17 +60,20 @@ func run(getenv func(string) string, stdout io.Writer) error {
 		return err
 	}
 
-	clients, err := client.GetClients(ctx, site.EffectiveID())
+	siteID := site.EffectiveID()
+	clients, err := client.GetClients(ctx, siteID)
 	if err != nil {
 		return err
 	}
-	// The wire has no per-client network name; resolve it from the site's
-	// LAN networks so the grouped output shows real VLAN membership.
-	nets, err := client.GetNetworks(ctx, site.EffectiveID())
+	// The thin wire has no IP or network name; the DHCP user list is
+	// required for the grouped output, so failures propagate.
+	nets, err := client.GetNetworks(ctx, siteID)
 	if err != nil {
 		return err
 	}
-	omada.EnrichClients(clients, nets)
+	if err := client.EnrichFromDHCP(ctx, siteID, clients, nets); err != nil {
+		return err
+	}
 
 	fmt.Fprint(stdout, omada.RenderClientInventory(site.Name, clients))
 	return nil
