@@ -181,17 +181,17 @@ func TestBuildAssertions(t *testing.T) {
 		{Name: "iot", CIDR: "10.0.1.0/24", Gateway: ""},
 	}
 	omadaNets := []Network{
-		{ID: "n1", Name: "Lan", SSID: "Lan", VLANID: 1, GatewaySubnet: "10.0.0.1/24"},
-		{ID: "n2", Name: "IoT", SSID: "IoT", VLANID: 2, GatewaySubnet: "10.0.1.1/24"},
+		{ID: "n1", Name: "Lan", VLANID: 1, GatewaySubnet: "10.0.0.1/24"},
+		{ID: "n2", Name: "IoT", VLANID: 2, GatewaySubnet: "10.0.1.1/24"},
 	}
-	// Live 6.x wire shape: clients carry ssid/vid, no networkName. They are
-	// enriched (EnrichClients) before buildAssertions counts them.
+	// Thin wire rows carry only mac/name/type; they are enriched from the
+	// DHCP user list (EnrichFromDHCP) before buildAssertions counts them.
+	// The enriched fields are pre-set here to exercise the counting directly.
 	clients := []ConnectedClient{
-		{SSID: "Lan", IP: "10.0.0.10"},
-		{SSID: "Lan", IP: "10.0.0.11"},
-		{SSID: "IoT", IP: "10.0.1.10"},
+		{MAC: "aa:01", Name: "PC-1", NetworkName: "Lan"},
+		{MAC: "aa:02", Name: "PC-2", NetworkName: "Lan"},
+		{MAC: "aa:03", Name: "PC-3", NetworkName: "IoT"},
 	}
-	EnrichClients(clients, omadaNets)
 	rules := []ACLRule{
 		{Name: "lan-iot-deny", Policy: ACLPolicyDeny, Status: true, SourceType: EndpointNetwork, SourceName: "lan", DestType: EndpointNetwork, DestName: "iot"},
 		{Name: "disabled", Policy: ACLPolicyDeny, Status: false},
@@ -247,31 +247,33 @@ func TestImportSpecEndToEnd(t *testing.T) {
 			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
 		case "/abc123/openapi/v1/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[{"id":"s1","name":"HQ"},{"id":"s2","name":"Branch"}]}`)
-		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
-			// live 6.x wire shape: nested dhcpSettings, SSID under origName
+		case "/abc123/openapi/v1/sites/s1/lan-networks":
+			// open API wire shape: DHCP nested under dhcpSettingsVO
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
-				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24","vlan":10,"origName":"Trusted","dhcpSettings":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"},
-				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.1.1/24","vlan":20,"origName":"IoT","dhcpSettings":{"enable":true}}
+				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24","vlan":10,"dhcpSettingsVO":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"},
+				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.1.1/24","vlan":20,"dhcpSettingsVO":{"enable":true}}
 			]}`)
-		case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
-			if r.URL.Query().Get("type") == "0" {
-				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-				return
-			}
+		case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
+		case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
 			writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
-				{"id":"a1","name":"IoT to Trusted","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]},
-				{"id":"a2","name":"Trusted to IoT web","status":true,"policy":1,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]},
-				{"id":"a3","name":"Disabled rule","status":false,"policy":0}
+				{"id":"a1","description":"IoT to Trusted","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]},
+				{"id":"a2","description":"Trusted to IoT web","status":true,"policy":1,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]},
+				{"id":"a3","description":"Disabled rule","status":false,"policy":0}
 			]}`)
-		case "/abc123/openapi/v1/sites/s1/clients":
-			// live 6.x wire shape: ssid/vid, no networkName
+		case "/abc123/openapi/v1/sites/s1/networks/client":
+			// thin rows: mac/name/type only; enrichment comes from the DHCP list
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
-				{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.0.50","ssid":"Trusted","vid":10,"wireless":false,"vendor":"Synology","deviceType":"nas","active":true}
+				{"mac":"aa:bb:cc:dd:ee:ff","name":"NAS-01","type":"wired"}
 			]}`)
-		case "/abc123/openapi/v1/sites/s1/devices":
-			writeEnvelope(w, 0, "", `[
+		case "/abc123/openapi/v1/sites/s1/setting/service/dhcp/user-list":
+			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
+				{"ipAddress":"10.0.0.50","macAddress":"aa:bb:cc:dd:ee:ff","name":"NAS-01","netId":"n1","netName":"Trusted"}
+			]}`)
+		case "/abc123/openapi/v1/sites/s1/networks/devices":
+			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 				{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254","firmwareVersion":"2.2.3","needUpgrade":true}
-			]`)
+			]}`)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			writeEnvelope(w, -1101, "not found", "null")
@@ -414,6 +416,7 @@ func TestImportSpecErrors(t *testing.T) {
 	})
 
 	t.Run("no networks", func(t *testing.T) {
+		// The single lan-networks path 404s, so the networks fetch must fail.
 		ts := serverResponding(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/api/info":
@@ -422,8 +425,6 @@ func TestImportSpecErrors(t *testing.T) {
 				writeEnvelope(w, 0, "", `{"accessToken":"t"}`)
 			case "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
-				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -445,15 +446,19 @@ func TestImportSpecWarnings(t *testing.T) {
 			writeEnvelope(w, 0, "", `{"accessToken":"t"}`)
 		case "/abc123/openapi/v1/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/lan-networks":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24"},
 				{"id":"n2","name":"IoT-NoSubnet"}
 			]}`)
-		case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
+		case "/abc123/openapi/v1/sites/s1/acls/osg-acls", "/abc123/openapi/v1/sites/s1/acls/osw-acls":
 			writeEnvelope(w, -1000, "expired", "null")
-		case "/abc123/openapi/v1/sites/s1/clients":
+		case "/abc123/openapi/v1/sites/s1/networks/client":
 			writeEnvelope(w, -1000, "expired", "null")
+		case "/abc123/openapi/v1/sites/s1/setting/service/dhcp/user-list":
+			// Succeed with zero rows: only the two ACL fetches and the client
+			// fetch should warn, so the DHCP enrichment must not add a third.
+			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -486,46 +491,6 @@ func TestImportSpecWarnings(t *testing.T) {
 	if !hasACLWarn || !hasGwWarn || !hasClientWarn || !hasSubnetWarn {
 		t.Errorf("warnings = %v, want ACL, gateway ACL, client, and subnet warnings (%v/%v/%v/%v)",
 			got.Warnings, hasACLWarn, hasGwWarn, hasClientWarn, hasSubnetWarn)
-	}
-}
-
-func TestImportSpecGatewayACLDisabledWarning(t *testing.T) {
-	ts := serverResponding(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/info":
-			testutil.WriteBody(w, testInfoResponse)
-		case "/openapi/authorize/token":
-			writeEnvelope(w, 0, "", `{"accessToken":"t"}`)
-		case "/abc123/openapi/v1/sites":
-			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
-			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"n1","name":"LAN","gatewaySubnet":"10.0.0.1/24"}]}`)
-		case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
-			if r.URL.Query().Get("type") == "0" {
-				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[],"aclDisable":true}`)
-				return
-			}
-			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-		case "/abc123/openapi/v1/sites/s1/clients":
-			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	})
-	defer ts.Close()
-
-	got, err := ImportSpec(context.Background(), ts.URL, "a", "b", "", false, true, "", nil)
-	if err != nil {
-		t.Fatalf("ImportSpec: %v", err)
-	}
-	found := false
-	for _, w := range got.Warnings {
-		if strings.Contains(w, "gateway ACL feature is disabled") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("warnings = %v, want aclDisable warning", got.Warnings)
 	}
 }
 

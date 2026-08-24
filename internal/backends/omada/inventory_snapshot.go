@@ -67,10 +67,11 @@ func (c *Client) FetchInventory(ctx context.Context, siteID string) (*InventoryS
 	clients, err := c.GetClients(ctx, siteID)
 	if err != nil {
 		snap.Warnings = append(snap.Warnings, fmt.Sprintf("clients unavailable: %v", err))
-	} else {
-		EnrichClients(clients, nets)
-		snap.Clients = clients
 	}
+	if eerr := c.EnrichFromDHCP(ctx, siteID, clients, nets); eerr != nil {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("client DHCP enrichment unavailable: %v", eerr))
+	}
+	snap.Clients = clients
 	return snap, nil
 }
 

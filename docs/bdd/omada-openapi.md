@@ -23,12 +23,12 @@ The cutover lands in three PRs, each red→green against its own scenarios:
 | Section | Content | PR | Status |
 | --- | --- | --- | --- |
 | §1, §2 | Auth (token mint, re-mint, logout, secret hygiene) + credential plumbing | PR 1 | **Implemented** |
-| §3 | Read endpoints + wire shapes | PR 2 | Spec only — endpoints and payloads below are the target contract, not yet shipped |
+| §3 | Read endpoints + wire shapes | PR 2 | **Implemented** — mirrored 1:1 by httptest tests |
 | §4, §5 | Write endpoints + scope-disabled removal | PR 3 | Spec only — same caveat |
 
-Until PR 2/PR 3 land, the production code still calls the v2-style
-`setting/` subpaths (under the new `openapi/v1` base) and tests mirror that
-interim state.
+Until PR 3 lands, write calls still use the unified `setting/firewall/acls`
+collection and the `ACLList` capability fields stay zero-valued (reads carry
+no capability flags on the Open API wire).
 
 ## 1. Authentication
 

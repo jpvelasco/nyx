@@ -7,13 +7,11 @@ import (
 	"testing"
 )
 
+// BDD S3.6 — devices live at sites/{id}/networks/devices and arrive in a
+// paged envelope (a bare array is still accepted).
 func TestGetDevicesFlatArray(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/openapi/authorize/token" {
-			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			return
-		}
-		if r.URL.Path == "/abc123/openapi/v1/sites/s1/devices" {
+		if r.URL.Path == "/abc123/openapi/v1/sites/s1/networks/devices" {
 			writeEnvelope(w, 0, "", `[
 				{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254","firmwareVersion":"2.2.3","needUpgrade":true},
 				{"id":"d2","name":"SW-2428P","model":"SW-2428P","type":"switch","mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.253","firmwareVersion":"1.1.15","needUpgrade":false},
@@ -24,9 +22,6 @@ func TestGetDevicesFlatArray(t *testing.T) {
 		t.Errorf("unexpected path %s", r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
 	}))
-	if err := c.Login(context.Background(), "admin", "pw"); err != nil {
-		t.Fatalf("login: %v", err)
-	}
 	devices, err := c.GetDevices(context.Background(), "s1")
 	if err != nil {
 		t.Fatalf("GetDevices: %v", err)
@@ -43,20 +38,15 @@ func TestGetDevicesFlatArray(t *testing.T) {
 }
 
 func TestGetDevicesPagedWrapper(t *testing.T) {
+	var gotQuery string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/openapi/authorize/token" {
-			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			return
-		}
-		if r.URL.Path == "/abc123/openapi/v1/sites/s1/devices" {
-			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254"}]}`)
+		if r.URL.Path == "/abc123/openapi/v1/sites/s1/networks/devices" {
+			gotQuery = r.URL.RawQuery
+			writeEnvelope(w, 0, "", `{"totalRows":1,"currentPage":1,"currentSize":1,"data":[{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254"}]}`)
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}))
-	if err := c.Login(context.Background(), "admin", "pw"); err != nil {
-		t.Fatalf("login: %v", err)
-	}
 	devices, err := c.GetDevices(context.Background(), "s1")
 	if err != nil {
 		t.Fatalf("GetDevices: %v", err)
@@ -64,25 +54,24 @@ func TestGetDevicesPagedWrapper(t *testing.T) {
 	if len(devices) != 1 || devices[0].Name != "GW-CORE" {
 		t.Errorf("devices = %+v, want 1 GW-CORE", devices)
 	}
+	if gotQuery != "page=1&pageSize=200" {
+		t.Errorf("query = %q, want page/pageSize params", gotQuery)
+	}
 }
 
 func TestGetDevicesErrors(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/openapi/authorize/token":
-			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-		case "/abc123/openapi/v1/sites/s1/devices":
+		if r.URL.Path == "/abc123/openapi/v1/sites/s1/networks/devices" {
 			writeEnvelope(w, 0, "", `[{"id":"d1","name":123}]`)
-		default:
-			w.WriteHeader(http.StatusNotFound)
+			return
 		}
+		w.WriteHeader(http.StatusNotFound)
 	}))
-	if err := c.Login(context.Background(), "admin", "pw"); err != nil {
-		t.Fatalf("login: %v", err)
+	// Malformed row payload must surface as a decode error.
+	if _, err := c.GetDevices(context.Background(), "s1"); err == nil || !strings.Contains(err.Error(), "decoding paged list response") {
+		t.Errorf("error = %v, want decode failure", err)
 	}
-	if _, err := c.GetDevices(context.Background(), "s1"); err == nil || !strings.Contains(err.Error(), "decoding device inventory") {
-		t.Errorf("error = %v, want decoding device inventory", err)
-	}
+	// Missing site must surface as the fetching wrapper.
 	if _, err := c.GetDevices(context.Background(), "missing"); err == nil || !strings.Contains(err.Error(), "getting devices") {
 		t.Errorf("error = %v, want getting devices", err)
 	}
@@ -158,48 +147,50 @@ func TestFetchInventory(t *testing.T) {
 	newClient := func(failDevices, failACLs, failClients bool) *Client {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/openapi/authorize/token":
-				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
-				// Live 6.x wire shape: DHCP nested under "dhcpSettings", SSID
-				// as "origName" — no top-level dhcpEnabled or per-client
-				// networkName on the wire.
+			case "/abc123/openapi/v1/sites/s1/lan-networks":
+				// Open API wire shape: DHCP nested under "dhcpSettingsVO".
 				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
-					{"id":"n1","name":"Trusted","vlan":10,"purpose":"interface","gatewaySubnet":"10.0.0.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettings":{"enable":true},"origName":"Trusted"},
-					{"id":"n2","name":"IoT","vlan":20,"purpose":"interface","gatewaySubnet":"10.0.1.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettings":{"enable":false},"origName":"IoT"}
+					{"id":"n1","name":"Trusted","vlan":10,"purpose":"interface","gatewaySubnet":"10.0.0.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettingsVO":{"enable":true}},
+					{"id":"n2","name":"IoT","vlan":20,"purpose":"interface","gatewaySubnet":"10.0.1.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettingsVO":{"enable":false}}
 				]}`)
-			case "/abc123/openapi/v1/sites/s1/devices":
+			case "/abc123/openapi/v1/sites/s1/networks/devices":
 				if failDevices {
 					writeEnvelope(w, -1, "boom", "null")
 					return
 				}
-				writeEnvelope(w, 0, "", `[{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254"}]`)
-			case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254"}]}`)
+			case "/abc123/openapi/v1/sites/s1/acls/osg-acls":
 				if failACLs {
 					writeEnvelope(w, -1, "boom", "null")
 					return
 				}
-				if r.URL.Query().Get("type") == "0" {
-					writeEnvelope(w, 0, "", `{"totalRows":1,"aclDisable":true,"supportLanToLan":true,"data":[{"id":"a1","name":"deny","status":true,"policy":0}]}`)
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","description":"deny","status":true,"policy":0}]}`)
+			case "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+				if failACLs {
+					writeEnvelope(w, -1, "boom", "null")
 					return
 				}
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-			case "/abc123/openapi/v1/sites/s1/clients":
+			case "/abc123/openapi/v1/sites/s1/networks/client":
 				if failClients {
 					writeEnvelope(w, -1, "boom", "null")
 					return
 				}
-				// Live 6.x wire shape: no "networkName" field; the client only
-				// reports its SSID (vid is often omitted), so FetchInventory
-				// must resolve the network from the LAN list.
-				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"mac":"aa","ip":"10.0.0.50","ssid":"Trusted","wireless":true}]}`)
+				// Thin rows: the wire carries only mac/name/type; FetchInventory
+				// must enrich from the DHCP user list.
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"mac":"aa","name":"PC-01","type":"wired"}]}`)
+			case "/abc123/openapi/v1/sites/s1/setting/service/dhcp/user-list":
+				if failClients {
+					writeEnvelope(w, -1, "boom", "null")
+					return
+				}
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
+					{"ipAddress":"10.0.0.50","macAddress":"aa","name":"PC-01","netId":"n1","netName":"Trusted"}
+				]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
 		}))
-		if err := c.Login(context.Background(), "admin", "pw"); err != nil {
-			t.Fatalf("login: %v", err)
-		}
 		return c
 	}
 
@@ -213,16 +204,19 @@ func TestFetchInventory(t *testing.T) {
 			t.Errorf("counts = %d/%d/%d, want 1/2/1", len(snap.Devices), len(snap.Networks), len(snap.Clients))
 		}
 		// The wire carries no per-client networkName: FetchInventory must
-		// resolve it from the LAN networks (SSID match) and backfill the VLAN.
+		// resolve it from the DHCP user list (MAC join) and backfill the VLAN
+		// from the netId -> LAN network match.
 		nc := snap.Clients[0]
-		if nc.NetworkName != "Trusted" || nc.VLANID != 10 {
-			t.Errorf("client = %+v, want NetworkName Trusted, VLANID 10", nc)
+		if nc.IP != "10.0.0.50" || nc.NetworkName != "Trusted" || nc.VLANID != 10 {
+			t.Errorf("client = %+v, want enriched IP/NetworkName/VLANID", nc)
 		}
 		if !snap.GatewayACLsOK || !snap.SwitchACLsOK {
 			t.Errorf("scopes = gw %v sw %v, want both OK", snap.GatewayACLsOK, snap.SwitchACLsOK)
 		}
-		if !snap.GatewayACLs.ACLDisable || !snap.GatewayACLs.SupportLanToLan {
-			t.Errorf("gateway flags = disable %v lan2lan %v, want true/true", snap.GatewayACLs.ACLDisable, snap.GatewayACLs.SupportLanToLan)
+		// The Open API list envelope carries no aclDisable/supportLanToLan:
+		// the decoded meta must stay at its zero value.
+		if snap.GatewayACLs.ACLDisable || snap.GatewayACLs.SupportLanToLan {
+			t.Errorf("gateway flags = disable %v lan2lan %v, want false/false", snap.GatewayACLs.ACLDisable, snap.GatewayACLs.SupportLanToLan)
 		}
 		if len(snap.Warnings) != 0 {
 			t.Errorf("warnings = %v, want none", snap.Warnings)
@@ -245,8 +239,10 @@ func TestFetchInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FetchInventory: %v, want nil (degraded snapshot)", err)
 		}
-		if len(snap.Warnings) != 4 {
-			t.Errorf("warnings = %v, want 4 (devices, gateway ACLs, switch ACLs, clients)", snap.Warnings)
+		// With no clients fetched the DHCP enrichment also degrades to a
+		// warning: 5 best-effort fetches in total.
+		if len(snap.Warnings) != 5 {
+			t.Errorf("warnings = %v, want 5 (devices, gateway ACLs, switch ACLs, clients, DHCP enrichment)", snap.Warnings)
 		}
 		if snap.GatewayACLsOK || snap.SwitchACLsOK {
 			t.Error("failed ACL scopes must not be marked OK")
@@ -258,16 +254,8 @@ func TestFetchInventory(t *testing.T) {
 
 	t.Run("networks failure is fatal", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.URL.Path {
-			case "/openapi/authorize/token":
-				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
-			default:
-				writeEnvelope(w, -1, "boom", "null")
-			}
+			writeEnvelope(w, -1, "boom", "null")
 		}))
-		if err := c.Login(context.Background(), "admin", "pw"); err != nil {
-			t.Fatalf("login: %v", err)
-		}
 		if _, err := c.FetchInventory(context.Background(), "s1"); err == nil {
 			t.Error("FetchInventory with failing networks fetch must error")
 		}

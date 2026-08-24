@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// ClientGroup is a set of active connected clients that share the same
-// Omada network name, sorted by IP address.
+// ClientGroup is a set of connected clients that share the same Omada
+// network name, sorted by IP address.
 type ClientGroup struct {
 	NetworkName string
 	VLANID      int
@@ -17,17 +17,14 @@ type ClientGroup struct {
 	Clients     []ConnectedClient
 }
 
-// GroupClientsByNetwork groups active clients by their Omada network name
-// (the raw name as reported by the controller, e.g. "LAN(Default)").
-// Clients without a network name are grouped under "". Groups are sorted by
-// VLAN id ascending, then by network name; clients within a group are sorted
-// by IP ascending. Inactive clients are excluded.
+// GroupClientsByNetwork groups clients by their Omada network name (the raw
+// name as reported by the controller, e.g. "LAN(Default)"). Clients without
+// a network name are grouped under "". Groups are sorted by VLAN id
+// ascending, then by network name; clients within a group are sorted by IP
+// ascending.
 func GroupClientsByNetwork(clients []ConnectedClient) []ClientGroup {
 	byName := make(map[string]*ClientGroup)
 	for _, c := range clients {
-		if !c.Active {
-			continue
-		}
 		g, ok := byName[c.NetworkName]
 		if !ok {
 			g = &ClientGroup{NetworkName: c.NetworkName, VLANID: c.VLANID}
@@ -54,14 +51,14 @@ func GroupClientsByNetwork(clients []ConnectedClient) []ClientGroup {
 	return groups
 }
 
-// RenderClientInventory formats a human-readable inventory of active clients
+// RenderClientInventory formats a human-readable inventory of clients
 // grouped by network. siteName is the Omada site label shown in the header.
 func RenderClientInventory(siteName string, clients []ConnectedClient) string {
 	groups := GroupClientsByNetwork(clients)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Site: %s\n\n", siteName)
 	if len(groups) == 0 {
-		b.WriteString("No active clients reported by the controller.\n")
+		b.WriteString("No clients reported by the controller.\n")
 		return b.String()
 	}
 	for _, g := range groups {
@@ -72,8 +69,8 @@ func RenderClientInventory(siteName string, clients []ConnectedClient) string {
 		fmt.Fprintf(&b, "== %s (VLAN %d) — %d client%s ==\n",
 			label, g.VLANID, g.Count, plural(g.Count))
 		for _, c := range g.Clients {
-			fmt.Fprintf(&b, "  %-15s %-20s %-15s %s\n",
-				c.IP, c.Hostname, c.DeviceType, c.Vendor)
+			fmt.Fprintf(&b, "  %-15s %-20s %s\n",
+				c.IP, c.Name, c.Type)
 		}
 		b.WriteString("\n")
 	}

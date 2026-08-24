@@ -35,14 +35,11 @@ type Network struct {
 	Isolated      bool
 	DHCPEnabled   bool
 	DeviceMac     string // MAC of the device this LAN is bound to
-	// SSID is the wireless SSID clients join on this network. 6.x reports it
-	// as "origName" (e.g. "LAN" for the "LAN(Default)" LAN).
-	SSID string
 }
 
-// rawNetwork is the wire shape of a network entry (observed on controller
-// 6.2.14). There is no top-level "dhcpEnabled" field — the DHCP switch is
-// nested under "dhcpSettings".
+// rawNetwork is the wire shape of a network entry (Open API). There is no
+// top-level "dhcpEnabled" field — the DHCP switch is nested under
+// "dhcpSettingsVO"; deviceMac is optional.
 type rawNetwork struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
@@ -52,13 +49,12 @@ type rawNetwork struct {
 	Isolated      bool   `json:"isolation"`
 	DHCPSettings  struct {
 		Enable bool `json:"enable"`
-	} `json:"dhcpSettings"`
+	} `json:"dhcpSettingsVO"`
 	DeviceMac string `json:"deviceMac"`
-	OrigName  string `json:"origName"`
 }
 
-// UnmarshalJSON decodes the wire shape so fields that moved between
-// controller versions (dhcpSettings.enable, origName) keep their meaning.
+// UnmarshalJSON decodes the wire shape so the nested DHCP switch
+// (dhcpSettingsVO.enable) keeps its meaning.
 func (n *Network) UnmarshalJSON(data []byte) error {
 	var raw rawNetwork
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -73,7 +69,6 @@ func (n *Network) UnmarshalJSON(data []byte) error {
 		Isolated:      raw.Isolated,
 		DHCPEnabled:   raw.DHCPSettings.Enable,
 		DeviceMac:     raw.DeviceMac,
-		SSID:          raw.OrigName,
 	}
 	return nil
 }
@@ -126,23 +121,11 @@ func (c *Client) GetSites(ctx context.Context) ([]Site, error) {
 }
 
 // GetNetworks returns all LAN networks for the given site, walking every page
-// of the first candidate endpoint that responds with data.
+// of the sites/{id}/lan-networks endpoint.
 func (c *Client) GetNetworks(ctx context.Context, siteID string) ([]Network, error) {
-	paths := []string{
-		fmt.Sprintf("sites/%s/setting/lan/networks", siteID),
-		fmt.Sprintf("sites/%s/setting/networks", siteID),
-		fmt.Sprintf("sites/%s/networks", siteID),
+	nets, _, err := fetchPaged[Network](ctx, c, fmt.Sprintf("sites/%s/lan-networks", siteID), defaultPageSize)
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch networks for site %q: %w", siteID, err)
 	}
-
-	for _, path := range paths {
-		nets, _, err := fetchPaged[Network](ctx, c, path, defaultPageSize)
-		if err != nil {
-			continue
-		}
-		if len(nets) > 0 {
-			return nets, nil
-		}
-	}
-
-	return nil, fmt.Errorf("could not fetch networks for site %q", siteID)
+	return nets, nil
 }

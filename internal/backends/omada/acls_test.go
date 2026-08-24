@@ -43,31 +43,36 @@ func TestEndpointKindUnmarshal(t *testing.T) {
 	}
 }
 
+// BDD S3.7 — gateway ACL rows come from the per-scope acls/osg-acls path
+// (no "type" query, no aclDisable), with the rule name on "description".
 func TestFetchACLsLiveGatewayShape(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("type") != "0" {
-			writeEnvelope(w, -1, "General error.", "null")
+		if r.URL.Path != "/abc123/openapi/v1/sites/s1/acls/osg-acls" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		writeEnvelope(w, 0, "", `{
 			"totalRows":1,"data":[{
-				"id":"6a00b0c0d0e0f0a0b0c0d0e1","type":0,"index":1,"name":"iot-lan-deny",
+				"id":"6a00b0c0d0e0f0a0b0c0d0e1","index":1,"description":"iot-lan-deny",
 				"status":true,"policy":0,"protocols":[256],
 				"sourceType":0,"sourceIds":["n-iot"],
 				"destinationType":0,"destinationIds":["n-lan","n-guest"],
 				"direction":{"lanToWan":false,"lanToLan":true,"wanInIds":[],"vpnInIds":[]}
-			}],
-			"aclDisable":true
+			}]
 		}`)
 	}))
 	list, err := c.FetchACLs(context.Background(), "s1", ACLTypeGateway)
 	if err != nil {
 		t.Fatalf("FetchACLs: %v", err)
 	}
-	if !list.ACLDisable || len(list.Rules) != 1 {
-		t.Fatalf("list = %+v, want one gateway rule", list)
+	if list.ACLDisable || len(list.Rules) != 1 {
+		t.Fatalf("list = %+v, want one gateway rule with zero-value meta", list)
 	}
 	r := list.Rules[0]
+	if r.Name != "iot-lan-deny" {
+		t.Errorf("rule name = %q, want the description from the wire", r.Name)
+	}
 	if r.SourceType != EndpointNetwork || r.DestType != EndpointNetwork {
 		t.Errorf("kinds = src %v dst %v, want network", r.SourceType, r.DestType)
 	}
