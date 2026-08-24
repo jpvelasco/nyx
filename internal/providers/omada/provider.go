@@ -85,9 +85,8 @@ func (o *OmadaProvider) Check(ctx context.Context, opts providers.ImportOptions)
 }
 
 // Inventory returns the site's point-in-time observation: device inventory,
-// LAN networks with their gateway bindings, both ACL scopes and their
-// enabled state, and the active client count. It is read-only and never
-// mutates.
+// LAN networks with their gateway bindings, both ACL scopes and their rule
+// counts, and the active client count. It is read-only and never mutates.
 func (o *OmadaProvider) Inventory(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInventory, error) {
 	client, err := omadabackend.NewClient(ctx, opts.Host, opts.SkipTLSVerify, opts.CACertPath)
 	if err != nil {
@@ -159,9 +158,8 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 	}
 	siteID := site.EffectiveID()
 
-	// Fetch both ACL scopes with their capability flags. A scope's
-	// aclDisable master switch means its rules are stored but not enforced —
-	// the verdict must reflect that, so the raw FetchACLs meta is kept.
+	// Fetch both ACL scopes. The Open API has no scope enable/disable
+	// flag, so an enabled matching rule is enforced.
 	swList, swErr := client.FetchACLs(ctx, siteID, omadabackend.ACLTypeSwitch)
 	gwList, gwErr := client.FetchACLs(ctx, siteID, omadabackend.ACLTypeGateway)
 	if swErr != nil {
@@ -192,22 +190,16 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 	result.Evidence = append(result.Evidence, string(rulesJSON))
 	result.Observed["rule_count"] = len(allRules)
 	if match != nil {
-		match.Scope, match.Disabled = aclScopeFlags(swList, gwList, match.Rule)
+		match.Scope = scopeLabel(match.Rule.Type)
 		result.Observed["scope"] = match.Scope
-		result.Observed["scope_disabled"] = match.Disabled
 	}
 	result.Expected["policy"] = req.PolicyName
 	result.Expected["expect"] = "enforced"
 
 	switch {
-	case req.ExpectEnforced && match != nil && !match.Disabled:
+	case req.ExpectEnforced && match != nil:
 		result.Status = models.StatusPass
 		result.Summary = fmt.Sprintf("ACL policy %q is enforced in Omada", req.PolicyName)
-	case req.ExpectEnforced && match != nil && match.Disabled:
-		result.Status = models.StatusFail
-		result.Summary = fmt.Sprintf("ACL policy %q is stored but NOT enforced: its %s ACL scope is disabled (aclDisable=true)", req.PolicyName, match.Scope)
-		result.Violations = append(result.Violations,
-			fmt.Sprintf("rule %q exists (status enabled) but the %s ACL master switch is off on the controller — enable the scope before relying on this rule", match.Rule.Name, match.Scope))
 	case req.ExpectEnforced && match == nil:
 		result.Status = models.StatusFail
 		result.Summary = fmt.Sprintf("ACL policy %q is NOT enforced in Omada", req.PolicyName)
@@ -232,12 +224,11 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 	return result, nil
 }
 
-// aclCheckMatch identifies the rule a policy refers to, plus whether the
-// scope that rule lives in is disabled (stored but not enforced).
+// aclCheckMatch identifies the rule a policy refers to and the scope that
+// rule lives in.
 type aclCheckMatch struct {
 	Rule      omadabackend.ACLRule
 	Scope     string // "gateway" | "switch"
-	Disabled  bool   // the scope's aclDisable master switch is on
 	MatchedBy string // "name" | "endpoints"
 }
 
@@ -265,17 +256,6 @@ func lookupACLMatch(rules []omadabackend.ACLRule, req providers.ACLCheckRequest)
 		}
 	}
 	return nil
-}
-
-// aclScopeFlags reports the scope label and disabled flag of the list a rule
-// was found in.
-func aclScopeFlags(sw, gw omadabackend.ACLList, rule omadabackend.ACLRule) (string, bool) {
-	switch rule.Type {
-	case omadabackend.ACLTypeGateway:
-		return "gateway", gw.ACLDisable
-	default:
-		return "switch", sw.ACLDisable
-	}
 }
 
 var _ providers.Provider = (*OmadaProvider)(nil)
@@ -359,9 +339,9 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 	ruleID := rule.ID
 	if !req.DryRun && outcome != "unchanged" {
 		if outcome == "created" {
-			_, err = client.CreateACLRule(ctx, siteID, rule)
+			err = client.CreateACLRule(ctx, siteID, rule)
 		} else {
-			_, err = client.UpdateACLRule(ctx, siteID, rule.ID, rule)
+			err = client.UpdateACLRule(ctx, siteID, rule.ID, rule)
 		}
 		if err != nil {
 			return nil, err
@@ -393,18 +373,17 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 	}
 
 	return &providers.ACLApplyResult{
-		DryRun:        req.DryRun,
-		Outcome:       outcome,
-		RuleID:        ruleID,
-		RuleName:      rule.Name,
-		Scope:         scopeLabel(scopeType),
-		ScopeDisabled: list.ACLDisable,
-		FromCIDRs:     networkList(srcs, func(n omadabackend.Network) string { return n.CIDR() }),
-		ToCIDRs:       networkList(dsts, func(n omadabackend.Network) string { return n.CIDR() }),
-		FromGateways:  networkList(srcs, func(n omadabackend.Network) string { return n.Gateway() }),
-		ToGateways:    networkList(dsts, func(n omadabackend.Network) string { return n.Gateway() }),
-		Before:        string(before),
-		After:         after,
+		DryRun:       req.DryRun,
+		Outcome:      outcome,
+		RuleID:       ruleID,
+		RuleName:     rule.Name,
+		Scope:        scopeLabel(scopeType),
+		FromCIDRs:    networkList(srcs, func(n omadabackend.Network) string { return n.CIDR() }),
+		ToCIDRs:      networkList(dsts, func(n omadabackend.Network) string { return n.CIDR() }),
+		FromGateways: networkList(srcs, func(n omadabackend.Network) string { return n.Gateway() }),
+		ToGateways:   networkList(dsts, func(n omadabackend.Network) string { return n.Gateway() }),
+		Before:       string(before),
+		After:        after,
 	}, nil
 }
 

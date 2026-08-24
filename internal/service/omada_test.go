@@ -90,11 +90,11 @@ func TestOmadaServiceInventory(t *testing.T) {
 		t.Fatalf("acl_scopes = %+v, want 2", inv.ACLScopes)
 	}
 	gw, sw := inv.ACLScopes[0], inv.ACLScopes[1]
-	if gw.Scope != "gateway" || !gw.Enabled || gw.RuleCount != 1 {
-		t.Errorf("gateway scope = %+v, want enabled/1 rule", gw)
+	if gw.Scope != "gateway" || gw.RuleCount != 1 {
+		t.Errorf("gateway scope = %+v, want 1 rule", gw)
 	}
-	if sw.Scope != "switch" || !sw.Enabled || sw.RuleCount != 0 {
-		t.Errorf("switch scope = %+v, want enabled/0 rules", sw)
+	if sw.Scope != "switch" || sw.RuleCount != 0 {
+		t.Errorf("switch scope = %+v, want 0 rules", sw)
 	}
 	if len(inv.Warnings) != 0 {
 		t.Errorf("warnings = %v, want none", inv.Warnings)
@@ -910,18 +910,19 @@ func omadaApplyServer(t *testing.T, initialRules string) *httptest.Server {
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 				{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
-		// Reads use the per-scope Open API paths; writes still use the
-		// unified setting/firewall/acls collection (ref5).
+		// Reads and writes use the per-scope Open API paths (BDD §4);
+		// creates return no payload, so the post-create refetch serves
+		// the updated list.
+		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
+			writeOmadaEnvelope(w, 0, "null")
+			state = `{"totalRows":1,"data":[{"id":"a9","description":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
+		case strings.HasPrefix(r.URL.Path, "/abc123/openapi/v1/sites/s1/acls/osw-acls/") && r.Method == http.MethodPut:
+			writeOmadaEnvelope(w, 0, "null")
+			state = `{"totalRows":1,"data":[{"id":"a1","description":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
 		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
 		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
 			writeOmadaEnvelope(w, 0, state)
-		case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
-			writeOmadaEnvelope(w, 0, `{"id":"a9","description":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`)
-			state = `{"totalRows":1,"data":[{"id":"a9","description":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
-		case strings.HasPrefix(r.URL.Path, "/abc123/openapi/v1/sites/s1/setting/firewall/acls/") && r.Method == http.MethodPut:
-			writeOmadaEnvelope(w, 0, `{"id":"a1","description":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`)
-			state = `{"totalRows":1,"data":[{"id":"a1","description":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
 		default:
 			http.NotFound(w, r)
 		}

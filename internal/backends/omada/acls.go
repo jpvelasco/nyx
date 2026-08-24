@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// ACL types on the unified 6.x endpoint (sites/<id>/setting/firewall/acls?type=N).
+// ACL types on the per-scope Open API paths (osw-acls / osg-acls / eap-acls).
 const (
 	ACLTypeGateway ACLType = 0
 	ACLTypeSwitch  ACLType = 1
@@ -225,22 +225,18 @@ type ACLRule struct {
 	DestName   string `json:"-"`
 }
 
-// ACLList is a typed fetch of one ACL scope. The meta fields are retained
-// for the legacy internal API; the Open API read paths carry no capability
-// flags, so they stay zero-valued.
+// ACLList is a typed fetch of one ACL scope. The Open API carries no scope
+// capability flags, so a list is just the scope type and its rules.
 type ACLList struct {
-	Type            ACLType
-	Rules           []ACLRule
-	ACLDisable      bool
-	SupportLanToLan bool
-	ExistLanToLan   bool
+	Type  ACLType
+	Rules []ACLRule
 }
 
 // FetchACLs loads every page of the ACL list for one scope: osw-acls for
 // switch rules, osg-acls for gateway rules. An empty list is success (no
 // rules in that scope).
 func (c *Client) FetchACLs(ctx context.Context, siteID string, typ ACLType) (ACLList, error) {
-	rules, _, err := fetchPaged[ACLRule](ctx, c, aclReadPath(siteID, typ), defaultPageSize)
+	rules, _, err := fetchPaged[ACLRule](ctx, c, aclScopePath(siteID, typ), defaultPageSize)
 	if err != nil {
 		return ACLList{}, fmt.Errorf("fetching ACL rules (type %d): %w", typ, err)
 	}
@@ -271,23 +267,18 @@ func (c *Client) GetGatewayACLRules(ctx context.Context, siteID string) ([]ACLRu
 	return list.Rules, nil
 }
 
-// aclReadPath is the Open API read path for one ACL scope. Writes still use
-// the unified setting/firewall/acls collection (see aclItemPath).
-func aclReadPath(siteID string, typ ACLType) string {
+// aclScopePath is the Open API collection for one ACL scope. Reads and
+// writes share the same per-scope path.
+func aclScopePath(siteID string, typ ACLType) string {
 	if typ == ACLTypeSwitch {
 		return fmt.Sprintf("sites/%s/acls/osw-acls", siteID)
 	}
 	return fmt.Sprintf("sites/%s/acls/osg-acls", siteID)
 }
 
-// aclCollectionPath is the unified write collection for ACL rules;
-// refactored to the per-scope Open API paths in ref5.
-func aclCollectionPath(siteID string) string {
-	return fmt.Sprintf("sites/%s/setting/firewall/acls", siteID)
-}
-
-func aclItemPath(siteID, ruleID string) string {
-	return fmt.Sprintf("sites/%s/setting/firewall/acls/%s", siteID, ruleID)
+// aclDeletePath is the scope-agnostic item path for removing a rule.
+func aclDeletePath(siteID, ruleID string) string {
+	return fmt.Sprintf("sites/%s/acls/%s", siteID, ruleID)
 }
 
 // ResolveRules fills SourceName/DestName from LAN network IDs. Names already

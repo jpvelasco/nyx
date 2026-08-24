@@ -77,26 +77,24 @@ type ACLApplyRequest struct {
 // ACLApplyResult is the structured outcome of an apply attempt, with
 // before/after evidence for auditing. Before and After hold the JSON arrays
 // of ACL rules as seen by the controller; they are identical when nothing
-// was mutated. ScopeDisabled is the scope's master switch at observation
-// time: when true, the rule is stored but not enforced.
+// was mutated.
 type ACLApplyResult struct {
-	DryRun        bool     `json:"dry_run"`
-	Outcome       string   `json:"outcome"` // "created" | "enabled" | "unchanged"
-	RuleID        string   `json:"rule_id,omitempty"`
-	RuleName      string   `json:"rule_name,omitempty"`
-	Scope         string   `json:"scope"` // "switch" or "gateway"
-	ScopeDisabled bool     `json:"scope_disabled,omitempty"`
-	FromCIDRs     []string `json:"from_cidrs"` // resolved network CIDRs for re-audit
-	ToCIDRs       []string `json:"to_cidrs"`
-	FromGateways  []string `json:"from_gateways,omitempty"` // gateway IPs for re-audit
-	ToGateways    []string `json:"to_gateways,omitempty"`
-	Before        string   `json:"before"`
-	After         string   `json:"after"`
+	DryRun       bool     `json:"dry_run"`
+	Outcome      string   `json:"outcome"` // "created" | "enabled" | "unchanged"
+	RuleID       string   `json:"rule_id,omitempty"`
+	RuleName     string   `json:"rule_name,omitempty"`
+	Scope        string   `json:"scope"`      // "switch" or "gateway"
+	FromCIDRs    []string `json:"from_cidrs"` // resolved network CIDRs for re-audit
+	ToCIDRs      []string `json:"to_cidrs"`
+	FromGateways []string `json:"from_gateways,omitempty"` // gateway IPs for re-audit
+	ToGateways   []string `json:"to_gateways,omitempty"`
+	Before       string   `json:"before"`
+	After        string   `json:"after"`
 }
 
 // ProviderInventory is the provider's point-in-time observation of a site:
 // the device inventory, LAN networks with their gateway bindings, both ACL
-// scopes and their enabled state, and the active client count. Human is a
+// scopes and their rule counts, and the active client count. Human is a
 // stable, human-readable rendering.
 type ProviderInventory struct {
 	Site        string            `json:"site"`

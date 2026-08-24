@@ -66,8 +66,8 @@ func TestFetchACLsLiveGatewayShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchACLs: %v", err)
 	}
-	if list.ACLDisable || len(list.Rules) != 1 {
-		t.Fatalf("list = %+v, want one gateway rule with zero-value meta", list)
+	if len(list.Rules) != 1 {
+		t.Fatalf("list = %+v, want one gateway rule", list)
 	}
 	r := list.Rules[0]
 	if r.Name != "iot-lan-deny" {

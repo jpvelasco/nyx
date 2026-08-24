@@ -119,9 +119,9 @@ func TestGetACLRulesUsesSwitchScopePath(t *testing.T) {
 	}
 }
 
-// BDD S3.7 — the list envelope carries no aclDisable: the scope-enablement
-// concept is gone, so the decoded meta must stay at its zero value.
-func TestGetGatewayACLRulesNoDisableFlag(t *testing.T) {
+// BDD S3.7 — the list envelope carries no capability flags: a scope list is
+// just the scope type and its rules.
+func TestGetGatewayACLRulesNoCapabilityFlags(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/abc123/openapi/v1/sites/s1/acls/osg-acls" {
 			w.WriteHeader(http.StatusNotFound)
@@ -133,8 +133,8 @@ func TestGetGatewayACLRulesNoDisableFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchACLs: %v", err)
 	}
-	if list.ACLDisable || list.Type != ACLTypeGateway {
-		t.Errorf("list = %+v, want zero-value meta and gateway type", list)
+	if list.Type != ACLTypeGateway {
+		t.Errorf("list = %+v, want gateway type", list)
 	}
 	rules, err := c.GetGatewayACLRules(context.Background(), "s1")
 	if err != nil {
