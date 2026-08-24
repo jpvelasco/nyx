@@ -28,12 +28,12 @@ func TestClassifyRetry(t *testing.T) {
 		want retryAction
 	}{
 		{"nil", nil, retryFail},
-		{"session expired", &apiError{ErrorCode: -1000}, retryReauth},
-		{"session expired alt", &apiError{ErrorCode: -44112}, retryReauth},
+		{"token expired", &apiError{ErrorCode: -44112}, retryReauth},
+		{"not logged in", &apiError{ErrorCode: -1000}, retryReauth},
 		{"http 401", &apiError{StatusCode: http.StatusUnauthorized}, retryReauth},
 		{"http 500", &apiError{StatusCode: http.StatusInternalServerError}, retryBackoff},
 		{"http 503", &apiError{StatusCode: http.StatusServiceUnavailable}, retryBackoff},
-		{"bad credentials", &apiError{ErrorCode: -30109}, retryFail},
+		{"invalid client credentials", &apiError{ErrorCode: -44106}, retryFail},
 		{"forbidden", &apiError{ErrorCode: -1005}, retryFail},
 		{"controller error", &apiError{ErrorCode: -7}, retryFail},
 		{"network error", &url.Error{Op: "dial", Err: errors.New("connection refused")}, retryBackoff},
@@ -88,9 +88,9 @@ func TestRetryTransientThenSuccess(t *testing.T) {
 	var calls int
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeEnvelope(w, 0, "", `{"token":"tok1"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"tok1"}`)
+		case "/abc123/openapi/v1/sites":
 			calls++
 			if calls < 3 {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -101,7 +101,7 @@ func TestRetryTransientThenSuccess(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	if err := c.Login(context.Background(), "admin", "secret"); err != nil {
+	if err := c.Login(context.Background(), "cid-1", "csecret"); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 	if err := c.get(context.Background(), "sites", nil); err != nil {
@@ -160,34 +160,34 @@ func TestNoRetryOnCancelledContext(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Session expiry → single re-login → retry.
+// BDD S1.3 — expired token → single re-mint → retry.
 // ---------------------------------------------------------------------------
 
-func TestSessionExpiryReloginAndRetry(t *testing.T) {
+func TestTokenExpiryRemintAndRetry(t *testing.T) {
 	var (
-		mu           sync.Mutex
-		loginBodies  []map[string]string
-		getCSRF      []string
-		expiredFirst bool
+		mu         sync.Mutex
+		mintBodies []map[string]string
+		getTokens  []string
+		expired    bool
 	)
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
+		case "/openapi/authorize/token":
 			var body map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			mu.Lock()
-			loginBodies = append(loginBodies, body)
-			tok := fmt.Sprintf("tok%d", len(loginBodies))
+			mintBodies = append(mintBodies, body)
+			tok := fmt.Sprintf("AT-%d", len(mintBodies))
 			mu.Unlock()
-			writeEnvelope(w, 0, "", `{"token":"`+tok+`"}`)
-		case "/abc123/api/v2/sites":
+			writeEnvelope(w, 0, "", `{"accessToken":"`+tok+`"}`)
+		case "/abc123/openapi/v1/sites":
 			mu.Lock()
-			getCSRF = append(getCSRF, r.Header.Get("Csrf-Token"))
-			expire := !expiredFirst
-			expiredFirst = true
+			getTokens = append(getTokens, r.Header.Get("Authorization"))
+			expire := !expired
+			expired = true
 			mu.Unlock()
 			if expire {
-				writeEnvelope(w, -1000, "session expired", "null")
+				writeEnvelope(w, -44112, "access token expired", "null")
 				return
 			}
 			writeEnvelope(w, 0, "", `{"data":[]}`)
@@ -196,148 +196,149 @@ func TestSessionExpiryReloginAndRetry(t *testing.T) {
 		}
 	}))
 
-	if err := c.Login(context.Background(), "admin", "secret"); err != nil {
+	if err := c.Login(context.Background(), "cid-1", "csecret"); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 	if err := c.get(context.Background(), "sites", nil); err != nil {
-		t.Fatalf("get with session refresh: %v", err)
+		t.Fatalf("get with token refresh: %v", err)
 	}
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(loginBodies) != 2 {
-		t.Fatalf("logins = %d, want 2 (initial + refresh)", len(loginBodies))
+	if len(mintBodies) != 2 {
+		t.Fatalf("mints = %d, want 2 (initial + refresh)", len(mintBodies))
 	}
-	if loginBodies[1]["username"] != "admin" || loginBodies[1]["password"] != "secret" {
-		t.Errorf("refresh login used credentials %v, want admin/secret", loginBodies[1])
+	// The re-mint reuses the stored client credentials (BDD S1.3).
+	if mintBodies[1]["client_id"] != "cid-1" || mintBodies[1]["client_secret"] != "csecret" {
+		t.Errorf("re-mint used credentials %v, want the stored client credentials", mintBodies[1])
 	}
-	if len(getCSRF) != 2 {
-		t.Fatalf("gets = %d, want 2 (expired then retried)", len(getCSRF))
+	if len(getTokens) != 2 {
+		t.Fatalf("gets = %d, want 2 (expired then retried)", len(getTokens))
 	}
-	if getCSRF[0] != "tok1" {
-		t.Errorf("first get csrf = %q, want tok1", getCSRF[0])
+	if getTokens[0] != "AccessToken=AT-1" {
+		t.Errorf("first get auth = %q, want AccessToken=AT-1", getTokens[0])
 	}
-	if getCSRF[1] != "tok2" {
-		t.Errorf("retried get csrf = %q, want tok2 (refreshed token)", getCSRF[1])
+	if getTokens[1] != "AccessToken=AT-2" {
+		t.Errorf("retried get auth = %q, want AccessToken=AT-2 (re-minted token)", getTokens[1])
 	}
-	if c.token != "tok2" {
-		t.Errorf("client token = %q, want tok2", c.token)
+	if c.token != "AT-2" {
+		t.Errorf("client token = %q, want AT-2", c.token)
 	}
 }
 
-func TestSessionExpiryWithoutCredentials(t *testing.T) {
+func TestTokenExpiryWithoutCredentials(t *testing.T) {
 	var (
-		mu         sync.Mutex
-		loginCalls int
-		getCalls   int
+		mu        sync.Mutex
+		mintCalls int
+		getCalls  int
 	)
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
+		case "/openapi/authorize/token":
 			mu.Lock()
-			loginCalls++
+			mintCalls++
 			mu.Unlock()
-			writeEnvelope(w, 0, "", `{"token":"t"}`)
+			writeEnvelope(w, 0, "", `{"accessToken":"t"}`)
 		default:
 			mu.Lock()
 			getCalls++
 			mu.Unlock()
-			writeEnvelope(w, -1000, "session expired", "null")
+			writeEnvelope(w, -44112, "access token expired", "null")
 		}
 	}))
 	err := c.get(context.Background(), "sites", nil)
-	if err == nil || !strings.Contains(err.Error(), "session expired") {
-		t.Fatalf("get error = %v, want session expired", err)
+	if err == nil || !strings.Contains(err.Error(), "access token expired") {
+		t.Fatalf("get error = %v, want access token expired", err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if loginCalls != 0 {
-		t.Errorf("logins = %d, want 0 (no stored credentials)", loginCalls)
+	if mintCalls != 0 {
+		t.Errorf("mints = %d, want 0 (no stored credentials)", mintCalls)
 	}
 	if getCalls != 1 {
 		t.Errorf("gets = %d, want 1 (no retry without credentials)", getCalls)
 	}
 }
 
-func TestSessionExpiryReloginFails(t *testing.T) {
+func TestTokenExpiryRemintFails(t *testing.T) {
 	var (
-		mu         sync.Mutex
-		loginCalls int
-		getCalls   int
+		mu        sync.Mutex
+		mintCalls int
+		getCalls  int
 	)
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
+		case "/openapi/authorize/token":
 			mu.Lock()
-			loginCalls++
-			expired := loginCalls > 1
+			mintCalls++
+			expired := mintCalls > 1
 			mu.Unlock()
 			if expired {
-				writeEnvelope(w, -30109, "invalid username or password", "null")
+				writeEnvelope(w, -44106, "invalid client credentials", "null")
 				return
 			}
-			writeEnvelope(w, 0, "", `{"token":"tok1"}`)
+			writeEnvelope(w, 0, "", `{"accessToken":"AT-1"}`)
 		default:
 			mu.Lock()
 			getCalls++
 			mu.Unlock()
-			writeEnvelope(w, -1000, "session expired", "null")
+			writeEnvelope(w, -44112, "access token expired", "null")
 		}
 	}))
-	if err := c.Login(context.Background(), "admin", "secret"); err != nil {
+	if err := c.Login(context.Background(), "cid-1", "csecret"); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 	err := c.get(context.Background(), "sites", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "session expired") {
-		t.Errorf("error = %v, want original session expired cause", err)
+	if !strings.Contains(err.Error(), "access token expired") {
+		t.Errorf("error = %v, want original expiry cause", err)
 	}
-	if !strings.Contains(err.Error(), "automatic re-login failed") {
-		t.Errorf("error = %v, want re-login failure note", err)
+	if !strings.Contains(err.Error(), "automatic re-mint failed") {
+		t.Errorf("error = %v, want re-mint failure note", err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if loginCalls != 2 {
-		t.Errorf("logins = %d, want 2 (initial + failed refresh)", loginCalls)
+	if mintCalls != 2 {
+		t.Errorf("mints = %d, want 2 (initial + failed refresh)", mintCalls)
 	}
 	if getCalls != 1 {
 		t.Errorf("gets = %d, want 1", getCalls)
 	}
 }
 
-func TestSessionExpiryReloginOnlyOnce(t *testing.T) {
+func TestTokenExpiryRemintOnlyOnce(t *testing.T) {
 	var (
-		mu         sync.Mutex
-		loginCalls int
-		getCalls   int
+		mu        sync.Mutex
+		mintCalls int
+		getCalls  int
 	)
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
+		case "/openapi/authorize/token":
 			mu.Lock()
-			loginCalls++
+			mintCalls++
 			mu.Unlock()
-			writeEnvelope(w, 0, "", `{"token":"tok"}`)
+			writeEnvelope(w, 0, "", `{"accessToken":"tok"}`)
 		default:
 			mu.Lock()
 			getCalls++
 			mu.Unlock()
-			writeEnvelope(w, -1000, "session expired", "null")
+			writeEnvelope(w, -44112, "access token expired", "null")
 		}
 	}))
-	if err := c.Login(context.Background(), "admin", "secret"); err != nil {
+	if err := c.Login(context.Background(), "cid-1", "csecret"); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 	err := c.get(context.Background(), "sites", nil)
 	if err == nil {
-		t.Fatal("expected error after re-login still expires")
+		t.Fatal("expected error after re-mint still expires")
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if loginCalls != 2 {
-		t.Errorf("logins = %d, want 2 (initial + one refresh only)", loginCalls)
+	if mintCalls != 2 {
+		t.Errorf("mints = %d, want 2 (initial + one re-mint only)", mintCalls)
 	}
 	if getCalls != 2 {
 		t.Errorf("gets = %d, want 2 (initial + one retry only)", getCalls)
@@ -348,36 +349,36 @@ func TestSessionExpiryReloginOnlyOnce(t *testing.T) {
 // Concurrency.
 // ---------------------------------------------------------------------------
 
-func TestConcurrentSessionRefreshSingleFlight(t *testing.T) {
+func TestConcurrentTokenRefreshSingleFlight(t *testing.T) {
 	var state struct {
 		sync.Mutex
-		logins int
+		mints  int
 		gets   int
 		expire bool
 	}
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
+		case "/openapi/authorize/token":
 			state.Lock()
-			state.logins++
-			tok := fmt.Sprintf("tok%d", state.logins)
+			state.mints++
+			tok := fmt.Sprintf("AT-%d", state.mints)
 			state.Unlock()
-			writeEnvelope(w, 0, "", `{"token":"`+tok+`"}`)
+			writeEnvelope(w, 0, "", `{"accessToken":"`+tok+`"}`)
 		default:
 			state.Lock()
 			state.gets++
-			csrf := r.Header.Get("Csrf-Token")
-			expire := csrf != fmt.Sprintf("tok%d", state.logins) || !state.expire
+			auth := r.Header.Get("Authorization")
+			expire := auth != "AccessToken="+fmt.Sprintf("AT-%d", state.mints) || !state.expire
 			state.expire = true
 			state.Unlock()
 			if expire {
-				writeEnvelope(w, -1000, "session expired", "null")
+				writeEnvelope(w, -44112, "access token expired", "null")
 				return
 			}
 			writeEnvelope(w, 0, "", `{"data":[]}`)
 		}
 	}))
-	if err := c.Login(context.Background(), "admin", "secret"); err != nil {
+	if err := c.Login(context.Background(), "cid-1", "csecret"); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 
@@ -401,8 +402,8 @@ func TestConcurrentSessionRefreshSingleFlight(t *testing.T) {
 
 	state.Lock()
 	defer state.Unlock()
-	if state.logins != 2 {
-		t.Errorf("logins = %d, want 2 (initial + single-flight refresh)", state.logins)
+	if state.mints != 2 {
+		t.Errorf("mints = %d, want 2 (initial + single-flight re-mint)", state.mints)
 	}
 	wantGets := goroutines + 1
 	if state.gets != wantGets {
@@ -413,13 +414,13 @@ func TestConcurrentSessionRefreshSingleFlight(t *testing.T) {
 func TestConcurrentRequestsAndSetLogger(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeEnvelope(w, 0, "", `{"token":"tok1"}`)
+		case "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"AT-1"}`)
 		default:
 			writeEnvelope(w, 0, "", `{"data":[]}`)
 		}
 	}))
-	if err := c.Login(context.Background(), "admin", "secret"); err != nil {
+	if err := c.Login(context.Background(), "cid-1", "csecret"); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 
@@ -464,7 +465,7 @@ func TestConcurrentRequestsAndSetLogger(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Structured operation logging.
+// Structured operation logging (BDD S1.5 — secrets never leak).
 // ---------------------------------------------------------------------------
 
 func TestOperationLogging(t *testing.T) {
@@ -475,19 +476,19 @@ func TestOperationLogging(t *testing.T) {
 	)
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeEnvelope(w, 0, "", `{"token":"tok1"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"AT-1"}`)
+		case "/abc123/openapi/v1/sites":
 			mu.Lock()
 			expire := !expiredFirst
 			expiredFirst = true
 			mu.Unlock()
 			if expire {
-				writeEnvelope(w, -1000, "session expired", "null")
+				writeEnvelope(w, -44112, "access token expired", "null")
 				return
 			}
 			writeEnvelope(w, 0, "", `{"data":[]}`)
-		case "/abc123/api/v2/clients":
+		case "/abc123/openapi/v1/clients":
 			mu.Lock()
 			clientCalls++
 			first := clientCalls == 1
@@ -510,14 +511,14 @@ func TestOperationLogging(t *testing.T) {
 	}
 	c.SetLogger(l)
 
-	if err := c.Login(context.Background(), "admin", "secret"); err != nil {
+	if err := c.Login(context.Background(), "cid-1", "csecret"); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 	// Transient failure → retry event.
 	if err := c.get(context.Background(), "clients", nil); err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	// Session expiry → re-login event.
+	// Token expiry → re-mint event.
 	if err := c.get(context.Background(), "sites", nil); err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -532,13 +533,13 @@ func TestOperationLogging(t *testing.T) {
 		t.Fatalf("reading log: %v", err)
 	}
 	logText := string(data)
-	for _, want := range []string{`"event":"login"`, `"event":"retry"`, `"event":"session_expired"`, `"event":"re_login"`, `"event":"logout"`} {
+	for _, want := range []string{`"event":"token_mint"`, `"event":"retry"`, `"event":"token_expired"`, `"event":"token_re_mint"`, `"event":"logout"`} {
 		if !strings.Contains(logText, want) {
 			t.Errorf("log missing %s; got:\n%s", want, logText)
 		}
 	}
-	if strings.Contains(logText, "secret") {
-		t.Error("log contains the password — credentials must never be logged")
+	if strings.Contains(logText, "csecret") || strings.Contains(logText, "cid-1") {
+		t.Error("log contains client credentials — they must never be logged")
 	}
 	if strings.Contains(logText, "127.0.0.1") {
 		t.Error("log contains the controller address — IPs/hostnames must not be logged")
@@ -548,14 +549,14 @@ func TestOperationLogging(t *testing.T) {
 func TestSetLoggerNilSafe(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeEnvelope(w, 0, "", `{"token":"tok1"}`)
+		case "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"AT-1"}`)
 		default:
 			writeEnvelope(w, 0, "", `{"data":[]}`)
 		}
 	}))
 	c.SetLogger(nil)
-	if err := c.Login(context.Background(), "admin", "secret"); err != nil {
+	if err := c.Login(context.Background(), "cid-1", "csecret"); err != nil {
 		t.Fatalf("Login with nil logger: %v", err)
 	}
 	if err := c.get(context.Background(), "sites", nil); err != nil {

@@ -732,8 +732,8 @@ func TestRunACLCheck_MissingCredentials(t *testing.T) {
 	providers.Register(&aclTestProvider{})
 
 	t.Setenv("OMADA_HOST", "")
-	t.Setenv("OMADA_USERNAME", "")
-	t.Setenv("OMADA_PASSWORD", "")
+	t.Setenv("OMADA_CLIENT_ID", "")
+	t.Setenv("OMADA_CLIENT_SECRET", "")
 
 	spec := &intent.Spec{
 		Version: 1, Site: "test",
@@ -792,8 +792,8 @@ func TestRunACLCheck_VaultFallback(t *testing.T) {
 	}
 
 	t.Setenv("OMADA_HOST", "")
-	t.Setenv("OMADA_USERNAME", "")
-	t.Setenv("OMADA_PASSWORD", "")
+	t.Setenv("OMADA_CLIENT_ID", "")
+	t.Setenv("OMADA_CLIENT_SECRET", "")
 
 	storePath := filepath.Join(t.TempDir(), "credentials.json")
 	store, err := credentials.Open(storePath)
@@ -801,9 +801,9 @@ func TestRunACLCheck_VaultFallback(t *testing.T) {
 		t.Fatalf("credentials.Open failed: %v", err)
 	}
 	if err := store.Set("recacl", "default", credentials.Entry{
-		"host":     "10.0.0.9",
-		"username": "vault-user",
-		"password": "vault-pass",
+		"host":          "10.0.0.9",
+		"client_id":     "vault-user",
+		"client_secret": "vault-pass",
 	}); err != nil {
 		t.Fatalf("store.Set failed: %v", err)
 	}
@@ -830,7 +830,7 @@ func TestRunACLCheck_VaultFallback(t *testing.T) {
 	if !rec.called {
 		t.Fatal("provider was not called; vault fallback did not fill credentials")
 	}
-	if rec.opts.Host != "10.0.0.9" || rec.opts.Username != "vault-user" || rec.opts.Password != "vault-pass" {
+	if rec.opts.Host != "10.0.0.9" || rec.opts.ClientID != "vault-user" || rec.opts.ClientSecret != "vault-pass" {
 		t.Errorf("provider received opts from env instead of vault: %+v", rec.opts)
 	}
 	if result.Status != models.StatusPass {
@@ -844,8 +844,8 @@ func TestRunACLCheck_VaultEmptyFallbackStillErrors(t *testing.T) {
 	providers.Register(&aclTestProvider{})
 
 	t.Setenv("OMADA_HOST", "")
-	t.Setenv("OMADA_USERNAME", "")
-	t.Setenv("OMADA_PASSWORD", "")
+	t.Setenv("OMADA_CLIENT_ID", "")
+	t.Setenv("OMADA_CLIENT_SECRET", "")
 
 	// Store exists but has no entry for this provider.
 	storePath := filepath.Join(t.TempDir(), "credentials.json")
@@ -883,8 +883,8 @@ func TestRunACLCheck_VaultCorruptFallsThrough(t *testing.T) {
 	providers.Register(&aclTestProvider{})
 
 	t.Setenv("OMADA_HOST", "")
-	t.Setenv("OMADA_USERNAME", "")
-	t.Setenv("OMADA_PASSWORD", "")
+	t.Setenv("OMADA_CLIENT_ID", "")
+	t.Setenv("OMADA_CLIENT_SECRET", "")
 
 	// A corrupt store must not crash the check; it falls through to the
 	// normal missing-credentials error.
@@ -926,8 +926,8 @@ func TestRunACLCheck_DefaultProvider(t *testing.T) {
 	providers.Register(&aclTestProvider{})
 
 	t.Setenv("OMADA_HOST", "host")
-	t.Setenv("OMADA_USERNAME", "user")
-	t.Setenv("OMADA_PASSWORD", "pass")
+	t.Setenv("OMADA_CLIENT_ID", "user")
+	t.Setenv("OMADA_CLIENT_SECRET", "pass")
 
 	spec := &intent.Spec{
 		Version: 1, Site: "test",
@@ -1604,8 +1604,8 @@ func TestRunACLCheck_SuccessfulCheck(t *testing.T) {
 	providers.Register(okProvider)
 
 	t.Setenv("OMADA_HOST", "localhost")
-	t.Setenv("OMADA_USERNAME", "admin")
-	t.Setenv("OMADA_PASSWORD", "pass")
+	t.Setenv("OMADA_CLIENT_ID", "admin")
+	t.Setenv("OMADA_CLIENT_SECRET", "pass")
 
 	spec := &intent.Spec{
 		Version: 1, Site: "test",

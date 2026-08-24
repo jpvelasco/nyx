@@ -9,11 +9,11 @@ import (
 
 func TestGetDevicesFlatArray(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/abc123/api/v2/login" {
-			writeEnvelope(w, 0, "", `{"token":"t1"}`)
+		if r.URL.Path == "/openapi/authorize/token" {
+			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
 			return
 		}
-		if r.URL.Path == "/abc123/api/v2/sites/s1/devices" {
+		if r.URL.Path == "/abc123/openapi/v1/sites/s1/devices" {
 			writeEnvelope(w, 0, "", `[
 				{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254","firmwareVersion":"2.2.3","needUpgrade":true},
 				{"id":"d2","name":"SW-2428P","model":"SW-2428P","type":"switch","mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.253","firmwareVersion":"1.1.15","needUpgrade":false},
@@ -44,11 +44,11 @@ func TestGetDevicesFlatArray(t *testing.T) {
 
 func TestGetDevicesPagedWrapper(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/abc123/api/v2/login" {
-			writeEnvelope(w, 0, "", `{"token":"t1"}`)
+		if r.URL.Path == "/openapi/authorize/token" {
+			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
 			return
 		}
-		if r.URL.Path == "/abc123/api/v2/sites/s1/devices" {
+		if r.URL.Path == "/abc123/openapi/v1/sites/s1/devices" {
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254"}]}`)
 			return
 		}
@@ -69,9 +69,9 @@ func TestGetDevicesPagedWrapper(t *testing.T) {
 func TestGetDevicesErrors(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeEnvelope(w, 0, "", `{"token":"t1"}`)
-		case "/abc123/api/v2/sites/s1/devices":
+		case "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+		case "/abc123/openapi/v1/sites/s1/devices":
 			writeEnvelope(w, 0, "", `[{"id":"d1","name":123}]`)
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -158,9 +158,9 @@ func TestFetchInventory(t *testing.T) {
 	newClient := func(failDevices, failACLs, failClients bool) *Client {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				// Live 6.x wire shape: DHCP nested under "dhcpSettings", SSID
 				// as "origName" — no top-level dhcpEnabled or per-client
 				// networkName on the wire.
@@ -168,13 +168,13 @@ func TestFetchInventory(t *testing.T) {
 					{"id":"n1","name":"Trusted","vlan":10,"purpose":"interface","gatewaySubnet":"10.0.0.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettings":{"enable":true},"origName":"Trusted"},
 					{"id":"n2","name":"IoT","vlan":20,"purpose":"interface","gatewaySubnet":"10.0.1.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettings":{"enable":false},"origName":"IoT"}
 				]}`)
-			case "/abc123/api/v2/sites/s1/devices":
+			case "/abc123/openapi/v1/sites/s1/devices":
 				if failDevices {
 					writeEnvelope(w, -1, "boom", "null")
 					return
 				}
 				writeEnvelope(w, 0, "", `[{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254"}]`)
-			case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 				if failACLs {
 					writeEnvelope(w, -1, "boom", "null")
 					return
@@ -184,7 +184,7 @@ func TestFetchInventory(t *testing.T) {
 					return
 				}
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-			case "/abc123/api/v2/sites/s1/clients":
+			case "/abc123/openapi/v1/sites/s1/clients":
 				if failClients {
 					writeEnvelope(w, -1, "boom", "null")
 					return
@@ -259,8 +259,8 @@ func TestFetchInventory(t *testing.T) {
 	t.Run("networks failure is fatal", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
 			default:
 				writeEnvelope(w, -1, "boom", "null")
 			}

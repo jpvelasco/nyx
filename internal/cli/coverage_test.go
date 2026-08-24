@@ -22,40 +22,40 @@ import (
 func saveRestoreGlobals(t *testing.T) {
 	t.Helper()
 	saved := struct {
-		jsonOutput        bool
-		outputPath        string
-		specFile          string
-		verbose           bool
-		timeout           string
-		interfaceOpt      string
-		routeTarget       string
-		vpnTarget         string
-		vpnExpect         string
-		isolationFrom     string
-		isolationTo       string
-		discoverSubnet    string
-		discoverTiming    int
-		discoverMinRate   int
-		providerHost      string
-		providerUsername  string
-		providerPassword  string
-		providerSite      string
-		providerDebug     bool
-		providerOutFile   string
-		providerSkipTLS   bool
-		providerCACertPth string
-		initOutput        string
-		warnVirtual       bool
-		skipHostKeyVerify bool
-		lastAuditReport   *models.AuditReport
-		mcpTransport      string
+		jsonOutput           bool
+		outputPath           string
+		specFile             string
+		verbose              bool
+		timeout              string
+		interfaceOpt         string
+		routeTarget          string
+		vpnTarget            string
+		vpnExpect            string
+		isolationFrom        string
+		isolationTo          string
+		discoverSubnet       string
+		discoverTiming       int
+		discoverMinRate      int
+		providerHost         string
+		providerClientID     string
+		providerClientSecret string
+		providerSite         string
+		providerDebug        bool
+		providerOutFile      string
+		providerSkipTLS      bool
+		providerCACertPth    string
+		initOutput           string
+		warnVirtual          bool
+		skipHostKeyVerify    bool
+		lastAuditReport      *models.AuditReport
+		mcpTransport         string
 	}{
 		jsonOutput: jsonOutput, outputPath: outputPath, specFile: specFile,
 		verbose: verbose, timeout: timeout, interfaceOpt: interfaceOpt,
 		routeTarget: routeTarget, vpnTarget: vpnTarget, vpnExpect: vpnExpect,
 		isolationFrom: isolationFrom, isolationTo: isolationTo,
 		discoverSubnet: discoverSubnet, discoverTiming: discoverTiming, discoverMinRate: discoverMinRate,
-		providerHost: providerHost, providerUsername: providerUsername, providerPassword: providerPassword,
+		providerHost: providerHost, providerClientID: providerClientID, providerClientSecret: providerClientSecret,
 		providerSite: providerSite, providerDebug: providerDebug, providerOutFile: providerOutFile,
 		providerSkipTLS: providerSkipTLS, providerCACertPth: providerCACertPath,
 		initOutput: initOutput, warnVirtual: warnVirtual,
@@ -68,7 +68,7 @@ func saveRestoreGlobals(t *testing.T) {
 		routeTarget, vpnTarget, vpnExpect = saved.routeTarget, saved.vpnTarget, saved.vpnExpect
 		isolationFrom, isolationTo = saved.isolationFrom, saved.isolationTo
 		discoverSubnet, discoverTiming, discoverMinRate = saved.discoverSubnet, saved.discoverTiming, saved.discoverMinRate
-		providerHost, providerUsername, providerPassword = saved.providerHost, saved.providerUsername, saved.providerPassword
+		providerHost, providerClientID, providerClientSecret = saved.providerHost, saved.providerClientID, saved.providerClientSecret
 		providerSite, providerDebug, providerOutFile = saved.providerSite, saved.providerDebug, saved.providerOutFile
 		providerSkipTLS, providerCACertPath = saved.providerSkipTLS, saved.providerCACertPth
 		initOutput, warnVirtual = saved.initOutput, saved.warnVirtual
@@ -656,8 +656,8 @@ func TestBuildInfoCmd_Run(t *testing.T) {
 	saveRestoreGlobals(t)
 	cmd := buildInfoCmd(&fakeProvider{name: "fake"})
 	providerHost = "10.0.0.5"
-	providerUsername = "admin"
-	providerPassword = "pw"
+	providerClientID = "admin"
+	providerClientSecret = "pw"
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -678,8 +678,8 @@ func TestBuildInfoCmd_HostFromEnv(t *testing.T) {
 	registerFakeProvider(t)
 	saveRestoreGlobals(t)
 	t.Setenv("OMADA_HOST", "10.0.0.9")
-	t.Setenv("OMADA_USERNAME", "env-user")
-	t.Setenv("OMADA_PASSWORD", "env-pass")
+	t.Setenv("OMADA_CLIENT_ID", "env-user")
+	t.Setenv("OMADA_CLIENT_SECRET", "env-pass")
 	cmd := buildInfoCmd(&fakeProvider{name: "fake"})
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatalf("info with OMADA_HOST: %v", err)

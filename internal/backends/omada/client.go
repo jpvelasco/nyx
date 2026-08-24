@@ -1,19 +1,20 @@
-// Package omada provides a client for the Omada SDN controller local REST
-// API (controller 6.x, API v2). Reads cover sites, networks, ACL rules,
-// clients, and controller info; writes cover ACL rule create and update.
+// Package omada provides a client for the Omada SDN controller Open API
+// (controller 6.x). Reads cover sites, networks, ACL rules, clients, and
+// controller info; writes cover ACL rule create and update.
 //
 // Credentials are never logged or stored beyond the lifetime of the client.
-// Authentication produces a short-lived token that is refreshed automatically;
-// the username and password are retained in memory for that refresh and
-// cleared on Logout.
+// Authentication mints an access token (OAuth2 client credentials) that is
+// refreshed automatically when it expires; the client id and secret are
+// retained in memory for that refresh and cleared on Logout, which is a
+// local-only operation (the Open API has no logout endpoint).
 //
 // The client is safe for concurrent use: requests are serialised internally,
-// and a session-expired response triggers a single automatic re-login before
+// and an expired-token response triggers a single automatic re-mint before
 // the original request is retried. Transient failures (network errors, HTTP
 // 5xx) are retried with exponential backoff.
 //
 // Minimum supported controller version: 6.0
-// API base path: https://<host>/<omadacId>/api/v2
+// API base path: https://<host>/<omadacId>/openapi/v1
 package omada
 
 import (
@@ -26,7 +27,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"strconv"
@@ -42,8 +42,8 @@ const (
 	// has been tested against.
 	MinControllerVersion = "6.0"
 
-	// apiV2 is the path segment used by controller 6.x.
-	apiV2 = "api/v2"
+	// openAPIBase is the path segment used by the Omada Open API (6.x).
+	openAPIBase = "openapi/v1"
 
 	// defaultMaxRetries is the number of times a transient failure is retried
 	// before the error is returned to the caller.
@@ -54,6 +54,10 @@ const (
 
 	// maxRetryDelay caps the exponential backoff delay.
 	maxRetryDelay = 5 * time.Second
+
+	// tokenEndpoint mints access tokens. The grant_type query parameter is
+	// mandatory — without it the controller rejects the request.
+	tokenEndpoint = "/openapi/authorize/token?grant_type=client_credentials"
 )
 
 // retryAction describes how the client responds to a failed request.
@@ -151,22 +155,22 @@ type apiResponse struct {
 	Result    json.RawMessage `json:"result"`
 }
 
-// Client is a stateful Omada API client. Create one with NewClient and call
-// Login before making any authenticated requests. The client is safe for
-// concurrent use — requests are serialised through an internal mutex, and a
-// session-expired response triggers a single automatic re-login using the
-// credentials from the last successful Login.
+// Client is a stateful Omada Open API client. Create one with NewClient and
+// call Login before making any authenticated requests. The client is safe
+// for concurrent use — requests are serialised through an internal mutex,
+// and an expired-token response triggers a single automatic re-mint using
+// the client credentials from the last successful Login.
 type Client struct {
-	mu         sync.Mutex
-	host       string
-	omadaCID   string
-	token      string
-	username   string
-	password   string // retained in memory for automatic session refresh; cleared on Logout
-	httpClient *http.Client
-	info       *ControllerInfo
-	log        *logger.Logger
-	Debug      bool // when true, raw API responses are printed to stderr
+	mu           sync.Mutex
+	host         string
+	omadaCID     string
+	token        string
+	clientID     string
+	clientSecret string // retained in memory for automatic token refresh; cleared on Logout
+	httpClient   *http.Client
+	info         *ControllerInfo
+	log          *logger.Logger
+	Debug        bool // when true, raw API responses are printed to stderr
 
 	maxRetries int
 	retryBase  time.Duration
@@ -187,14 +191,8 @@ func NewClient(ctx context.Context, host string, skipTLSVerify bool, caCertPath 
 
 	tlsConfig := buildTLSConfig(skipTLSVerify, caCertPath)
 
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating cookie jar: %w", err)
-	}
-
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
-		Jar:     jar,
 		Transport: &http.Transport{
 			TLSClientConfig: tlsConfig,
 		},
@@ -229,49 +227,49 @@ func (c *Client) Info() *ControllerInfo {
 	return c.info
 }
 
-// Login authenticates with the controller using the supplied credentials.
-// The token is stored on the client and attached to all subsequent requests.
-// The credentials are retained in memory so the client can re-authenticate
-// automatically when the session expires, and are cleared by Logout.
+// Login mints an access token with the supplied client credentials. The
+// token is stored on the client and attached to all subsequent requests.
+// The credentials are retained in memory so the client can re-mint
+// automatically when the token expires, and are cleared by Logout.
 // Credentials are never written to any log or evidence output.
-func (c *Client) Login(ctx context.Context, username, password string) error {
+func (c *Client) Login(ctx context.Context, clientID, clientSecret string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.username = username
-	c.password = password
-	if err := c.loginLocked(ctx); err != nil {
-		c.username = ""
-		c.password = ""
-		c.logEvent("login_failed", map[string]interface{}{"error": logSafeError(err)})
-		return fmt.Errorf("login failed: %w", err)
+	c.clientID = clientID
+	c.clientSecret = clientSecret
+	if err := c.mintToken(ctx); err != nil {
+		c.clientID = ""
+		c.clientSecret = ""
+		c.logEvent("token_mint_failed", map[string]interface{}{"error": logSafeError(err)})
+		return fmt.Errorf("token mint failed: %w", err)
 	}
-	c.logEvent("login", nil)
+	c.logEvent("token_mint", nil)
 	return nil
 }
 
-// Logout invalidates the current session token and clears the stored
-// credentials, disabling automatic session refresh.
-func (c *Client) Logout(ctx context.Context) error {
+// Logout clears the stored token and client credentials. It is a local-only
+// operation: the Open API has no logout endpoint and the token simply
+// expires, so no HTTP request is made.
+func (c *Client) Logout(_ context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.token == "" {
-		c.username = ""
-		c.password = ""
+		c.clientID = ""
+		c.clientSecret = ""
 		return nil
 	}
-	_ = c.doRequestLocked(ctx, http.MethodPost, "logout", nil, nil, true)
 	c.token = ""
-	c.username = ""
-	c.password = ""
+	c.clientID = ""
+	c.clientSecret = ""
 	c.logEvent("logout", nil)
 	return nil
 }
 
 // SetLogger attaches an optional structured logger for operation events
-// (login, re-login, session expiry, retries). A nil logger disables logging.
-// Credentials are never written to the log.
+// (token mint, re-mint, token expiry, retries). A nil logger disables
+// logging. Credentials are never written to the log.
 func (c *Client) SetLogger(l *logger.Logger) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -308,7 +306,13 @@ func logSafeError(err error) string {
 
 // baseURL returns the versioned base URL for authenticated API calls.
 func (c *Client) baseURL() string {
-	return fmt.Sprintf("https://%s/%s/%s", c.host, c.omadaCID, apiV2)
+	return fmt.Sprintf("https://%s/%s/%s", c.host, c.omadaCID, openAPIBase)
+}
+
+// mintURL returns the token-mint endpoint. It lives outside the versioned
+// base path and is not itself authenticated.
+func (c *Client) mintURL() string {
+	return fmt.Sprintf("https://%s%s", c.host, tokenEndpoint)
 }
 
 // fetchInfo calls the unauthenticated /api/info endpoint.
@@ -357,19 +361,19 @@ func (c *Client) post(ctx context.Context, path string, body interface{}, dest i
 }
 
 // doRequest serialises a request through the client mutex and applies the
-// retry and session-refresh policy.
+// retry and token-refresh policy.
 func (c *Client) doRequest(ctx context.Context, method, path string, body []byte, dest interface{}) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.doRequestLocked(ctx, method, path, body, dest, true)
+	return c.doRequestLocked(ctx, method, c.requestURL(path), path, body, dest, true)
 }
 
 // doRequestLocked executes a request, retrying transient failures with
-// exponential backoff and refreshing the session once when it has expired.
-// allowReauth is false for the login request itself, so a failed login can
-// never trigger a recursive re-login.
-func (c *Client) doRequestLocked(ctx context.Context, method, path string, body []byte, dest interface{}, allowReauth bool) error {
-	reqURL := fmt.Sprintf("%s/%s", c.baseURL(), path)
+// exponential backoff and re-minting the token once when it has expired.
+// logPath is the request path used in retry log entries — the log must
+// never carry the controller address. allowReauth is false for the token
+// mint itself, so a failed mint can never trigger a recursive re-mint.
+func (c *Client) doRequestLocked(ctx context.Context, method, reqURL, logPath string, body []byte, dest interface{}, allowReauth bool) error {
 	reauthUsed := false
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, method, reqURL, bytes.NewReader(body))
@@ -387,16 +391,16 @@ func (c *Client) doRequestLocked(ctx context.Context, method, path string, body 
 		}
 		switch classifyRetry(err) {
 		case retryReauth:
-			if !allowReauth || reauthUsed || c.username == "" {
+			if !allowReauth || reauthUsed || c.clientID == "" {
 				return err
 			}
 			reauthUsed = true
-			c.logEvent("session_expired", nil)
-			if rerr := c.loginLocked(ctx); rerr != nil {
-				c.logEvent("re_login_failed", map[string]interface{}{"error": logSafeError(rerr)})
-				return fmt.Errorf("%v (automatic re-login failed: %v)", err, rerr)
+			c.logEvent("token_expired", nil)
+			if rerr := c.mintToken(ctx); rerr != nil {
+				c.logEvent("token_re_mint_failed", map[string]interface{}{"error": logSafeError(rerr)})
+				return fmt.Errorf("%v (automatic re-mint failed: %v)", err, rerr)
 			}
-			c.logEvent("re_login", nil)
+			c.logEvent("token_re_mint", nil)
 		case retryBackoff:
 			if attempt >= c.maxRetries {
 				return err
@@ -406,7 +410,7 @@ func (c *Client) doRequestLocked(ctx context.Context, method, path string, body 
 				"attempt":  attempt + 1,
 				"delay_ms": delay.Milliseconds(),
 				"method":   method,
-				"path":     path,
+				"path":     logPath,
 			})
 			if err := sleepCtx(ctx, delay); err != nil {
 				return err
@@ -417,30 +421,36 @@ func (c *Client) doRequestLocked(ctx context.Context, method, path string, body 
 	}
 }
 
-// loginLocked re-authenticates with the stored credentials and updates the
-// token. Callers must hold c.mu.
-func (c *Client) loginLocked(ctx context.Context) error {
+// requestURL joins a versioned base path with the given path.
+func (c *Client) requestURL(path string) string {
+	return fmt.Sprintf("%s/%s", c.baseURL(), path)
+}
+
+// mintToken mints a fresh access token with the stored client credentials
+// and updates c.token. Callers must hold c.mu.
+func (c *Client) mintToken(ctx context.Context) error {
 	body, err := json.Marshal(map[string]string{
-		"username": c.username,
-		"password": c.password,
+		"omadacId":      c.omadaCID,
+		"client_id":     c.clientID,
+		"client_secret": c.clientSecret,
 	})
 	if err != nil {
-		return fmt.Errorf("marshaling login body: %w", err)
+		return fmt.Errorf("marshaling token mint body: %w", err)
 	}
 	var result struct {
-		Token string `json:"token"`
+		AccessToken string `json:"accessToken"`
 	}
-	if err := c.doRequestLocked(ctx, http.MethodPost, "login", body, &result, false); err != nil {
+	if err := c.doRequestLocked(ctx, http.MethodPost, c.mintURL(), tokenEndpoint, body, &result, false); err != nil {
 		return err
 	}
-	c.token = result.Token
+	c.token = result.AccessToken
 	return nil
 }
 
-// addAuthHeaders attaches the Csrf-Token and cookie-based session token.
+// addAuthHeaders attaches the access-token header for authenticated calls.
 func (c *Client) addAuthHeaders(req *http.Request) {
 	if c.token != "" {
-		req.Header.Set("Csrf-Token", c.token)
+		req.Header.Set("Authorization", "AccessToken="+c.token)
 	}
 }
 
@@ -481,10 +491,12 @@ func (c *Client) execute(req *http.Request, dest interface{}) error {
 	switch env.ErrorCode {
 	case 0:
 		// success
-	case -1000, -44112:
+	case -44112:
+		return &apiError{ErrorCode: env.ErrorCode, Msg: "access token expired"}
+	case -1000:
 		return &apiError{ErrorCode: env.ErrorCode, Msg: fmt.Sprintf("session expired or not logged in (errorCode %d)", env.ErrorCode)}
-	case -30109:
-		return &apiError{ErrorCode: env.ErrorCode, Msg: "invalid username or password"}
+	case -44106:
+		return &apiError{ErrorCode: env.ErrorCode, Msg: "invalid client credentials — check OMADA_CLIENT_ID and OMADA_CLIENT_SECRET"}
 	case -1005:
 		return &apiError{ErrorCode: env.ErrorCode, Msg: "operation forbidden — check account permissions"}
 	default:
@@ -499,10 +511,10 @@ func (c *Client) execute(req *http.Request, dest interface{}) error {
 	return nil
 }
 
-// isVersionSupported returns true if the controller version is >= 6.0.
+// isVersionSupported returns true if the controller version is at least
+// MinControllerVersion, compared numerically on major and minor.
 func isVersionSupported(ver string) bool {
-	// Version format: "6.0.0.36" — we check major.minor
-	parts := strings.SplitN(ver, ".", 3)
+	parts := strings.Split(ver, ".")
 	if len(parts) < 2 {
 		return false
 	}
@@ -510,18 +522,11 @@ func isVersionSupported(ver string) bool {
 	if err != nil {
 		return false
 	}
-	if major > 6 {
-		return true
-	}
-	if major < 6 {
-		return false
-	}
-	// major == 6, check minor
 	minor, err := strconv.Atoi(parts[1])
 	if err != nil {
 		return false
 	}
-	return minor >= 0
+	return major > 6 || (major == 6 && minor >= 0)
 }
 
 // buildTLSConfig creates a TLS config based on the provided options.

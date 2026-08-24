@@ -42,27 +42,25 @@ func writeOmadaEnvelope(w io.Writer, errorCode int, result string) {
 func TestOmadaServiceInventory(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/logout":
-			writeOmadaEnvelope(w, 0, `null`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","deviceMac":"aa:bb:cc:dd:ee:00"},
 				{"id":"n2","name":"IoT","purpose":"lan","vlan":20,"gatewaySubnet":"10.0.20.1/24","deviceMac":"aa:bb:cc:dd:ee:00"}]}`)
-		case "/abc123/api/v2/sites/s1/devices":
+		case "/abc123/openapi/v1/sites/s1/devices":
 			writeOmadaEnvelope(w, 0, `[
 				{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254","firmwareVersion":"2.2.3","needUpgrade":true},
 				{"id":"d2","name":"SW-2428P","model":"SW-2428P","type":"switch","mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.253"}]`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+		case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 			if r.URL.Query().Get("type") == "0" {
 				writeOmadaEnvelope(w, 0, `{"totalRows":1,"aclDisable":true,"supportLanToLan":true,"data":[{"id":"g1","name":"Trusted Deny","status":true,"policy":0}]}`)
 				return
 			}
 			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
-		case "/abc123/api/v2/sites/s1/clients":
+		case "/abc123/openapi/v1/sites/s1/clients":
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[{"mac":"aa","ip":"10.0.10.5"},{"mac":"bb","ip":"10.0.10.6"}]}`)
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
@@ -106,15 +104,15 @@ func TestOmadaServiceInventory(t *testing.T) {
 func TestOmadaServiceInventoryErrors(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, -30109, `null`)
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, -44106, `null`)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
-	_, err := NewOmadaService().Inventory(context.Background(), OmadaOptions{Host: ts.URL, Username: "a", Password: "b", SkipTLSVerify: true})
+	_, err := NewOmadaService().Inventory(context.Background(), OmadaOptions{Host: ts.URL, ClientID: "a", ClientSecret: "b", SkipTLSVerify: true})
 	if err == nil {
-		t.Error("expected login failure to propagate")
+		t.Error("expected token mint failure to propagate")
 	}
 }
 
@@ -156,31 +154,27 @@ func TestOmadaServiceInfoError(t *testing.T) {
 }
 
 func TestOmadaServiceListNetworks(t *testing.T) {
-	var loggedOut bool
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
+		case "/openapi/authorize/token":
 			if r.Method != http.MethodPost {
 				t.Errorf("login method = %s, want POST", r.Method)
 			}
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			// live 6.x shape: DHCP flag nested under dhcpSettings
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"origName":"Trusted","dhcpSettings":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"},
 				{"id":"n2","name":"IoT","purpose":"lan","vlan":20,"gatewaySubnet":"10.0.20.1/24","isolation":true,"origName":"IoT","dhcpSettings":{"enable":false},"deviceMac":"aa:bb:cc:dd:ee:00"}]}`)
-		case "/abc123/api/v2/logout":
-			loggedOut = true
-			writeOmadaEnvelope(w, 0, "null")
 		default:
 			http.NotFound(w, r)
 		}
 	})
 
 	nets, err := NewOmadaService().ListNetworks(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	})
 	if err != nil {
 		t.Fatalf("ListNetworks: %v", err)
@@ -199,26 +193,21 @@ func TestOmadaServiceListNetworks(t *testing.T) {
 	if iot.VLANID != 20 || iot.DHCPEnabled || !iot.Isolated {
 		t.Errorf("iot = %+v, want vlan 20, dhcp off, isolated", iot)
 	}
-	if !loggedOut {
-		t.Error("expected logout after network fetch")
-	}
 }
 
 func TestOmadaServiceListNetworks_SiteSelection(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
 				{"id":"s1","name":"HQ"},
 				{"id":"s2","name":"Branch"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n-hq","name":"HQ Net"}]}`)
-		case "/abc123/api/v2/sites/s2/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s2/setting/lan/networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n-branch","name":"Branch Net"}]}`)
-		case "/abc123/api/v2/logout":
-			writeOmadaEnvelope(w, 0, "null")
 		default:
 			http.NotFound(w, r)
 		}
@@ -226,7 +215,7 @@ func TestOmadaServiceListNetworks_SiteSelection(t *testing.T) {
 
 	t.Run("defaults to first site", func(t *testing.T) {
 		nets, err := NewOmadaService().ListNetworks(context.Background(), OmadaOptions{
-			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+			Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 		})
 		if err != nil {
 			t.Fatalf("ListNetworks: %v", err)
@@ -238,7 +227,7 @@ func TestOmadaServiceListNetworks_SiteSelection(t *testing.T) {
 
 	t.Run("selects named site", func(t *testing.T) {
 		nets, err := NewOmadaService().ListNetworks(context.Background(), OmadaOptions{
-			Host: ts.URL, Username: "admin", Password: "pw", Site: "Branch", SkipTLSVerify: true,
+			Host: ts.URL, ClientID: "admin", ClientSecret: "pw", Site: "Branch", SkipTLSVerify: true,
 		})
 		if err != nil {
 			t.Fatalf("ListNetworks: %v", err)
@@ -250,7 +239,7 @@ func TestOmadaServiceListNetworks_SiteSelection(t *testing.T) {
 
 	t.Run("unknown site errors with available sites", func(t *testing.T) {
 		_, err := NewOmadaService().ListNetworks(context.Background(), OmadaOptions{
-			Host: ts.URL, Username: "admin", Password: "pw", Site: "Nope", SkipTLSVerify: true,
+			Host: ts.URL, ClientID: "admin", ClientSecret: "pw", Site: "Nope", SkipTLSVerify: true,
 		})
 		if err == nil || !strings.Contains(err.Error(), "not found; available sites: HQ, Branch") {
 			t.Fatalf("ListNetworks error = %v, want site not found listing sites", err)
@@ -261,29 +250,29 @@ func TestOmadaServiceListNetworks_SiteSelection(t *testing.T) {
 func TestOmadaService_SessionFailures(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, -30109, "bad creds")
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, -44106, "bad creds")
 		default:
 			http.NotFound(w, r)
 		}
 	})
-	authOpts := OmadaOptions{Host: ts.URL, Username: "admin", Password: "nope", SkipTLSVerify: true}
-	connectOpts := OmadaOptions{Host: "https://127.0.0.1:1", Username: "admin", Password: "pw", SkipTLSVerify: true}
+	authOpts := OmadaOptions{Host: ts.URL, ClientID: "admin", ClientSecret: "nope", SkipTLSVerify: true}
+	connectOpts := OmadaOptions{Host: "https://127.0.0.1:1", ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true}
 	cases := []struct {
 		name string
 		opts OmadaOptions
 		want string
 		call func(opts OmadaOptions) error
 	}{
-		{"networks/login-fail", authOpts, "login failed", func(opts OmadaOptions) error {
+		{"networks/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
 			_, err := NewOmadaService().ListNetworks(context.Background(), opts)
 			return err
 		}},
-		{"acls/login-fail", authOpts, "login failed", func(opts OmadaOptions) error {
+		{"acls/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
 			_, err := NewOmadaService().ListACLs(context.Background(), opts)
 			return err
 		}},
-		{"clients/login-fail", authOpts, "login failed", func(opts OmadaOptions) error {
+		{"clients/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
 			_, err := NewOmadaService().ListClients(context.Background(), opts)
 			return err
 		}},
@@ -299,7 +288,7 @@ func TestOmadaService_SessionFailures(t *testing.T) {
 			_, err := NewOmadaService().ListClients(context.Background(), opts)
 			return err
 		}},
-		{"plan/login-fail", authOpts, "login failed", func(opts OmadaOptions) error {
+		{"plan/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
 			_, err := NewOmadaService().Plan(context.Background(), opts, omadaPlanProposal)
 			return err
 		}},
@@ -321,15 +310,15 @@ func TestOmadaService_SessionFailures(t *testing.T) {
 func TestOmadaServiceListNetworks_SitesFetchFails(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
 		default:
 			http.NotFound(w, r)
 		}
 	})
 
 	_, err := NewOmadaService().ListNetworks(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "fetching sites") {
 		t.Fatalf("ListNetworks error = %v, want sites fetch failure", err)
@@ -339,9 +328,9 @@ func TestOmadaServiceListNetworks_SitesFetchFails(t *testing.T) {
 func TestOmadaServiceListNetworks_FetchFails(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -349,7 +338,7 @@ func TestOmadaServiceListNetworks_FetchFails(t *testing.T) {
 	})
 
 	_, err := NewOmadaService().ListNetworks(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "fetching networks") {
 		t.Fatalf("ListNetworks error = %v, want networks fetch failure", err)
@@ -359,30 +348,28 @@ func TestOmadaServiceListNetworks_FetchFails(t *testing.T) {
 func TestOmadaServiceListACLs(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":3,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 				{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+		case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 			if r.URL.Query().Get("type") == "0" {
 				writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"g1","name":"Deny Guest","status":false,"policy":0,"protocols":[6],"sourceType":"network","sourceIds":["n3"],"destinationType":"network","destinationIds":["n1"],"index":5}]}`)
 				return
 			}
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block IoT","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":1}]}`)
-		case "/abc123/api/v2/logout":
-			writeOmadaEnvelope(w, 0, "null")
 		default:
 			http.NotFound(w, r)
 		}
 	})
 
 	rules, err := NewOmadaService().ListACLs(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	})
 	if err != nil {
 		t.Fatalf("ListACLs: %v", err)
@@ -406,11 +393,11 @@ func TestOmadaServiceListACLs(t *testing.T) {
 func TestOmadaServiceListACLs_GatewayFetchFails(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+		case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 			if r.URL.Query().Get("type") == "0" {
 				http.NotFound(w, r)
 				return
@@ -422,7 +409,7 @@ func TestOmadaServiceListACLs_GatewayFetchFails(t *testing.T) {
 	})
 
 	_, err := NewOmadaService().ListACLs(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "gateway ACL") {
 		t.Fatalf("ListACLs error = %v, want gateway ACL failure", err)
@@ -432,9 +419,9 @@ func TestOmadaServiceListACLs_GatewayFetchFails(t *testing.T) {
 func TestOmadaServiceListACLs_SwitchFetchFails(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -442,7 +429,7 @@ func TestOmadaServiceListACLs_SwitchFetchFails(t *testing.T) {
 	})
 
 	_, err := NewOmadaService().ListACLs(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "fetching ACL rules") {
 		t.Fatalf("ListACLs error = %v, want switch ACL failure", err)
@@ -452,25 +439,23 @@ func TestOmadaServiceListACLs_SwitchFetchFails(t *testing.T) {
 func TestOmadaServiceListClients(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			// live 6.x shape: nested dhcpSettings, no top-level dhcpEnabled
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"origName":"Trusted","dhcpSettings":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"}]}`)
-		case "/abc123/api/v2/sites/s1/clients":
+		case "/abc123/openapi/v1/sites/s1/clients":
 			// live 6.x shape: ssid + vid, no networkName on the wire
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","name":"nas","hostName":"nas.local","ssid":"Trusted","vid":10,"wireless":false,"vendor":"Synology","deviceType":"nas","active":true,"uptime":86400}]}`)
-		case "/abc123/api/v2/logout":
-			writeOmadaEnvelope(w, 0, "null")
 		default:
 			http.NotFound(w, r)
 		}
 	})
 
 	clients, err := NewOmadaService().ListClients(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	})
 	if err != nil {
 		t.Fatalf("ListClients: %v", err)
@@ -495,34 +480,32 @@ func TestOmadaServiceListClients(t *testing.T) {
 func TestOmadaServiceImport(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"origName":"Trusted","dhcpSettings":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"},
 				{"id":"n2","name":"IoT","purpose":"lan","vlan":20,"gatewaySubnet":"10.0.20.1/24","isolation":true,"origName":"IoT","dhcpSettings":{"enable":false},"deviceMac":"aa:bb:cc:dd:ee:00"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+		case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 			if r.URL.Query().Get("type") == "0" {
 				writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
 				return
 			}
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block IoT","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":1}]}`)
-		case "/abc123/api/v2/sites/s1/devices":
+		case "/abc123/openapi/v1/sites/s1/devices":
 			writeOmadaEnvelope(w, 0, `[{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254"}]`)
-		case "/abc123/api/v2/sites/s1/clients":
+		case "/abc123/openapi/v1/sites/s1/clients":
 			// live 6.x shape: ssid + vid, no networkName on the wire
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","name":"nas","hostName":"nas.local","ssid":"Trusted","vid":10,"wireless":false,"vendor":"Synology","deviceType":"nas","active":true,"uptime":86400}]}`)
-		case "/abc123/api/v2/logout":
-			writeOmadaEnvelope(w, 0, "null")
 		default:
 			http.NotFound(w, r)
 		}
 	})
 
 	imp, err := NewOmadaService().Import(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	})
 	if err != nil {
 		t.Fatalf("Import: %v", err)
@@ -562,25 +545,23 @@ func TestOmadaServiceImport(t *testing.T) {
 func TestOmadaServiceImport_Warnings(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"}]}`)
-		case "/abc123/api/v2/sites/s1/clients":
+		case "/abc123/openapi/v1/sites/s1/clients":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5"}]}`)
-		case "/abc123/api/v2/sites/s1/devices":
+		case "/abc123/openapi/v1/sites/s1/devices":
 			writeOmadaEnvelope(w, 0, `[]`)
-		case "/abc123/api/v2/logout":
-			writeOmadaEnvelope(w, 0, "null")
 		default:
 			http.NotFound(w, r)
 		}
 	})
 
 	imp, err := NewOmadaService().Import(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	})
 	if err != nil {
 		t.Fatalf("Import: %v", err)
@@ -601,9 +582,9 @@ func TestOmadaServiceImport_Warnings(t *testing.T) {
 func TestOmadaServiceImport_NetworksFetchFails(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -611,7 +592,7 @@ func TestOmadaServiceImport_NetworksFetchFails(t *testing.T) {
 	})
 
 	_, err := NewOmadaService().Import(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "fetching networks") {
 		t.Fatalf("Import error = %v, want networks fetch failure", err)
@@ -621,9 +602,9 @@ func TestOmadaServiceImport_NetworksFetchFails(t *testing.T) {
 func TestOmadaServiceListClients_FetchFails(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -631,7 +612,7 @@ func TestOmadaServiceListClients_FetchFails(t *testing.T) {
 	})
 
 	_, err := NewOmadaService().ListClients(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "fetching clients") {
 		t.Fatalf("ListClients error = %v, want clients fetch failure", err)
@@ -670,20 +651,19 @@ assertions: []
 `
 
 func TestOmadaServicePlan(t *testing.T) {
-	var loggedOut bool
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":4,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 				{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"},
 				{"id":"n4","name":"WAN","gatewaySubnet":"10.0.0.1/24"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+		case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 			if r.URL.Query().Get("type") == "0" {
 				writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
 					{"id":"g1","name":"Block IoT Guest","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n3"],"index":1},
@@ -691,16 +671,13 @@ func TestOmadaServicePlan(t *testing.T) {
 				return
 			}
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","name":"Block IoT","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":1}]}`)
-		case "/abc123/api/v2/logout":
-			loggedOut = true
-			writeOmadaEnvelope(w, 0, "null")
 		default:
 			http.NotFound(w, r)
 		}
 	})
 
 	plan, err := NewOmadaService().Plan(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	}, omadaPlanProposal)
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
@@ -734,9 +711,6 @@ func TestOmadaServicePlan(t *testing.T) {
 	if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], "dmz") {
 		t.Errorf("warnings = %v, want dmz not declared", plan.Warnings)
 	}
-	if !loggedOut {
-		t.Error("expected logout after plan")
-	}
 }
 
 func TestOmadaServicePlan_InvalidProposal(t *testing.T) {
@@ -753,9 +727,9 @@ func TestOmadaServicePlan_InvalidProposal(t *testing.T) {
 func TestOmadaServicePlan_NetworksFetchFails(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -763,7 +737,7 @@ func TestOmadaServicePlan_NetworksFetchFails(t *testing.T) {
 	})
 
 	_, err := NewOmadaService().Plan(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	}, omadaPlanProposal)
 	if err == nil || !strings.Contains(err.Error(), "fetching networks") {
 		t.Fatalf("Plan error = %v, want networks fetch failure", err)
@@ -773,13 +747,13 @@ func TestOmadaServicePlan_NetworksFetchFails(t *testing.T) {
 func TestOmadaServicePlan_GatewayACLsFetchFails(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+		case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 			if r.URL.Query().Get("type") == "0" {
 				http.NotFound(w, r)
 				return
@@ -791,7 +765,7 @@ func TestOmadaServicePlan_GatewayACLsFetchFails(t *testing.T) {
 	})
 
 	_, err := NewOmadaService().Plan(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	}, omadaPlanProposal)
 	if err == nil || !strings.Contains(err.Error(), "gateway ACL") {
 		t.Fatalf("Plan error = %v, want gateway ACL fetch failure", err)
@@ -801,11 +775,11 @@ func TestOmadaServicePlan_GatewayACLsFetchFails(t *testing.T) {
 func TestOmadaServicePlan_ACLsFetchFails(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -813,7 +787,7 @@ func TestOmadaServicePlan_ACLsFetchFails(t *testing.T) {
 	})
 
 	_, err := NewOmadaService().Plan(context.Background(), OmadaOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 	}, omadaPlanProposal)
 	if err == nil || !strings.Contains(err.Error(), "fetching ACL rules") {
 		t.Fatalf("Plan error = %v, want switch ACL fetch failure", err)
@@ -931,29 +905,27 @@ func omadaApplyServer(t *testing.T, initialRules string) *httptest.Server {
 	state := initialRules
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/abc123/api/v2/login":
-			writeOmadaEnvelope(w, 0, `{"token":"tok"}`)
-		case r.URL.Path == "/abc123/api/v2/sites":
+		case r.URL.Path == "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case r.URL.Path == "/abc123/openapi/v1/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			writeOmadaEnvelope(w, 0, `{"totalRows":3,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 				{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
-		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
+		case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 			if r.URL.Query().Get("type") == "0" {
 				writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
 				return
 			}
 			writeOmadaEnvelope(w, 0, state)
-		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
+		case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
 			writeOmadaEnvelope(w, 0, `{"id":"a9","name":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`)
 			state = `{"totalRows":1,"data":[{"id":"a9","name":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
-		case strings.HasPrefix(r.URL.Path, "/abc123/api/v2/sites/s1/setting/firewall/acls/") && r.Method == http.MethodPut:
+		case strings.HasPrefix(r.URL.Path, "/abc123/openapi/v1/sites/s1/setting/firewall/acls/") && r.Method == http.MethodPut:
 			writeOmadaEnvelope(w, 0, `{"id":"a1","name":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`)
 			state = `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
-		case r.URL.Path == "/abc123/api/v2/logout":
-			writeOmadaEnvelope(w, 0, "null")
 		default:
 			http.NotFound(w, r)
 		}
@@ -1023,7 +995,7 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 		svc := NewOmadaService()
 		svc.PostAudit = cannedPostAudit(t, []string{"iot"}, []string{"trusted"}, "deny")
 		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
-			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+			Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 		}, OmadaACLApplyRequest{From: []string{"iot"}, To: []string{"trusted"}, Action: "deny", PostAudit: true})
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
@@ -1051,7 +1023,7 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 		svc := NewOmadaService()
 		svc.PostAudit = cannedPostAudit(t, []string{"iot"}, []string{"trusted", "guest"}, "deny")
 		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
-			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+			Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 		}, OmadaACLApplyRequest{From: []string{"iot"}, To: []string{"trusted", "guest"}, Action: "deny", PostAudit: true})
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
@@ -1073,7 +1045,7 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 		svc := NewOmadaService()
 		svc.PostAudit = cannedPostAudit(t, []string{"iot", "guest"}, []string{"trusted"}, "deny")
 		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
-			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+			Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 		}, OmadaACLApplyRequest{From: []string{"iot", "guest"}, To: []string{"trusted"}, Action: "deny", PostAudit: true})
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
@@ -1091,7 +1063,7 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 			return nil, nil
 		}
 		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
-			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+			Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 		}, OmadaACLApplyRequest{From: []string{"iot"}, To: []string{"trusted"}, Action: "deny", DryRun: true})
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
@@ -1109,7 +1081,7 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 			return nil, nil
 		}
 		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
-			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+			Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 		}, OmadaACLApplyRequest{From: []string{"iot"}, To: []string{"trusted"}, Action: "deny", PostAudit: true})
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
@@ -1127,7 +1099,7 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 			return nil, nil
 		}
 		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
-			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+			Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 		}, OmadaACLApplyRequest{From: []string{"iot"}, To: []string{"trusted"}, Action: "deny", PostAudit: false})
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
@@ -1144,7 +1116,7 @@ func TestOmadaServiceApplyACL(t *testing.T) {
 			return nil, errors.New("engine exploded")
 		}
 		res, err := svc.ApplyACL(context.Background(), OmadaOptions{
-			Host: ts.URL, Username: "admin", Password: "pw", SkipTLSVerify: true,
+			Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
 		}, OmadaACLApplyRequest{From: []string{"iot"}, To: []string{"trusted"}, Action: "deny", PostAudit: true})
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)

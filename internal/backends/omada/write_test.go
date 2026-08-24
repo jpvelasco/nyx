@@ -37,7 +37,7 @@ func sampleSwitchRule() ACLRule {
 func TestCreateACLRule(t *testing.T) {
 	var gotMethod, gotCT, gotBody string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/abc123/api/v2/sites/s1/setting/firewall/acls" {
+		if r.URL.Path != "/abc123/openapi/v1/sites/s1/setting/firewall/acls" {
 			t.Errorf("path = %q, want ACL create path", r.URL.Path)
 		}
 		gotMethod = r.Method
@@ -140,7 +140,7 @@ func TestCreateACLRule_DefaultsEmptyProtocolsToAll(t *testing.T) {
 func TestUpdateACLRule(t *testing.T) {
 	var gotMethod, gotBody string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/abc123/api/v2/sites/s1/setting/firewall/acls/a1" {
+		if r.URL.Path != "/abc123/openapi/v1/sites/s1/setting/firewall/acls/a1" {
 			t.Errorf("path = %q, want ACL update path with rule id", r.URL.Path)
 		}
 		gotMethod = r.Method
@@ -200,7 +200,7 @@ func TestDeleteACLRule(t *testing.T) {
 	if gotMethod != http.MethodDelete {
 		t.Errorf("method = %q, want DELETE", gotMethod)
 	}
-	if gotPath != "/abc123/api/v2/sites/s1/setting/firewall/acls/a1" {
+	if gotPath != "/abc123/openapi/v1/sites/s1/setting/firewall/acls/a1" {
 		t.Errorf("path = %q, want delete item path", gotPath)
 	}
 }

@@ -278,7 +278,7 @@ Safety rails:
 
 - `omada_apply_acl` is **dry-run by default**; a real apply requires an explicit `dry_run=false`.
 - Mutation is idempotent and limited to creating rules or enabling disabled matching rules. A conflicting rule with a different policy is rejected, and the agent is pointed at `omada_plan` to reconcile.
-- Credentials come from environment variables (`OMADA_HOST`, `OMADA_USERNAME`, `OMADA_PASSWORD`, `OMADA_SITE`) — never from spec, flags, or tool arguments — and never appear in tool output.
+- Credentials come from environment variables (`OMADA_HOST`, `OMADA_CLIENT_ID`, `OMADA_CLIENT_SECRET`, `OMADA_SITE`) — never from spec, flags, or tool arguments — and never appear in tool output.
 - A post-apply audit failure is reported but never fatal; the agent decides the next step from the evidence.
 
 ## Providers
@@ -300,13 +300,13 @@ Omada provider supports Omada SDN controller 6.x. Pass your controller address (
 nyx omada info --host 192.168.11.20
 
 # Generate spec from controller
-nyx omada import --host 192.168.11.20 --username admin --password password
+nyx omada import --host 192.168.11.20 --client-id <client-id> --client-secret <client-secret>
 
 # Import and audit in one step
-nyx omada check --host 192.168.11.20 --username admin --password password --spec examples/homelab.yaml
+nyx omada check --host 192.168.11.20 --client-id <client-id> --client-secret <client-secret> --spec examples/homelab.yaml
 ```
 
-Credentials can be passed via flags or env vars: `OMADA_HOST`, `OMADA_USERNAME`, `OMADA_PASSWORD`.
+Credentials can be passed via flags or env vars: `OMADA_HOST`, `OMADA_CLIENT_ID`, `OMADA_CLIENT_SECRET`.
 
 ### OPNsense
 

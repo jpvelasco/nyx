@@ -1,7 +1,7 @@
 // Command omada-clients lists Omada connected clients grouped by network,
 // to help pick probe candidates and debug VLAN mapping.
 //
-// Credentials come from the OMADA_HOST, OMADA_USERNAME, and OMADA_PASSWORD
+// Credentials come from the OMADA_HOST, OMADA_CLIENT_ID, and OMADA_CLIENT_SECRET
 // environment variables (optionally OMADA_SITE to target a specific site).
 package main
 
@@ -33,10 +33,10 @@ func runMain(getenv func(string) string, stdout, stderr io.Writer) int {
 // writer as parameters so tests can inject fakes.
 func run(getenv func(string) string, stdout io.Writer) error {
 	host := getenv("OMADA_HOST")
-	user := getenv("OMADA_USERNAME")
-	pass := getenv("OMADA_PASSWORD")
-	if host == "" || user == "" || pass == "" {
-		return fmt.Errorf("set OMADA_HOST, OMADA_USERNAME, and OMADA_PASSWORD")
+	clientID := getenv("OMADA_CLIENT_ID")
+	clientSecret := getenv("OMADA_CLIENT_SECRET")
+	if host == "" || clientID == "" || clientSecret == "" {
+		return fmt.Errorf("set OMADA_HOST, OMADA_CLIENT_ID, and OMADA_CLIENT_SECRET")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -46,7 +46,7 @@ func run(getenv func(string) string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := client.Login(ctx, user, pass); err != nil {
+	if err := client.Login(ctx, clientID, clientSecret); err != nil {
 		return err
 	}
 	defer client.Logout(ctx) //nolint:errcheck

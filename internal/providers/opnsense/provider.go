@@ -30,7 +30,7 @@ func (o *Provider) Info(ctx context.Context, opts providers.ImportOptions) (*pro
 	if opts.Host == "" {
 		return nil, fmt.Errorf("--host is required for opnsense provider")
 	}
-	client := NewClient(opts.Host, opts.Username, opts.Password, opts.SkipTLSVerify, opts.CACertPath)
+	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
 	fw, err := client.GetFirmwareInfo(ctx)
 	if err != nil {
 		return nil, err
@@ -51,11 +51,11 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 	if opts.Host == "" {
 		return nil, fmt.Errorf("--host is required for opnsense provider")
 	}
-	if opts.Username == "" || opts.Password == "" {
-		return nil, fmt.Errorf("--username and --password are required (API key and secret)")
+	if opts.ClientID == "" || opts.ClientSecret == "" {
+		return nil, fmt.Errorf("--client-id and --client-secret are required (API key and secret)")
 	}
 
-	client := NewClient(opts.Host, opts.Username, opts.Password, opts.SkipTLSVerify, opts.CACertPath)
+	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
 
 	// Get firmware info for version
 	fw, err := client.GetFirmwareInfo(ctx)

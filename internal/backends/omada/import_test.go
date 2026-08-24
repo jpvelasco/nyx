@@ -238,28 +238,22 @@ func TestBuildAssertions(t *testing.T) {
 
 func TestImportSpecEndToEnd(t *testing.T) {
 	var paths []string
-	var csrfSeen string
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
-		if csrf := r.Header.Get("Csrf-Token"); csrf != "" {
-			csrfSeen = csrf
-		}
 		switch r.URL.Path {
 		case "/api/info":
 			testutil.WriteBody(w, testInfoResponse)
-		case "/abc123/api/v2/login":
-			writeEnvelope(w, 0, "", `{"token":"t1"}`)
-		case "/abc123/api/v2/logout":
-			writeEnvelope(w, 0, "", "null")
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+		case "/abc123/openapi/v1/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[{"id":"s1","name":"HQ"},{"id":"s2","name":"Branch"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			// live 6.x wire shape: nested dhcpSettings, SSID under origName
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24","vlan":10,"origName":"Trusted","dhcpSettings":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"},
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.1.1/24","vlan":20,"origName":"IoT","dhcpSettings":{"enable":true}}
 			]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+		case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 			if r.URL.Query().Get("type") == "0" {
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 				return
@@ -269,12 +263,12 @@ func TestImportSpecEndToEnd(t *testing.T) {
 				{"id":"a2","name":"Trusted to IoT web","status":true,"policy":1,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]},
 				{"id":"a3","name":"Disabled rule","status":false,"policy":0}
 			]}`)
-		case "/abc123/api/v2/sites/s1/clients":
+		case "/abc123/openapi/v1/sites/s1/clients":
 			// live 6.x wire shape: ssid/vid, no networkName
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 				{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.0.50","ssid":"Trusted","vid":10,"wireless":false,"vendor":"Synology","deviceType":"nas","active":true}
 			]}`)
-		case "/abc123/api/v2/sites/s1/devices":
+		case "/abc123/openapi/v1/sites/s1/devices":
 			writeEnvelope(w, 0, "", `[
 				{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254","firmwareVersion":"2.2.3","needUpgrade":true}
 			]`)
@@ -295,9 +289,6 @@ func TestImportSpecEndToEnd(t *testing.T) {
 	if got.NetworkCount != 2 || got.ACLRuleCount != 3 || got.ClientCount != 1 {
 		t.Errorf("counts = nets %d acl %d clients %d; want 2/3/1 (rule count includes disabled)",
 			got.NetworkCount, got.ACLRuleCount, got.ClientCount)
-	}
-	if csrfSeen != "t1" {
-		t.Errorf("Csrf-Token seen = %q, want t1 (login token reused)", csrfSeen)
 	}
 	if got.Spec == nil {
 		t.Fatal("Spec is nil")
@@ -371,16 +362,16 @@ func TestImportSpecErrors(t *testing.T) {
 			switch r.URL.Path {
 			case "/api/info":
 				testutil.WriteBody(w, testInfoResponse)
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, -30109, "bad", "null")
+			case "/openapi/authorize/token":
+				writeEnvelope(w, -44106, "bad", "null")
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
 		}))
 		defer ts.Close()
 		_, err := ImportSpec(context.Background(), ts.URL, "admin", "bad", "", true, true, "", nil)
-		if err == nil || !strings.Contains(err.Error(), "login failed") {
-			t.Errorf("error = %v, want login failed", err)
+		if err == nil || !strings.Contains(err.Error(), "token mint failed") {
+			t.Errorf("error = %v, want token mint failed", err)
 		}
 	})
 
@@ -389,9 +380,9 @@ func TestImportSpecErrors(t *testing.T) {
 			switch r.URL.Path {
 			case "/api/info":
 				testutil.WriteBody(w, testInfoResponse)
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t"}`)
-			case "/abc123/api/v2/sites":
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t"}`)
+			case "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 			}
 		})
@@ -407,9 +398,9 @@ func TestImportSpecErrors(t *testing.T) {
 			switch r.URL.Path {
 			case "/api/info":
 				testutil.WriteBody(w, testInfoResponse)
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t"}`)
-			case "/abc123/api/v2/sites":
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t"}`)
+			case "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			default:
 				writeEnvelope(w, 0, "", `{}`)
@@ -427,11 +418,11 @@ func TestImportSpecErrors(t *testing.T) {
 			switch r.URL.Path {
 			case "/api/info":
 				testutil.WriteBody(w, testInfoResponse)
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t"}`)
-			case "/abc123/api/v2/sites":
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t"}`)
+			case "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -450,20 +441,18 @@ func TestImportSpecWarnings(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/info":
 			testutil.WriteBody(w, testInfoResponse)
-		case "/abc123/api/v2/login":
-			writeEnvelope(w, 0, "", `{"token":"t"}`)
-		case "/abc123/api/v2/logout":
-			writeEnvelope(w, 0, "", "null")
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"t"}`)
+		case "/abc123/openapi/v1/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24"},
 				{"id":"n2","name":"IoT-NoSubnet"}
 			]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+		case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 			writeEnvelope(w, -1000, "expired", "null")
-		case "/abc123/api/v2/sites/s1/clients":
+		case "/abc123/openapi/v1/sites/s1/clients":
 			writeEnvelope(w, -1000, "expired", "null")
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -505,21 +494,19 @@ func TestImportSpecGatewayACLDisabledWarning(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/info":
 			testutil.WriteBody(w, testInfoResponse)
-		case "/abc123/api/v2/login":
-			writeEnvelope(w, 0, "", `{"token":"t"}`)
-		case "/abc123/api/v2/logout":
-			writeEnvelope(w, 0, "", "null")
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"t"}`)
+		case "/abc123/openapi/v1/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"n1","name":"LAN","gatewaySubnet":"10.0.0.1/24"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+		case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 			if r.URL.Query().Get("type") == "0" {
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[],"aclDisable":true}`)
 				return
 			}
 			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-		case "/abc123/api/v2/sites/s1/clients":
+		case "/abc123/openapi/v1/sites/s1/clients":
 			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 		default:
 			w.WriteHeader(http.StatusNotFound)

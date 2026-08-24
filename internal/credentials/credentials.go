@@ -32,7 +32,7 @@ import (
 )
 
 // Entry is a single credential record: a set of string fields whose keys
-// are provider-defined (e.g. host, username, password for omada).
+// are provider-defined (e.g. host, client_id, client_secret for omada).
 type Entry map[string]string
 
 // Store is an encrypted-at-rest credential store rooted at a single file.
@@ -83,13 +83,13 @@ func (s *Store) Set(provider, name string, entry Entry) error {
 }
 
 // Fields is the typed overlay target for provider credentials. A struct
-// (not a map) keeps host/username/site distinct from password so a
+// (not a map) keeps host/site distinct from the credential values so a
 // printed hostname cannot be treated as a leaked secret.
 type Fields struct {
-	Host     string
-	Username string
-	Password string
-	Site     string
+	Host         string
+	ClientID     string
+	ClientSecret string
+	Site         string
 }
 
 // Overlay fills empty Fields from the named store entry. Store failures
@@ -113,11 +113,11 @@ func Overlay(path, provider, name string, dest *Fields) {
 	if dest.Host == "" {
 		dest.Host = entry["host"]
 	}
-	if dest.Username == "" {
-		dest.Username = entry["username"]
+	if dest.ClientID == "" {
+		dest.ClientID = entry["client_id"]
 	}
-	if dest.Password == "" {
-		dest.Password = entry["password"]
+	if dest.ClientSecret == "" {
+		dest.ClientSecret = entry["client_secret"]
 	}
 	if dest.Site == "" {
 		dest.Site = entry["site"]

@@ -23,7 +23,7 @@ type ImportResult struct {
 // ImportSpec connects to the controller, fetches all relevant configuration,
 // and produces an intent.Spec that reflects the observed design. log is an
 // optional structured logger for operation events (may be nil).
-func ImportSpec(ctx context.Context, host, username, password, siteName string, debug bool, skipTLSVerify bool, caCertPath string, log *logger.Logger) (*ImportResult, error) {
+func ImportSpec(ctx context.Context, host, clientID, clientSecret, siteName string, debug bool, skipTLSVerify bool, caCertPath string, log *logger.Logger) (*ImportResult, error) {
 	client, err := NewClient(ctx, host, skipTLSVerify, caCertPath)
 	if err != nil {
 		return nil, err
@@ -32,7 +32,7 @@ func ImportSpec(ctx context.Context, host, username, password, siteName string, 
 	client.SetLogger(log)
 	defer client.Logout(ctx) //nolint:errcheck
 
-	if err := client.Login(ctx, username, password); err != nil {
+	if err := client.Login(ctx, clientID, clientSecret); err != nil {
 		return nil, err
 	}
 

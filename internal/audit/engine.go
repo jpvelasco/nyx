@@ -793,15 +793,15 @@ func aclCheckErrorResult(provider, policy string, summary string) *models.CheckR
 // still reports missing credentials.
 func fillFromCredentialStore(opts providers.ImportOptions, provider, path string) providers.ImportOptions {
 	fields := credentials.Fields{
-		Host:     opts.Host,
-		Username: opts.Username,
-		Password: opts.Password,
-		Site:     opts.Site,
+		Host:         opts.Host,
+		ClientID:     opts.ClientID,
+		ClientSecret: opts.ClientSecret,
+		Site:         opts.Site,
 	}
 	credentials.Overlay(path, provider, "default", &fields)
 	opts.Host = fields.Host
-	opts.Username = fields.Username
-	opts.Password = fields.Password
+	opts.ClientID = fields.ClientID
+	opts.ClientSecret = fields.ClientSecret
 	opts.Site = fields.Site
 	return opts
 }
@@ -835,18 +835,18 @@ func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.C
 	// Build import options from environment (backward-compatible with existing env var pattern)
 	opts := providers.ImportOptions{
 		Host:          os.Getenv("OMADA_HOST"),
-		Username:      os.Getenv("OMADA_USERNAME"),
-		Password:      os.Getenv("OMADA_PASSWORD"),
+		ClientID:      os.Getenv("OMADA_CLIENT_ID"),
+		ClientSecret:  os.Getenv("OMADA_CLIENT_SECRET"),
 		Site:          os.Getenv("OMADA_SITE"),
 		SkipTLSVerify: e.SkipTLSVerify,
 		CACertPath:    e.CACertPath,
 	}
-	if opts.Host == "" || opts.Username == "" || opts.Password == "" {
+	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
 		opts = fillFromCredentialStore(opts, providerName, e.CredentialsPath)
 	}
-	if opts.Host == "" || opts.Username == "" || opts.Password == "" {
+	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
 		return aclCheckErrorResult(providerName, a.Policy,
-			"acl_check requires OMADA_HOST, OMADA_USERNAME, OMADA_PASSWORD environment variables, or stored credentials (see `nyx credentials set omada`)"), nil
+			"acl_check requires OMADA_HOST, OMADA_CLIENT_ID, OMADA_CLIENT_SECRET environment variables, or stored credentials (see `nyx credentials set omada`)"), nil
 	}
 
 	expect := a.Expect // "enforced" or "not_enforced"

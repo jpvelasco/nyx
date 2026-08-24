@@ -22,9 +22,9 @@ func TestRun_MissingCredentials(t *testing.T) {
 		wantSub string
 	}{
 		{"all missing", map[string]string{}, "set OMADA_HOST"},
-		{"host missing", map[string]string{"OMADA_USERNAME": "u", "OMADA_PASSWORD": "p"}, "set OMADA_HOST"},
-		{"user missing", map[string]string{"OMADA_HOST": "h", "OMADA_PASSWORD": "p"}, "set OMADA_HOST"},
-		{"pass missing", map[string]string{"OMADA_HOST": "h", "OMADA_USERNAME": "u"}, "set OMADA_HOST"},
+		{"host missing", map[string]string{"OMADA_CLIENT_ID": "u", "OMADA_CLIENT_SECRET": "p"}, "set OMADA_HOST"},
+		{"client id missing", map[string]string{"OMADA_HOST": "h", "OMADA_CLIENT_SECRET": "p"}, "set OMADA_HOST"},
+		{"client secret missing", map[string]string{"OMADA_HOST": "h", "OMADA_CLIENT_ID": "u"}, "set OMADA_HOST"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,10 +47,8 @@ func TestRun_Success(t *testing.T) {
 		switch {
 		case r.URL.Path == "/api/info":
 			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"3","omadacId":"test","configured":true}}`) //nosem // test mock
-		case strings.Contains(r.URL.Path, "/login"):
-			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"token":"tok123"}}`) //nosem // test mock
-		case strings.Contains(r.URL.Path, "/logout"):
-			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":null}`) //nosem // test mock
+		case r.URL.Path == "/openapi/authorize/token":
+			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"accessToken":"tok123"}}`) //nosem // test mock
 		case strings.Contains(r.URL.Path, "/setting/lan/networks"):
 			//nosem // test mock — live 6.x shape (dhcpSettings nested, origName)
 			fmt.Fprint(w, envelope(`{"totalRows":1,"data":[
@@ -75,9 +73,9 @@ func TestRun_Success(t *testing.T) {
 		switch key {
 		case "OMADA_HOST":
 			return strings.TrimPrefix(ts.URL, "https://")
-		case "OMADA_USERNAME":
+		case "OMADA_CLIENT_ID":
 			return "admin"
-		case "OMADA_PASSWORD":
+		case "OMADA_CLIENT_SECRET":
 			return "secret"
 		}
 		return ""
@@ -101,11 +99,11 @@ func TestRun_Success(t *testing.T) {
 func TestRun_LoginFailure(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/api/info":
+		switch r.URL.Path {
+		case "/api/info":
 			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"3","omadacId":"test","configured":true}}`) //nosem // test mock
-		case strings.Contains(r.URL.Path, "/login"):
-			fmt.Fprint(w, `{"errorCode":-30109,"msg":"invalid username or password","result":null}`) //nosem // test mock
+		case "/openapi/authorize/token":
+			fmt.Fprint(w, `{"errorCode":-44106,"msg":"invalid client credentials","result":null}`) //nosem // test mock
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			fmt.Fprint(w, `{"errorCode":-1,"msg":"not found","result":null}`) //nosem // test mock
@@ -117,9 +115,9 @@ func TestRun_LoginFailure(t *testing.T) {
 		switch key {
 		case "OMADA_HOST":
 			return strings.TrimPrefix(ts.URL, "https://")
-		case "OMADA_USERNAME":
+		case "OMADA_CLIENT_ID":
 			return "baduser"
-		case "OMADA_PASSWORD":
+		case "OMADA_CLIENT_SECRET":
 			return "badpass"
 		}
 		return ""
@@ -130,7 +128,7 @@ func TestRun_LoginFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected login error")
 	}
-	if !strings.Contains(err.Error(), "invalid username or password") {
+	if !strings.Contains(err.Error(), "invalid client credentials") {
 		t.Errorf("error = %q, want login failure indication", err.Error())
 	}
 }
@@ -141,9 +139,9 @@ func TestRun_NewClientFailure(t *testing.T) {
 		switch key {
 		case "OMADA_HOST":
 			return "not-a-valid-host"
-		case "OMADA_USERNAME":
+		case "OMADA_CLIENT_ID":
 			return "admin"
-		case "OMADA_PASSWORD":
+		case "OMADA_CLIENT_SECRET":
 			return "secret"
 		}
 		return ""
@@ -162,10 +160,8 @@ func TestRun_SelectSiteFailure(t *testing.T) {
 		switch {
 		case r.URL.Path == "/api/info":
 			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"3","omadacId":"test","configured":true}}`) //nosem // test mock
-		case strings.Contains(r.URL.Path, "/login"):
-			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"token":"tok123"}}`) //nosem // test mock
-		case strings.Contains(r.URL.Path, "/logout"):
-			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":null}`) //nosem // test mock
+		case r.URL.Path == "/openapi/authorize/token":
+			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"accessToken":"tok123"}}`) //nosem // test mock
 		case strings.Contains(r.URL.Path, "/sites"):
 			// Return multiple sites but request a non-existent one.
 			fmt.Fprint(w, envelope(`{"totalRows":2,"data":[{"id":"site1","name":"Home","type":0},{"id":"site2","name":"Office","type":0}]}`)) //nosem // test mock
@@ -180,9 +176,9 @@ func TestRun_SelectSiteFailure(t *testing.T) {
 		switch key {
 		case "OMADA_HOST":
 			return strings.TrimPrefix(ts.URL, "https://")
-		case "OMADA_USERNAME":
+		case "OMADA_CLIENT_ID":
 			return "admin"
-		case "OMADA_PASSWORD":
+		case "OMADA_CLIENT_SECRET":
 			return "secret"
 		case "OMADA_SITE":
 			return "NonExistent"
@@ -203,10 +199,8 @@ func TestRun_GetClientsFailure(t *testing.T) {
 		switch {
 		case r.URL.Path == "/api/info":
 			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"3","omadacId":"test","configured":true}}`) //nosem // test mock
-		case strings.Contains(r.URL.Path, "/login"):
-			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"token":"tok123"}}`) //nosem // test mock
-		case strings.Contains(r.URL.Path, "/logout"):
-			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":null}`) //nosem // test mock
+		case r.URL.Path == "/openapi/authorize/token":
+			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"accessToken":"tok123"}}`) //nosem // test mock
 		case strings.Contains(r.URL.Path, "/clients"):
 			// Return an error for the clients endpoint.
 			fmt.Fprint(w, `{"errorCode":-1,"msg":"internal error","result":null}`) //nosem // test mock
@@ -223,9 +217,9 @@ func TestRun_GetClientsFailure(t *testing.T) {
 		switch key {
 		case "OMADA_HOST":
 			return strings.TrimPrefix(ts.URL, "https://")
-		case "OMADA_USERNAME":
+		case "OMADA_CLIENT_ID":
 			return "admin"
-		case "OMADA_PASSWORD":
+		case "OMADA_CLIENT_SECRET":
 			return "secret"
 		}
 		return ""
@@ -244,10 +238,8 @@ func TestRun_NoSites(t *testing.T) {
 		switch {
 		case r.URL.Path == "/api/info":
 			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"3","omadacId":"test","configured":true}}`) //nosem // test mock
-		case strings.Contains(r.URL.Path, "/login"):
-			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"token":"tok123"}}`) //nosem // test mock
-		case strings.Contains(r.URL.Path, "/logout"):
-			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":null}`) //nosem // test mock
+		case r.URL.Path == "/openapi/authorize/token":
+			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"accessToken":"tok123"}}`) //nosem // test mock
 		case strings.Contains(r.URL.Path, "/sites"):
 			fmt.Fprint(w, envelope(`{"totalRows":0,"data":[]}`)) //nosem // test mock
 		default:
@@ -261,9 +253,9 @@ func TestRun_NoSites(t *testing.T) {
 		switch key {
 		case "OMADA_HOST":
 			return strings.TrimPrefix(ts.URL, "https://")
-		case "OMADA_USERNAME":
+		case "OMADA_CLIENT_ID":
 			return "admin"
-		case "OMADA_PASSWORD":
+		case "OMADA_CLIENT_SECRET":
 			return "secret"
 		}
 		return ""
@@ -283,10 +275,8 @@ func TestRunMain_Success(t *testing.T) {
 		switch {
 		case r.URL.Path == "/api/info":
 			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"3","omadacId":"test","configured":true}}`) //nosem // test mock
-		case strings.Contains(r.URL.Path, "/login"):
-			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"token":"tok123"}}`) //nosem // test mock
-		case strings.Contains(r.URL.Path, "/logout"):
-			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":null}`) //nosem // test mock
+		case r.URL.Path == "/openapi/authorize/token":
+			fmt.Fprint(w, `{"errorCode":0,"msg":"","result":{"accessToken":"tok123"}}`) //nosem // test mock
 		case strings.Contains(r.URL.Path, "/clients"):
 			//nosem // test mock
 			fmt.Fprint(w, envelope(`{"totalRows":1,"data":[
@@ -305,9 +295,9 @@ func TestRunMain_Success(t *testing.T) {
 		switch key {
 		case "OMADA_HOST":
 			return strings.TrimPrefix(ts.URL, "https://")
-		case "OMADA_USERNAME":
+		case "OMADA_CLIENT_ID":
 			return "admin"
-		case "OMADA_PASSWORD":
+		case "OMADA_CLIENT_SECRET":
 			return "secret"
 		}
 		return ""

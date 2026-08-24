@@ -20,7 +20,7 @@ func TestCredentialsCmdRoundtrip(t *testing.T) {
 	t.Setenv("NYX_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 
 	if err := runCredentialsCmd(t, "credentials", "set", "omada",
-		"--set", "host=192.168.1.1", "--set", "username=admin", "--set", "password=hunter2"); err != nil {
+		"--set", "host=192.168.1.1", "--set", "client_id=cid-1", "--set", "client_secret=hunter2"); err != nil {
 		t.Fatalf("set failed: %v", err)
 	}
 
@@ -53,8 +53,8 @@ func TestCredentialsVerifyMissingFields(t *testing.T) {
 		t.Fatalf("set failed: %v", err)
 	}
 	err := runCredentialsCmd(t, "credentials", "verify", "omada")
-	if err == nil || !strings.Contains(err.Error(), "username") {
-		t.Errorf("verify should report missing username, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "client_id") {
+		t.Errorf("verify should report missing client_id, got: %v", err)
 	}
 }
 
