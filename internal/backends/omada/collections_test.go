@@ -32,6 +32,22 @@ func TestGetNetworksPurposeInteger(t *testing.T) {
 	}
 }
 
+// BDD S3.3 — an unknown purpose code stringifies instead of aborting the fetch.
+func TestGetNetworksPurposeUnknownInteger(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
+			{"id":"n1","name":"Trusted","purpose":7,"vlan":10}
+		]}`)
+	}))
+	nets, err := c.GetNetworks(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("GetNetworks: %v", err)
+	}
+	if nets[0].Purpose != "7" {
+		t.Errorf("purpose = %q, want \"7\" (unknown codes stringify)", nets[0].Purpose)
+	}
+}
+
 // BDD S3.3 — single lan-networks endpoint, DHCP state nested under
 // "dhcpSettingsVO". There is no "dhcpEnabled" or "ssid" field on the wire;
 // deviceMac/origName are optional and decode to zero values when absent.
