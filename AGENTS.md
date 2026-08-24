@@ -80,7 +80,7 @@ Provider-specific CLI commands (`nyx <vendor> info|import|check|inventory`) are 
 
 ### OPNsense Provider
 
-Fully implements `Info`, `ImportSpec`, and `Check`. Uses API key/secret auth (not username/password). TLS verification is **on by default**; opt out per-run with `--skip-tls-verify` (self-signed cert) or pin the controller CA with `--ca-cert <pem>`. ImportSpec builds networks from interfaces, policies from deny/block/reject firewall rules, and estimates host counts from **Dynamic Host Configuration Protocol (DHCP)** leases only.
+Fully implements `Info`, `ImportSpec`, and `Check`. Uses API key/secret auth (not username/password). TLS verification is **on by default**; opt out per-run with `--skip-tls-verify` (self-signed cert) or pin the controller CA with `--ca-cert <pem>`. ImportSpec builds networks from interfaces, policies from deny/block/reject firewall rules, and estimates host counts from DHCP leases only.
 
 ## Credential Resolution
 
@@ -110,7 +110,7 @@ The `nmap` backend spawns `nmap` as a subprocess. Tests in `backends/nmap` call 
 
 ## Omada Backend
 
-The official Omada Open API (`/openapi/v1`) research notes — endpoints, auth, the gateway-ACL scope flag dead end, and the TLS renegotiation quirk — are in `docs/omada-openapi.md`.
+The official Omada Open API (`/openapi/v1`) research notes — endpoints, auth, the gateway-ACL scope flag dead end, and the TLS renegotiation quirk — are in `docs/omada-openapi.md`. The undocumented internal v2 API (`/api/v2`, cookie + CSRF session login) is **fully cut**; `docs/bdd/omada-openapi.md` is the BDD acceptance contract for that cutover — its scenarios are mirrored 1:1 by httptest fake-controller tests, so consult it before changing the Omada backend.
 
 - The HTTP client (`internal/backends/omada`) is **concurrency-safe**: requests are serialised through an internal mutex. It retries transient failures (network errors, HTTP 5xx) with exponential backoff (3 retries, 500ms base capped at 5s) and, on a session-expired response, performs a **single automatic re-login** using the credentials from the last successful `Login` before retrying the request.
 - `Login` retains the username/password in memory for automatic session refresh; `Logout` clears them. Credentials are **never** written to logs, evidence, or recommendations.
@@ -240,7 +240,7 @@ Version 1 intent spec: `networks`, `vpn`, `probes`, `policies`, `assertions`. Ei
 - `system/` — platform-specific system commands (`system_linux.go`, `system_darwin.go`, `system_windows.go`). Only `system.go` is shared.
 - `dns/` — DNS resolution checks, including optional DNSSEC validation. `TestResolve_TruncatedResponse_TCPFallback` retries 50 port binds because Windows runners reserve wide ephemeral port ranges (a 20-attempt version flaked in CI).
 - `health/` — latency, packet loss, and MTU probing.
-- `omada/` — REST client for Omada SDN 6.x (reads + switch-ACL writes). **Concurrency-safe** with retry/backoff and automatic re-login — see the Omada Backend section. TLS verification on by default; `--skip-tls-verify` / `--ca-cert` opt out.
+- `omada/` — REST client for Omada SDN 6.x via the official Open API (reads + switch/gateway-ACL writes). **Concurrency-safe** with retry/backoff and automatic re-login — see the Omada Backend section. TLS verification on by default; `--skip-tls-verify` / `--ca-cert` opt out.
 - `batfish/` — stub returning `ErrNotImplemented`; `Available()` returns `false`.
 
 ## Other Core Packages
