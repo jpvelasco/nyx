@@ -123,7 +123,9 @@ func TestSave_SameMillisecondCollision(t *testing.T) {
 	if path == blocked {
 		t.Errorf("Save must not overwrite the existing snapshot, wrote %s", path)
 	}
-	data, err := os.ReadFile(blocked)
+	// Reading back through the dynamic path is the point of the test: verify
+	// Save did not touch the seeded fixture file.
+	data, err := os.ReadFile(blocked) // nosemgrep: go.filesystem.rule-fileread
 	if err != nil {
 		t.Fatalf("original snapshot replaced: %v", err)
 	}
