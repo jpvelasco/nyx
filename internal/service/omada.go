@@ -141,19 +141,18 @@ type OmadaPostAudit struct {
 // before/after evidence and the post-apply audit. FromCIDRs/ToCIDRs and the
 // gateway slices are in request order of the endpoints.
 type OmadaACLApplyResult struct {
-	DryRun        bool            `json:"dry_run"`
-	Outcome       string          `json:"outcome"` // "created" | "enabled" | "unchanged"
-	RuleID        string          `json:"rule_id,omitempty"`
-	RuleName      string          `json:"rule_name,omitempty"`
-	Scope         string          `json:"scope"`
-	ScopeDisabled bool            `json:"scope_disabled,omitempty"`
-	FromCIDRs     []string        `json:"from_cidrs"`
-	ToCIDRs       []string        `json:"to_cidrs"`
-	FromGateways  []string        `json:"from_gateways,omitempty"`
-	ToGateways    []string        `json:"to_gateways,omitempty"`
-	Before        string          `json:"before"`
-	After         string          `json:"after"`
-	PostAudit     *OmadaPostAudit `json:"post_audit,omitempty"`
+	DryRun       bool            `json:"dry_run"`
+	Outcome      string          `json:"outcome"` // "created" | "enabled" | "unchanged"
+	RuleID       string          `json:"rule_id,omitempty"`
+	RuleName     string          `json:"rule_name,omitempty"`
+	Scope        string          `json:"scope"`
+	FromCIDRs    []string        `json:"from_cidrs"`
+	ToCIDRs      []string        `json:"to_cidrs"`
+	FromGateways []string        `json:"from_gateways,omitempty"`
+	ToGateways   []string        `json:"to_gateways,omitempty"`
+	Before       string          `json:"before"`
+	After        string          `json:"after"`
+	PostAudit    *OmadaPostAudit `json:"post_audit,omitempty"`
 }
 
 // OmadaService exposes the Omada observation surface shared by the MCP server
@@ -323,12 +322,11 @@ type serviceDevice struct {
 	Networks []string `json:"networks,omitempty"`
 }
 
-// serviceACLScope is the enabled state of one ACL scope (gateway | switch).
+// serviceACLScope is the rule count of one ACL scope (gateway | switch).
+// The Open API has no scope enable/disable flag.
 type serviceACLScope struct {
-	Scope           string `json:"scope"`
-	Enabled         bool   `json:"enabled"`
-	RuleCount       int    `json:"rule_count"`
-	SupportLanToLan *bool  `json:"support_lan_to_lan,omitempty"`
+	Scope     string `json:"scope"`
+	RuleCount int    `json:"rule_count"`
 }
 
 // Inventory returns the site's device/network/ACL-scope/client observation.
@@ -368,12 +366,7 @@ func (s *OmadaService) Inventory(ctx context.Context, opts OmadaOptions) (*Omada
 		})
 	}
 	for _, sc := range specInv.ACLScopes {
-		inv.ACLScopes = append(inv.ACLScopes, serviceACLScope{
-			Scope:           sc.Scope,
-			Enabled:         sc.Enabled,
-			RuleCount:       sc.RuleCount,
-			SupportLanToLan: sc.SupportLanToLan,
-		})
+		inv.ACLScopes = append(inv.ACLScopes, serviceACLScope{Scope: sc.Scope, RuleCount: sc.RuleCount})
 	}
 	return inv, nil
 }
@@ -465,18 +458,17 @@ func (s *OmadaService) ApplyACL(ctx context.Context, opts OmadaOptions, req Omad
 		return nil, err
 	}
 	out := &OmadaACLApplyResult{
-		DryRun:        res.DryRun,
-		Outcome:       res.Outcome,
-		RuleID:        res.RuleID,
-		RuleName:      res.RuleName,
-		Scope:         res.Scope,
-		ScopeDisabled: res.ScopeDisabled,
-		FromCIDRs:     res.FromCIDRs,
-		ToCIDRs:       res.ToCIDRs,
-		FromGateways:  res.FromGateways,
-		ToGateways:    res.ToGateways,
-		Before:        res.Before,
-		After:         res.After,
+		DryRun:       res.DryRun,
+		Outcome:      res.Outcome,
+		RuleID:       res.RuleID,
+		RuleName:     res.RuleName,
+		Scope:        res.Scope,
+		FromCIDRs:    res.FromCIDRs,
+		ToCIDRs:      res.ToCIDRs,
+		FromGateways: res.FromGateways,
+		ToGateways:   res.ToGateways,
+		Before:       res.Before,
+		After:        res.After,
 	}
 	if !res.DryRun && res.Outcome != "unchanged" && req.PostAudit {
 		out.PostAudit = s.runPostAudit(ctx, req, res)

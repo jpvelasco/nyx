@@ -136,7 +136,7 @@ func ImportSpec(ctx context.Context, host, clientID, clientSecret, siteName stri
 	spec.Assertions = buildAssertions(spec.Networks, omadaNets, clients, allRules, netsByID)
 
 	// Inventory snapshot: what the controller's devices and ACL scopes look
-	// like right now, so audits can flag drift (e.g. ACL scope disabled).
+	// like right now, so audits can flag drift (e.g. ACL rule count).
 	spec.Inventory = BuildSpecInventory(&InventorySnapshot{
 		ControllerVersion:  result.ControllerVersion,
 		ControllerCategory: client.Info().Category,
@@ -229,9 +229,9 @@ func buildAssertions(networks []intent.Network, omadaNets []Network, clients []C
 	}
 
 	// Enforced-state assertions: one acl_check per enabled ACL rule, keyed
-	// off the sanitized rule name (the spec's policy name). This is what
-	// makes a stored-but-unenforced gateway ACL (aclDisable) a FAIL instead
-	// of a silent pass.
+	// off the sanitized rule name (the spec's policy name). A rule counts
+	// as enforced when a covering rule is present and enabled in its
+	// scope.
 	for _, rule := range rules {
 		if !rule.Status {
 			continue

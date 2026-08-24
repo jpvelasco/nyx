@@ -566,8 +566,8 @@ func TestProviderCheckACL_PerScopePaths(t *testing.T) {
 		if res.Status != "pass" {
 			t.Errorf("status = %s (summary %q), want pass", res.Status, res.Summary)
 		}
-		if res.Observed["scope"] != "gateway" || res.Observed["scope_disabled"] != false {
-			t.Errorf("observed = %v, want scope gateway, not disabled (no capability flags on read)", res.Observed)
+		if res.Observed["scope"] != "gateway" {
+			t.Errorf("observed = %v, want scope gateway", res.Observed)
 		}
 		if res.Observed["rule_count"] != 2 {
 			t.Errorf("rule_count = %v, want 2 (both scopes)", res.Observed["rule_count"])
@@ -584,8 +584,8 @@ func TestProviderCheckACL_PerScopePaths(t *testing.T) {
 		if res.Status != "pass" {
 			t.Errorf("status = %s (summary %q), want pass", res.Status, res.Summary)
 		}
-		if res.Observed["scope"] != "switch" || res.Observed["scope_disabled"] != false {
-			t.Errorf("observed = %v, want scope switch, not disabled", res.Observed)
+		if res.Observed["scope"] != "switch" {
+			t.Errorf("observed = %v, want scope switch", res.Observed)
 		}
 	})
 
@@ -670,13 +670,13 @@ func TestProviderInventory(t *testing.T) {
 		t.Fatalf("ACLScopes = %+v, want 2", res.Inventory.ACLScopes)
 	}
 	gw, sw := res.Inventory.ACLScopes[0], res.Inventory.ACLScopes[1]
-	if gw.Scope != "gateway" || gw.Enabled != true || gw.RuleCount != 1 {
-		t.Errorf("gateway scope = %+v, want enabled, 1 rule", gw)
+	if gw.Scope != "gateway" || gw.RuleCount != 1 {
+		t.Errorf("gateway scope = %+v, want 1 rule", gw)
 	}
-	if sw.Scope != "switch" || !sw.Enabled || sw.RuleCount != 0 {
-		t.Errorf("switch scope = %+v, want enabled, 0 rules", sw)
+	if sw.Scope != "switch" || sw.RuleCount != 0 {
+		t.Errorf("switch scope = %+v, want 0 rules", sw)
 	}
-	for _, want := range []string{"Site: HQ", "== Devices (2) ==", "== Networks (2) ==", "2 active clients"} {
+	for _, want := range []string{"Site: HQ", "== Devices (2) ==", "== Networks (2) ==", "2 active clients", "gateway: 1 rule", "switch:  0 rules"} {
 		if !strings.Contains(res.Human, want) {
 			t.Errorf("human output missing %q:\n%s", want, res.Human)
 		}
@@ -722,18 +722,18 @@ func TestNetworkList_Positional(t *testing.T) {
 }
 
 // applyACLServer serves networks n1/n2/n3 plus mutable, per-scope ACL rule
-// lists for ApplyACL tests. Reads come from the per-scope Open API paths;
-// writes still hit the unified setting/firewall/acls collection (ref5). The
-// switch and gateway lists start with the given JSON rules and update as
-// writes arrive; any write on an unexpected path or a write when
-// writesAllowed is false fails the test.
+// lists for ApplyACL tests. Reads and writes both use the per-scope Open
+// API paths (BDD §4); creates return no payload, so the post-create
+// refetch serves the updated scope list. The switch and gateway lists start
+// with the given JSON rules and update as writes arrive; any write on an
+// unexpected path or a write when writesAllowed is false fails the test.
 func applyACLServer(t *testing.T, initialSwitch, initialGateway string, writesAllowed bool) *httptest.Server {
 	t.Helper()
-	switchRules := initialSwitch
-	gatewayRules := initialGateway
-	postCreate := `{"id":"a9","description":"block-iot","status":true,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`
-	postState := `{"totalRows":1,"data":[` + `{"id":"a9","description":"block-iot","status":true,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}` + `]}`
-	putState := `{"totalRows":1,"data":[{"id":"a1","description":"block-iot","status":true,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
+	switchState := initialSwitch
+	gatewayState := initialGateway
+	switchAfterCreate := `{"totalRows":1,"data":[{"id":"a9","description":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
+	switchAfterUpdate := `{"totalRows":1,"data":[{"id":"a1","description":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
+	gatewayAfterCreate := `{"totalRows":1,"data":[{"id":"a7","description":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1","n3"],"index":4}]}`
 	ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/openapi/authorize/token":
@@ -742,30 +742,28 @@ func applyACLServer(t *testing.T, initialSwitch, initialGateway string, writesAl
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
 			writeEnvelope(w, 0, "", threeNetworksJSON)
-		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
-			writeEnvelope(w, 0, "", gatewayRules)
-		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
-			writeEnvelope(w, 0, "", switchRules)
-		case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
+		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
 			if !writesAllowed {
 				t.Error("unexpected POST create when writes are not allowed")
 			}
-			writeEnvelope(w, 0, "", postCreate)
-			if r.URL.Query().Get("type") == "0" {
-				gatewayRules = postState
-			} else {
-				switchRules = postState
-			}
-		case strings.HasPrefix(r.URL.Path, "/abc123/openapi/v1/sites/s1/setting/firewall/acls/") && r.Method == http.MethodPut:
+			writeEnvelope(w, 0, "", "null")
+			switchState = switchAfterCreate
+		case strings.HasPrefix(r.URL.Path, "/abc123/openapi/v1/sites/s1/acls/osw-acls/") && r.Method == http.MethodPut:
 			if !writesAllowed {
 				t.Error("unexpected PUT update when writes are not allowed")
 			}
-			writeEnvelope(w, 0, "", `{"id":"a1","description":"block-iot","status":true,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}`)
-			if r.URL.Query().Get("type") == "0" {
-				gatewayRules = putState
-			} else {
-				switchRules = putState
+			writeEnvelope(w, 0, "", "null")
+			switchState = switchAfterUpdate
+		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
+			writeEnvelope(w, 0, "", switchState)
+		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls" && r.Method == http.MethodPost:
+			if !writesAllowed {
+				t.Error("unexpected POST create when writes are not allowed")
 			}
+			writeEnvelope(w, 0, "", "null")
+			gatewayState = gatewayAfterCreate
+		case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+			writeEnvelope(w, 0, "", gatewayState)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -819,6 +817,7 @@ func TestProviderApplyACL(t *testing.T) {
 
 	t.Run("creates a gateway scope rule with direction", func(t *testing.T) {
 		var gotBody string
+		var wrote bool
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.URL.Path == "/openapi/authorize/token":
@@ -827,14 +826,18 @@ func TestProviderApplyACL(t *testing.T) {
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", threeNetworksJSON)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
-				// The Open API read paths carry no aclDisable capability.
-				writeEnvelope(w, 0, "", emptyList)
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls" && r.Method == http.MethodPost:
+				wrote = true
+				gotBody = readReqBody(t, r)
+				writeEnvelope(w, 0, "", "null")
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
-				gotBody = readReqBody(t, r)
-				writeEnvelope(w, 0, "", `{"id":"a7","status":true,"policy":0,"protocols":[256],"sourceIds":["n2"],"destinationIds":["n1","n3"]}`)
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
+				if wrote {
+					writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a7","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1","n3"]}]}`)
+					return
+				}
+				writeEnvelope(w, 0, "", emptyList)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -846,16 +849,18 @@ func TestProviderApplyACL(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ApplyACL: %v", err)
 		}
-		if res.Scope != "gateway" || res.ScopeDisabled {
-			t.Errorf("scope = %q disabled %v, want gateway, not disabled (no capability flags on read)", res.Scope, res.ScopeDisabled)
+		if res.Scope != "gateway" || res.RuleID != "a7" {
+			t.Errorf("scope = %q rule_id = %q, want gateway a7", res.Scope, res.RuleID)
 		}
 		var body struct {
-			Type        int                       `json:"type"`
 			SourceIDs   []string                  `json:"sourceIds"`
 			DestIDs     []string                  `json:"destinationIds"`
 			Protocols   []int                     `json:"protocols"`
 			Direction   omadabackend.ACLDirection `json:"direction"`
 			BindingType *int                      `json:"bindingType"`
+			Syslog      bool                      `json:"syslog"`
+			StateMode   int                       `json:"stateMode"`
+			States      map[string]bool           `json:"states"`
 		}
 		if err := json.Unmarshal([]byte(gotBody), &body); err != nil {
 			t.Fatalf("request body %q: %v", gotBody, err)
@@ -863,8 +868,11 @@ func TestProviderApplyACL(t *testing.T) {
 		if body.BindingType != nil {
 			t.Errorf("gateway wire body bindingType = %v, want omitted", *body.BindingType)
 		}
-		if body.Type != 0 || !body.Direction.LANToLAN || body.Direction.LANToWAN {
-			t.Errorf("wire = type %v direction %+v, want gateway type 0 lanToLan", body.Type, body.Direction)
+		if !body.Syslog || body.StateMode != 0 || len(body.States) != 4 {
+			t.Errorf("wire state tracking = syslog %v stateMode %d states %v, want syslog/stateMode/4 states", body.Syslog, body.StateMode, body.States)
+		}
+		if !body.Direction.LANToLAN || body.Direction.LANToWAN {
+			t.Errorf("wire direction = %+v, want lanToLan only", body.Direction)
 		}
 		if len(body.SourceIDs) != 1 || body.SourceIDs[0] != "n2" || len(body.DestIDs) != 2 {
 			t.Errorf("wire endpoints = %v -> %v, want n2 -> n1,n3", body.SourceIDs, body.DestIDs)
@@ -921,16 +929,16 @@ func TestProviderApplyACL(t *testing.T) {
 				writeEnvelope(w, 0, "", threeNetworksJSON)
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
 				writeEnvelope(w, 0, "", emptyList)
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
+				wrote = true
+				gotBody = readReqBody(t, r)
+				writeEnvelope(w, 0, "", "null")
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
 				if wrote {
 					writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a9","status":true,"policy":0,"protocols":[6],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]}]}`)
 					return
 				}
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","description":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
-				wrote = true
-				gotBody = readReqBody(t, r)
-				writeEnvelope(w, 0, "", `{"id":"a9","status":true,"policy":0}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -1000,6 +1008,9 @@ func TestProviderApplyACL(t *testing.T) {
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", threeNetworksJSON)
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls" && r.Method == http.MethodPost:
+				wrote = true
+				writeEnvelope(w, 0, "", "null")
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
 				if wrote {
 					writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a7","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]}]}`)
@@ -1010,9 +1021,6 @@ func TestProviderApplyACL(t *testing.T) {
 				// A covering switch rule exists, but it must not satisfy a
 				// gateway-scope request.
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","description":"block-iot","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
-				wrote = true
-				writeEnvelope(w, 0, "", `{"id":"a7","status":true,"policy":0,"protocols":[256],"sourceIds":["n2"],"destinationIds":["n1"]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -1155,10 +1163,10 @@ func TestProviderApplyACL(t *testing.T) {
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", threeNetworksJSON)
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
+				writeEnvelope(w, -1005, "no permission", "null")
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
-				writeEnvelope(w, -1005, "no permission", "null")
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -1179,10 +1187,10 @@ func TestProviderApplyACL(t *testing.T) {
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", threeNetworksJSON)
+			case strings.HasPrefix(r.URL.Path, "/abc123/openapi/v1/sites/s1/acls/osw-acls/") && r.Method == http.MethodPut:
+				writeEnvelope(w, -1005, "no permission", "null")
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","description":"block-iot","status":false,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`)
-			case strings.HasPrefix(r.URL.Path, "/abc123/openapi/v1/sites/s1/setting/firewall/acls/") && r.Method == http.MethodPut:
-				writeEnvelope(w, -1005, "no permission", "null")
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -1204,15 +1212,15 @@ func TestProviderApplyACL(t *testing.T) {
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/lan-networks":
 				writeEnvelope(w, 0, "", threeNetworksJSON)
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
+				wrote = true
+				writeEnvelope(w, 0, "", "null")
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
 				if wrote {
 					w.WriteHeader(http.StatusNotFound)
 					return
 				}
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
-				wrote = true
-				writeEnvelope(w, 0, "", `{"id":"a9","status":true,"policy":0}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -1237,16 +1245,16 @@ func TestProviderApplyACL(t *testing.T) {
 				writeEnvelope(w, 0, "", threeNetworksJSON)
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
 				writeEnvelope(w, 0, "", emptyList)
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
+				wrote = true
+				gotBody = readReqBody(t, r)
+				writeEnvelope(w, 0, "", "null")
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
 				if wrote {
 					writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a8","status":true,"policy":1,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]}]}`)
 					return
 				}
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
-				wrote = true
-				gotBody = readReqBody(t, r)
-				writeEnvelope(w, 0, "", `{"id":"a8","status":true,"policy":1}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -1283,16 +1291,16 @@ func TestProviderApplyACL(t *testing.T) {
 				writeEnvelope(w, 0, "", threeNetworksJSON)
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osg-acls":
 				writeEnvelope(w, 0, "", emptyList)
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls" && r.Method == http.MethodPost:
+				wrote = true
+				gotBody = readReqBody(t, r)
+				writeEnvelope(w, 0, "", "null")
 			case r.URL.Path == "/abc123/openapi/v1/sites/s1/acls/osw-acls":
 				if wrote {
 					writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a9","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1","n3"]}]}`)
 					return
 				}
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
-				wrote = true
-				gotBody = readReqBody(t, r)
-				writeEnvelope(w, 0, "", `{"id":"a9","status":true,"policy":0}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -1303,13 +1311,13 @@ func TestProviderApplyACL(t *testing.T) {
 			t.Fatalf("ApplyACL: %v", err)
 		}
 		var body struct {
-			Name string `json:"name"`
+			Description string `json:"description"`
 		}
 		if err := json.Unmarshal([]byte(gotBody), &body); err != nil {
 			t.Fatalf("request body %q: %v", gotBody, err)
 		}
-		if body.Name != "iot-trusted-guest-deny" {
-			t.Errorf("derived rule name = %q, want iot-trusted-guest-deny", body.Name)
+		if body.Description != "iot-trusted-guest-deny" {
+			t.Errorf("derived rule name = %q, want iot-trusted-guest-deny", body.Description)
 		}
 		if res.RuleID != "a9" {
 			t.Errorf("rule_id = %q, want a9 from refetch", res.RuleID)

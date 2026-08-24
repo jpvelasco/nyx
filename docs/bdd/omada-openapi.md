@@ -24,11 +24,11 @@ The cutover lands in three PRs, each red→green against its own scenarios:
 | --- | --- | --- | --- |
 | §1, §2 | Auth (token mint, re-mint, logout, secret hygiene) + credential plumbing | PR 1 | **Implemented** |
 | §3 | Read endpoints + wire shapes | PR 2 | **Implemented** — mirrored 1:1 by httptest tests |
-| §4, §5 | Write endpoints + scope-disabled removal | PR 3 | Spec only — same caveat |
+| §4, §5 | Write endpoints + scope-disabled removal | PR 3 | **Implemented** — mirrored 1:1 by httptest tests |
 
-Until PR 3 lands, write calls still use the unified `setting/firewall/acls`
-collection and the `ACLList` capability fields stay zero-valued (reads carry
-no capability flags on the Open API wire).
+All three PRs landed: writes use the per-scope collections
+(`acls/osw-acls` / `acls/osg-acls`) and the Open API's absence of a scope
+enable/disable flag is honored end-to-end (no `scope_disabled` surface).
 
 ## 1. Authentication
 

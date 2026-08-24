@@ -105,21 +105,12 @@ func BuildSpecInventory(snap *InventorySnapshot) *intent.Inventory {
 		inv.Devices = append(inv.Devices, dev)
 	}
 	if snap.GatewayACLsOK {
-		inv.ACLScopes = append(inv.ACLScopes, aclScopeStatus("gateway", snap.GatewayACLs))
+		inv.ACLScopes = append(inv.ACLScopes, intent.ACLScopeStatus{Scope: "gateway", RuleCount: len(snap.GatewayACLs.Rules)})
 	}
 	if snap.SwitchACLsOK {
-		inv.ACLScopes = append(inv.ACLScopes, aclScopeStatus("switch", snap.SwitchACLs))
+		inv.ACLScopes = append(inv.ACLScopes, intent.ACLScopeStatus{Scope: "switch", RuleCount: len(snap.SwitchACLs.Rules)})
 	}
 	return inv
-}
-
-func aclScopeStatus(scope string, list ACLList) intent.ACLScopeStatus {
-	s := intent.ACLScopeStatus{Scope: scope, Enabled: !list.ACLDisable, RuleCount: len(list.Rules)}
-	if scope == "gateway" {
-		v := list.SupportLanToLan
-		s.SupportLanToLan = &v
-	}
-	return s
 }
 
 // RenderInventory formats the snapshot as a stable, human-readable map of
@@ -176,15 +167,7 @@ func RenderInventory(snap *InventorySnapshot, siteName string) string {
 }
 
 func renderScope(b *strings.Builder, scope string, list ACLList) {
-	state := "enabled"
-	if list.ACLDisable {
-		state = "DISABLED — stored rules are not enforced"
-	}
-	extra := ""
-	if scope == "gateway" && list.SupportLanToLan {
-		extra = " (lan-to-lan supported)"
-	}
-	fmt.Fprintf(b, "  %-8s %-55s %d rule%s%s\n", scope+":", state, len(list.Rules), plural(len(list.Rules)), extra)
+	fmt.Fprintf(b, "  %-8s %d rule%s\n", scope+":", len(list.Rules), plural(len(list.Rules)))
 }
 
 // GatewayForNetwork is a snapshot-level convenience over the binding lookup.

@@ -45,13 +45,11 @@ type InventoryDevice struct {
 	Networks []string `yaml:"networks,omitempty" json:"networks,omitempty"`
 }
 
-// ACLScopeStatus captures whether a controller ACL scope is active.
-// Enabled=false means stored rules of that scope are not enforced.
+// ACLScopeStatus captures the rule count of a controller ACL scope. The
+// Open API has no scope enable/disable flag, so a listed scope is active.
 type ACLScopeStatus struct {
-	Scope           string `yaml:"scope" json:"scope"` // "gateway" | "switch"
-	Enabled         bool   `yaml:"enabled" json:"enabled"`
-	RuleCount       int    `yaml:"rule_count" json:"rule_count"`
-	SupportLanToLan *bool  `yaml:"support_lan_to_lan,omitempty" json:"support_lan_to_lan,omitempty"`
+	Scope     string `yaml:"scope" json:"scope"` // "gateway" | "switch"
+	RuleCount int    `yaml:"rule_count" json:"rule_count"`
 }
 
 // Network defines a named CIDR block

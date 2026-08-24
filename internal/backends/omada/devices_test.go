@@ -213,11 +213,6 @@ func TestFetchInventory(t *testing.T) {
 		if !snap.GatewayACLsOK || !snap.SwitchACLsOK {
 			t.Errorf("scopes = gw %v sw %v, want both OK", snap.GatewayACLsOK, snap.SwitchACLsOK)
 		}
-		// The Open API list envelope carries no aclDisable/supportLanToLan:
-		// the decoded meta must stay at its zero value.
-		if snap.GatewayACLs.ACLDisable || snap.GatewayACLs.SupportLanToLan {
-			t.Errorf("gateway flags = disable %v lan2lan %v, want false/false", snap.GatewayACLs.ACLDisable, snap.GatewayACLs.SupportLanToLan)
-		}
 		if len(snap.Warnings) != 0 {
 			t.Errorf("warnings = %v, want none", snap.Warnings)
 		}
@@ -269,9 +264,9 @@ func TestBuildSpecInventory(t *testing.T) {
 		Devices:            []Device{{Name: "GW-CORE", Model: "GW-CORE", Type: "gateway", MAC: "aa:bb:cc:dd:ee:00", IP: "10.0.0.254", FirmwareVersion: "2.2.3", NeedUpgrade: true}},
 		Networks:           []Network{{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24", VLANID: 10, DeviceMac: "aa:bb:cc:dd:ee:00"}},
 		Bindings:           NetworkBindings{"n1": "aa:bb:cc:dd:ee:00"},
-		GatewayACLs:        ACLList{ACLDisable: true, SupportLanToLan: true, Rules: []ACLRule{{}, {}}},
+		GatewayACLs:        ACLList{Rules: []ACLRule{{}, {}}},
 		GatewayACLsOK:      true,
-		SwitchACLs:         ACLList{ACLDisable: false},
+		SwitchACLs:         ACLList{},
 		SwitchACLsOK:       true,
 		Clients:            []ConnectedClient{{MAC: "aa"}},
 	}
@@ -296,17 +291,11 @@ func TestBuildSpecInventory(t *testing.T) {
 		t.Fatalf("ACLScopes = %+v, want 2", inv.ACLScopes)
 	}
 	gw, sw := inv.ACLScopes[0], inv.ACLScopes[1]
-	if gw.Scope != "gateway" || gw.Enabled || gw.RuleCount != 2 {
-		t.Errorf("gateway scope = %+v, want disabled/2 rules", gw)
+	if gw.Scope != "gateway" || gw.RuleCount != 2 {
+		t.Errorf("gateway scope = %+v, want 2 rules", gw)
 	}
-	if gw.SupportLanToLan == nil || !*gw.SupportLanToLan {
-		t.Errorf("gateway SupportLanToLan = %v, want ptr(true)", gw.SupportLanToLan)
-	}
-	if sw.Scope != "switch" || !sw.Enabled || sw.RuleCount != 0 {
-		t.Errorf("switch scope = %+v, want enabled/0 rules", sw)
-	}
-	if sw.SupportLanToLan != nil {
-		t.Errorf("switch SupportLanToLan = %v, want nil (gateway-only)", sw.SupportLanToLan)
+	if sw.Scope != "switch" || sw.RuleCount != 0 {
+		t.Errorf("switch scope = %+v, want 0 rules", sw)
 	}
 }
 
@@ -326,9 +315,9 @@ func TestRenderInventory(t *testing.T) {
 		Devices:            []Device{{Name: "GW-CORE", Model: "GW-CORE", Type: "gateway", MAC: "aa:bb:cc:dd:ee:00", IP: "10.0.0.254", FirmwareVersion: "2.2.3", NeedUpgrade: true}},
 		Networks:           []Network{{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24", VLANID: 10, DeviceMac: "aa:bb:cc:dd:ee:00"}},
 		Bindings:           NetworkBindings{"n1": "aa:bb:cc:dd:ee:00"},
-		GatewayACLs:        ACLList{ACLDisable: true, SupportLanToLan: true, Rules: []ACLRule{{}}},
+		GatewayACLs:        ACLList{Rules: []ACLRule{{}}},
 		GatewayACLsOK:      true,
-		SwitchACLs:         ACLList{Rules: []ACLRule{}},
+		SwitchACLs:         ACLList{},
 		SwitchACLsOK:       true,
 		Clients:            []ConnectedClient{{MAC: "aa"}, {MAC: "bb"}},
 		Warnings:           []string{"clients unavailable: boom"},
@@ -344,8 +333,8 @@ func TestRenderInventory(t *testing.T) {
 		"== Networks (1) ==",
 		"gateway: GW-CORE",
 		"== ACL scopes ==",
-		"DISABLED — stored rules are not enforced",
-		"(lan-to-lan supported)",
+		"gateway: 1 rule",
+		"switch:  0 rules",
 		"== Clients ==",
 		"2 active clients",
 	} {
@@ -353,12 +342,8 @@ func TestRenderInventory(t *testing.T) {
 			t.Errorf("render output missing %q:\n%s", want, out)
 		}
 	}
-	// Switch scope rendered enabled with no lan-to-lan suffix.
-	if !strings.Contains(out, "switch:") || strings.Count(out, "(lan-to-lan supported)") != 1 {
-		t.Errorf("switch scope rendering wrong:\n%s", out)
-	}
-	if !strings.Contains(out, "enabled") {
-		t.Errorf("switch scope should render enabled:\n%s", out)
+	if strings.Contains(out, "not enforced") {
+		t.Errorf("render output must not claim stored rules are unenforced:\n%s", out)
 	}
 }
 

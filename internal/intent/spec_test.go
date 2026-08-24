@@ -308,12 +308,11 @@ func TestValidateSpec_ACLCheckValid(t *testing.T) {
 }
 
 func TestValidateSpec_InventoryValid(t *testing.T) {
-	lanToLan := true
 	spec := &Spec{Version: 1, Site: "test", Inventory: &Inventory{
 		ControllerVersion: "6.4.5.1",
 		Devices:           []InventoryDevice{{Type: "gateway", Name: "GW-CORE", Upgrade: true}},
 		NetworkGateways:   map[string]string{"trusted": "GW-CORE"},
-		ACLScopes:         []ACLScopeStatus{{Scope: "gateway", Enabled: false, RuleCount: 1, SupportLanToLan: &lanToLan}},
+		ACLScopes:         []ACLScopeStatus{{Scope: "gateway", RuleCount: 1}},
 	}}
 	if err := ValidateSpec(spec); err != nil {
 		t.Fatalf("unexpected error: %v", err)
