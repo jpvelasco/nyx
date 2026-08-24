@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -37,16 +38,42 @@ type Network struct {
 	DeviceMac     string // MAC of the device this LAN is bound to
 }
 
+// lanPurpose is the wire value of "purpose": the 6.x Open API sends
+// integer(int32) (0: VLAN, 1: interface); older fixtures send the string
+// form. It decodes both and exposes the display string.
+type lanPurpose string
+
+func (p *lanPurpose) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		*p = lanPurpose(s)
+		return nil
+	}
+	var i int
+	if err := json.Unmarshal(data, &i); err != nil {
+		return err
+	}
+	switch i {
+	case 0:
+		*p = lanPurpose("VLAN")
+	case 1:
+		*p = lanPurpose("interface")
+	default:
+		*p = lanPurpose(strconv.Itoa(i))
+	}
+	return nil
+}
+
 // rawNetwork is the wire shape of a network entry (Open API). There is no
 // top-level "dhcpEnabled" field — the DHCP switch is nested under
 // "dhcpSettingsVO"; deviceMac is optional.
 type rawNetwork struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Purpose       string `json:"purpose"`
-	VLANID        int    `json:"vlan"`
-	GatewaySubnet string `json:"gatewaySubnet"`
-	Isolated      bool   `json:"isolation"`
+	ID            string     `json:"id"`
+	Name          string     `json:"name"`
+	Purpose       lanPurpose `json:"purpose"`
+	VLANID        int        `json:"vlan"`
+	GatewaySubnet string     `json:"gatewaySubnet"`
+	Isolated      bool       `json:"isolation"`
 	DHCPSettings  struct {
 		Enable bool `json:"enable"`
 	} `json:"dhcpSettingsVO"`
@@ -63,7 +90,7 @@ func (n *Network) UnmarshalJSON(data []byte) error {
 	*n = Network{
 		ID:            raw.ID,
 		Name:          raw.Name,
-		Purpose:       raw.Purpose,
+		Purpose:       string(raw.Purpose),
 		VLANID:        raw.VLANID,
 		GatewaySubnet: raw.GatewaySubnet,
 		Isolated:      raw.Isolated,

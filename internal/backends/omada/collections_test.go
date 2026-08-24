@@ -8,6 +8,30 @@ import (
 	"testing"
 )
 
+// BDD S3.3 — the 6.x Open API sends "purpose" as integer(int32)
+// (0: VLAN, 1: interface); the string form must keep decoding too.
+func TestGetNetworksPurposeInteger(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+			{"id":"n1","name":"Trusted","purpose":1,"vlan":10,
+				"gatewaySubnet":"10.0.0.1/24","isolation":true,
+				"dhcpSettingsVO":{"enable":false}},
+			{"id":"n2","name":"LAN(Default)","purpose":0,"vlan":1,
+				"gatewaySubnet":"10.0.0.254/24"}
+		]}`)
+	}))
+	nets, err := c.GetNetworks(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("GetNetworks: %v", err)
+	}
+	if len(nets) != 2 {
+		t.Fatalf("networks = %d, want 2", len(nets))
+	}
+	if nets[0].Purpose != "interface" || nets[1].Purpose != "VLAN" {
+		t.Errorf("purposes = %q/%q, want interface/VLAN", nets[0].Purpose, nets[1].Purpose)
+	}
+}
+
 // BDD S3.3 — single lan-networks endpoint, DHCP state nested under
 // "dhcpSettingsVO". There is no "dhcpEnabled" or "ssid" field on the wire;
 // deviceMac/origName are optional and decode to zero values when absent.
