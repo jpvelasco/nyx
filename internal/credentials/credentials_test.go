@@ -22,10 +22,10 @@ func newTestStore(t *testing.T) (*Store, string) {
 func TestSetGetRoundtrip(t *testing.T) {
 	s, _ := newTestStore(t)
 	if err := s.Set("omada", "default", Entry{
-		"host":     "192.168.1.1",
-		"username": "admin",
-		"password": "hunter2",
-		"site":     "Site1",
+		"host":          "192.168.1.1",
+		"client_id":     "cid-1",
+		"client_secret": "hunter2",
+		"site":          "Site1",
 	}); err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
@@ -34,14 +34,14 @@ func TestSetGetRoundtrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("Get = ok=%v, want ok=true", ok)
 	}
-	if entry["password"] != "hunter2" || entry["host"] != "192.168.1.1" {
+	if entry["client_secret"] != "hunter2" || entry["host"] != "192.168.1.1" {
 		t.Errorf("Get returned unexpected entry: %v", entry)
 	}
 
 	// Mutating the returned entry must not corrupt the store.
-	entry["password"] = "tampered"
+	entry["client_secret"] = "tampered"
 	stored, _ := s.Get("omada", "default")
-	if stored["password"] != "hunter2" {
+	if stored["client_secret"] != "hunter2" {
 		t.Error("mutating a returned entry changed the store")
 	}
 }
@@ -49,10 +49,10 @@ func TestSetGetRoundtrip(t *testing.T) {
 func TestOverlayFillsEmptyKeysOnly(t *testing.T) {
 	s, path := newTestStore(t)
 	if err := s.Set("omada", "default", Entry{
-		"host":     "192.168.1.1",
-		"username": "admin",
-		"password": "secret",
-		"site":     "Home",
+		"host":          "192.168.1.1",
+		"client_id":     "cid-1",
+		"client_secret": "secret",
+		"site":          "Home",
 	}); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
@@ -62,12 +62,12 @@ func TestOverlayFillsEmptyKeysOnly(t *testing.T) {
 	if dest.Host != "flag-host" {
 		t.Errorf("host = %q, want flag value preserved", dest.Host)
 	}
-	if dest.Username != "admin" || dest.Password != "secret" || dest.Site != "Home" {
+	if dest.ClientID != "cid-1" || dest.ClientSecret != "secret" || dest.Site != "Home" {
 		t.Errorf("dest = %+v, want store fill for empty keys", dest)
 	}
 
 	Overlay(path, "omada", "missing", &dest)
-	if dest.Username != "admin" {
+	if dest.ClientID != "cid-1" {
 		t.Error("missing entry must not clear dest")
 	}
 
@@ -155,7 +155,7 @@ func TestEncryptedAtRest(t *testing.T) {
 		t.Fatalf("Open failed: %v", err)
 	}
 	secret := "sup3r-secret-value"
-	if err := s.Set("omada", "default", Entry{"password": secret}); err != nil {
+	if err := s.Set("omada", "default", Entry{"client_secret": secret}); err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
 
@@ -169,7 +169,7 @@ func TestEncryptedAtRest(t *testing.T) {
 	if strings.Contains(string(raw), "omada") {
 		t.Error("store file contains plaintext provider name")
 	}
-	if strings.Contains(string(raw), "password") {
+	if strings.Contains(string(raw), "client_secret") {
 		t.Error("store file contains plaintext field name")
 	}
 }

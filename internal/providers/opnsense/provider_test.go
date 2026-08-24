@@ -151,7 +151,7 @@ func TestProviderImportSpec(t *testing.T) {
 	t.Run("missing credentials", func(t *testing.T) {
 		p := &Provider{}
 		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: "h"})
-		if err == nil || !strings.Contains(err.Error(), "--username and --password are required") {
+		if err == nil || !strings.Contains(err.Error(), "--client-id and --client-secret are required") {
 			t.Errorf("error = %v, want credentials required", err)
 		}
 	})
@@ -161,8 +161,8 @@ func TestProviderImportSpec(t *testing.T) {
 		p := &Provider{}
 		opts := providers.ImportOptions{
 			Host:          ts.URL,
-			Username:      "key",
-			Password:      "secret",
+			ClientID:      "key",
+			ClientSecret:  "secret",
 			SkipTLSVerify: true,
 		}
 		res, err := p.ImportSpec(context.Background(), opts)
@@ -208,7 +208,7 @@ func TestProviderImportSpec(t *testing.T) {
 		}))
 		defer ts.Close()
 		p := &Provider{}
-		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, Username: "k", Password: "s", SkipTLSVerify: true})
+		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
 		if err == nil || !strings.Contains(err.Error(), "fetching firmware info") {
 			t.Errorf("error = %v, want fetching firmware info", err)
 		}
@@ -224,7 +224,7 @@ func TestProviderImportSpec(t *testing.T) {
 		}))
 		defer ts.Close()
 		p := &Provider{}
-		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, Username: "k", Password: "s", SkipTLSVerify: true})
+		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
 		if err == nil || !strings.Contains(err.Error(), "fetching interfaces") {
 			t.Errorf("error = %v, want fetching interfaces", err)
 		}
@@ -247,7 +247,7 @@ func TestProviderImportSpec(t *testing.T) {
 		}))
 		defer ts.Close()
 		p := &Provider{}
-		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, Username: "k", Password: "s", SkipTLSVerify: true})
+		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
 		if err == nil || !strings.Contains(err.Error(), "fetching firewall rules") {
 			t.Errorf("error = %v, want fetching firewall rules", err)
 		}
@@ -270,7 +270,7 @@ func TestProviderImportSpec(t *testing.T) {
 		}))
 		defer ts.Close()
 		p := &Provider{}
-		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, Username: "k", Password: "s", SkipTLSVerify: true})
+		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
 		if err == nil || !strings.Contains(err.Error(), "fetching DHCP leases") {
 			t.Errorf("error = %v, want fetching DHCP leases", err)
 		}
@@ -299,7 +299,7 @@ func TestProviderCheck(t *testing.T) {
 
 		p := &Provider{}
 		res, err := p.Check(context.Background(), providers.ImportOptions{
-			Host: ts.URL, Username: "k", Password: "s", SkipTLSVerify: true,
+			Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true,
 		})
 		if err != nil {
 			t.Fatalf("Check: %v", err)
@@ -314,7 +314,7 @@ func TestProviderCheck(t *testing.T) {
 
 	t.Run("import fails", func(t *testing.T) {
 		p := &Provider{}
-		_, err := p.Check(context.Background(), providers.ImportOptions{Host: "https://127.0.0.1:1", Username: "k", Password: "s"})
+		_, err := p.Check(context.Background(), providers.ImportOptions{Host: "https://127.0.0.1:1", ClientID: "k", ClientSecret: "s"})
 		if err == nil {
 			t.Error("expected import failure to propagate")
 		}

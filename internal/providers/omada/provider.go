@@ -49,7 +49,7 @@ func (o *OmadaProvider) Info(ctx context.Context, opts providers.ImportOptions) 
 
 // ImportSpec imports networks, policies, and clients from the Omada controller and returns a generated intent spec.
 func (o *OmadaProvider) ImportSpec(ctx context.Context, opts providers.ImportOptions) (*providers.ImportResult, error) {
-	result, err := omadabackend.ImportSpec(ctx, opts.Host, opts.Username, opts.Password, opts.Site, opts.Debug, opts.SkipTLSVerify, opts.CACertPath, opts.Logger)
+	result, err := omadabackend.ImportSpec(ctx, opts.Host, opts.ClientID, opts.ClientSecret, opts.Site, opts.Debug, opts.SkipTLSVerify, opts.CACertPath, opts.Logger)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func (o *OmadaProvider) Inventory(ctx context.Context, opts providers.ImportOpti
 		return nil, fmt.Errorf("connecting to omada controller: %w", err)
 	}
 	client.SetLogger(opts.Logger)
-	if err := client.Login(ctx, opts.Username, opts.Password); err != nil {
+	if err := client.Login(ctx, opts.ClientID, opts.ClientSecret); err != nil {
 		return nil, err
 	}
 	defer client.Logout(ctx) //nolint:errcheck
@@ -133,9 +133,9 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 		return result, nil
 	}
 	client.SetLogger(opts.Logger)
-	if err := client.Login(ctx, opts.Username, opts.Password); err != nil {
+	if err := client.Login(ctx, opts.ClientID, opts.ClientSecret); err != nil {
 		result.Status = models.StatusError
-		result.Summary = fmt.Sprintf("Omada login failed: %v", err)
+		result.Summary = fmt.Sprintf("Omada token mint failed: %v", err)
 		result.Finish()
 		return result, nil
 	}
@@ -316,7 +316,7 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 		return nil, fmt.Errorf("connecting to omada controller: %w", err)
 	}
 	client.SetLogger(opts.Logger)
-	if err := client.Login(ctx, opts.Username, opts.Password); err != nil {
+	if err := client.Login(ctx, opts.ClientID, opts.ClientSecret); err != nil {
 		return nil, err
 	}
 	defer client.Logout(ctx) //nolint:errcheck

@@ -16,14 +16,14 @@ import (
 )
 
 var (
-	providerHost       string
-	providerUsername   string
-	providerPassword   string
-	providerSite       string
-	providerDebug      bool
-	providerOutFile    string
-	providerSkipTLS    bool
-	providerCACertPath string
+	providerHost         string
+	providerClientID     string
+	providerClientSecret string
+	providerSite         string
+	providerDebug        bool
+	providerOutFile      string
+	providerSkipTLS      bool
+	providerCACertPath   string
 )
 
 var providerCmd = &cobra.Command{
@@ -288,24 +288,24 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 func providerImportOptions(providerName string) providers.ImportOptions {
 	opts := providers.ImportOptions{
 		Host:          firstNonEmpty(providerHost, os.Getenv("OMADA_HOST")),
-		Username:      firstNonEmpty(providerUsername, os.Getenv("OMADA_USERNAME")),
-		Password:      firstNonEmpty(providerPassword, os.Getenv("OMADA_PASSWORD")),
+		ClientID:      firstNonEmpty(providerClientID, os.Getenv("OMADA_CLIENT_ID")),
+		ClientSecret:  firstNonEmpty(providerClientSecret, os.Getenv("OMADA_CLIENT_SECRET")),
 		Site:          firstNonEmpty(providerSite, os.Getenv("OMADA_SITE")),
 		SkipTLSVerify: providerSkipTLS,
 		CACertPath:    providerCACertPath,
 		Logger:        log,
 	}
-	if opts.Host == "" || opts.Username == "" || opts.Password == "" {
+	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
 		fields := credentials.Fields{
-			Host:     opts.Host,
-			Username: opts.Username,
-			Password: opts.Password,
-			Site:     opts.Site,
+			Host:         opts.Host,
+			ClientID:     opts.ClientID,
+			ClientSecret: opts.ClientSecret,
+			Site:         opts.Site,
 		}
 		credentials.Overlay(storePath(), providerName, "default", &fields)
 		opts.Host = fields.Host
-		opts.Username = fields.Username
-		opts.Password = fields.Password
+		opts.ClientID = fields.ClientID
+		opts.ClientSecret = fields.ClientSecret
 		opts.Site = fields.Site
 	}
 	return opts
@@ -329,8 +329,8 @@ func requireProviderHost(opts providers.ImportOptions) error {
 
 func addProviderFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&providerHost, "host", "", "Controller IP or hostname")
-	cmd.Flags().StringVar(&providerUsername, "username", "", "Admin username")
-	cmd.Flags().StringVar(&providerPassword, "password", "", "Admin password")
+	cmd.Flags().StringVar(&providerClientID, "client-id", "", "Omada Open API client ID")
+	cmd.Flags().StringVar(&providerClientSecret, "client-secret", "", "Omada Open API client secret")
 	cmd.Flags().BoolVar(&providerSkipTLS, "skip-tls-verify", false, "Skip TLS certificate verification (like curl -k)")
 	cmd.Flags().StringVar(&providerCACertPath, "ca-cert", "", "Path to custom CA certificate PEM file")
 }

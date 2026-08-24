@@ -15,12 +15,12 @@ import (
 )
 
 // OmadaOptions carries everything needed to talk to an Omada SDN controller.
-// The password is held only for the duration of a request; it is never
-// written to logs, evidence, or tool output.
+// The client credentials are held only for the duration of a request; they
+// are never written to logs, evidence, or tool output.
 type OmadaOptions struct {
 	Host          string
-	Username      string
-	Password      string
+	ClientID      string
+	ClientSecret  string
 	Site          string
 	SkipTLSVerify bool
 	CACertPath    string
@@ -387,7 +387,7 @@ func (s *OmadaService) Inventory(ctx context.Context, opts OmadaOptions) (*Omada
 // Import connects, imports the controller state, and produces an intent
 // spec reflecting the observed design (networks, policies, assertions).
 func (s *OmadaService) Import(ctx context.Context, opts OmadaOptions) (*OmadaImport, error) {
-	result, err := omadabackend.ImportSpec(ctx, opts.Host, opts.Username, opts.Password, opts.Site,
+	result, err := omadabackend.ImportSpec(ctx, opts.Host, opts.ClientID, opts.ClientSecret, opts.Site,
 		false, opts.SkipTLSVerify, opts.CACertPath, nil)
 	if err != nil {
 		return nil, err
@@ -461,8 +461,8 @@ func (s *OmadaService) ApplyACL(ctx context.Context, opts OmadaOptions, req Omad
 		DryRun:     req.DryRun,
 	}, providers.ImportOptions{
 		Host:          opts.Host,
-		Username:      opts.Username,
-		Password:      opts.Password,
+		ClientID:      opts.ClientID,
+		ClientSecret:  opts.ClientSecret,
 		Site:          opts.Site,
 		SkipTLSVerify: opts.SkipTLSVerify,
 		CACertPath:    opts.CACertPath,
@@ -730,7 +730,7 @@ func (s *OmadaService) session(ctx context.Context, opts OmadaOptions) (*omadaba
 	if err != nil {
 		return nil, omadabackend.Site{}, err
 	}
-	if err := client.Login(ctx, opts.Username, opts.Password); err != nil {
+	if err := client.Login(ctx, opts.ClientID, opts.ClientSecret); err != nil {
 		return nil, omadabackend.Site{}, err
 	}
 	sites, err := client.GetSites(ctx)

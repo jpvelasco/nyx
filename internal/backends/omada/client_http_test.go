@@ -2,12 +2,14 @@ package omada
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,38 +105,96 @@ func TestNewClientNormalisesHost(t *testing.T) {
 	}
 }
 
-func TestLoginLogout(t *testing.T) {
+// BDD S1.1 — token mint: POST /openapi/authorize/token?grant_type=client_credentials
+// with the exact client-credentials body, result.accessToken stored, and
+// every subsequent request authenticated with Authorization: AccessToken=.
+func TestLoginTokenMint(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		gotQuery string
+		gotCT    string
+		gotBody  map[string]string
+	)
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
+		case "/openapi/authorize/token":
 			if r.Method != http.MethodPost {
-				t.Errorf("login method = %s, want POST", r.Method)
+				t.Errorf("mint method = %s, want POST", r.Method)
 			}
-			if ct := r.Header.Get("Content-Type"); ct != "application/json" {
-				t.Errorf("login content-type = %q, want application/json", ct)
-			}
-			writeEnvelope(w, 0, "", `{"token":"tok123"}`)
-		case "/abc123/api/v2/logout":
-			if csrf := r.Header.Get("Csrf-Token"); csrf != "tok123" {
-				t.Errorf("logout csrf = %q, want tok123", csrf)
-			}
-			writeEnvelope(w, 0, "", "null")
+			gotQuery = r.URL.RawQuery
+			gotCT = r.Header.Get("Content-Type")
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			writeEnvelope(w, 0, "", `{"accessToken":"AT-123"}`)
 		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 
-	if err := c.Login(context.Background(), "admin", "secret"); err != nil {
+	if err := c.Login(context.Background(), "cid-1", "csecret"); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
-	if c.token != "tok123" {
-		t.Errorf("token = %q, want tok123", c.token)
+	if c.token != "AT-123" {
+		t.Errorf("token = %q, want AT-123 (result.accessToken)", c.token)
+	}
+	if gotQuery != "grant_type=client_credentials" {
+		t.Errorf("mint query = %q, want grant_type=client_credentials", gotQuery)
+	}
+	if gotCT != "application/json" {
+		t.Errorf("mint content-type = %q, want application/json", gotCT)
+	}
+	wantBody := map[string]string{"omadacId": "abc123", "client_id": "cid-1", "client_secret": "csecret"}
+	if len(gotBody) != len(wantBody) {
+		t.Fatalf("mint body = %v, want exactly %v", gotBody, wantBody)
+	}
+	for k, v := range wantBody {
+		if gotBody[k] != v {
+			t.Errorf("mint body[%s] = %q, want %q", k, gotBody[k], v)
+		}
+	}
+	// BDD S1.4 — no cookie jar on the client.
+	if c.httpClient.Jar != nil {
+		t.Error("client uses a cookie jar, want none (Open API is stateless)")
+	}
+}
+
+// BDD S1.4 — Logout clears the token and credentials locally and makes no
+// HTTP request (there is no logout endpoint).
+func TestLogoutClearsLocallyOnly(t *testing.T) {
+	var (
+		mu        sync.Mutex
+		mintCalls int
+	)
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openapi/authorize/token":
+			mu.Lock()
+			mintCalls++
+			mu.Unlock()
+			writeEnvelope(w, 0, "", `{"accessToken":"AT-1"}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	if err := c.Login(context.Background(), "cid-1", "csecret"); err != nil {
+		t.Fatalf("Login: %v", err)
 	}
 	if err := c.Logout(context.Background()); err != nil {
 		t.Fatalf("Logout: %v", err)
 	}
 	if c.token != "" {
 		t.Errorf("token after logout = %q, want empty", c.token)
+	}
+	if c.clientID != "" || c.clientSecret != "" {
+		t.Error("credentials not cleared after logout")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if mintCalls != 1 {
+		t.Errorf("mint calls = %d, want 1 (logout must not touch the network)", mintCalls)
 	}
 }
 
@@ -147,17 +207,25 @@ func TestLogoutWithoutTokenIsNoop(t *testing.T) {
 		t.Fatalf("Logout: %v", err)
 	}
 	if called {
-		t.Error("logout request sent despite empty token")
+		t.Error("request sent despite empty token")
 	}
 }
 
-func TestLoginError(t *testing.T) {
+// BDD S1.2 — invalid client credentials are a permanent failure: the mint
+// gets errorCode -44106, the error names the invalid credentials, and no
+// retry or re-mint loop runs.
+func TestLoginInvalidClientCredentials(t *testing.T) {
+	var calls int
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeEnvelope(w, -30109, "bad credentials", "null")
+		calls++
+		writeEnvelope(w, -44106, "invalid client", "null")
 	}))
-	err := c.Login(context.Background(), "admin", "nope")
-	if err == nil || !strings.Contains(err.Error(), "invalid username or password") {
-		t.Fatalf("Login error = %v, want invalid username or password", err)
+	err := c.Login(context.Background(), "bad", "worse")
+	if err == nil || !strings.Contains(err.Error(), "invalid client credentials") {
+		t.Fatalf("Login error = %v, want invalid client credentials", err)
+	}
+	if calls != 1 {
+		t.Errorf("mint calls = %d, want 1 (bad credentials must not retry)", calls)
 	}
 }
 
@@ -167,9 +235,9 @@ func TestGetErrorCodes(t *testing.T) {
 		errorCode int
 		wantError string
 	}{
-		{"session expired", -1000, "session expired"},
-		{"session expired alt", -44112, "session expired"},
-		{"bad password", -30109, "invalid username or password"},
+		{"token expired", -44112, "access token expired"},
+		{"not logged in", -1000, "session expired"},
+		{"bad credentials", -44106, "invalid client credentials"},
 		{"forbidden", -1005, "operation forbidden"},
 		{"other", -7, "controller error -7"},
 	}
@@ -178,7 +246,7 @@ func TestGetErrorCodes(t *testing.T) {
 			c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				writeEnvelope(w, tc.errorCode, "boom", "null")
 			}))
-			err := c.get(context.Background(), "sites?currentPage=1&currentPageSize=100", nil)
+			err := c.get(context.Background(), "sites?page=1&pageSize=100", nil)
 			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
 				t.Errorf("get error = %v, want contains %q", err, tc.wantError)
 			}
@@ -189,7 +257,7 @@ func TestGetErrorCodes(t *testing.T) {
 func TestGetSitesResponseShapes(t *testing.T) {
 	t.Run("paged", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"siteId":"s1","name":"HQ"}]}`)
 		}))
 		sites, err := c.GetSites(context.Background())
 		if err != nil {
@@ -202,7 +270,7 @@ func TestGetSitesResponseShapes(t *testing.T) {
 
 	t.Run("direct array", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeEnvelope(w, 0, "", `[{"id":"s1","name":"HQ"}]`)
+			writeEnvelope(w, 0, "", `[{"siteId":"s1","name":"HQ"}]`)
 		}))
 		sites, err := c.GetSites(context.Background())
 		if err != nil {
@@ -224,15 +292,17 @@ func TestGetSitesResponseShapes(t *testing.T) {
 	})
 }
 
+// BDD S1.1 — the access token is sent as Authorization: AccessToken=<token>,
+// and only when a token is present.
 func TestDoRequestAuthHeader(t *testing.T) {
 	var first, second string
 	call := 0
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call++
 		if call == 1 {
-			first = r.Header.Get("Csrf-Token")
+			first = r.Header.Get("Authorization")
 		} else {
-			second = r.Header.Get("Csrf-Token")
+			second = r.Header.Get("Authorization")
 		}
 		writeEnvelope(w, 0, "", `{"data":[]}`)
 	}))
@@ -245,11 +315,11 @@ func TestDoRequestAuthHeader(t *testing.T) {
 	if err := c.get(context.Background(), "whatever", nil); err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if first != "abc" {
-		t.Errorf("Csrf-Token with session = %q, want abc", first)
+	if first != "AccessToken=abc" {
+		t.Errorf("Authorization with token = %q, want AccessToken=abc", first)
 	}
 	if second != "" {
-		t.Errorf("Csrf-Token logged out = %q, want empty", second)
+		t.Errorf("Authorization without token = %q, want empty", second)
 	}
 }
 
@@ -259,7 +329,7 @@ func TestDoRequestCancelledContext(t *testing.T) {
 	}))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := c.get(ctx, "sites?currentPage=1&currentPageSize=100", nil)
+	err := c.get(ctx, "sites?page=1&pageSize=100", nil)
 	if err == nil {
 		t.Fatal("expected context cancellation error")
 	}
@@ -269,7 +339,7 @@ func TestDoRequestUnauthorized(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
-	err := c.get(context.Background(), "sites?currentPage=1&currentPageSize=100", nil)
+	err := c.get(context.Background(), "sites?page=1&pageSize=100", nil)
 	if err == nil || !strings.Contains(err.Error(), "not authenticated") {
 		t.Errorf("error = %v, want not-authenticated message", err)
 	}
@@ -279,7 +349,7 @@ func TestDoRequestBadJSON(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		testutil.WriteBody(w, `{not json`)
 	}))
-	err := c.get(context.Background(), "sites?currentPage=1&currentPageSize=100", nil)
+	err := c.get(context.Background(), "sites?page=1&pageSize=100", nil)
 	if err == nil || !strings.Contains(err.Error(), "decoding response") {
 		t.Errorf("error = %v, want decoding response error", err)
 	}
@@ -287,10 +357,10 @@ func TestDoRequestBadJSON(t *testing.T) {
 
 func TestDoRequestDebug(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeEnvelope(w, 0, "", `{"token":"x"}`)
+		writeEnvelope(w, 0, "", `{"accessToken":"x"}`)
 	}))
 	c.Debug = true
-	if err := c.get(context.Background(), "sites?currentPage=1&currentPageSize=100", nil); err != nil {
+	if err := c.get(context.Background(), "sites?page=1&pageSize=100", nil); err != nil {
 		t.Fatalf("get with debug: %v", err)
 	}
 }
@@ -300,7 +370,7 @@ func TestDoRequestResultUnmarshal(t *testing.T) {
 		writeEnvelope(w, 0, "", `"not-shape"`)
 	}))
 	var dest struct{ X int }
-	err := c.get(context.Background(), "sites?currentPage=1&currentPageSize=100", &dest)
+	err := c.get(context.Background(), "sites?page=1&pageSize=100", &dest)
 	if err == nil || !strings.Contains(err.Error(), "decoding result") {
 		t.Errorf("error = %v, want decoding result error", err)
 	}
@@ -313,7 +383,7 @@ func TestDoRequestSkipNilBody(t *testing.T) {
 		}
 		writeEnvelope(w, 0, "", "null")
 	}))
-	if err := c.post(context.Background(), "logout", nil, nil); err != nil {
+	if err := c.post(context.Background(), "sites/page1", nil, nil); err != nil {
 		t.Fatalf("post nil body: %v", err)
 	}
 }

@@ -412,13 +412,13 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				Type: "object",
 				Properties: map[string]propSchema{
 					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"username":        {Type: "string", Description: "Omada account username"},
-					"password":        {Type: "string", Description: "Omada account password"},
+					"client_id":       {Type: "string", Description: "Omada Open API client ID"},
+					"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
 					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
 				},
-				Required: []string{"host", "username", "password"},
+				Required: []string{"host", "client_id", "client_secret"},
 			},
 		},
 		{
@@ -428,13 +428,13 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				Type: "object",
 				Properties: map[string]propSchema{
 					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"username":        {Type: "string", Description: "Omada account username"},
-					"password":        {Type: "string", Description: "Omada account password"},
+					"client_id":       {Type: "string", Description: "Omada Open API client ID"},
+					"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
 					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
 				},
-				Required: []string{"host", "username", "password"},
+				Required: []string{"host", "client_id", "client_secret"},
 			},
 		},
 		{
@@ -444,13 +444,13 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				Type: "object",
 				Properties: map[string]propSchema{
 					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"username":        {Type: "string", Description: "Omada account username"},
-					"password":        {Type: "string", Description: "Omada account password"},
+					"client_id":       {Type: "string", Description: "Omada Open API client ID"},
+					"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
 					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
 				},
-				Required: []string{"host", "username", "password"},
+				Required: []string{"host", "client_id", "client_secret"},
 			},
 		},
 		{
@@ -460,13 +460,13 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				Type: "object",
 				Properties: map[string]propSchema{
 					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"username":        {Type: "string", Description: "Omada account username"},
-					"password":        {Type: "string", Description: "Omada account password"},
+					"client_id":       {Type: "string", Description: "Omada Open API client ID"},
+					"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
 					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
 				},
-				Required: []string{"host", "username", "password"},
+				Required: []string{"host", "client_id", "client_secret"},
 			},
 		},
 		{
@@ -476,13 +476,13 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				Type: "object",
 				Properties: map[string]propSchema{
 					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"username":        {Type: "string", Description: "Omada account username"},
-					"password":        {Type: "string", Description: "Omada account password"},
+					"client_id":       {Type: "string", Description: "Omada Open API client ID"},
+					"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
 					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
 				},
-				Required: []string{"host", "username", "password"},
+				Required: []string{"host", "client_id", "client_secret"},
 			},
 		},
 		{
@@ -492,14 +492,14 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				Type: "object",
 				Properties: map[string]propSchema{
 					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"username":        {Type: "string", Description: "Omada account username"},
-					"password":        {Type: "string", Description: "Omada account password"},
+					"client_id":       {Type: "string", Description: "Omada Open API client ID"},
+					"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
 					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
 					"spec":            {Type: "string", Description: "Proposed intent spec (YAML): networks and policies to preview"},
 				},
-				Required: []string{"host", "username", "password", "spec"},
+				Required: []string{"host", "client_id", "client_secret", "spec"},
 			},
 		},
 		{
@@ -509,8 +509,8 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				Type: "object",
 				Properties: map[string]propSchema{
 					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"username":        {Type: "string", Description: "Omada account username"},
-					"password":        {Type: "string", Description: "Omada account password"},
+					"client_id":       {Type: "string", Description: "Omada Open API client ID"},
+					"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
 					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
@@ -523,7 +523,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"dry_run":         {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
 					"post_audit":      {Type: "boolean", Description: "Run a targeted isolation audit after a real apply. Default true."},
 				},
-				Required: []string{"host", "username", "password", "from", "to", "action"},
+				Required: []string{"host", "client_id", "client_secret", "from", "to", "action"},
 			},
 		},
 		{
@@ -1009,10 +1009,10 @@ func omadaOptionsFromArgs(args map[string]interface{}, needCredentials bool) (se
 		return opts, "host parameter is required"
 	}
 	if needCredentials {
-		opts.Username, _ = args["username"].(string)
-		opts.Password, _ = args["password"].(string)
-		if opts.Username == "" || opts.Password == "" {
-			return opts, "username and password parameters are required"
+		opts.ClientID, _ = args["client_id"].(string)
+		opts.ClientSecret, _ = args["client_secret"].(string)
+		if opts.ClientID == "" || opts.ClientSecret == "" {
+			return opts, "client_id and client_secret parameters are required"
 		}
 	}
 	opts.Site, _ = args["site"].(string)

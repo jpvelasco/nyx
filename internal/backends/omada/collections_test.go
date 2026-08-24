@@ -12,9 +12,9 @@ func TestGetNetworksEndpointFallback(t *testing.T) {
 	// First candidate path 404s; second path returns paged data.
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			w.WriteHeader(http.StatusNotFound)
-		case "/abc123/api/v2/sites/s1/setting/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/networks":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"n1","name":"LAN","gatewaySubnet":"10.0.0.1/24"}]}`)
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -94,9 +94,9 @@ func TestGetNetworksParseFailThenSucceed(t *testing.T) {
 	// must continue to the next endpoint.
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			writeEnvelope(w, 0, "", `"not-network-shaped"`)
-		case "/abc123/api/v2/sites/s1/setting/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/networks":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"n1","name":"LAN"}]}`)
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -124,7 +124,7 @@ func TestGetNetworksAllPathsFail(t *testing.T) {
 func TestGetACLRulesRequiresTypeQuery(t *testing.T) {
 	var queries []string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/abc123/api/v2/sites/s1/setting/firewall/acls" {
+		if r.URL.Path != "/abc123/openapi/v1/sites/s1/setting/firewall/acls" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -152,7 +152,7 @@ func TestGetACLRulesRequiresTypeQuery(t *testing.T) {
 
 func TestGetGatewayACLRulesAndDisableFlag(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/abc123/api/v2/sites/s1/setting/firewall/acls" {
+		if r.URL.Path != "/abc123/openapi/v1/sites/s1/setting/firewall/acls" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}

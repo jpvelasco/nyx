@@ -34,7 +34,7 @@ var credentialsSetFlag []string
 var credentialsSetCmd = &cobra.Command{
 	Use:   "set <provider> [name]",
 	Short: "Store a credential entry",
-	Example: `  nyx credentials set omada --set host=192.168.1.1 --set username=admin --set password=secret
+	Example: `  nyx credentials set omada --set host=192.168.1.1 --set client_id=... --set client_secret=...
   nyx credentials set probe home --set host=10.0.0.5 --set username=ubuntu --set key=~/.ssh/id_ed25519`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(_ *cobra.Command, args []string) error {
@@ -121,7 +121,7 @@ var credentialsRemoveCmd = &cobra.Command{
 // credentialRequirements lists the fields each known provider must carry in
 // an entry. Unknown providers only require a non-empty entry.
 var credentialRequirements = map[string][]string{
-	"omada":    {"host", "username", "password"},
+	"omada":    {"host", "client_id", "client_secret"},
 	"opnsense": {"host", "api_key", "api_secret"},
 	"probe":    {"host", "username", "key"},
 }
@@ -130,7 +130,7 @@ var credentialsVerifyCmd = &cobra.Command{
 	Use:   "verify [provider] [name]",
 	Short: "Check that stored credentials are present and complete",
 	Long: `Checks that a stored entry exists and carries the fields the
-provider needs (omada: host, username, password; opnsense: host,
+provider needs (omada: host, client_id, client_secret; opnsense: host,
 api_key, api_secret; probe: host, username, key). Live connectivity
 verification is not performed.`,
 	Args: cobra.MaximumNArgs(2),

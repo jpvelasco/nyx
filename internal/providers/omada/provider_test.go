@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -54,7 +55,7 @@ func TestParseAPIResponse(t *testing.T) {
 }
 
 func writeEnvelope(w io.Writer, errorCode int, msg, result string) {
-	testutil.WriteBody(w, `{"errorCode":`+itoa(errorCode)+`,"msg":"`+msg+`","result":`+result+`}`)
+	testutil.WriteBody(w, `{"errorCode":`+strconv.Itoa(errorCode)+`,"msg":"`+msg+`","result":`+result+`}`)
 }
 
 func readReqBody(t *testing.T, r *http.Request) string {
@@ -64,13 +65,6 @@ func readReqBody(t *testing.T, r *http.Request) string {
 		t.Fatalf("reading request body: %v", err)
 	}
 	return string(data)
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	return itoa(n/10) + string(rune('0'+n%10))
 }
 
 // omadaServer serves a canned Omada 6.x API for provider-level tests.
@@ -129,18 +123,16 @@ func TestProviderImportSpec(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case "/abc123/api/v2/logout":
-				writeEnvelope(w, 0, "", "null")
-			case "/abc123/api/v2/sites":
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				// Live 6.x wire shape: nested dhcpSettings, SSID as origName.
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 					{"id":"n1","name":"Trusted","vlan":10,"purpose":"interface","gatewaySubnet":"10.0.0.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettings":{"enable":true},"origName":"Trusted"}
 				]}`)
-			case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 				if r.URL.Query().Get("type") == "0" {
 					writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 					return
@@ -148,7 +140,7 @@ func TestProviderImportSpec(t *testing.T) {
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
 					{"id":"a1","name":"Deny IoT","status":true,"policy":0}
 				]}`)
-			case "/abc123/api/v2/sites/s1/clients":
+			case "/abc123/openapi/v1/sites/s1/clients":
 				// Live 6.x wire shape: no networkName field; the import must
 				// resolve it from the LAN list via SSID.
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
@@ -160,7 +152,7 @@ func TestProviderImportSpec(t *testing.T) {
 		}))
 		p := &OmadaProvider{}
 		res, err := p.ImportSpec(context.Background(), providers.ImportOptions{
-			Host: ts.URL, Username: "admin", Password: "pw", Site: "hq", SkipTLSVerify: true,
+			Host: ts.URL, ClientID: "admin", ClientSecret: "pw", Site: "hq", SkipTLSVerify: true,
 		})
 		if err != nil {
 			t.Fatalf("ImportSpec: %v", err)
@@ -179,18 +171,18 @@ func TestProviderImportSpec(t *testing.T) {
 	t.Run("import error propagates", func(t *testing.T) {
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, -30109, "bad creds", "null")
+			case "/openapi/authorize/token":
+				writeEnvelope(w, -44106, "bad creds", "null")
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
 		}))
 		p := &OmadaProvider{}
 		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{
-			Host: ts.URL, Username: "admin", Password: "bad", SkipTLSVerify: true,
+			Host: ts.URL, ClientID: "admin", ClientSecret: "bad", SkipTLSVerify: true,
 		})
-		if err == nil || !strings.Contains(err.Error(), "login failed") {
-			t.Errorf("error = %v, want login failed", err)
+		if err == nil || !strings.Contains(err.Error(), "token mint failed") {
+			t.Errorf("error = %v, want token mint failed", err)
 		}
 	})
 }
@@ -201,19 +193,17 @@ func TestProviderCheck(t *testing.T) {
 		// always-added 8.8.8.8 route check (local routing table, hermetic).
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case "/abc123/api/v2/logout":
-				writeEnvelope(w, 0, "", "null")
-			case "/abc123/api/v2/sites":
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-			case "/abc123/api/v2/sites/s1/setting/networks":
+			case "/abc123/openapi/v1/sites/s1/setting/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"n1","name":"IoT"}]}`)
-			case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-			case "/abc123/api/v2/sites/s1/clients":
+			case "/abc123/openapi/v1/sites/s1/clients":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -221,7 +211,7 @@ func TestProviderCheck(t *testing.T) {
 		}))
 		p := &OmadaProvider{}
 		res, err := p.Check(context.Background(), providers.ImportOptions{
-			Host: ts.URL, Username: "admin", Password: "pw", Site: "hq", SkipTLSVerify: true,
+			Host: ts.URL, ClientID: "admin", ClientSecret: "pw", Site: "hq", SkipTLSVerify: true,
 		})
 		if err != nil {
 			t.Fatalf("Check: %v", err)
@@ -233,7 +223,7 @@ func TestProviderCheck(t *testing.T) {
 
 	t.Run("import fails", func(t *testing.T) {
 		p := &OmadaProvider{}
-		_, err := p.Check(context.Background(), providers.ImportOptions{Host: "https://127.0.0.1:1", Username: "a", Password: "b"})
+		_, err := p.Check(context.Background(), providers.ImportOptions{Host: "https://127.0.0.1:1", ClientID: "a", ClientSecret: "b"})
 		if err == nil {
 			t.Error("expected import failure to propagate")
 		}
@@ -245,18 +235,16 @@ func TestProviderCheckACL(t *testing.T) {
 	newServer := func() (*httptest.Server, *OmadaProvider) {
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case "/abc123/api/v2/logout":
-				writeEnvelope(w, 0, "", "null")
-			case "/abc123/api/v2/sites":
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 					{"id":"n-lan","name":"lan","gatewaySubnet":"10.0.0.1/24"},
 					{"id":"n-iot","name":"iot","gatewaySubnet":"10.0.1.1/24"}
 				]}`)
-			case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 				if r.URL.Query().Get("type") == "0" {
 					writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 					return
@@ -275,7 +263,7 @@ func TestProviderCheckACL(t *testing.T) {
 	// The site is addressed by display name; the ACL endpoints are keyed by
 	// site ID — resolution must happen inside CheckACL.
 	opts := func(ts *httptest.Server) providers.ImportOptions {
-		return providers.ImportOptions{Host: ts.URL, Username: "admin", Password: "pw", Site: "HQ", SkipTLSVerify: true}
+		return providers.ImportOptions{Host: ts.URL, ClientID: "admin", ClientSecret: "pw", Site: "HQ", SkipTLSVerify: true}
 	}
 
 	t.Run("enforced and found", func(t *testing.T) {
@@ -336,18 +324,16 @@ func TestProviderCheckACL(t *testing.T) {
 	t.Run("allow action matches accept policy", func(t *testing.T) {
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case "/abc123/api/v2/logout":
-				writeEnvelope(w, 0, "", "null")
-			case "/abc123/api/v2/sites":
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 					{"id":"n-lan","name":"LAN","gatewaySubnet":"10.0.0.1/24"},
 					{"id":"n-iot","name":"IoT","gatewaySubnet":"10.0.1.1/24"}
 				]}`)
-			case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 				if r.URL.Query().Get("type") == "0" {
 					writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 					return
@@ -386,8 +372,8 @@ func TestProviderCheckACL(t *testing.T) {
 
 	t.Run("login fails", func(t *testing.T) {
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/abc123/api/v2/login" {
-				writeEnvelope(w, -30109, "bad", "null")
+			if r.URL.Path == "/openapi/authorize/token" {
+				writeEnvelope(w, -44106, "bad", "null")
 				return
 			}
 			w.WriteHeader(http.StatusNotFound)
@@ -407,11 +393,9 @@ func TestProviderCheckACL(t *testing.T) {
 	t.Run("acl fetch fails", func(t *testing.T) {
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case "/abc123/api/v2/logout":
-				writeEnvelope(w, 0, "", "null")
-			case "/abc123/api/v2/sites":
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -432,11 +416,9 @@ func TestProviderCheckACL(t *testing.T) {
 	t.Run("site selection fails for unknown site", func(t *testing.T) {
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case "/abc123/api/v2/logout":
-				writeEnvelope(w, 0, "", "null")
-			case "/abc123/api/v2/sites":
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -445,7 +427,7 @@ func TestProviderCheckACL(t *testing.T) {
 		p := &OmadaProvider{}
 		res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{
 			PolicyName: "p", From: "lan", To: "iot", Action: "deny", ExpectEnforced: true,
-		}, providers.ImportOptions{Host: ts.URL, Username: "admin", Password: "pw", Site: "Branch", SkipTLSVerify: true})
+		}, providers.ImportOptions{Host: ts.URL, ClientID: "admin", ClientSecret: "pw", Site: "Branch", SkipTLSVerify: true})
 		if err != nil {
 			t.Fatalf("CheckACL: %v", err)
 		}
@@ -457,11 +439,9 @@ func TestProviderCheckACL(t *testing.T) {
 	t.Run("site fetch failure surfaces as error", func(t *testing.T) {
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case "/abc123/api/v2/logout":
-				writeEnvelope(w, 0, "", "null")
-			case "/abc123/api/v2/sites":
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case "/abc123/openapi/v1/sites":
 				w.WriteHeader(http.StatusInternalServerError)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -470,7 +450,7 @@ func TestProviderCheckACL(t *testing.T) {
 		p := &OmadaProvider{}
 		res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{
 			PolicyName: "p", From: "lan", To: "iot", Action: "deny", ExpectEnforced: true,
-		}, providers.ImportOptions{Host: ts.URL, Username: "admin", Password: "pw", Site: "HQ", SkipTLSVerify: true})
+		}, providers.ImportOptions{Host: ts.URL, ClientID: "admin", ClientSecret: "pw", Site: "HQ", SkipTLSVerify: true})
 		if err != nil {
 			t.Fatalf("CheckACL: %v", err)
 		}
@@ -482,18 +462,16 @@ func TestProviderCheckACL(t *testing.T) {
 	t.Run("gateway ACL fetch failure downgrades negative verdicts to warn", func(t *testing.T) {
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case "/abc123/api/v2/logout":
-				writeEnvelope(w, 0, "", "null")
-			case "/abc123/api/v2/sites":
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 					{"id":"n-lan","name":"lan","gatewaySubnet":"10.0.0.1/24"},
 					{"id":"n-iot","name":"iot","gatewaySubnet":"10.0.1.1/24"}
 				]}`)
-			case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+			case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 				if r.URL.Query().Get("type") == "0" {
 					w.WriteHeader(http.StatusNotFound)
 					return
@@ -548,18 +526,16 @@ func TestProviderCheckACL_ScopeDisabled(t *testing.T) {
 	// gateway rule must FAIL, an enabled switch rule must PASS.
 	ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeEnvelope(w, 0, "", `{"token":"t1"}`)
-		case "/abc123/api/v2/logout":
-			writeEnvelope(w, 0, "", "null")
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+		case "/abc123/openapi/v1/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.0.1/24"},
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.1.1/24"}
 			]}`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+		case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 			if r.URL.Query().Get("type") == "0" {
 				writeEnvelope(w, 0, "", `{"totalRows":1,"aclDisable":true,"supportLanToLan":true,"data":[
 					{"id":"g1","name":"Trusted Deny","status":true,"policy":0,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]}
@@ -574,7 +550,7 @@ func TestProviderCheckACL_ScopeDisabled(t *testing.T) {
 		}
 	}))
 	p := &OmadaProvider{}
-	opts := providers.ImportOptions{Host: ts.URL, Username: "admin", Password: "pw", Site: "HQ", SkipTLSVerify: true}
+	opts := providers.ImportOptions{Host: ts.URL, ClientID: "admin", ClientSecret: "pw", Site: "HQ", SkipTLSVerify: true}
 
 	t.Run("gateway rule in disabled scope fails", func(t *testing.T) {
 		res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{
@@ -633,30 +609,28 @@ func TestProviderCheckACL_ScopeDisabled(t *testing.T) {
 func TestProviderInventory(t *testing.T) {
 	ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/abc123/api/v2/login":
-			writeEnvelope(w, 0, "", `{"token":"t1"}`)
-		case "/abc123/api/v2/logout":
-			writeEnvelope(w, 0, "", "null")
-		case "/abc123/api/v2/sites":
+		case "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+		case "/abc123/openapi/v1/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[{"id":"s1","name":"HQ"},{"id":"s2","name":"Branch"}]}`)
-		case "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			// Live 6.x wire shape: nested dhcpSettings, SSID as origName.
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
 				{"id":"n1","name":"Trusted","vlan":10,"purpose":"interface","gatewaySubnet":"10.0.0.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettings":{"enable":true},"origName":"Trusted"},
 				{"id":"n2","name":"IoT","vlan":20,"purpose":"interface","gatewaySubnet":"10.0.1.1/24","deviceMac":"aa:bb:cc:dd:ee:00","dhcpSettings":{"enable":false},"origName":"IoT"}
 			]}`)
-		case "/abc123/api/v2/sites/s1/devices":
+		case "/abc123/openapi/v1/sites/s1/devices":
 			writeEnvelope(w, 0, "", `[
 				{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254","firmwareVersion":"2.2.3","needUpgrade":true},
 				{"id":"d2","name":"SW-2428P","model":"SW-2428P","type":"switch","mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.253"}
 			]`)
-		case "/abc123/api/v2/sites/s1/setting/firewall/acls":
+		case "/abc123/openapi/v1/sites/s1/setting/firewall/acls":
 			if r.URL.Query().Get("type") == "0" {
 				writeEnvelope(w, 0, "", `{"totalRows":1,"aclDisable":true,"supportLanToLan":true,"data":[{"id":"g1","name":"Trusted Deny","status":true,"policy":0}]}`)
 				return
 			}
 			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
-		case "/abc123/api/v2/sites/s1/clients":
+		case "/abc123/openapi/v1/sites/s1/clients":
 			// Live 6.x wire shape: no networkName field; enrichment resolves
 			// the network from SSID / vid against the LAN list.
 			writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
@@ -669,7 +643,7 @@ func TestProviderInventory(t *testing.T) {
 	}))
 	p := &OmadaProvider{}
 	res, err := p.Inventory(context.Background(), providers.ImportOptions{
-		Host: ts.URL, Username: "admin", Password: "pw", Site: "hq", SkipTLSVerify: true,
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", Site: "hq", SkipTLSVerify: true,
 	})
 	if err != nil {
 		t.Fatalf("Inventory: %v", err)
@@ -711,22 +685,22 @@ func TestProviderInventory(t *testing.T) {
 		t.Errorf("warnings = %v, want none", res.Warnings)
 	}
 
-	t.Run("login failure propagates", func(t *testing.T) {
+	t.Run("token mint failure propagates", func(t *testing.T) {
 		bad := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/abc123/api/v2/login" {
-				writeEnvelope(w, -30109, "bad creds", "null")
+			if r.URL.Path == "/openapi/authorize/token" {
+				writeEnvelope(w, -44106, "bad creds", "null")
 				return
 			}
 			w.WriteHeader(http.StatusNotFound)
 		}))
-		_, err := p.Inventory(context.Background(), providers.ImportOptions{Host: bad.URL, Username: "admin", Password: "bad", SkipTLSVerify: true})
-		if err == nil || !strings.Contains(err.Error(), "login failed") {
-			t.Errorf("error = %v, want login failed", err)
+		_, err := p.Inventory(context.Background(), providers.ImportOptions{Host: bad.URL, ClientID: "admin", ClientSecret: "bad", SkipTLSVerify: true})
+		if err == nil || !strings.Contains(err.Error(), "token mint failed") {
+			t.Errorf("error = %v, want token mint failed", err)
 		}
 	})
 
 	t.Run("site selection error propagates", func(t *testing.T) {
-		_, err := p.Inventory(context.Background(), providers.ImportOptions{Host: ts.URL, Username: "admin", Password: "pw", Site: "nope", SkipTLSVerify: true})
+		_, err := p.Inventory(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "admin", ClientSecret: "pw", Site: "nope", SkipTLSVerify: true})
 		if err == nil || !strings.Contains(err.Error(), "not found") {
 			t.Errorf("error = %v, want site not found", err)
 		}
@@ -760,24 +734,22 @@ func applyACLServer(t *testing.T, initialSwitch, initialGateway string, writesAl
 	putState := `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"type":1,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`
 	ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/abc123/api/v2/login":
-			writeEnvelope(w, 0, "", `{"token":"t1"}`)
-		case r.URL.Path == "/abc123/api/v2/logout":
-			writeEnvelope(w, 0, "", "null")
-		case r.URL.Path == "/abc123/api/v2/sites":
+		case r.URL.Path == "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+		case r.URL.Path == "/abc123/openapi/v1/sites":
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
+		case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 			writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 				{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 				{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 				{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
-		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
+		case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 			if r.URL.Query().Get("type") == "0" {
 				writeEnvelope(w, 0, "", gatewayRules)
 				return
 			}
 			writeEnvelope(w, 0, "", switchRules)
-		case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
+		case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
 			if !writesAllowed {
 				t.Error("unexpected POST create when writes are not allowed")
 			}
@@ -787,7 +759,7 @@ func applyACLServer(t *testing.T, initialSwitch, initialGateway string, writesAl
 			} else {
 				switchRules = postState
 			}
-		case strings.HasPrefix(r.URL.Path, "/abc123/api/v2/sites/s1/setting/firewall/acls/") && r.Method == http.MethodPut:
+		case strings.HasPrefix(r.URL.Path, "/abc123/openapi/v1/sites/s1/setting/firewall/acls/") && r.Method == http.MethodPut:
 			if !writesAllowed {
 				t.Error("unexpected PUT update when writes are not allowed")
 			}
@@ -805,7 +777,7 @@ func applyACLServer(t *testing.T, initialSwitch, initialGateway string, writesAl
 }
 
 func applyOpts(ts *httptest.Server) providers.ImportOptions {
-	return providers.ImportOptions{Host: ts.URL, Username: "admin", Password: "pw", Site: "HQ", SkipTLSVerify: true}
+	return providers.ImportOptions{Host: ts.URL, ClientID: "admin", ClientSecret: "pw", Site: "HQ", SkipTLSVerify: true}
 }
 
 func aclApplyReq(policyName, action string, from, to []string) providers.ACLApplyRequest {
@@ -852,22 +824,22 @@ func TestProviderApplyACL(t *testing.T) {
 		var gotBody string
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
-			case r.URL.Path == "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case r.URL.Path == "/abc123/api/v2/sites":
+			case r.URL.Path == "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case r.URL.Path == "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 				if r.URL.Query().Get("type") == "0" {
 					writeEnvelope(w, 0, "", `{"totalRows":0,"data":[],"aclDisable":true}`)
 					return
 				}
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
 				gotBody = readReqBody(t, r)
 				writeEnvelope(w, 0, "", `{"id":"a7","status":true,"policy":0,"protocols":[256],"sourceIds":["n2"],"destinationIds":["n1","n3"]}`)
 			default:
@@ -948,16 +920,16 @@ func TestProviderApplyACL(t *testing.T) {
 		var wrote bool
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
-			case r.URL.Path == "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case r.URL.Path == "/abc123/api/v2/sites":
+			case r.URL.Path == "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case r.URL.Path == "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 				if r.URL.Query().Get("type") == "0" {
 					writeEnvelope(w, 0, "", emptyList)
 					return
@@ -967,7 +939,7 @@ func TestProviderApplyACL(t *testing.T) {
 					return
 				}
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
 				wrote = true
 				gotBody = readReqBody(t, r)
 				writeEnvelope(w, 0, "", `{"id":"a9","status":true,"policy":0}`)
@@ -1034,16 +1006,16 @@ func TestProviderApplyACL(t *testing.T) {
 		var wrote bool
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
-			case r.URL.Path == "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case r.URL.Path == "/abc123/api/v2/sites":
+			case r.URL.Path == "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case r.URL.Path == "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 				if r.URL.Query().Get("type") == "0" {
 					if wrote {
 						writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a7","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]}]}`)
@@ -1053,7 +1025,7 @@ func TestProviderApplyACL(t *testing.T) {
 					return
 				}
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
 				wrote = true
 				writeEnvelope(w, 0, "", `{"id":"a7","status":true,"policy":0,"protocols":[256],"sourceIds":["n2"],"destinationIds":["n1"]}`)
 			default:
@@ -1126,7 +1098,7 @@ func TestProviderApplyACL(t *testing.T) {
 		p := &OmadaProvider{}
 		_, err := p.ApplyACL(context.Background(), providers.ACLApplyRequest{
 			From: []string{"a"}, To: []string{"b"}, Action: "deny",
-		}, providers.ImportOptions{Host: "https://127.0.0.1:1", Username: "u", Password: "p"})
+		}, providers.ImportOptions{Host: "https://127.0.0.1:1", ClientID: "u", ClientSecret: "p"})
 		if err == nil {
 			t.Fatal("expected session failure to propagate")
 		}
@@ -1135,8 +1107,8 @@ func TestProviderApplyACL(t *testing.T) {
 	t.Run("sites fetch failure propagates", func(t *testing.T) {
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -1151,9 +1123,9 @@ func TestProviderApplyACL(t *testing.T) {
 	t.Run("networks fetch failure propagates", func(t *testing.T) {
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case "/abc123/api/v2/sites":
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -1169,11 +1141,11 @@ func TestProviderApplyACL(t *testing.T) {
 	t.Run("acl fetch failure propagates", func(t *testing.T) {
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case "/abc123/api/v2/sites":
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
@@ -1192,18 +1164,18 @@ func TestProviderApplyACL(t *testing.T) {
 	t.Run("create failure propagates", func(t *testing.T) {
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
-			case r.URL.Path == "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case r.URL.Path == "/abc123/api/v2/sites":
+			case r.URL.Path == "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case r.URL.Path == "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
 				writeEnvelope(w, -1005, "no permission", "null")
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -1219,18 +1191,18 @@ func TestProviderApplyACL(t *testing.T) {
 	t.Run("enable failure propagates", func(t *testing.T) {
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
-			case r.URL.Path == "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case r.URL.Path == "/abc123/api/v2/sites":
+			case r.URL.Path == "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case r.URL.Path == "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","name":"block-iot","status":false,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":4}]}`)
-			case strings.HasPrefix(r.URL.Path, "/abc123/api/v2/sites/s1/setting/firewall/acls/") && r.Method == http.MethodPut:
+			case strings.HasPrefix(r.URL.Path, "/abc123/openapi/v1/sites/s1/setting/firewall/acls/") && r.Method == http.MethodPut:
 				writeEnvelope(w, -1005, "no permission", "null")
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -1247,22 +1219,22 @@ func TestProviderApplyACL(t *testing.T) {
 		var wrote bool
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
-			case r.URL.Path == "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case r.URL.Path == "/abc123/api/v2/sites":
+			case r.URL.Path == "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case r.URL.Path == "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 				if wrote {
 					w.WriteHeader(http.StatusNotFound)
 					return
 				}
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
 				wrote = true
 				writeEnvelope(w, 0, "", `{"id":"a9","status":true,"policy":0}`)
 			default:
@@ -1281,16 +1253,16 @@ func TestProviderApplyACL(t *testing.T) {
 		var wrote bool
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
-			case r.URL.Path == "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case r.URL.Path == "/abc123/api/v2/sites":
+			case r.URL.Path == "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case r.URL.Path == "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 				if r.URL.Query().Get("type") == "0" {
 					writeEnvelope(w, 0, "", emptyList)
 					return
@@ -1300,7 +1272,7 @@ func TestProviderApplyACL(t *testing.T) {
 					return
 				}
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
 				wrote = true
 				gotBody = readReqBody(t, r)
 				writeEnvelope(w, 0, "", `{"id":"a8","status":true,"policy":1}`)
@@ -1332,16 +1304,16 @@ func TestProviderApplyACL(t *testing.T) {
 		var wrote bool
 		ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
-			case r.URL.Path == "/abc123/api/v2/login":
-				writeEnvelope(w, 0, "", `{"token":"t1"}`)
-			case r.URL.Path == "/abc123/api/v2/sites":
+			case r.URL.Path == "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case r.URL.Path == "/abc123/openapi/v1/sites":
 				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/lan/networks":
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/lan/networks":
 				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
 					{"id":"n1","name":"Trusted","gatewaySubnet":"10.0.10.1/24"},
 					{"id":"n2","name":"IoT","gatewaySubnet":"10.0.20.1/24"},
 					{"id":"n3","name":"Guest","gatewaySubnet":"10.0.30.1/24"}]}`)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodGet:
 				if r.URL.Query().Get("type") == "0" {
 					writeEnvelope(w, 0, "", emptyList)
 					return
@@ -1351,7 +1323,7 @@ func TestProviderApplyACL(t *testing.T) {
 					return
 				}
 				writeEnvelope(w, 0, "", emptyList)
-			case r.URL.Path == "/abc123/api/v2/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
+			case r.URL.Path == "/abc123/openapi/v1/sites/s1/setting/firewall/acls" && r.Method == http.MethodPost:
 				wrote = true
 				gotBody = readReqBody(t, r)
 				writeEnvelope(w, 0, "", `{"id":"a9","status":true,"policy":0}`)

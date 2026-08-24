@@ -742,7 +742,7 @@ func TestDispatchOmadaGetInfo_Success(t *testing.T) {
 	if stub.lastOpts.Host != "omada.local" || !stub.lastOpts.SkipTLSVerify || stub.lastOpts.CACertPath != "ca.pem" {
 		t.Errorf("options = %+v", stub.lastOpts)
 	}
-	if stub.lastOpts.Password != "" {
+	if stub.lastOpts.ClientSecret != "" {
 		t.Error("get_info must not carry credentials")
 	}
 }
@@ -761,7 +761,7 @@ func TestDispatchOmadaListNetworks_MissingCredentials(t *testing.T) {
 	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "omada_list_networks", map[string]interface{}{
 		"host": "omada.local",
 	})
-	if !isErr || !strings.Contains(text, "username and password parameters are required") {
+	if !isErr || !strings.Contains(text, "client_id and client_secret parameters are required") {
 		t.Errorf("got (%q, %v)", text, isErr)
 	}
 }
@@ -772,10 +772,10 @@ func TestDispatchOmadaListNetworks_Success(t *testing.T) {
 	}}
 	server := serverWithOmadaStub(stub)
 	text, isErr := server.DispatchToolForTest(context.Background(), "omada_list_networks", map[string]interface{}{
-		"host":     "omada.local",
-		"username": "admin",
-		"password": "pw",
-		"site":     "HQ",
+		"host":          "omada.local",
+		"client_id":     "cid-1",
+		"client_secret": "pw",
+		"site":          "HQ",
 	})
 	if isErr {
 		t.Fatalf("unexpected error: %s", text)
@@ -786,20 +786,20 @@ func TestDispatchOmadaListNetworks_Success(t *testing.T) {
 	if stub.calls != 1 {
 		t.Errorf("service calls = %d, want 1", stub.calls)
 	}
-	if stub.lastOpts.Host != "omada.local" || stub.lastOpts.Username != "admin" || stub.lastOpts.Password != "pw" || stub.lastOpts.Site != "HQ" {
+	if stub.lastOpts.Host != "omada.local" || stub.lastOpts.ClientID != "cid-1" || stub.lastOpts.ClientSecret != "pw" || stub.lastOpts.Site != "HQ" {
 		t.Errorf("options = %+v", stub.lastOpts)
 	}
 	if strings.Contains(text, "pw") {
-		t.Error("tool output must not echo the password")
+		t.Error("tool output must not echo the client secret")
 	}
 }
 
 func TestDispatchOmadaListNetworks_ServiceError(t *testing.T) {
 	stub := &stubOmadaSvc{err: errors.New("site not found")}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_networks", map[string]interface{}{
-		"host":     "omada.local",
-		"username": "admin",
-		"password": "pw",
+		"host":          "omada.local",
+		"client_id":     "cid-1",
+		"client_secret": "pw",
 	})
 	if !isErr || !strings.Contains(text, "omada networks request failed") {
 		t.Errorf("got (%q, %v)", text, isErr)
@@ -811,9 +811,9 @@ func TestDispatchOmadaListACLs_Success(t *testing.T) {
 		{ID: "a1", Name: "Block IoT", Enabled: true, Policy: "drop", SourceName: "iot", DestName: "trusted"},
 	}}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_acls", map[string]interface{}{
-		"host":     "omada.local",
-		"username": "admin",
-		"password": "pw",
+		"host":          "omada.local",
+		"client_id":     "cid-1",
+		"client_secret": "pw",
 	})
 	if isErr {
 		t.Fatalf("unexpected error: %s", text)
@@ -826,9 +826,9 @@ func TestDispatchOmadaListACLs_Success(t *testing.T) {
 func TestDispatchOmadaListACLs_ServiceError(t *testing.T) {
 	stub := &stubOmadaSvc{err: errors.New("no ACL endpoint")}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_acls", map[string]interface{}{
-		"host":     "omada.local",
-		"username": "admin",
-		"password": "pw",
+		"host":          "omada.local",
+		"client_id":     "cid-1",
+		"client_secret": "pw",
 	})
 	if !isErr || !strings.Contains(text, "omada acls request failed") {
 		t.Errorf("got (%q, %v)", text, isErr)
@@ -840,9 +840,9 @@ func TestDispatchOmadaListClients_Success(t *testing.T) {
 		{MAC: "aa:bb:cc:dd:ee:ff", IP: "10.0.10.5", Name: "nas", NetworkName: "Trusted", Active: true},
 	}}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_clients", map[string]interface{}{
-		"host":     "omada.local",
-		"username": "admin",
-		"password": "pw",
+		"host":          "omada.local",
+		"client_id":     "cid-1",
+		"client_secret": "pw",
 	})
 	if isErr {
 		t.Fatalf("unexpected error: %s", text)
@@ -855,9 +855,9 @@ func TestDispatchOmadaListClients_Success(t *testing.T) {
 func TestDispatchOmadaListClients_ServiceError(t *testing.T) {
 	stub := &stubOmadaSvc{err: errors.New("getting clients")}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_clients", map[string]interface{}{
-		"host":     "omada.local",
-		"username": "admin",
-		"password": "pw",
+		"host":          "omada.local",
+		"client_id":     "cid-1",
+		"client_secret": "pw",
 	})
 	if !isErr || !strings.Contains(text, "omada clients request failed") {
 		t.Errorf("got (%q, %v)", text, isErr)
@@ -875,10 +875,10 @@ func TestDispatchOmadaInventory_Success(t *testing.T) {
 	}}
 	server := serverWithOmadaStub(stub)
 	text, isErr := server.DispatchToolForTest(context.Background(), "omada_inventory", map[string]interface{}{
-		"host":     "omada.local",
-		"username": "admin",
-		"password": "pw",
-		"site":     "HQ",
+		"host":          "omada.local",
+		"client_id":     "cid-1",
+		"client_secret": "pw",
+		"site":          "HQ",
 	})
 	if isErr {
 		t.Fatalf("unexpected error: %s", text)
@@ -899,7 +899,7 @@ func TestDispatchOmadaInventory_Success(t *testing.T) {
 		t.Errorf("calls = %d, site = %q", stub.calls, stub.lastOpts.Site)
 	}
 	if strings.Contains(text, "pw") {
-		t.Error("tool output must not echo the password")
+		t.Error("tool output must not echo the client secret")
 	}
 }
 
@@ -907,7 +907,7 @@ func TestDispatchOmadaInventory_MissingCredentials(t *testing.T) {
 	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "omada_inventory", map[string]interface{}{
 		"host": "omada.local",
 	})
-	if !isErr || !strings.Contains(text, "username and password parameters are required") {
+	if !isErr || !strings.Contains(text, "client_id and client_secret parameters are required") {
 		t.Errorf("got (%q, %v)", text, isErr)
 	}
 }
@@ -915,9 +915,9 @@ func TestDispatchOmadaInventory_MissingCredentials(t *testing.T) {
 func TestDispatchOmadaInventory_ServiceError(t *testing.T) {
 	stub := &stubOmadaSvc{err: errors.New("controller unreachable")}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_inventory", map[string]interface{}{
-		"host":     "omada.local",
-		"username": "admin",
-		"password": "pw",
+		"host":          "omada.local",
+		"client_id":     "cid-1",
+		"client_secret": "pw",
 	})
 	if !isErr || !strings.Contains(text, "omada inventory request failed") {
 		t.Errorf("got (%q, %v)", text, isErr)
@@ -929,7 +929,7 @@ func TestDispatchOmadaImport_MissingParams(t *testing.T) {
 	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_import", map[string]interface{}{}); !isErr || !strings.Contains(text, "host parameter is required") {
 		t.Errorf("missing host: (%q, %v)", text, isErr)
 	}
-	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_import", map[string]interface{}{"host": "omada.local"}); !isErr || !strings.Contains(text, "username and password parameters are required") {
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_import", map[string]interface{}{"host": "omada.local"}); !isErr || !strings.Contains(text, "client_id and client_secret parameters are required") {
 		t.Errorf("missing creds: (%q, %v)", text, isErr)
 	}
 }
@@ -940,10 +940,10 @@ func TestDispatchOmadaImport_Success(t *testing.T) {
 		Warnings: []string{"note"},
 	}}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_import", map[string]interface{}{
-		"host":     "omada.local",
-		"username": "admin",
-		"password": "pw",
-		"site":     "HQ",
+		"host":          "omada.local",
+		"client_id":     "cid-1",
+		"client_secret": "pw",
+		"site":          "HQ",
 	})
 	if isErr {
 		t.Fatalf("unexpected error: %s", text)
@@ -955,16 +955,16 @@ func TestDispatchOmadaImport_Success(t *testing.T) {
 		t.Errorf("options = %+v", stub.lastOpts)
 	}
 	if strings.Contains(text, "pw") {
-		t.Error("tool output must not echo the password")
+		t.Error("tool output must not echo the client secret")
 	}
 }
 
 func TestDispatchOmadaImport_ServiceError(t *testing.T) {
 	stub := &stubOmadaSvc{err: errors.New("import failed")}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_import", map[string]interface{}{
-		"host":     "omada.local",
-		"username": "admin",
-		"password": "pw",
+		"host":          "omada.local",
+		"client_id":     "cid-1",
+		"client_secret": "pw",
 	})
 	if !isErr || !strings.Contains(text, "omada import request failed") {
 		t.Errorf("got (%q, %v)", text, isErr)
@@ -976,11 +976,11 @@ func TestDispatchOmadaPlan_MissingParams(t *testing.T) {
 	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan", map[string]interface{}{}); !isErr || !strings.Contains(text, "host parameter is required") {
 		t.Errorf("missing host: (%q, %v)", text, isErr)
 	}
-	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan", map[string]interface{}{"host": "omada.local"}); !isErr || !strings.Contains(text, "username and password parameters are required") {
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan", map[string]interface{}{"host": "omada.local"}); !isErr || !strings.Contains(text, "client_id and client_secret parameters are required") {
 		t.Errorf("missing creds: (%q, %v)", text, isErr)
 	}
 	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan", map[string]interface{}{
-		"host": "omada.local", "username": "admin", "password": "pw",
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw",
 	}); !isErr || !strings.Contains(text, "spec parameter is required") {
 		t.Errorf("missing spec: (%q, %v)", text, isErr)
 	}
@@ -992,11 +992,11 @@ func TestDispatchOmadaPlan_Success(t *testing.T) {
 		ToAdd: []service.OmadaPolicyDiff{{From: "guest", To: "trusted", Action: "deny"}},
 	}}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_plan", map[string]interface{}{
-		"host":     "omada.local",
-		"username": "admin",
-		"password": "pw",
-		"site":     "HQ",
-		"spec":     "version: 1\nsite: HQ\npolicies: []\n",
+		"host":          "omada.local",
+		"client_id":     "cid-1",
+		"client_secret": "pw",
+		"site":          "HQ",
+		"spec":          "version: 1\nsite: HQ\npolicies: []\n",
 	})
 	if isErr {
 		t.Fatalf("unexpected error: %s", text)
@@ -1008,23 +1008,23 @@ func TestDispatchOmadaPlan_Success(t *testing.T) {
 		t.Errorf("options = %+v", stub.lastOpts)
 	}
 	if strings.Contains(text, "pw") {
-		t.Error("tool output must not echo the password")
+		t.Error("tool output must not echo the client secret")
 	}
 }
 
 func TestDispatchOmadaPlan_ServiceError(t *testing.T) {
 	stub := &stubOmadaSvc{err: errors.New("plan failed")}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_plan", map[string]interface{}{
-		"host":     "omada.local",
-		"username": "admin",
-		"password": "pw",
-		"spec":     "version: 1\nsite: HQ\npolicies: []\n",
+		"host":          "omada.local",
+		"client_id":     "cid-1",
+		"client_secret": "pw",
+		"spec":          "version: 1\nsite: HQ\npolicies: []\n",
 	})
 	if !isErr || !strings.Contains(text, "omada plan request failed") {
 		t.Errorf("got (%q, %v)", text, isErr)
 	}
 	if strings.Contains(text, "pw") {
-		t.Error("error output must not echo the password")
+		t.Error("error output must not echo the client secret")
 	}
 }
 
@@ -1033,20 +1033,20 @@ func TestDispatchOmadaApplyACL_MissingParams(t *testing.T) {
 	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{}); !isErr || !strings.Contains(text, "host parameter is required") {
 		t.Errorf("missing host: (%q, %v)", text, isErr)
 	}
-	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{"host": "omada.local"}); !isErr || !strings.Contains(text, "username and password parameters are required") {
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{"host": "omada.local"}); !isErr || !strings.Contains(text, "client_id and client_secret parameters are required") {
 		t.Errorf("missing creds: (%q, %v)", text, isErr)
 	}
-	base := map[string]interface{}{"host": "omada.local", "username": "admin", "password": "pw"}
+	base := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw"}
 	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_apply_acl", base); !isErr || !strings.Contains(text, "from parameter is required") {
 		t.Errorf("missing from: (%q, %v)", text, isErr)
 	}
 	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
-		"host": "omada.local", "username": "admin", "password": "pw", "from": "iot",
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "from": "iot",
 	}); !isErr || !strings.Contains(text, "to parameter is required") {
 		t.Errorf("missing to: (%q, %v)", text, isErr)
 	}
 	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
-		"host": "omada.local", "username": "admin", "password": "pw", "from": "iot", "to": "trusted",
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "from": "iot", "to": "trusted",
 	}); !isErr || !strings.Contains(text, "action parameter is required") {
 		t.Errorf("missing action: (%q, %v)", text, isErr)
 	}
@@ -1059,7 +1059,7 @@ func TestDispatchOmadaApplyACL_Success(t *testing.T) {
 		Before: "[]", After: "[]",
 	}}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
-		"host": "omada.local", "username": "admin", "password": "pw", "site": "HQ",
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "site": "HQ",
 		"from": "iot", "to": "trusted", "action": "deny",
 	})
 	if isErr {
@@ -1075,7 +1075,7 @@ func TestDispatchOmadaApplyACL_Success(t *testing.T) {
 		t.Errorf("apply request = %+v", stub.lastApplyReq)
 	}
 	if strings.Contains(text, "pw") {
-		t.Error("tool output must not echo the password")
+		t.Error("tool output must not echo the client secret")
 	}
 }
 
@@ -1087,7 +1087,7 @@ func TestDispatchOmadaApplyACL_ExplicitApply(t *testing.T) {
 			Findings: []models.CheckResult{{CheckType: "isolation", Status: models.StatusPass, Summary: "isolation confirmed"}}},
 	}}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
-		"host": "omada.local", "username": "admin", "password": "pw",
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw",
 		"from": "iot", "to": "trusted", "action": "deny", "dry_run": false, "post_audit": false,
 	})
 	if isErr {
@@ -1111,7 +1111,7 @@ func TestDispatchOmadaApplyACL_ScopeProtocolsAndList(t *testing.T) {
 		Before: "[]", After: "[{\"id\":\"a9\"}]",
 	}}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
-		"host": "omada.local", "username": "admin", "password": "pw",
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw",
 		"from": "iot", "to": "trusted, guest", "action": "deny",
 		"scope": "gateway", "protocols": "6, 17", "dry_run": true,
 	})
@@ -1132,7 +1132,7 @@ func TestDispatchOmadaApplyACL_ScopeProtocolsAndList(t *testing.T) {
 func TestDispatchOmadaApplyACL_InvalidProtocols(t *testing.T) {
 	stub := &stubOmadaSvc{}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
-		"host": "omada.local", "username": "admin", "password": "pw",
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw",
 		"from": "iot", "to": "trusted", "action": "deny", "protocols": "6, tcp",
 	})
 	if !isErr || !strings.Contains(text, "protocols") {
@@ -1146,14 +1146,14 @@ func TestDispatchOmadaApplyACL_InvalidProtocols(t *testing.T) {
 func TestDispatchOmadaApplyACL_ServiceError(t *testing.T) {
 	stub := &stubOmadaSvc{err: errors.New("apply failed")}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{
-		"host": "omada.local", "username": "admin", "password": "pw",
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw",
 		"from": "iot", "to": "trusted", "action": "deny",
 	})
 	if !isErr || !strings.Contains(text, "omada apply request failed") {
 		t.Errorf("got (%q, %v)", text, isErr)
 	}
 	if strings.Contains(text, "pw") {
-		t.Error("error output must not echo the password")
+		t.Error("error output must not echo the client secret")
 	}
 }
 

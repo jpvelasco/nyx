@@ -10,15 +10,17 @@ import (
 )
 
 // ImportOptions holds credentials and options for provider connections.
+// ClientID/ClientSecret carry the vendor's credential pair: for Omada the
+// Open API client credentials, for OPNsense the API key/secret.
 type ImportOptions struct {
 	Host          string
-	Username      string
-	Password      string
+	ClientID      string
+	ClientSecret  string
 	Site          string
 	Debug         bool
 	SkipTLSVerify bool
 	CACertPath    string
-	// Logger receives structured operation events (login, retries, session
+	// Logger receives structured operation events (token mint, retries,
 	// refresh) from provider clients. Never contains credentials.
 	Logger *logger.Logger
 }
