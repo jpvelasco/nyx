@@ -2,19 +2,33 @@
 
 BDD acceptance contract for the Open API cutover. The Omada backend moves off
 the undocumented internal v2 API (`/api/v2`, cookie + CSRF session login) onto
-TP-Link's Omada Open API (`/openapi/v1`, OAuth2 client-credentials). Every
-Given/When/Then scenario below is mirrored 1:1 by tests in `internal/`
-(httptest fake controller) and, where noted, was verified against a live 6.2.x
-controller during implementation.
+TP-Link's Omada Open API (`/openapi/v1`, OAuth2 client-credentials). Scenarios
+marked **Implemented** are mirrored 1:1 by tests in `internal/` (httptest fake
+controller); the rest are the target contract for the follow-up PRs and are
+verified against a live 6.2.x controller during their implementation.
 
 ## 0. Scope
 
-- The internal v2 surface is **cut**: no cookie jar, no CSRF header, no
-  `login`/`logout` session endpoints, no `setting/` v2 paths.
+- The internal v2 session surface is **cut**: no cookie jar, no CSRF header,
+  no `login`/`logout` session endpoints.
 - Discovery (`GET /api/info`) stays unauthenticated and unchanged; it
   supplies `omadacId` and the controller version gate (>= 6.0).
 - Retry machinery is kept: mutex-serialized requests, exponential backoff on
   transient failures (5xx, network errors), single re-auth on expiry.
+
+### Phased rollout
+
+The cutover lands in three PRs, each red→green against its own scenarios:
+
+| Section | Content | PR | Status |
+| --- | --- | --- | --- |
+| §1, §2 | Auth (token mint, re-mint, logout, secret hygiene) + credential plumbing | PR 1 | **Implemented** |
+| §3 | Read endpoints + wire shapes | PR 2 | Spec only — endpoints and payloads below are the target contract, not yet shipped |
+| §4, §5 | Write endpoints + scope-disabled removal | PR 3 | Spec only — same caveat |
+
+Until PR 2/PR 3 land, the production code still calls the v2-style
+`setting/` subpaths (under the new `openapi/v1` base) and tests mirror that
+interim state.
 
 ## 1. Authentication
 
