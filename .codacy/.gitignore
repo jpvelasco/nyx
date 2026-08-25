@@ -1,3 +1,4 @@
 logs/
 *.sarif
 server-issues.json
+generated/

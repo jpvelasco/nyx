@@ -156,9 +156,28 @@ func ValidateSpec(spec *Spec) error {
 	if spec.Site == "" {
 		return fmt.Errorf("spec must have a site name")
 	}
-	// Validate networks
+	if err := validateNetworks(spec.Networks); err != nil {
+		return err
+	}
+	if err := validateVPNs(spec.VPN); err != nil {
+		return err
+	}
+	probeNames, err := validateProbes(spec.Probes)
+	if err != nil {
+		return err
+	}
+	if err := validatePolicies(spec.Policies); err != nil {
+		return err
+	}
+	if err := validateInventory(spec.Inventory); err != nil {
+		return err
+	}
+	return validateAssertions(spec.Assertions, probeNames)
+}
+
+func validateNetworks(networks []Network) error {
 	names := make(map[string]bool)
-	for i, n := range spec.Networks {
+	for i, n := range networks {
 		if n.Name == "" {
 			return fmt.Errorf("network[%d]: name is required", i)
 		}
@@ -173,8 +192,11 @@ func ValidateSpec(spec *Spec) error {
 			return fmt.Errorf("network %q: invalid gateway IP %q", n.Name, n.Gateway)
 		}
 	}
-	// Validate VPN configs
-	for i, v := range spec.VPN {
+	return nil
+}
+
+func validateVPNs(vpns []VPNConfig) error {
+	for i, v := range vpns {
 		if v.Name == "" {
 			return fmt.Errorf("vpn[%d]: name is required", i)
 		}
@@ -182,28 +204,36 @@ func ValidateSpec(spec *Spec) error {
 			return fmt.Errorf("vpn %q: type is required", v.Name)
 		}
 	}
-	// Validate probes
-	probeNames := make(map[string]bool)
-	for i, p := range spec.Probes {
+	return nil
+}
+
+// validateProbes returns the set of declared probe names so assertion
+// runner references can be checked against it.
+func validateProbes(probes []Probe) (map[string]bool, error) {
+	names := make(map[string]bool)
+	for i, p := range probes {
 		if p.Name == "" {
-			return fmt.Errorf("probe[%d]: 'name' is required", i)
+			return nil, fmt.Errorf("probe[%d]: 'name' is required", i)
 		}
 		if p.Host == "" {
-			return fmt.Errorf("probe[%d]: 'host' is required", i)
+			return nil, fmt.Errorf("probe[%d]: 'host' is required", i)
 		}
 		if p.User == "" {
-			return fmt.Errorf("probe[%d]: 'user' is required", i)
+			return nil, fmt.Errorf("probe[%d]: 'user' is required", i)
 		}
 		if p.Port != 0 && (p.Port < 1 || p.Port > 65535) {
-			return fmt.Errorf("probe[%d]: 'port' must be 1-65535, got %d", i, p.Port)
+			return nil, fmt.Errorf("probe[%d]: 'port' must be 1-65535, got %d", i, p.Port)
 		}
-		if probeNames[p.Name] {
-			return fmt.Errorf("probe[%d]: duplicate probe name %q", i, p.Name)
+		if names[p.Name] {
+			return nil, fmt.Errorf("probe[%d]: duplicate probe name %q", i, p.Name)
 		}
-		probeNames[p.Name] = true
+		names[p.Name] = true
 	}
-	// Validate policies
-	for i, p := range spec.Policies {
+	return names, nil
+}
+
+func validatePolicies(policies []Policy) error {
+	for i, p := range policies {
 		if p.Name == "" {
 			return fmt.Errorf("policy[%d]: name is required", i)
 		}
@@ -211,101 +241,136 @@ func ValidateSpec(spec *Spec) error {
 			return fmt.Errorf("policy %q: action must be 'allow' or 'deny'", p.Name)
 		}
 	}
-	// Validate inventory snapshot (optional)
-	if spec.Inventory != nil {
-		validDeviceTypes := map[string]bool{"gateway": true, "switch": true, "ap": true}
-		for i, d := range spec.Inventory.Devices {
-			if d.Name == "" {
-				return fmt.Errorf("inventory.devices[%d]: name is required", i)
-			}
-			if !validDeviceTypes[d.Type] {
-				return fmt.Errorf("inventory.devices[%d]: type must be gateway, switch, or ap (got %q)", i, d.Type)
-			}
+	return nil
+}
+
+func validateInventory(inv *Inventory) error {
+	if inv == nil {
+		return nil
+	}
+	validDeviceTypes := map[string]bool{"gateway": true, "switch": true, "ap": true}
+	for i, d := range inv.Devices {
+		if d.Name == "" {
+			return fmt.Errorf("inventory.devices[%d]: name is required", i)
 		}
-		for i, s := range spec.Inventory.ACLScopes {
-			if s.Scope != "gateway" && s.Scope != "switch" {
-				return fmt.Errorf("inventory.acl_scopes[%d]: scope must be 'gateway' or 'switch' (got %q)", i, s.Scope)
-			}
+		if !validDeviceTypes[d.Type] {
+			return fmt.Errorf("inventory.devices[%d]: type must be gateway, switch, or ap (got %q)", i, d.Type)
 		}
 	}
-	// Validate assertions
-	validTypes := map[string]bool{
-		"subnet_discovery": true,
-		"isolation":        true,
-		"vpn_route":        true,
-		"route_check":      true,
-		"port_check":       true,
-		"dns_check":        true,
-		"network_health":   true,
-		"acl_check":        true,
+	for i, s := range inv.ACLScopes {
+		if s.Scope != "gateway" && s.Scope != "switch" {
+			return fmt.Errorf("inventory.acl_scopes[%d]: scope must be 'gateway' or 'switch' (got %q)", i, s.Scope)
+		}
 	}
-	for i, a := range spec.Assertions {
-		if !validTypes[a.Type] {
+	return nil
+}
+
+// assertionValidators maps each supported assertion type to its field
+// requirements. Every entry must stay in sync with validAssertionTypes.
+var assertionValidators = map[string]func(int, *Assertion) error{
+	"subnet_discovery": validateSubnetDiscoveryAssertion,
+	"isolation":        validateIsolationAssertion,
+	"vpn_route":        validateVPNRouteAssertion,
+	"route_check":      validateRouteCheckAssertion,
+	"port_check":       validatePortCheckAssertion,
+	"dns_check":        validateDNSCheckAssertion,
+	"network_health":   validateNetworkHealthAssertion,
+	"acl_check":        validateACLCheckAssertion,
+}
+
+func validateSubnetDiscoveryAssertion(i int, a *Assertion) error {
+	if a.Network == "" {
+		return fmt.Errorf("assertion[%d] (subnet_discovery): network is required", i)
+	}
+	if a.ExpectHostsMin != nil && a.ExpectHostsMax != nil && *a.ExpectHostsMin > *a.ExpectHostsMax {
+		return fmt.Errorf("assertion[%d] (subnet_discovery): expect_hosts_min must not exceed expect_hosts_max", i)
+	}
+	return nil
+}
+
+func validateIsolationAssertion(i int, a *Assertion) error {
+	if a.From == "" {
+		return fmt.Errorf("assertion[%d] (isolation): from is required", i)
+	}
+	if a.To == "" {
+		return fmt.Errorf("assertion[%d] (isolation): to is required", i)
+	}
+	if a.Expect == "" {
+		return fmt.Errorf("assertion[%d] (isolation): expect is required (use 'deny' or 'allow')", i)
+	}
+	return nil
+}
+
+func validateVPNRouteAssertion(i int, a *Assertion) error {
+	if a.VPN == "" {
+		return fmt.Errorf("assertion[%d] (vpn_route): vpn is required", i)
+	}
+	if a.Target == "" {
+		return fmt.Errorf("assertion[%d] (vpn_route): target is required", i)
+	}
+	return nil
+}
+
+func validateRouteCheckAssertion(i int, a *Assertion) error {
+	if a.Target == "" {
+		return fmt.Errorf("assertion[%d] (route_check): target is required", i)
+	}
+	return nil
+}
+
+func validatePortCheckAssertion(i int, a *Assertion) error {
+	if a.Target == "" {
+		return fmt.Errorf("assertion[%d]: port_check requires 'target'", i)
+	}
+	if len(a.Ports) == 0 {
+		return fmt.Errorf("assertion[%d]: port_check requires 'ports'", i)
+	}
+	if a.Expect == "" {
+		return fmt.Errorf("assertion[%d]: port_check requires 'expect' (open or closed)", i)
+	}
+	return nil
+}
+
+func validateDNSCheckAssertion(i int, a *Assertion) error {
+	if a.Query == "" {
+		return fmt.Errorf("assertion[%d]: dns_check requires 'query'", i)
+	}
+	return nil
+}
+
+func validateNetworkHealthAssertion(i int, a *Assertion) error {
+	if a.Target == "" {
+		return fmt.Errorf("assertion[%d]: network_health requires 'target'", i)
+	}
+	return nil
+}
+
+func validateACLCheckAssertion(i int, a *Assertion) error {
+	if a.Provider == "" {
+		return fmt.Errorf("assertion[%d]: acl_check requires 'provider'", i)
+	}
+	if a.Policy == "" {
+		return fmt.Errorf("assertion[%d]: acl_check requires 'policy'", i)
+	}
+	if a.Expect == "" {
+		return fmt.Errorf("assertion[%d]: acl_check requires 'expect' (enforced or not_enforced)", i)
+	}
+	return nil
+}
+
+func validateAssertions(assertions []Assertion, probeNames map[string]bool) error {
+	for i := range assertions {
+		a := &assertions[i]
+		validate, known := assertionValidators[a.Type]
+		if !known {
 			return fmt.Errorf("assertion[%d]: unknown type %q", i, a.Type)
 		}
-		switch a.Type {
-		case "subnet_discovery":
-			if a.Network == "" {
-				return fmt.Errorf("assertion[%d] (subnet_discovery): network is required", i)
-			}
-			if a.ExpectHostsMin != nil && a.ExpectHostsMax != nil && *a.ExpectHostsMin > *a.ExpectHostsMax {
-				return fmt.Errorf("assertion[%d] (subnet_discovery): expect_hosts_min must not exceed expect_hosts_max", i)
-			}
-		case "isolation":
-			if a.From == "" {
-				return fmt.Errorf("assertion[%d] (isolation): from is required", i)
-			}
-			if a.To == "" {
-				return fmt.Errorf("assertion[%d] (isolation): to is required", i)
-			}
-			if a.Expect == "" {
-				return fmt.Errorf("assertion[%d] (isolation): expect is required (use 'deny' or 'allow')", i)
-			}
-		case "vpn_route":
-			if a.VPN == "" {
-				return fmt.Errorf("assertion[%d] (vpn_route): vpn is required", i)
-			}
-			if a.Target == "" {
-				return fmt.Errorf("assertion[%d] (vpn_route): target is required", i)
-			}
-		case "route_check":
-			if a.Target == "" {
-				return fmt.Errorf("assertion[%d] (route_check): target is required", i)
-			}
-		case "port_check":
-			if a.Target == "" {
-				return fmt.Errorf("assertion[%d]: port_check requires 'target'", i)
-			}
-			if len(a.Ports) == 0 {
-				return fmt.Errorf("assertion[%d]: port_check requires 'ports'", i)
-			}
-			if a.Expect == "" {
-				return fmt.Errorf("assertion[%d]: port_check requires 'expect' (open or closed)", i)
-			}
-		case "dns_check":
-			if a.Query == "" {
-				return fmt.Errorf("assertion[%d]: dns_check requires 'query'", i)
-			}
-		case "network_health":
-			if a.Target == "" {
-				return fmt.Errorf("assertion[%d]: network_health requires 'target'", i)
-			}
-		case "acl_check":
-			if a.Provider == "" {
-				return fmt.Errorf("assertion[%d]: acl_check requires 'provider'", i)
-			}
-			if a.Policy == "" {
-				return fmt.Errorf("assertion[%d]: acl_check requires 'policy'", i)
-			}
-			if a.Expect == "" {
-				return fmt.Errorf("assertion[%d]: acl_check requires 'expect' (enforced or not_enforced)", i)
-			}
+		if err := validate(i, a); err != nil {
+			return err
 		}
 		// Validate runner references a declared probe
-		if a.Runner != "" && a.Runner != "local" {
-			if !probeNames[a.Runner] {
-				return fmt.Errorf("assertion[%d]: runner %q is not declared in probes", i, a.Runner)
-			}
+		if a.Runner != "" && a.Runner != "local" && !probeNames[a.Runner] {
+			return fmt.Errorf("assertion[%d]: runner %q is not declared in probes", i, a.Runner)
 		}
 	}
 	return nil
