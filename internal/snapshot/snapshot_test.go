@@ -125,7 +125,7 @@ func TestSave_SameMillisecondCollision(t *testing.T) {
 	}
 	// Reading back through the dynamic path is the point of the test: verify
 	// Save did not touch the seeded fixture file.
-	data, err := os.ReadFile(blocked) // nosemgrep: go.filesystem.rule-fileread
+	data, err := os.ReadFile(blocked) // nosemgrep: go_filesystem_rule-fileread
 	if err != nil {
 		t.Fatalf("original snapshot replaced: %v", err)
 	}
