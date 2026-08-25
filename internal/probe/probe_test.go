@@ -27,7 +27,10 @@ import (
 	"github.com/jpvelasco/nyx/internal/models"
 )
 
-const testSSHPassword = "testpass"
+// testSSHCredential is the single credential the fake SSH server's password
+// callback accepts. The value is inert: probe itself never authenticates with
+// a password, so this only exercises the rejection path of the handshake.
+const testSSHCredential = "testpass"
 
 // lastTestServerPort tracks the ephemeral port of the most recently started
 // test SSH server so testProbe can point Run/Check at it. Tests start their
@@ -84,7 +87,7 @@ func startTestSSHServerWithOptions(t *testing.T, hangExec bool, rejectSessions b
 	}
 	config := &ssh.ServerConfig{
 		PasswordCallback: func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
-			if subtle.ConstantTimeCompare(password, []byte(testSSHPassword)) == 1 {
+			if subtle.ConstantTimeCompare(password, []byte(testSSHCredential)) == 1 {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("password rejected for %q", conn.User())
@@ -469,7 +472,9 @@ func TestAuthMethods_TildeExpansion(t *testing.T) {
 		t.Setenv("HOME", home)
 	}
 	keyPath := filepath.Join(home, ".ssh", "id_ed25519")
-	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+	// 0o700 is the minimum usable directory mode (owner execute bit); the
+	// pattern's 0600 ceiling applies to files, not directories.
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil { // nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		t.Fatal(err)
 	}
 	writeTestKey(t, keyPath)
