@@ -6,10 +6,10 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
+	"github.com/jpvelasco/nyx/internal/storepath"
 	"github.com/spf13/cobra"
 )
 
@@ -54,7 +54,7 @@ var credentialsSetCmd = &cobra.Command{
 			return fmt.Errorf("at least one --set key=value is required")
 		}
 
-		store, err := credentials.Open(storePath())
+		store, err := credentials.Open(storepath.StoreFile())
 		if err != nil {
 			return fmt.Errorf("opening credential store: %w", err)
 		}
@@ -71,7 +71,7 @@ var credentialsListCmd = &cobra.Command{
 	Short: "List credential entry names (never values)",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(_ *cobra.Command, args []string) error {
-		store, err := credentials.Open(storePath())
+		store, err := credentials.Open(storepath.StoreFile())
 		if err != nil {
 			return fmt.Errorf("opening credential store: %w", err)
 		}
@@ -106,7 +106,7 @@ var credentialsRemoveCmd = &cobra.Command{
 		if len(args) == 2 {
 			name = args[1]
 		}
-		store, err := credentials.Open(storePath())
+		store, err := credentials.Open(storepath.StoreFile())
 		if err != nil {
 			return fmt.Errorf("opening credential store: %w", err)
 		}
@@ -135,7 +135,7 @@ api_key, api_secret; probe: host, username, key). Live connectivity
 verification is not performed.`,
 	Args: cobra.MaximumNArgs(2),
 	RunE: func(_ *cobra.Command, args []string) error {
-		store, err := credentials.Open(storePath())
+		store, err := credentials.Open(storepath.StoreFile())
 		if err != nil {
 			return fmt.Errorf("opening credential store: %w", err)
 		}
@@ -196,13 +196,4 @@ func init() {
 	credentialsCmd.AddCommand(credentialsListCmd)
 	credentialsCmd.AddCommand(credentialsRemoveCmd)
 	credentialsCmd.AddCommand(credentialsVerifyCmd)
-}
-
-// storePath resolves the credential store location: NYX_CREDENTIALS_FILE
-// env var, else the default ~/.nyx/credentials.json.
-func storePath() string {
-	if p := os.Getenv("NYX_CREDENTIALS_FILE"); p != "" {
-		return p
-	}
-	return credentials.DefaultPath()
 }

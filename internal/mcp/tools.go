@@ -235,7 +235,7 @@ func (s *Server) toolProviderList(_ context.Context, _ map[string]interface{}) t
 }
 
 func (s *Server) toolOmadaGetInfo(ctx context.Context, args map[string]interface{}) toolDispatchResult {
-	opts, msg := omadaOptionsFromArgs(args, false)
+	opts, msg := s.omadaOptionsFromArgs(args, false)
 	if msg != "" {
 		return errResult(msg)
 	}
@@ -247,7 +247,7 @@ func (s *Server) toolOmadaGetInfo(ctx context.Context, args map[string]interface
 }
 
 func (s *Server) toolOmadaListNetworks(ctx context.Context, args map[string]interface{}) toolDispatchResult {
-	opts, msg := omadaOptionsFromArgs(args, true)
+	opts, msg := s.omadaOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)
 	}
@@ -259,7 +259,7 @@ func (s *Server) toolOmadaListNetworks(ctx context.Context, args map[string]inte
 }
 
 func (s *Server) toolOmadaListACLs(ctx context.Context, args map[string]interface{}) toolDispatchResult {
-	opts, msg := omadaOptionsFromArgs(args, true)
+	opts, msg := s.omadaOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)
 	}
@@ -271,7 +271,7 @@ func (s *Server) toolOmadaListACLs(ctx context.Context, args map[string]interfac
 }
 
 func (s *Server) toolOmadaListClients(ctx context.Context, args map[string]interface{}) toolDispatchResult {
-	opts, msg := omadaOptionsFromArgs(args, true)
+	opts, msg := s.omadaOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)
 	}
@@ -283,7 +283,7 @@ func (s *Server) toolOmadaListClients(ctx context.Context, args map[string]inter
 }
 
 func (s *Server) toolOmadaInventory(ctx context.Context, args map[string]interface{}) toolDispatchResult {
-	opts, msg := omadaOptionsFromArgs(args, true)
+	opts, msg := s.omadaOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)
 	}
@@ -295,7 +295,7 @@ func (s *Server) toolOmadaInventory(ctx context.Context, args map[string]interfa
 }
 
 func (s *Server) toolOmadaImport(ctx context.Context, args map[string]interface{}) toolDispatchResult {
-	opts, msg := omadaOptionsFromArgs(args, true)
+	opts, msg := s.omadaOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)
 	}
@@ -307,7 +307,7 @@ func (s *Server) toolOmadaImport(ctx context.Context, args map[string]interface{
 }
 
 func (s *Server) toolOmadaPlan(ctx context.Context, args map[string]interface{}) toolDispatchResult {
-	opts, msg := omadaOptionsFromArgs(args, true)
+	opts, msg := s.omadaOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)
 	}
@@ -323,7 +323,7 @@ func (s *Server) toolOmadaPlan(ctx context.Context, args map[string]interface{})
 }
 
 func (s *Server) toolOmadaApplyACL(ctx context.Context, args map[string]interface{}) toolDispatchResult {
-	opts, msg := omadaOptionsFromArgs(args, true)
+	opts, msg := s.omadaOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)
 	}
@@ -360,7 +360,7 @@ func (s *Server) toolOmadaApplyACL(ctx context.Context, args map[string]interfac
 }
 
 func (s *Server) toolOpnsenseGetInfo(ctx context.Context, args map[string]interface{}) toolDispatchResult {
-	opts, msg := opnsenseOptionsFromArgs(args, true)
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)
 	}
@@ -372,7 +372,7 @@ func (s *Server) toolOpnsenseGetInfo(ctx context.Context, args map[string]interf
 }
 
 func (s *Server) toolOpnsenseListInterfaces(ctx context.Context, args map[string]interface{}) toolDispatchResult {
-	opts, msg := opnsenseOptionsFromArgs(args, true)
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)
 	}
@@ -384,7 +384,7 @@ func (s *Server) toolOpnsenseListInterfaces(ctx context.Context, args map[string
 }
 
 func (s *Server) toolOpnsenseListFirewallRules(ctx context.Context, args map[string]interface{}) toolDispatchResult {
-	opts, msg := opnsenseOptionsFromArgs(args, true)
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)
 	}
@@ -396,7 +396,7 @@ func (s *Server) toolOpnsenseListFirewallRules(ctx context.Context, args map[str
 }
 
 func (s *Server) toolOpnsenseListClients(ctx context.Context, args map[string]interface{}) toolDispatchResult {
-	opts, msg := opnsenseOptionsFromArgs(args, true)
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)
 	}

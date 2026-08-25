@@ -90,6 +90,10 @@ type Fields struct {
 	ClientID     string
 	ClientSecret string
 	Site         string
+	// APIKey / APISecret carry the OPNsense credential pair (store keys
+	// api_key / api_secret under provider "opnsense").
+	APIKey    string
+	APISecret string
 }
 
 // Overlay fills empty Fields from the named store entry. Store failures
@@ -121,6 +125,12 @@ func Overlay(path, provider, name string, dest *Fields) {
 	}
 	if dest.Site == "" {
 		dest.Site = entry["site"]
+	}
+	if dest.APIKey == "" {
+		dest.APIKey = entry["api_key"]
+	}
+	if dest.APISecret == "" {
+		dest.APISecret = entry["api_secret"]
 	}
 }
 
