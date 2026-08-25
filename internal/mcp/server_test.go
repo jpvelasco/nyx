@@ -19,8 +19,41 @@ import (
 	"github.com/jpvelasco/nyx/internal/service"
 )
 
+// hermeticCreds pins the credential-resolution inputs for missing-credential
+// tests: all provider env vars empty and an empty temp store, so no local
+// ~/.nyx/credentials.json or dev machine env vars leak into assertions.
+func hermeticCreds(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"OMADA_HOST", "OMADA_CLIENT_ID", "OMADA_CLIENT_SECRET", "OMADA_SITE", "OPNSENSE_HOST", "OPNSENSE_API_KEY", "OPNSENSE_API_SECRET"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("NYX_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+}
+
+// credEnvReaders wires the env-var layer of credential resolution to the real
+// process environment so dispatch tests observe the full fallback chain.
+func credEnvReaders() (omada, opnsense map[string]func(string) string) {
+	omada = map[string]func(string) string{
+		"OMADA_HOST": os.Getenv, "OMADA_CLIENT_ID": os.Getenv,
+		"OMADA_CLIENT_SECRET": os.Getenv, "OMADA_SITE": os.Getenv,
+	}
+	opnsense = map[string]func(string) string{
+		"OPNSENSE_HOST": os.Getenv, "OPNSENSE_API_KEY": os.Getenv,
+		"OPNSENSE_API_SECRET": os.Getenv,
+	}
+	return omada, opnsense
+}
+
 func newTestServer() *Server {
-	return &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{}, checkSvc: service.NewCheckService(), omadaSvc: service.NewOmadaService()}
+	omada, opnsense := credEnvReaders()
+	return &Server{
+		reader:          &bytes.Buffer{},
+		writer:          &bytes.Buffer{},
+		checkSvc:        service.NewCheckService(),
+		omadaSvc:        service.NewOmadaService(),
+		credEnv:         omada,
+		opnsenseCredEnv: opnsense,
+	}
 }
 
 func TestNewServer(t *testing.T) {
@@ -283,6 +316,59 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if len(dc.InputSchema.Required) != 1 || dc.InputSchema.Required[0] != "subnet" {
 		t.Errorf("discover_subnet required = %v", dc.InputSchema.Required)
 	}
+}
+
+// BDD S3.1 — credential arguments are optional in the input schemas: the
+// tools/list Required lists carry only the arguments that have no env/store
+// fallback, so an agent with configured credentials need not pass them.
+func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
+	server := newTestServer()
+	server.handleInitialize(&jsonRPCRequest{ID: json.RawMessage(`1`)})
+	resp := server.handleToolsList(&jsonRPCRequest{ID: json.RawMessage(`2`)})
+	list, ok := resp.Result.(toolsListResult)
+	if !ok {
+		t.Fatalf("expected toolsListResult, got %T", resp.Result)
+	}
+	byName := map[string]tool{}
+	for _, tl := range list.Tools {
+		byName[tl.Name] = tl
+	}
+
+	want := map[string][]string{
+		"omada_list_networks":          {"host"},
+		"omada_list_acls":              {"host"},
+		"omada_list_clients":           {"host"},
+		"omada_inventory":              {"host"},
+		"omada_import":                 {"host"},
+		"omada_plan":                   {"host", "spec"},
+		"omada_apply_acl":              {"host", "from", "to", "action"},
+		"opnsense_get_info":            {"host"},
+		"opnsense_list_interfaces":     {"host"},
+		"opnsense_list_firewall_rules": {"host"},
+		"opnsense_list_clients":        {"host"},
+	}
+	for name, wantReq := range want {
+		tl, ok := byName[name]
+		if !ok {
+			t.Errorf("missing tool %q", name)
+			continue
+		}
+		if got := tl.InputSchema.Required; !equalStrings(got, wantReq) {
+			t.Errorf("%s required = %v, want %v", name, got, wantReq)
+		}
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestHandleToolCall_NotInitialized(t *testing.T) {
@@ -716,6 +802,7 @@ func TestDispatchGetInterfaces_BackendError(t *testing.T) {
 }
 
 func TestDispatchOmadaGetInfo_MissingHost(t *testing.T) {
+	hermeticCreds(t)
 	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "omada_get_info", map[string]interface{}{})
 	if !isErr || !strings.Contains(text, "host parameter is required") {
 		t.Errorf("got (%q, %v)", text, isErr)
@@ -758,6 +845,7 @@ func TestDispatchOmadaGetInfo_ServiceError(t *testing.T) {
 }
 
 func TestDispatchOmadaListNetworks_MissingCredentials(t *testing.T) {
+	hermeticCreds(t)
 	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "omada_list_networks", map[string]interface{}{
 		"host": "omada.local",
 	})
@@ -904,6 +992,7 @@ func TestDispatchOmadaInventory_Success(t *testing.T) {
 }
 
 func TestDispatchOmadaInventory_MissingCredentials(t *testing.T) {
+	hermeticCreds(t)
 	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "omada_inventory", map[string]interface{}{
 		"host": "omada.local",
 	})
@@ -925,6 +1014,7 @@ func TestDispatchOmadaInventory_ServiceError(t *testing.T) {
 }
 
 func TestDispatchOmadaImport_MissingParams(t *testing.T) {
+	hermeticCreds(t)
 	server := newTestServer()
 	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_import", map[string]interface{}{}); !isErr || !strings.Contains(text, "host parameter is required") {
 		t.Errorf("missing host: (%q, %v)", text, isErr)
@@ -972,6 +1062,7 @@ func TestDispatchOmadaImport_ServiceError(t *testing.T) {
 }
 
 func TestDispatchOmadaPlan_MissingParams(t *testing.T) {
+	hermeticCreds(t)
 	server := newTestServer()
 	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan", map[string]interface{}{}); !isErr || !strings.Contains(text, "host parameter is required") {
 		t.Errorf("missing host: (%q, %v)", text, isErr)
@@ -1029,6 +1120,7 @@ func TestDispatchOmadaPlan_ServiceError(t *testing.T) {
 }
 
 func TestDispatchOmadaApplyACL_MissingParams(t *testing.T) {
+	hermeticCreds(t)
 	server := newTestServer()
 	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_apply_acl", map[string]interface{}{}); !isErr || !strings.Contains(text, "host parameter is required") {
 		t.Errorf("missing host: (%q, %v)", text, isErr)
@@ -1158,12 +1250,13 @@ func TestDispatchOmadaApplyACL_ServiceError(t *testing.T) {
 }
 
 func TestDispatchOpnsense_MissingParams(t *testing.T) {
+	hermeticCreds(t)
 	server := newTestServer()
 	for _, tool := range []string{"opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients"} {
 		if text, isErr := server.DispatchToolForTest(context.Background(), tool, map[string]interface{}{}); !isErr || !strings.Contains(text, "host parameter is required") {
 			t.Errorf("%s missing host: (%q, %v)", tool, text, isErr)
 		}
-		if text, isErr := server.DispatchToolForTest(context.Background(), tool, map[string]interface{}{"host": "fw.local"}); !isErr || !strings.Contains(text, "api key and api secret parameters are required") {
+		if text, isErr := server.DispatchToolForTest(context.Background(), tool, map[string]interface{}{"host": "fw.local"}); !isErr || !strings.Contains(text, "api_key and api_secret parameters are required") {
 			t.Errorf("%s missing creds: (%q, %v)", tool, text, isErr)
 		}
 	}
@@ -1438,9 +1531,25 @@ func (s *stubOpnsenseSvc) ListClients(_ context.Context, opts service.OpnsenseOp
 }
 
 func serverWithOpnsenseStub(stub *stubOpnsenseSvc) *Server {
-	return &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{}, checkSvc: service.NewCheckService(), opnsenseSvc: stub}
+	omada, opnsense := credEnvReaders()
+	return &Server{
+		reader:          &bytes.Buffer{},
+		writer:          &bytes.Buffer{},
+		checkSvc:        service.NewCheckService(),
+		opnsenseSvc:     stub,
+		credEnv:         omada,
+		opnsenseCredEnv: opnsense,
+	}
 }
 
 func serverWithOmadaStub(stub *stubOmadaSvc) *Server {
-	return &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{}, checkSvc: service.NewCheckService(), omadaSvc: stub}
+	omada, opnsense := credEnvReaders()
+	return &Server{
+		reader:          &bytes.Buffer{},
+		writer:          &bytes.Buffer{},
+		checkSvc:        service.NewCheckService(),
+		omadaSvc:        stub,
+		credEnv:         omada,
+		opnsenseCredEnv: opnsense,
+	}
 }

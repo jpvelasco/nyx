@@ -14,8 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/service"
+	"github.com/jpvelasco/nyx/internal/storepath"
 	"github.com/jpvelasco/nyx/internal/version"
 )
 
@@ -129,16 +131,24 @@ type Server struct {
 	checkSvc    *service.CheckService
 	omadaSvc    omadaSurface
 	opnsenseSvc opnsenseSurface
+	// credEnv reads the Omada credential env vars (keys OMADA_HOST /
+	// OMADA_CLIENT_ID / OMADA_CLIENT_SECRET / OMADA_SITE) and opnsenseCredEnv
+	// the OPNsense ones (OPNSENSE_HOST / OPNSENSE_API_KEY /
+	// OPNSENSE_API_SECRET). A missing key leaves that layer empty.
+	credEnv         map[string]func(string) string
+	opnsenseCredEnv map[string]func(string) string
 }
 
 // NewServer creates a new MCP server
 func NewServer() *Server {
 	return &Server{
-		reader:      os.Stdin,
-		writer:      os.Stdout,
-		checkSvc:    service.NewCheckService(),
-		omadaSvc:    service.NewOmadaService(),
-		opnsenseSvc: service.NewOpnsenseService(),
+		reader:          os.Stdin,
+		writer:          os.Stdout,
+		checkSvc:        service.NewCheckService(),
+		omadaSvc:        service.NewOmadaService(),
+		opnsenseSvc:     service.NewOpnsenseService(),
+		credEnv:         map[string]func(string) string{"OMADA_HOST": os.Getenv, "OMADA_CLIENT_ID": os.Getenv, "OMADA_CLIENT_SECRET": os.Getenv, "OMADA_SITE": os.Getenv},
+		opnsenseCredEnv: map[string]func(string) string{"OPNSENSE_HOST": os.Getenv, "OPNSENSE_API_KEY": os.Getenv, "OPNSENSE_API_SECRET": os.Getenv},
 	}
 }
 
@@ -413,7 +423,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
 				},
-				Required: []string{"host", "client_id", "client_secret"},
+				Required: []string{"host"},
 			},
 		},
 		{
@@ -429,7 +439,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
 				},
-				Required: []string{"host", "client_id", "client_secret"},
+				Required: []string{"host"},
 			},
 		},
 		{
@@ -445,7 +455,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
 				},
-				Required: []string{"host", "client_id", "client_secret"},
+				Required: []string{"host"},
 			},
 		},
 		{
@@ -461,7 +471,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
 				},
-				Required: []string{"host", "client_id", "client_secret"},
+				Required: []string{"host"},
 			},
 		},
 		{
@@ -477,7 +487,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
 				},
-				Required: []string{"host", "client_id", "client_secret"},
+				Required: []string{"host"},
 			},
 		},
 		{
@@ -494,7 +504,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
 					"spec":            {Type: "string", Description: "Proposed intent spec (YAML): networks and policies to preview"},
 				},
-				Required: []string{"host", "client_id", "client_secret", "spec"},
+				Required: []string{"host", "spec"},
 			},
 		},
 		{
@@ -518,7 +528,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"dry_run":         {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
 					"post_audit":      {Type: "boolean", Description: "Run a targeted isolation audit after a real apply. Default true."},
 				},
-				Required: []string{"host", "client_id", "client_secret", "from", "to", "action"},
+				Required: []string{"host", "from", "to", "action"},
 			},
 		},
 		{
@@ -533,7 +543,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
 				},
-				Required: []string{"host", "api_key", "api_secret"},
+				Required: []string{"host"},
 			},
 		},
 		{
@@ -548,7 +558,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
 				},
-				Required: []string{"host", "api_key", "api_secret"},
+				Required: []string{"host"},
 			},
 		},
 		{
@@ -563,7 +573,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
 				},
-				Required: []string{"host", "api_key", "api_secret"},
+				Required: []string{"host"},
 			},
 		},
 		{
@@ -578,7 +588,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
 				},
-				Required: []string{"host", "api_key", "api_secret"},
+				Required: []string{"host"},
 			},
 		},
 	}
@@ -669,25 +679,66 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 	return res.text, res.isErr
 }
 
-// omadaOptionsFromArgs extracts Omada connection options from tool arguments.
-// The returned message is non-empty when a required parameter is missing.
-func omadaOptionsFromArgs(args map[string]interface{}, needCredentials bool) (service.OmadaOptions, string) {
+// omadaOptionsFromArgs extracts Omada connection options from tool arguments,
+// falling back to env vars and then the encrypted credential store (entry
+// omada/default) for any value left empty — the same resolution order as the
+// CLI. The returned message is non-empty when a required parameter is
+// missing after all three layers.
+func (s *Server) omadaOptionsFromArgs(args map[string]interface{}, needCredentials bool) (service.OmadaOptions, string) {
 	var opts service.OmadaOptions
-	opts.Host, _ = args["host"].(string)
+	opts.Host = storepath.FirstNonEmpty(argString(args, "host"), s.env("OMADA_HOST"))
+	opts.Site = storepath.FirstNonEmpty(argString(args, "site"), s.env("OMADA_SITE"))
+	opts.SkipTLSVerify, _ = args["skip_tls_verify"].(bool)
+	opts.CACertPath, _ = args["ca_cert_path"].(string)
+	if !needCredentials {
+		// Unauthenticated calls (get_info) resolve only host/site from args
+		// and env and never touch the store, so they cannot carry
+		// credentials.
+		if opts.Host == "" {
+			return opts, "host parameter is required"
+		}
+		return opts, ""
+	}
+	// Credential-bearing calls fill in what args and env left empty from
+	// the store (entry omada/default); read failures are silently ignored
+	// (credentials.Overlay), leaving the error below for the genuinely
+	// unconfigured case. Validation runs after the overlay so a store entry
+	// can supply the host too.
+	fields := credentials.Fields{
+		Host:         opts.Host,
+		ClientID:     storepath.FirstNonEmpty(argString(args, "client_id"), s.env("OMADA_CLIENT_ID")),
+		ClientSecret: storepath.FirstNonEmpty(argString(args, "client_secret"), s.env("OMADA_CLIENT_SECRET")),
+		Site:         opts.Site,
+	}
+	credentials.Overlay(storepath.StoreFile(), "omada", "default", &fields)
+	opts.Host, opts.ClientID, opts.ClientSecret, opts.Site = fields.Host, fields.ClientID, fields.ClientSecret, fields.Site
 	if opts.Host == "" {
 		return opts, "host parameter is required"
 	}
-	if needCredentials {
-		opts.ClientID, _ = args["client_id"].(string)
-		opts.ClientSecret, _ = args["client_secret"].(string)
-		if opts.ClientID == "" || opts.ClientSecret == "" {
-			return opts, "client_id and client_secret parameters are required"
+	if opts.ClientID == "" || opts.ClientSecret == "" {
+		return opts, "client_id and client_secret parameters are required: " +
+			"set the OMADA_CLIENT_ID / OMADA_CLIENT_SECRET environment variables or run `nyx credentials set omada`"
+	}
+	return opts, ""
+}
+
+// env reads a credential environment variable through the credEnv reader map
+// (omada or opnsenseCredEnv depending on the prefix), falling back to the
+// real environment when the map is unset (hand-built servers in tests).
+func (s *Server) env(name string) string {
+	var readers map[string]func(string) string
+	switch {
+	case strings.HasPrefix(name, "OMADA_"):
+		readers = s.credEnv
+	case strings.HasPrefix(name, "OPNSENSE_"):
+		readers = s.opnsenseCredEnv
+	}
+	if readers != nil {
+		if fn, ok := readers[name]; ok {
+			return fn(name)
 		}
 	}
-	opts.Site, _ = args["site"].(string)
-	opts.SkipTLSVerify, _ = args["skip_tls_verify"].(bool)
-	opts.CACertPath, _ = args["ca_cert_path"].(string)
-	return opts, ""
+	return os.Getenv(name)
 }
 
 // argString returns a string tool argument, or "" when absent.
@@ -741,23 +792,39 @@ func argBoolDefault(args map[string]interface{}, key string, def bool) bool {
 }
 
 // opnsenseOptionsFromArgs extracts OPNsense connection options from tool
-// arguments. The returned message is non-empty when a required parameter is
-// missing.
-func opnsenseOptionsFromArgs(args map[string]interface{}, needCredentials bool) (service.OpnsenseOptions, string) {
+// arguments, falling back to env vars and then the encrypted credential
+// store (entry opnsense/default) for any value left empty — the same
+// resolution order as the CLI. The returned message is non-empty when a
+// required parameter is missing after all three layers.
+func (s *Server) opnsenseOptionsFromArgs(args map[string]interface{}, needCredentials bool) (service.OpnsenseOptions, string) {
 	var opts service.OpnsenseOptions
-	opts.Host, _ = args["host"].(string)
+	opts.Host = storepath.FirstNonEmpty(argString(args, "host"), s.env("OPNSENSE_HOST"))
+	opts.SkipTLSVerify, _ = args["skip_tls_verify"].(bool)
+	opts.CACertPath, _ = args["ca_cert_path"].(string)
+	if !needCredentials {
+		if opts.Host == "" {
+			return opts, "host parameter is required"
+		}
+		return opts, ""
+	}
+	// Credential-bearing calls fill in what args and env left empty from
+	// the store (entry opnsense/default); read failures are silently
+	// ignored (credentials.Overlay). Validation runs after the overlay so a
+	// store entry can supply the host too.
+	fields := credentials.Fields{
+		Host:      opts.Host,
+		APIKey:    storepath.FirstNonEmpty(argString(args, "api_key"), s.env("OPNSENSE_API_KEY")),
+		APISecret: storepath.FirstNonEmpty(argString(args, "api_secret"), s.env("OPNSENSE_API_SECRET")),
+	}
+	credentials.Overlay(storepath.StoreFile(), "opnsense", "default", &fields)
+	opts.Host, opts.APIKey, opts.APISecret = fields.Host, fields.APIKey, fields.APISecret
 	if opts.Host == "" {
 		return opts, "host parameter is required"
 	}
-	if needCredentials {
-		opts.APIKey, _ = args["api_key"].(string)
-		opts.APISecret, _ = args["api_secret"].(string)
-		if opts.APIKey == "" || opts.APISecret == "" {
-			return opts, "api key and api secret parameters are required"
-		}
+	if opts.APIKey == "" || opts.APISecret == "" {
+		return opts, "api_key and api_secret parameters are required: " +
+			"set the OPNSENSE_API_KEY / OPNSENSE_API_SECRET environment variables or run `nyx credentials set opnsense`"
 	}
-	opts.SkipTLSVerify, _ = args["skip_tls_verify"].(bool)
-	opts.CACertPath, _ = args["ca_cert_path"].(string)
 	return opts, ""
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/credentials"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/report"
+	"github.com/jpvelasco/nyx/internal/storepath"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -287,10 +288,10 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 // provider surfaces its own connection error.
 func providerImportOptions(providerName string) providers.ImportOptions {
 	opts := providers.ImportOptions{
-		Host:          firstNonEmpty(providerHost, os.Getenv("OMADA_HOST")),
-		ClientID:      firstNonEmpty(providerClientID, os.Getenv("OMADA_CLIENT_ID")),
-		ClientSecret:  firstNonEmpty(providerClientSecret, os.Getenv("OMADA_CLIENT_SECRET")),
-		Site:          firstNonEmpty(providerSite, os.Getenv("OMADA_SITE")),
+		Host:          storepath.FirstNonEmpty(providerHost, os.Getenv("OMADA_HOST")),
+		ClientID:      storepath.FirstNonEmpty(providerClientID, os.Getenv("OMADA_CLIENT_ID")),
+		ClientSecret:  storepath.FirstNonEmpty(providerClientSecret, os.Getenv("OMADA_CLIENT_SECRET")),
+		Site:          storepath.FirstNonEmpty(providerSite, os.Getenv("OMADA_SITE")),
 		SkipTLSVerify: providerSkipTLS,
 		CACertPath:    providerCACertPath,
 		Logger:        log,
@@ -302,22 +303,13 @@ func providerImportOptions(providerName string) providers.ImportOptions {
 			ClientSecret: opts.ClientSecret,
 			Site:         opts.Site,
 		}
-		credentials.Overlay(storePath(), providerName, "default", &fields)
+		credentials.Overlay(storepath.StoreFile(), providerName, "default", &fields)
 		opts.Host = fields.Host
 		opts.ClientID = fields.ClientID
 		opts.ClientSecret = fields.ClientSecret
 		opts.Site = fields.Site
 	}
 	return opts
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func requireProviderHost(opts providers.ImportOptions) error {

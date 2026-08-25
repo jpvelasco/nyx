@@ -75,6 +75,35 @@ func TestOverlayFillsEmptyKeysOnly(t *testing.T) {
 	Overlay("", "omada", "default", nil)
 }
 
+// BDD S2.1 (docs/bdd/mcp-credentials.md) store step: the typed overlay
+// target carries the OPNsense key/secret pair via its own fields.
+func TestOverlayOpnsenseFields(t *testing.T) {
+	s, path := newTestStore(t)
+	if err := s.Set("opnsense", "default", Entry{
+		"host":       "10.0.10.1",
+		"api_key":    "key-1",
+		"api_secret": "secret-1",
+	}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	dest := Fields{APIKey: "flag-key"}
+	Overlay(path, "opnsense", "default", &dest)
+	if dest.APIKey != "flag-key" || dest.APISecret != "secret-1" || dest.Host != "10.0.10.1" {
+		t.Errorf("dest = %+v, want flag key preserved, store fill for empty keys", dest)
+	}
+
+	// An entry without api_key/api_secret leaves the OPNsense fields empty.
+	if err := s.Set("omada", "default", Entry{"host": "10.0.10.2"}); err != nil {
+		t.Fatalf("Set omada: %v", err)
+	}
+	dest2 := Fields{}
+	Overlay(path, "omada", "default", &dest2)
+	if dest2.APIKey != "" || dest2.APISecret != "" {
+		t.Errorf("OPNsense fields filled from entry without them: %+v", dest2)
+	}
+}
+
 func TestGetMissing(t *testing.T) {
 	s, _ := newTestStore(t)
 	if _, ok := s.Get("omada", "default"); ok {

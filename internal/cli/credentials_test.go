@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
+	"github.com/jpvelasco/nyx/internal/storepath"
 )
 
 func runCredentialsCmd(t *testing.T, args ...string) error {
@@ -159,14 +160,19 @@ func TestCredentialsVerifyUnknownProvider(t *testing.T) {
 	}
 }
 
-func TestStorePathDefault(t *testing.T) {
+// BDD S3.2 (docs/bdd/mcp-credentials.md): the store path honors the
+// NYX_CREDENTIALS_FILE override, shared by the CLI and the MCP server.
+func TestStoreFileDefault(t *testing.T) {
 	t.Setenv("NYX_CREDENTIALS_FILE", "")
-	if got := storePath(); got != credentials.DefaultPath() {
-		t.Errorf("storePath() = %q, want default %q", got, credentials.DefaultPath())
+	if got := storepath.StoreFile(); got != credentials.DefaultPath() {
+		t.Errorf("StoreFile() = %q, want default %q", got, credentials.DefaultPath())
 	}
+}
 
-	t.Setenv("NYX_CREDENTIALS_FILE", "custom.json")
-	if got := storePath(); got != "custom.json" {
-		t.Errorf("storePath() = %q, want custom.json", got)
+func TestStoreFileHonorsEnvOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "custom.json")
+	t.Setenv("NYX_CREDENTIALS_FILE", path)
+	if got := storepath.StoreFile(); got != path {
+		t.Errorf("StoreFile() = %q, want the NYX_CREDENTIALS_FILE override", got)
 	}
 }
