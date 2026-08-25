@@ -628,7 +628,7 @@ assertions:
 `
 	dir := t.TempDir()
 	path := filepath.Join(dir, "spec.yml")
-	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(yaml), 0600); err != nil {
 		t.Fatalf("failed to write temp spec: %v", err)
 	}
 	spec, err := LoadSpec(path)
