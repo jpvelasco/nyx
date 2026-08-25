@@ -14,12 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jpvelasco/nyx/internal/audit"
-	"github.com/jpvelasco/nyx/internal/backends/nmap"
-	"github.com/jpvelasco/nyx/internal/backends/system"
-	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
-	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/version"
 )
@@ -647,357 +642,31 @@ type toolDispatchResult struct {
 	isErr bool
 }
 
+func okResult(text string) toolDispatchResult {
+	return toolDispatchResult{text: text}
+}
+
+func errResult(msg string) toolDispatchResult {
+	return toolDispatchResult{text: msg, isErr: true}
+}
+
+// statusResult finishes a CheckResult and reports it as a tool error only
+// when the check itself errored.
+func statusResult(result *models.CheckResult) toolDispatchResult {
+	result.Finish()
+	if result.Status == models.StatusError {
+		return errResult(toJSON(result))
+	}
+	return okResult(toJSON(result))
+}
+
 func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]interface{}) (string, bool) {
-	switch name {
-	case "discover_subnet":
-		subnet, _ := args["subnet"].(string)
-		if subnet == "" {
-			return "subnet parameter is required", true
-		}
-		opts := nmap.DefaultScanOptions
-		if t, ok := args["scan_timing"].(float64); ok && t > 0 {
-			opts.TimingTemplate = int(t)
-		}
-		if r, ok := args["scan_min_rate"].(float64); ok && r > 0 {
-			opts.MinRate = int(r)
-		}
-		result, err := nmap.DiscoverWithOptions(ctx, subnet, opts)
-		if err != nil {
-			return fmt.Sprintf("discovery failed: %v", err), true
-		}
-		return toJSON(result), false
-
-	case "check_routes":
-		target, _ := args["target"].(string)
-		if target == "" {
-			return "target parameter is required", true
-		}
-		result := s.checkSvc.CheckRoute(ctx, target)
-		result.Finish()
-		if result.Status == models.StatusError {
-			return toJSON(result), true
-		}
-		return toJSON(result), false
-
-	case "check_vpn":
-		target, _ := args["target"].(string)
-		if target == "" {
-			return "target parameter is required", true
-		}
-		result := s.checkSvc.CheckVPN(ctx, target)
-		result.Finish()
-		if result.Status == models.StatusError {
-			return toJSON(result), true
-		}
-		return toJSON(result), false
-
-	case "verify_isolation":
-		from, _ := args["from"].(string)
-		to, _ := args["to"].(string)
-		if from == "" {
-			return "from parameter is required", true
-		}
-		if to == "" {
-			return "to parameter is required", true
-		}
-		specFile, _ := args["spec_file"].(string)
-
-		if specFile != "" {
-			spec, err := intent.LoadSpec(specFile)
-			if err != nil {
-				return fmt.Sprintf("failed to load spec: %v", err), true
-			}
-			expectDeny := "deny"
-			miniSpec := &intent.Spec{
-				Version:  spec.Version,
-				Site:     spec.Site,
-				Networks: spec.Networks,
-				Assertions: []intent.Assertion{{
-					Type:   "isolation",
-					From:   from,
-					To:     to,
-					Expect: expectDeny,
-				}},
-			}
-			eng := audit.NewEngine(miniSpec)
-			report, err := eng.Run(ctx)
-			if err != nil {
-				return fmt.Sprintf("isolation check failed: %v", err), true
-			}
-			if len(report.Findings) == 0 {
-				return "no findings returned", true
-			}
-			return toJSON(report.Findings[0]), false
-		}
-
-		// No spec: ping `to` directly as a bare IP/hostname
-		result := models.NewCheckResult("system", "isolation", "local", fmt.Sprintf("%s -> %s", from, to))
-		pingResult, err := system.Ping(ctx, to)
-		if err != nil {
-			result.Status = models.StatusWarn
-			result.Summary = fmt.Sprintf("could not determine isolation: %v", err)
-		} else {
-			result.Observed["reachable"] = pingResult.Reachable
-			if pingResult.Reachable {
-				result.Status = models.StatusFail
-				result.Summary = fmt.Sprintf("isolation violated: %s can reach %s", from, to)
-				result.Violations = append(result.Violations, "target is reachable when isolation is expected")
-			} else {
-				result.Status = models.StatusPass
-				result.Summary = fmt.Sprintf("isolation confirmed: %s cannot reach %s", from, to)
-			}
-		}
-		result.Finish()
-		return toJSON(result), false
-
-	case "run_audit":
-		specFile, _ := args["spec_file"].(string)
-		if specFile == "" {
-			return "spec_file parameter is required", true
-		}
-		spec, err := intent.LoadSpec(specFile)
-		if err != nil {
-			return fmt.Sprintf("failed to load spec: %v", err), true
-		}
-		eng := audit.NewEngine(spec)
-		report, err := eng.Run(ctx)
-		if err != nil {
-			return fmt.Sprintf("audit failed: %v", err), true
-		}
-		return toJSON(report), false
-
-	case "load_spec":
-		specFile, _ := args["spec_file"].(string)
-		if specFile == "" {
-			return "spec_file parameter is required", true
-		}
-		spec, err := intent.LoadSpec(specFile)
-		if err != nil {
-			return fmt.Sprintf("failed to load spec: %v", err), true
-		}
-		return toJSON(spec), false
-
-	case "get_interfaces":
-		ifaces, err := s.checkSvc.GetInterfaces(ctx)
-		if err != nil {
-			return fmt.Sprintf("failed to get interfaces: %v", err), true
-		}
-		return toJSON(ifaces), false
-
-	case "ping_target":
-		target, _ := args["target"].(string)
-		if target == "" {
-			return "target parameter is required", true
-		}
-		pingResult, err := system.Ping(ctx, target)
-		if err != nil {
-			return fmt.Sprintf("ping failed: %v", err), true
-		}
-		return toJSON(pingResult), false
-
-	case "run_doctor":
-		specPath, _ := args["spec_file"].(string)
-		var findings []models.CheckResult
-
-		nmapResult := service.NmapCheck()
-		if !nmap.Available() {
-			nmapResult.Status = models.StatusFail
-			nmapResult.Summary = "nmap is not installed or not in PATH"
-		}
-		findings = append(findings, *nmapResult)
-
-		if specPath != "" {
-			findings = append(findings, *service.SpecFileCheck(specPath))
-			findings = append(findings, *service.SpecValidCheck(specPath))
-			for _, c := range service.ProbeChecks(specPath) {
-				findings = append(findings, *c)
-			}
-		}
-
-		doctorReport := &models.AuditReport{
-			Audit:    "doctor",
-			Status:   models.ComputeOverallStatus(findings),
-			Summary:  models.Tally(findings),
-			Findings: findings,
-		}
-		return toJSON(doctorReport), false
-
-	case "provider_list":
-		list := providers.List()
-		type entry struct {
-			Name         string   `json:"name"`
-			Capabilities []string `json:"capabilities"`
-		}
-		out := make([]entry, len(list))
-		for i, p := range list {
-			out[i] = entry{Name: p.Name(), Capabilities: p.Capabilities()}
-		}
-		return toJSON(out), false
-
-	case "omada_get_info":
-		opts, msg := omadaOptionsFromArgs(args, false)
-		if msg != "" {
-			return msg, true
-		}
-		info, err := s.omadaSvc.Info(ctx, opts)
-		if err != nil {
-			return fmt.Sprintf("omada info request failed: %v", err), true
-		}
-		return toJSON(info), false
-
-	case "omada_list_networks":
-		opts, msg := omadaOptionsFromArgs(args, true)
-		if msg != "" {
-			return msg, true
-		}
-		nets, err := s.omadaSvc.ListNetworks(ctx, opts)
-		if err != nil {
-			return fmt.Sprintf("omada networks request failed: %v", err), true
-		}
-		return toJSON(nets), false
-
-	case "omada_list_acls":
-		opts, msg := omadaOptionsFromArgs(args, true)
-		if msg != "" {
-			return msg, true
-		}
-		rules, err := s.omadaSvc.ListACLs(ctx, opts)
-		if err != nil {
-			return fmt.Sprintf("omada acls request failed: %v", err), true
-		}
-		return toJSON(rules), false
-
-	case "omada_list_clients":
-		opts, msg := omadaOptionsFromArgs(args, true)
-		if msg != "" {
-			return msg, true
-		}
-		clients, err := s.omadaSvc.ListClients(ctx, opts)
-		if err != nil {
-			return fmt.Sprintf("omada clients request failed: %v", err), true
-		}
-		return toJSON(clients), false
-
-	case "omada_inventory":
-		opts, msg := omadaOptionsFromArgs(args, true)
-		if msg != "" {
-			return msg, true
-		}
-		inv, err := s.omadaSvc.Inventory(ctx, opts)
-		if err != nil {
-			return fmt.Sprintf("omada inventory request failed: %v", err), true
-		}
-		return toJSON(inv), false
-
-	case "omada_import":
-		opts, msg := omadaOptionsFromArgs(args, true)
-		if msg != "" {
-			return msg, true
-		}
-		imp, err := s.omadaSvc.Import(ctx, opts)
-		if err != nil {
-			return fmt.Sprintf("omada import request failed: %v", err), true
-		}
-		return toJSON(imp), false
-
-	case "omada_plan":
-		opts, msg := omadaOptionsFromArgs(args, true)
-		if msg != "" {
-			return msg, true
-		}
-		specYAML, _ := args["spec"].(string)
-		if specYAML == "" {
-			return "spec parameter is required", true
-		}
-		plan, err := s.omadaSvc.Plan(ctx, opts, specYAML)
-		if err != nil {
-			return fmt.Sprintf("omada plan request failed: %v", err), true
-		}
-		return toJSON(plan), false
-
-	case "omada_apply_acl":
-		opts, msg := omadaOptionsFromArgs(args, true)
-		if msg != "" {
-			return msg, true
-		}
-		fromList := splitCSV(argString(args, "from"))
-		toList := splitCSV(argString(args, "to"))
-		protocols, perr := parseProtocols(argString(args, "protocols"))
-		if perr != "" {
-			return perr, true
-		}
-		req := service.OmadaACLApplyRequest{
-			PolicyName: argString(args, "policy_name"),
-			From:       fromList,
-			To:         toList,
-			Action:     argString(args, "action"),
-			Scope:      argString(args, "scope"),
-			Protocols:  protocols,
-			DryRun:     argBoolDefault(args, "dry_run", true),
-			PostAudit:  argBoolDefault(args, "post_audit", true),
-		}
-		if len(fromList) == 0 {
-			return "from parameter is required", true
-		}
-		if len(toList) == 0 {
-			return "to parameter is required", true
-		}
-		if req.Action == "" {
-			return "action parameter is required", true
-		}
-		res, err := s.omadaSvc.ApplyACL(ctx, opts, req)
-		if err != nil {
-			return fmt.Sprintf("omada apply request failed: %v", err), true
-		}
-		return toJSON(res), false
-
-	case "opnsense_get_info":
-		opts, msg := opnsenseOptionsFromArgs(args, true)
-		if msg != "" {
-			return msg, true
-		}
-		info, err := s.opnsenseSvc.Info(ctx, opts)
-		if err != nil {
-			return fmt.Sprintf("opnsense info request failed: %v", err), true
-		}
-		return toJSON(info), false
-
-	case "opnsense_list_interfaces":
-		opts, msg := opnsenseOptionsFromArgs(args, true)
-		if msg != "" {
-			return msg, true
-		}
-		ifaces, err := s.opnsenseSvc.ListInterfaces(ctx, opts)
-		if err != nil {
-			return fmt.Sprintf("opnsense interfaces request failed: %v", err), true
-		}
-		return toJSON(ifaces), false
-
-	case "opnsense_list_firewall_rules":
-		opts, msg := opnsenseOptionsFromArgs(args, true)
-		if msg != "" {
-			return msg, true
-		}
-		rules, err := s.opnsenseSvc.ListFirewallRules(ctx, opts)
-		if err != nil {
-			return fmt.Sprintf("opnsense firewall rules request failed: %v", err), true
-		}
-		return toJSON(rules), false
-
-	case "opnsense_list_clients":
-		opts, msg := opnsenseOptionsFromArgs(args, true)
-		if msg != "" {
-			return msg, true
-		}
-		clients, err := s.opnsenseSvc.ListClients(ctx, opts)
-		if err != nil {
-			return fmt.Sprintf("opnsense clients request failed: %v", err), true
-		}
-		return toJSON(clients), false
-
-	default:
+	handler, ok := toolHandlers[name]
+	if !ok {
 		return fmt.Sprintf("unknown tool: %s", name), true
 	}
+	res := handler(s, ctx, args)
+	return res.text, res.isErr
 }
 
 // omadaOptionsFromArgs extracts Omada connection options from tool arguments.
