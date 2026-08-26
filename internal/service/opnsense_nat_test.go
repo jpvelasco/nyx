@@ -148,6 +148,102 @@ func TestOpnsenseServiceListAliases(t *testing.T) {
 	}
 }
 
+// Each per-read method must wrap its failure with the fetch prefix so an
+// agent can name the broken controller endpoint; GetFirewallRule passes the
+// client error through unwrapped.
+func TestOpnsenseServiceNatReads_Failures(t *testing.T) {
+	// Every path 404s; each call fails on its own read with its own prefix.
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	svc := NewOpnsenseService()
+	ctx := context.Background()
+	opts := opnsenseOptions(ts)
+
+	if _, err := svc.ListPortForwardRules(ctx, opts); err == nil || !strings.Contains(err.Error(), "fetching port forward rules") {
+		t.Errorf("ListPortForwardRules error = %v", err)
+	}
+	if _, err := svc.ListOneToOneRules(ctx, opts); err == nil || !strings.Contains(err.Error(), "fetching one-to-one rules") {
+		t.Errorf("ListOneToOneRules error = %v", err)
+	}
+	if _, err := svc.ListSourceNatRules(ctx, opts); err == nil || !strings.Contains(err.Error(), "fetching source NAT rules") {
+		t.Errorf("ListSourceNatRules error = %v", err)
+	}
+	if _, err := svc.ListAliases(ctx, opts); err == nil || !strings.Contains(err.Error(), "fetching aliases") {
+		t.Errorf("ListAliases error = %v", err)
+	}
+	if _, err := svc.GetOutboundNatMode(ctx, opts); err == nil || !strings.Contains(err.Error(), "fetching outbound NAT mode") {
+		t.Errorf("GetOutboundNatMode error = %v", err)
+	}
+	// GetFirewallRule surfaces the client error unwrapped.
+	if _, err := svc.GetFirewallRule(ctx, opts, "ru"); err == nil || !strings.Contains(err.Error(), "resource not found") {
+		t.Errorf("GetFirewallRule error = %v, want resource not found", err)
+	}
+}
+
+// GetNAT failures after the mode read must name the failing rule set so an
+// agent can pin the broken endpoint.
+func TestOpnsenseServiceGetNAT_LaterReadFailures(t *testing.T) {
+	cases := []struct {
+		name, failPath, want string
+	}{
+		{"mode", "/api/firewall/filter_base/get", "fetching outbound NAT mode"},
+		{"one-to-one", "/api/firewall/one_to_one/search_rule", "fetching one-to-one rules"},
+		{"source nat", "/api/firewall/source_nat/search_rule", "fetching source NAT rules"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var unexpected strings.Builder
+			ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == tc.failPath {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				opnsenseNatHandlers(&unexpected)(w, r)
+			})
+			_, err := NewOpnsenseService().GetNAT(context.Background(), opnsenseOptions(ts))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("GetNAT error = %v, want %q prefix", err, tc.want)
+			}
+		})
+	}
+}
+
+// The topology report must name the provider whose observation failed — a
+// silent skip would turn a blind spot into a confidently wrong verdict.
+func TestTopologyService_Report_ObservationErrors(t *testing.T) {
+	t.Run("omada failure is wrapped", func(t *testing.T) {
+		// Unreachable Omada host: the report must fail with an "observing
+		// omada" prefix. Omada is observed first, so its failure surfaces
+		// before any OPNsense read.
+		svc := &TopologyService{Omada: NewOmadaService(), Opnsense: NewOpnsenseService()}
+		_, err := svc.Report(context.Background(), TopologyOptions{
+			Omada: &OmadaOptions{Host: "https://127.0.0.1:1", ClientID: "a", ClientSecret: "b", SkipTLSVerify: true},
+		})
+		if err == nil || !strings.Contains(err.Error(), "observing omada") {
+			t.Fatalf("Report error = %v, want observing-omada prefix", err)
+		}
+	})
+
+	t.Run("opnsense failure is wrapped", func(t *testing.T) {
+		svc := &TopologyService{Opnsense: NewOpnsenseService()}
+		_, err := svc.Report(context.Background(), TopologyOptions{
+			Opnsense: &OpnsenseOptions{Host: "https://127.0.0.1:1", APIKey: "k", APISecret: "s", SkipTLSVerify: true},
+		})
+		if err == nil || !strings.Contains(err.Error(), "observing opnsense") {
+			t.Fatalf("Report error = %v, want observing-opnsense prefix", err)
+		}
+	})
+
+	t.Run("no providers configured", func(t *testing.T) {
+		svc := &TopologyService{Omada: NewOmadaService(), Opnsense: NewOpnsenseService()}
+		_, err := svc.Report(context.Background(), TopologyOptions{})
+		if err == nil || !strings.Contains(err.Error(), "at least one provider") {
+			t.Fatalf("Report error = %v, want no-provider guidance", err)
+		}
+	})
+}
+
 func TestOpnsenseServiceGetOutboundNatModeAndRule(t *testing.T) {
 	var unexpected strings.Builder
 	ts := opnsenseTestServer(t, opnsenseNatHandlers(&unexpected))

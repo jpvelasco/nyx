@@ -201,3 +201,37 @@ func TestRunNatCheck_VaultEmptyStillErrors(t *testing.T) {
 		t.Errorf("summary %q should contain 'requires' for the CLI recommendations filter", result.Summary)
 	}
 }
+
+// runAssertion dispatches nat_check to runNatCheck with a per-assertion
+// deadline, like the other provider-driven types.
+func TestRunAssertionDispatchesNatCheck(t *testing.T) {
+	providers.Reset()
+	t.Cleanup(func() { providers.Reset() })
+
+	t.Setenv("OMADA_HOST", "")
+	t.Setenv("OMADA_CLIENT_ID", "")
+	t.Setenv("OMADA_CLIENT_SECRET", "")
+	t.Setenv("OPNSENSE_HOST", "")
+	t.Setenv("OPNSENSE_API_KEY", "")
+	t.Setenv("OPNSENSE_API_SECRET", "")
+
+	rec := &natTestProvider{}
+	if err := providers.Register(rec); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	eng := NewEngine(&intent.Spec{Version: 1, Site: "test"})
+	eng.CredentialsPath = t.TempDir() + "/empty.json"
+
+	result, err := eng.runAssertion(context.Background(), intent.Assertion{
+		Type: "nat_check", Provider: "nattest", NatMode: "disabled",
+	})
+	if err != nil {
+		t.Fatalf("runAssertion: %v", err)
+	}
+	if rec.called {
+		t.Fatal("NatCheck must not be called without credentials")
+	}
+	if result.Status != models.StatusError || result.CheckType != "nat_check" {
+		t.Errorf("got %s/%s, want error/nat_check", result.CheckType, result.Status)
+	}
+}

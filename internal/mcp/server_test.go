@@ -1828,3 +1828,149 @@ func TestDispatchTopology_ReportError(t *testing.T) {
 		t.Errorf("got (%q, %v)", text, isErr)
 	}
 }
+
+// fwOnlyOmadaSvc succeeds at ALG and fails at firewall settings so the
+// get_nat_settings dispatch test can exercise the second (firewall) error
+// branch, which a plain err stub cannot reach.
+type fwOnlyOmadaSvc struct {
+	stubOmadaSvc
+}
+
+func (s *fwOnlyOmadaSvc) GetFirewallSettings(_ context.Context, opts service.OmadaOptions) (*service.OmadaFirewallSettings, error) {
+	s.calls++
+	s.lastOpts = opts
+	return nil, errors.New("firewall endpoint missing")
+}
+
+func TestDispatchOmadaNatReads_Errors(t *testing.T) {
+	hermeticCreds(t)
+	args := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw"}
+
+	cases := []struct {
+		tool, want string
+	}{
+		{"omada_list_port_forwardings", "omada port forwardings request failed"},
+		{"omada_list_one_to_one_nat", "omada one-to-one NAT request failed"},
+		{"omada_nat_facts", "omada nat facts request failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.tool, func(t *testing.T) {
+			server := serverWithOmadaStub(&stubOmadaSvc{err: errors.New("controller down")})
+			text, isErr := server.DispatchToolForTest(context.Background(), tc.tool, args)
+			if !isErr || !strings.Contains(text, tc.want) || !strings.Contains(text, "controller down") {
+				t.Errorf("got (%q, %v), want %q", text, isErr, tc.want)
+			}
+		})
+	}
+
+	// ALG failure is reported by the first read.
+	t.Run("get_nat_settings_alg_error", func(t *testing.T) {
+		server := serverWithOmadaStub(&stubOmadaSvc{err: errors.New("alg down")})
+		text, isErr := server.DispatchToolForTest(context.Background(), "omada_get_nat_settings", args)
+		if !isErr || !strings.Contains(text, "omada ALG settings request failed") {
+			t.Errorf("got (%q, %v)", text, isErr)
+		}
+	})
+
+	// Firewall failure is reported only when ALG succeeds.
+	t.Run("get_nat_settings_firewall_error", func(t *testing.T) {
+		omadaEnv, opnsenseEnv := credEnvReaders()
+		server := &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{},
+			checkSvc: service.NewCheckService(),
+			omadaSvc: &fwOnlyOmadaSvc{stubOmadaSvc{alg: &service.OmadaALGSettings{}}},
+			topoSvc:  &stubTopoSvc{},
+			credEnv:  omadaEnv, opnsenseCredEnv: opnsenseEnv}
+		text, isErr := server.DispatchToolForTest(context.Background(), "omada_get_nat_settings", args)
+		if !isErr || !strings.Contains(text, "omada firewall settings request failed") ||
+			!strings.Contains(text, "firewall endpoint missing") {
+			t.Errorf("got (%q, %v)", text, isErr)
+		}
+	})
+}
+
+func TestDispatchOpnsenseNatReads_Errors(t *testing.T) {
+	hermeticCreds(t)
+	args := map[string]interface{}{"host": "fw.local", "api_key": "key1", "api_secret": "secret1"}
+
+	cases := []struct {
+		tool, want string
+	}{
+		{"opnsense_list_port_forward_rules", "opnsense port forward rules request failed"},
+		{"opnsense_list_one_to_one_rules", "opnsense one-to-one rules request failed"},
+		{"opnsense_list_source_nat_rules", "opnsense source NAT rules request failed"},
+		{"opnsense_list_aliases", "opnsense aliases request failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.tool, func(t *testing.T) {
+			server := serverWithOpnsenseStub(&stubOpnsenseSvc{err: errors.New("controller down")})
+			text, isErr := server.DispatchToolForTest(context.Background(), tc.tool, args)
+			if !isErr || !strings.Contains(text, tc.want) || !strings.Contains(text, "controller down") {
+				t.Errorf("got (%q, %v), want %q", text, isErr, tc.want)
+			}
+		})
+	}
+}
+
+// A host present without credentials must fail the topology call with the
+// options-builder message, not silently skip the provider (a partial picture
+// would mislead the double-NAT verdict).
+func TestDispatchTopology_MissingCredentials(t *testing.T) {
+	hermeticCreds(t)
+	omada, opnsense := credEnvReaders()
+	server := &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{},
+		checkSvc: service.NewCheckService(), topoSvc: &stubTopoSvc{},
+		credEnv: omada, opnsenseCredEnv: opnsense}
+
+	text, isErr := server.DispatchToolForTest(context.Background(), "topology", map[string]interface{}{
+		"omada_host": "omada.local",
+	})
+	if !isErr || !strings.Contains(text, "client_id and client_secret parameters are required") {
+		t.Errorf("omada: got (%q, %v), want missing-credential message", text, isErr)
+	}
+
+	text, isErr = server.DispatchToolForTest(context.Background(), "topology", map[string]interface{}{
+		"opnsense_host": "fw.local",
+	})
+	if !isErr || !strings.Contains(text, "api_key and api_secret parameters are required") {
+		t.Errorf("opnsense: got (%q, %v), want missing-credential message", text, isErr)
+	}
+}
+
+// Every NAT read tool must reject a call that carries no host with the
+// options-builder message, before any provider call happens.
+func TestDispatchNatReads_MissingHost(t *testing.T) {
+	hermeticCreds(t)
+
+	omadaTools := []string{
+		"omada_list_port_forwardings",
+		"omada_list_one_to_one_nat",
+		"omada_get_nat_settings",
+		"omada_nat_facts",
+	}
+	for _, tool := range omadaTools {
+		t.Run(tool, func(t *testing.T) {
+			server := serverWithOmadaStub(&stubOmadaSvc{})
+			text, isErr := server.DispatchToolForTest(context.Background(), tool, map[string]interface{}{})
+			if !isErr || !strings.Contains(text, "host parameter is required") {
+				t.Errorf("got (%q, %v), want host-parameter error", text, isErr)
+			}
+		})
+	}
+
+	opnsenseTools := []string{
+		"opnsense_list_port_forward_rules",
+		"opnsense_list_one_to_one_rules",
+		"opnsense_list_source_nat_rules",
+		"opnsense_list_aliases",
+		"opnsense_get_nat",
+	}
+	for _, tool := range opnsenseTools {
+		t.Run(tool, func(t *testing.T) {
+			server := serverWithOpnsenseStub(&stubOpnsenseSvc{})
+			text, isErr := server.DispatchToolForTest(context.Background(), tool, map[string]interface{}{})
+			if !isErr || !strings.Contains(text, "host parameter is required") {
+				t.Errorf("got (%q, %v), want host-parameter error", text, isErr)
+			}
+		})
+	}
+}

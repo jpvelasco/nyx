@@ -85,6 +85,98 @@ func TestOmadaServiceNatFacts_NoGateway(t *testing.T) {
 	}
 }
 
+// A failure on any read must surface as a hard error with the per-read fetch
+// prefix, so an agent can name which controller endpoint broke.
+func TestOmadaServiceNatReads_Failures(t *testing.T) {
+	cases := []struct {
+		name, failPath, want string
+	}{
+		{"devices", "/openapi/v1/abc123/sites/s1/networks/devices", "fetching devices"},
+		{"port forwardings", "/openapi/v1/abc123/sites/s1/nat/port-forwardings", "fetching port forwardings"},
+		{"one-to-one", "/openapi/v1/abc123/sites/s1/nat/one-to-one-nat", "fetching one-to-one NAT rules"},
+		{"alg", "/openapi/v1/abc123/sites/s1/nat/alg", "fetching ALG settings"},
+		{"firewall", "/openapi/v1/abc123/sites/s1/firewall", "fetching firewall settings"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var unexpected strings.Builder
+			ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == tc.failPath {
+					writeOmadaEnvelope(w, -1010, `null`)
+					return
+				}
+				natReads(&unexpected)(w, r)
+			})
+			_, err := NewOmadaService().NatFacts(context.Background(), omadaNatOptions(ts))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("NatFacts error = %v, want %q prefix", err, tc.want)
+			}
+		})
+	}
+
+	// Session-establishment failure (login / site select) is returned raw.
+	t.Run("session", func(t *testing.T) {
+		ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/openapi/authorize/token" {
+				writeOmadaEnvelope(w, -44106, `null`) // token mint failed
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		})
+		if _, err := NewOmadaService().NatFacts(context.Background(), omadaNatOptions(ts)); err == nil {
+			t.Fatal("expected session error to propagate")
+		}
+	})
+}
+
+// Per-read service methods must wrap their failures with the same fetch
+// prefixes so error reporting is consistent across the API surface.
+func TestOmadaServiceListReads_Failures(t *testing.T) {
+	cases := []struct {
+		name, failPath, want string
+	}{
+		{"port forwardings", "/openapi/v1/abc123/sites/s1/nat/port-forwardings", "fetching port forwardings"},
+		{"one-to-one", "/openapi/v1/abc123/sites/s1/nat/one-to-one-nat", "fetching one-to-one NAT rules"},
+		{"alg", "/openapi/v1/abc123/sites/s1/nat/alg", "fetching ALG settings"},
+		{"firewall", "/openapi/v1/abc123/sites/s1/firewall", "fetching firewall settings"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/openapi/authorize/token":
+					writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+				case "/openapi/v1/abc123/sites":
+					writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+				default:
+					if r.URL.Path == tc.failPath {
+						writeOmadaEnvelope(w, -1010, `null`)
+						return
+					}
+					w.WriteHeader(http.StatusNotFound)
+				}
+			})
+			var (
+				err error
+				svc = NewOmadaService()
+			)
+			switch tc.name {
+			case "port forwardings":
+				_, err = svc.ListPortForwardings(context.Background(), omadaNatOptions(ts))
+			case "one-to-one":
+				_, err = svc.ListOneToOneNAT(context.Background(), omadaNatOptions(ts))
+			case "alg":
+				_, err = svc.GetALGSettings(context.Background(), omadaNatOptions(ts))
+			default:
+				_, err = svc.GetFirewallSettings(context.Background(), omadaNatOptions(ts))
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q prefix", err, tc.want)
+			}
+		})
+	}
+}
+
 // A partial NAT picture would mislead the double-NAT verdict, so a failure
 // on any read must surface as a hard error.
 func TestOmadaServiceNatFacts_HardError(t *testing.T) {
@@ -177,5 +269,35 @@ func TestOmadaServiceGetALGAndFirewall(t *testing.T) {
 	}
 	if fw.ICMP != 30 || fw.UDPStream != 0 || !fw.SynCookies {
 		t.Errorf("firewall = %+v", fw)
+	}
+}
+
+// A login failure (bad client credentials) must surface from every NAT read
+// method unchanged, before any NAT endpoint is touched.
+func TestOmadaServiceNatReads_SessionFailure(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, -44106, "null")
+		default:
+			t.Errorf("unexpected path %q after login failure", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	svc := NewOmadaService()
+	ctx := context.Background()
+
+	if _, err := svc.ListPortForwardings(ctx, omadaNatOptions(ts)); err == nil {
+		t.Error("ListPortForwardings: want error, got nil")
+	}
+	if _, err := svc.ListOneToOneNAT(ctx, omadaNatOptions(ts)); err == nil {
+		t.Error("ListOneToOneNAT: want error, got nil")
+	}
+	if _, err := svc.GetALGSettings(ctx, omadaNatOptions(ts)); err == nil {
+		t.Error("GetALGSettings: want error, got nil")
+	}
+	if _, err := svc.GetFirewallSettings(ctx, omadaNatOptions(ts)); err == nil {
+		t.Error("GetFirewallSettings: want error, got nil")
 	}
 }

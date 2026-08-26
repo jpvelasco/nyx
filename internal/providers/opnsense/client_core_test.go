@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -256,6 +257,54 @@ func TestDoCancelledContext(t *testing.T) {
 	}
 }
 
+// S1.9b — a cancelled context during the retry backoff ends the call with
+// the context error; the second request never starts. Cancellation is
+// deterministic: the handler holds the first request until the test signals
+// (past the first attempt, before the backoff sleep) and the main goroutine
+// cancels immediately on that signal.
+func TestDoCancelledDuringRetryBackoff(t *testing.T) {
+	var calls int32
+	first := make(chan struct{})
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			close(first)
+			time.Sleep(20 * time.Millisecond) // still inside the first attempt when cancel fires
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	c.retryBase = 200 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.do(ctx, http.MethodGet, "/x", nil)
+		done <- err
+	}()
+
+	select {
+	case <-first:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first request never reached the server")
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("do did not return after context cancellation")
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("requests = %d, want 1 (retry must not start after cancellation)", got)
+	}
+}
+
 // S1.10 — retries emit a structured event carrying method, path, attempt,
 // and delay; no event carries credentials or the controller host.
 func TestDoRetriesAreLogged(t *testing.T) {
@@ -339,6 +388,54 @@ func TestBackoffDelay(t *testing.T) {
 			t.Errorf("backoffDelay(%d, %v, %v) = %v, want %v", tc.attempt, tc.base, tc.max, got, tc.want)
 		}
 	}
+}
+
+// classifyRetry: stable failures and context errors fail fast; everything
+// else is transient and retried with backoff.
+func TestClassifyRetry(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want retryAction
+	}{
+		{"stable 401", &stableError{errors.New("authentication failed — check API key and secret")}, retryFail},
+		{"stable 404", &stableError{errors.New("resource not found")}, retryFail},
+		{"wrapped stable", fmt.Errorf("outer: %w", &stableError{errors.New("bad")}), retryFail},
+		{"context canceled", context.Canceled, retryFail},
+		{"context deadline exceeded", context.DeadlineExceeded, retryFail},
+		{"transient 5xx", errors.New("unexpected status 500 from OPNsense for /x"), retryBackoff},
+		{"transient transport", errors.New("connecting to OPNsense at gateway.local: connection refused"), retryBackoff},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyRetry(tc.err); got != tc.want {
+				t.Errorf("classifyRetry(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// sleepCtx: nil on a natural timeout, the context error when cancelled.
+func TestSleepCtx(t *testing.T) {
+	t.Run("returns nil when the timer fires", func(t *testing.T) {
+		if err := sleepCtx(context.Background(), 2*time.Millisecond); err != nil {
+			t.Fatalf("sleepCtx = %v, want nil", err)
+		}
+	})
+	t.Run("returns the context error when cancelled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := sleepCtx(ctx, 500*time.Millisecond); !errors.Is(err, context.Canceled) {
+			t.Fatalf("sleepCtx = %v, want context.Canceled", err)
+		}
+	})
+	t.Run("returns the deadline error when the deadline passes", func(t *testing.T) {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(1*time.Millisecond))
+		defer cancel()
+		if err := sleepCtx(ctx, 500*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("sleepCtx = %v, want context.DeadlineExceeded", err)
+		}
+	})
 }
 
 // fetchPagedList walks a paged OPNsense list endpoint
@@ -439,4 +536,98 @@ func TestFetchPagedList(t *testing.T) {
 			t.Errorf("error = %v, want decoding paged list response", err)
 		}
 	})
+
+	t.Run("full pages stop once total is reached", func(t *testing.T) {
+		var calls int32
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			n := atomic.AddInt32(&calls, 1)
+			testutil.WriteBody(w, fmt.Sprintf(`{"total":4,"rowCount":2,"current":%d,"rows":[{"n":1},{"n":2}]}`, n))
+		}))
+		var got []json.RawMessage
+		total, err := fetchPagedList(context.Background(), c, "/firewall/filter/searchRule", 2, &got)
+		if err != nil {
+			t.Fatalf("fetchPagedList: %v", err)
+		}
+		// Page 1 is full (2 of 2) with total=4: page 2 fetches the last two
+		// rows, and the walk stops on total — a third request would be a bug.
+		if total != 4 || len(got) != 4 {
+			t.Fatalf("total=%d rows=%d, want 4/4", total, len(got))
+		}
+		if gotCalls := atomic.LoadInt32(&calls); gotCalls != 2 {
+			t.Errorf("requests = %d, want 2", gotCalls)
+		}
+	})
+
+	t.Run("short page against rowCount stops the walk", func(t *testing.T) {
+		var calls int32
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&calls, 1)
+			// 2 rows with a declared rowCount of 3: shorter than the page
+			// size? no — exactly full — but shorter than the declared row
+			// count, which terminates the walk.
+			testutil.WriteBody(w, `{"total":0,"rowCount":3,"current":1,"rows":[{"n":1},{"n":2}]}`)
+		}))
+		var got []json.RawMessage
+		if _, err := fetchPagedList(context.Background(), c, "/firewall/filter/searchRule", 2, &got); err != nil {
+			t.Fatalf("fetchPagedList: %v", err)
+		}
+		if len(got) != 2 {
+			t.Errorf("rows = %d, want 2", len(got))
+		}
+		if gotCalls := atomic.LoadInt32(&calls); gotCalls != 1 {
+			t.Errorf("requests = %d, want 1 (walk must stop on short rowCount)", gotCalls)
+		}
+	})
+
+	t.Run("non-array rows is a decode error", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"total":1,"rowCount":1,"current":1,"rows":{"not":"array"}}`)
+		}))
+		var got []json.RawMessage
+		_, err := fetchPagedList(context.Background(), c, "/firewall/filter/searchRule", 200, &got)
+		if err == nil || !strings.Contains(err.Error(), "decoding paged list response") {
+			t.Errorf("error = %v, want decoding paged list response", err)
+		}
+	})
+
+	t.Run("page cap guards against non-terminating controllers", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Always a full page: the walk must hit the page cap, not loop.
+			testutil.WriteBody(w, `{"total":0,"rowCount":2,"current":99,"rows":[{"n":1},{"n":2}]}`)
+		}))
+		var got []json.RawMessage
+		_, err := fetchPagedList(context.Background(), c, "/firewall/filter/searchRule", 2, &got)
+		if err == nil || !strings.Contains(err.Error(), "did not terminate after 100 pages") {
+			t.Errorf("error = %v, want the page-cap error", err)
+		}
+	})
+
+	t.Run("do error surfaces from getJSON", func(t *testing.T) {
+		// A 404 is a stable error (no retries), so the fetch fails fast.
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			testutil.WriteBody(w, `{"message":"missing"}`)
+		}))
+		var got []json.RawMessage
+		_, err := fetchPagedList(context.Background(), c, "/firewall/missing", 200, &got)
+		if err == nil || !strings.Contains(err.Error(), "resource not found") {
+			t.Errorf("error = %v, want resource-not-found", err)
+		}
+	})
+}
+
+// A host that fails URL parsing (e.g. contains a space) makes
+// http.NewRequestWithContext fail before any network I/O: do() must wrap the
+// parse error without retrying.
+func TestDoRequestBuildFailure(t *testing.T) {
+	c := NewClient("bad host", "key", "secret", true, "")
+	_, err := c.do(context.Background(), http.MethodGet, "/x", nil)
+	if err == nil || !strings.Contains(err.Error(), "building request for /x") {
+		t.Fatalf("err = %v, want building-request error", err)
+	}
+}
+
+func TestDrainBodyNil(t *testing.T) {
+	// Must not panic on a nil body.
+	drainBody(nil)
 }

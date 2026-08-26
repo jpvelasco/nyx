@@ -2,11 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/service"
+	"github.com/jpvelasco/nyx/internal/testutil"
 	topology "github.com/jpvelasco/nyx/internal/topology"
 )
 
@@ -197,5 +203,240 @@ func TestPrintTopologyReport_UnknownMode(t *testing.T) {
 	}
 	if !strings.Contains(out, "managed gateway:    true") {
 		t.Errorf("output missing omada facts: %q", out)
+	}
+}
+
+// topoOpnsenseServer serves the minimal OPNsense NAT-observation endpoints a
+// topology RunE success test needs: the outbound-NAT mode plus empty rule
+// lists. TLS + basic auth, mirroring the service-layer fixture.
+func topoOpnsenseServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != "key1" || pass != "secret1" {
+			w.WriteHeader(http.StatusUnauthorized)
+			testutil.WriteBody(w, `{"message":"auth required"}`)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/firewall/filter_base/get":
+			testutil.WriteBody(w, `{"general":{"snat_mode":"disabled"}}`)
+		case "/api/firewall/d_nat/search_rule",
+			"/api/firewall/one_to_one/search_rule",
+			"/api/firewall/source_nat/search_rule":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestTopologyCmd_RunE_NoHost(t *testing.T) {
+	saveRestoreGlobals(t)
+	topoFlagsRestore(t)
+	clearTopoEnv(t)
+
+	rootCmd.SetArgs([]string{"topology"})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+	err := Execute()
+	if err == nil {
+		t.Fatal("expected error when neither provider has a host")
+	}
+	if !strings.Contains(err.Error(), "topology needs a host for at least one provider") {
+		t.Errorf("error = %v, want host guidance message", err)
+	}
+}
+
+func TestTopologyCmd_RunE_IncompleteCredentials(t *testing.T) {
+	saveRestoreGlobals(t)
+	topoFlagsRestore(t)
+	clearTopoEnv(t)
+
+	// OPNsense host via flag, no key/secret anywhere → hard error.
+	rootCmd.SetArgs([]string{"topology", "--opnsense-host", "10.0.0.9"})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+	err := Execute()
+	if err == nil {
+		t.Fatal("expected incomplete-credentials error")
+	}
+	if !strings.Contains(err.Error(), "opnsense credentials incomplete") {
+		t.Errorf("error = %v, want opnsense incomplete-credentials message", err)
+	}
+}
+
+func TestTopologyCmd_RunE_InvalidTimeout(t *testing.T) {
+	saveRestoreGlobals(t)
+	topoFlagsRestore(t)
+	clearTopoEnv(t)
+	timeout = "not-a-duration"
+
+	rootCmd.SetArgs([]string{"topology", "--opnsense-host", "10.0.0.9"})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+	err := Execute()
+	if err == nil || !strings.Contains(err.Error(), "invalid --timeout") {
+		t.Fatalf("error = %v, want invalid --timeout error", err)
+	}
+}
+
+func TestTopologyCmd_RunE_HumanAndJSON(t *testing.T) {
+	saveRestoreGlobals(t)
+	topoFlagsRestore(t)
+	clearTopoEnv(t)
+	ts := topoOpnsenseServer(t)
+
+	// duration 0 → default 60s branch.
+	rootCmd.SetArgs([]string{
+		"topology",
+		"--opnsense-host", ts.URL,
+		"--opnsense-api-key", "key1",
+		"--opnsense-api-secret", "secret1",
+		"--skip-tls-verify",
+		"--timeout", "0s",
+	})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+
+	out := captureStdout(func() {
+		if err := Execute(); err != nil {
+			t.Fatalf("Execute (human): %v", err)
+		}
+	})
+	for _, want := range []string{
+		"Double-NAT risk: none",
+		"opnsense: bridge",
+		"outbound NAT mode:  disabled",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("human output missing %q:\n%s", want, out)
+		}
+	}
+
+	// --json variant: the report must round-trip as JSON with the verdict.
+	rootCmd.SetArgs([]string{
+		"topology",
+		"--opnsense-host", ts.URL,
+		"--opnsense-api-key", "key1",
+		"--opnsense-api-secret", "secret1",
+		"--skip-tls-verify",
+		"--timeout", "5s",
+		"--json",
+	})
+	jsonOut := captureStdout(func() {
+		if err := Execute(); err != nil {
+			t.Fatalf("Execute (--json): %v", err)
+		}
+	})
+	var rep service.TopologyReport
+	if err := json.Unmarshal([]byte(jsonOut), &rep); err != nil {
+		t.Fatalf("json output did not decode: %v\n%s", err, jsonOut)
+	}
+	if rep.Risk != "none" || len(rep.Devices) != 1 || rep.Opnsense == nil {
+		t.Errorf("decoded report = %+v, want risk none + one device + opnsense facts", rep)
+	}
+	if rep.Opnsense.OutboundNatMode != "disabled" {
+		t.Errorf("outbound mode = %q, want disabled", rep.Opnsense.OutboundNatMode)
+	}
+}
+
+func TestTopologyCmd_RunE_OutputFile(t *testing.T) {
+	saveRestoreGlobals(t)
+	topoFlagsRestore(t)
+	clearTopoEnv(t)
+	ts := topoOpnsenseServer(t)
+
+	outFile := fmt.Sprintf("%s/topology.json", t.TempDir())
+	rootCmd.SetArgs([]string{
+		"topology",
+		"--opnsense-host", ts.URL,
+		"--opnsense-api-key", "key1",
+		"--opnsense-api-secret", "secret1",
+		"--skip-tls-verify",
+		"--json",
+		"--output", outFile,
+	})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+	if err := Execute(); err != nil {
+		t.Fatalf("Execute (--output): %v", err)
+	}
+
+	// File variant: verify the writer path was taken by reading the file back.
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("output file not written: %v", err)
+	}
+	var rep service.TopologyReport
+	if err := json.Unmarshal(data, &rep); err != nil {
+		t.Fatalf("file did not decode: %v\n%s", err, data)
+	}
+	if rep.Risk != "none" {
+		t.Errorf("risk = %q, want none", rep.Risk)
+	}
+}
+
+func TestTopologyCmd_RunE_OutputFileError(t *testing.T) {
+	saveRestoreGlobals(t)
+	topoFlagsRestore(t)
+	clearTopoEnv(t)
+	ts := topoOpnsenseServer(t)
+
+	// A non-existent directory makes getWriter fail after the report is built.
+	outFile := fmt.Sprintf("%s/no/such/dir/topology.txt", t.TempDir())
+	rootCmd.SetArgs([]string{
+		"topology",
+		"--opnsense-host", ts.URL,
+		"--opnsense-api-key", "key1",
+		"--opnsense-api-secret", "secret1",
+		"--skip-tls-verify",
+		"--output", outFile,
+	})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+	if err := Execute(); err == nil {
+		t.Fatal("expected getWriter error for unwritable output path")
+	}
+}
+
+// A present Omada host with incomplete credentials must fail the command
+// before any provider call (RunE's early return after resolveOmadaTopologyOpts).
+func TestTopologyCmd_RunE_OmadaIncompleteCredentials(t *testing.T) {
+	saveRestoreGlobals(t)
+	topoFlagsRestore(t)
+	clearTopoEnv(t)
+
+	rootCmd.SetArgs([]string{"topology", "--omada-host", "10.0.0.5"})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+	err := Execute()
+	if err == nil || !strings.Contains(err.Error(), "omada credentials incomplete") {
+		t.Fatalf("err = %v, want omada-credentials-incomplete", err)
+	}
+}
+
+// A report fetch failure must propagate as the command's error (RunE's
+// early return after TopologyService.Report).
+func TestTopologyCmd_RunE_ReportError(t *testing.T) {
+	saveRestoreGlobals(t)
+	topoFlagsRestore(t)
+	clearTopoEnv(t)
+
+	// 404 on every path is a stable error (no retries), so the report
+	// fails fast.
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		testutil.WriteBody(w, `{"message":"missing"}`)
+	}))
+	t.Cleanup(ts.Close)
+
+	rootCmd.SetArgs([]string{
+		"topology",
+		"--opnsense-host", ts.URL,
+		"--opnsense-api-key", "key1",
+		"--opnsense-api-secret", "secret1",
+		"--skip-tls-verify",
+	})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+	err := Execute()
+	if err == nil || !strings.Contains(err.Error(), "observing opnsense") {
+		t.Fatalf("err = %v, want observing-opnsense prefix", err)
 	}
 }

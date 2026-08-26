@@ -40,6 +40,30 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+// TestIsRole is the gate for role-based expected values: only the
+// classifiable roles qualify — an unknown mode is key drift, not a role.
+func TestIsRole(t *testing.T) {
+	cases := []struct {
+		value string
+		want  bool
+	}{
+		{"nat_router", true},
+		{"bridge", true},
+		{"indeterminate", true},
+		{"unknown", false},
+		{"", false},
+		{"automatic", false},
+		{"fortigate", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.value, func(t *testing.T) {
+			if got := IsRole(tc.value); got != tc.want {
+				t.Errorf("IsRole(%q) = %v, want %v", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestBuildReportRisk is the table test for the site-level double-NAT verdict.
 func TestBuildReportRisk(t *testing.T) {
 	cases := []struct {

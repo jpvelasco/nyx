@@ -2,6 +2,7 @@ package opnsense
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -252,6 +253,119 @@ func TestGetAliases(t *testing.T) {
 		_, err := c.GetAliases(context.Background())
 		if err == nil || !strings.Contains(err.Error(), "decoding aliases response") {
 			t.Errorf("error = %v, want decoding aliases response", err)
+		}
+	})
+
+	t.Run("404 endpoint", func(t *testing.T) {
+		// A 404 is a stable error (no retries), so the read fails fast.
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			testutil.WriteBody(w, `{"message":"missing"}`)
+		}))
+		_, err := c.GetAliases(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "resource not found") {
+			t.Errorf("error = %v, want resource-not-found", err)
+		}
+	})
+}
+
+// decodeNatRow edge cases: malformed rule elements are skipped (nil), the
+// address field backs up a missing network, and the "1"/"0" enabled string
+// wins over the bool flag when both are present.
+func TestDecodeNatRow_Edges(t *testing.T) {
+	t.Run("malformed rule element is skipped", func(t *testing.T) {
+		if r := decodeNatRow(json.RawMessage(`{"rule":["not-an-object"]}`)); r != nil {
+			t.Errorf("decodeNatRow = %+v, want nil", r)
+		}
+		if r := decodeNatRow(json.RawMessage(`{"rule":42}`)); r != nil {
+			t.Errorf("decodeNatRow = %+v, want nil", r)
+		}
+	})
+
+	t.Run("address backs up a missing network", func(t *testing.T) {
+		r := decodeNatRow(json.RawMessage(`{"rule":[{"uuid":"x","source":{"network":"","address":"10.0.40.99"},"destination":{"network":"","address":"203.0.113.9"}}]}`))
+		if r == nil {
+			t.Fatal("decodeNatRow = nil, want the rule with address fallback")
+		}
+		if r.Source != "10.0.40.99" || r.Destination != "203.0.113.9" {
+			t.Errorf("source=%q destination=%q, want the address fallback", r.Source, r.Destination)
+		}
+	})
+
+	t.Run("enabled string wins over the disabled bool", func(t *testing.T) {
+		r := decodeNatRow(json.RawMessage(`{"rule":[{"uuid":"x","disabled":false,"enabled":"0"}]}`))
+		if r == nil || !r.Disabled {
+			t.Errorf("decodeNatRow = %+v, want disabled (enabled=\"0\")", r)
+		}
+		r = decodeNatRow(json.RawMessage(`{"rule":[{"uuid":"x","disabled":true,"enabled":"1"}]}`))
+		if r == nil || r.Disabled {
+			t.Errorf("decodeNatRow = %+v, want enabled (enabled=\"1\")", r)
+		}
+	})
+}
+
+// rawRows: empty input and non-array input both yield no rows.
+func TestRawRows(t *testing.T) {
+	if got := rawRows(nil); got != nil {
+		t.Errorf("rawRows(nil) = %v, want nil", got)
+	}
+	if got := rawRows(json.RawMessage(`{"rows":"not-an-array"}`)); got != nil {
+		t.Errorf("rawRows(non-array) = %v, want nil", got)
+	}
+	if got := rawRows(json.RawMessage(`[{"a":1},{"b":2}]`)); len(got) != 2 {
+		t.Errorf("rawRows(array) = %v, want 2 rows", got)
+	}
+}
+
+// natRules propagates transport-level failures (404) without wrapping.
+func TestNatRules_RequestFailure(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	_, err := c.GetPortForwardRules(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "resource not found") {
+		t.Errorf("error = %v, want resource not found", err)
+	}
+}
+
+// S2.5 — GetFirewallRule decode failure.
+func TestGetFirewallRule_BadJSON(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		testutil.WriteBody(w, `not json`)
+	}))
+	_, err := c.GetFirewallRule(context.Background(), "u-123")
+	if err == nil || !strings.Contains(err.Error(), "decoding firewall rule response") {
+		t.Errorf("error = %v, want decoding firewall rule response", err)
+	}
+}
+
+// S2.10 — GetAliases: a malformed row is skipped, and a row without
+// details falls back to the comma-separated address field.
+func TestGetAliases_Rows(t *testing.T) {
+	t.Run("malformed row is skipped", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"total":2,"rows":[123,{"uuid":"a1","name":"WEB","type":"host","details":["10.0.40.10"],"enabled":"1"}]}`)
+		}))
+		aliases, err := c.GetAliases(context.Background())
+		if err != nil {
+			t.Fatalf("GetAliases: %v", err)
+		}
+		if len(aliases) != 1 || aliases[0].Name != "WEB" {
+			t.Errorf("aliases = %+v, want the single well-formed alias", aliases)
+		}
+	})
+
+	t.Run("address field splits on commas without details", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"a2","name":"PAIR","type":"host","address":"10.0.40.10,10.0.40.11","enabled":"1"}]}`)
+		}))
+		aliases, err := c.GetAliases(context.Background())
+		if err != nil {
+			t.Fatalf("GetAliases: %v", err)
+		}
+		if len(aliases) != 1 || len(aliases[0].Addresses) != 2 ||
+			aliases[0].Addresses[0] != "10.0.40.10" || aliases[0].Addresses[1] != "10.0.40.11" {
+			t.Errorf("aliases = %+v, want two addresses from the comma split", aliases)
 		}
 	})
 }

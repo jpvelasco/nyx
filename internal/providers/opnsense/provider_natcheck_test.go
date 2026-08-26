@@ -149,3 +149,44 @@ func TestProviderNatCheck(t *testing.T) {
 		}
 	})
 }
+
+// A failure on a rule read (after the mode read succeeds) must name that
+// specific read — the mode being fine does not make the verdict trustworthy.
+func TestProviderNatCheck_LaterReadFailures(t *testing.T) {
+	p := &Provider{}
+	for _, tc := range []struct {
+		failPath, want string
+	}{
+		{"/api/firewall/d_nat/search_rule", "reading port forward rules"},
+		{"/api/firewall/one_to_one/search_rule", "reading one-to-one rules"},
+		{"/api/firewall/source_nat/search_rule", "reading source NAT rules"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == tc.failPath {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				switch r.URL.Path {
+				case "/api/firewall/filter_base/get":
+					testutil.WriteBody(w, `{"general":{"snat_mode":"disabled"}}`)
+				case "/api/firewall/d_nat/search_rule",
+					"/api/firewall/one_to_one/search_rule",
+					"/api/firewall/source_nat/search_rule":
+					testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+				default:
+					t.Errorf("unexpected path %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			t.Cleanup(ts.Close)
+			res, err := p.NatCheck(context.Background(), providers.NatCheckRequest{ExpectMode: "bridge"}, natOpts(ts))
+			if err != nil {
+				t.Fatalf("NatCheck: %v", err)
+			}
+			if res.Status != "error" || !strings.Contains(res.Summary, tc.want) {
+				t.Errorf("status/summary = %s/%q, want %q", res.Status, res.Summary, tc.want)
+			}
+		})
+	}
+}

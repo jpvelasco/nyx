@@ -116,6 +116,16 @@ func TestGetOneToOneNAT(t *testing.T) {
 			t.Errorf("error = %v, want decoding paged list response", err)
 		}
 	})
+
+	t.Run("error envelope", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeEnvelope(w, 57, "permission denied", `null`)
+		}))
+		_, err := c.GetOneToOneNAT(context.Background(), "s1")
+		if err == nil || !strings.Contains(err.Error(), "one-to-one NAT rules") {
+			t.Errorf("error = %v, want a one-to-one NAT fetch error", err)
+		}
+	})
 }
 
 func TestGetALG(t *testing.T) {
@@ -142,6 +152,16 @@ func TestGetALG(t *testing.T) {
 		_, err := c.GetALG(context.Background(), "s1")
 		if err == nil || !strings.Contains(err.Error(), "decoding alg response") {
 			t.Errorf("error = %v, want decoding alg response", err)
+		}
+	})
+
+	t.Run("error envelope", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeEnvelope(w, 57, "permission denied", `null`)
+		}))
+		_, err := c.GetALG(context.Background(), "s1")
+		if err == nil || !strings.Contains(err.Error(), "ALG settings") {
+			t.Errorf("error = %v, want an ALG settings fetch error", err)
 		}
 	})
 }
@@ -175,4 +195,31 @@ func TestGetFirewallSettings(t *testing.T) {
 			t.Errorf("error = %v, want decoding firewall settings response", err)
 		}
 	})
+
+	t.Run("error envelope", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeEnvelope(w, 57, "permission denied", "null")
+		}))
+		_, err := c.GetFirewallSettings(context.Background(), "s1")
+		if err == nil || !strings.Contains(err.Error(), "could not fetch firewall settings") {
+			t.Errorf("error = %v, want fetch-failure wrapper", err)
+		}
+	})
+}
+
+func TestNatProtocol(t *testing.T) {
+	cases := []struct {
+		in   int
+		want string
+	}{
+		{0, "ALL"},
+		{1, "TCP"},
+		{2, "UDP"},
+		{9, "ALL"},
+	}
+	for _, tc := range cases {
+		if got := natProtocol(tc.in); got != tc.want {
+			t.Errorf("natProtocol(%d) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
 }
