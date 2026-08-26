@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	opnsensebackend "github.com/jpvelasco/nyx/internal/providers/opnsense"
 )
@@ -56,6 +57,44 @@ type OpnsenseClient struct {
 	MAC      string `json:"mac"`
 	IP       string `json:"ip"`
 	Hostname string `json:"hostname"`
+}
+
+// OpnsenseNatRule is a NAT rule (port forward, one-to-one, or source NAT)
+// in a flat, agent-friendly shape.
+type OpnsenseNatRule struct {
+	UUID        string   `json:"uuid"`
+	Enabled     bool     `json:"enabled"`
+	Interfaces  []string `json:"interfaces"`
+	Protocol    string   `json:"protocol"`
+	Source      string   `json:"source"`
+	Destination string   `json:"destination"`
+	Port        string   `json:"port,omitempty"`
+	LocalPort   string   `json:"local_port,omitempty"`
+	Target      string   `json:"target,omitempty"`
+	Mode        string   `json:"mode,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	SNATMode    string   `json:"snat_mode,omitempty"`
+	Label       string   `json:"label,omitempty"`
+}
+
+// OpnsenseNatSummary is the site's full NAT posture in one read: the
+// outbound (source) NAT mode plus every NAT rule set. The mode is the key
+// double-NAT signal — a transparent-proxy OPNsense reports "disabled".
+type OpnsenseNatSummary struct {
+	OutboundNatMode  string            `json:"outbound_nat_mode"`
+	PortForwardRules []OpnsenseNatRule `json:"port_forward_rules"`
+	OneToOneRules    []OpnsenseNatRule `json:"one_to_one_rules"`
+	SourceNatRules   []OpnsenseNatRule `json:"source_nat_rules"`
+}
+
+// OpnsenseAlias is a firewall address alias.
+type OpnsenseAlias struct {
+	UUID        string   `json:"uuid"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Addresses   []string `json:"addresses"`
+	Description string   `json:"description,omitempty"`
+	Disabled    bool     `json:"disabled"`
 }
 
 // OpnsenseService exposes the OPNsense observation surface shared by the MCP
@@ -142,6 +181,139 @@ func (s *OpnsenseService) ListClients(ctx context.Context, opts OpnsenseOptions)
 		out = append(out, OpnsenseClient{MAC: l.MAC, IP: l.IP, Hostname: l.Hostname})
 	}
 	return out, nil
+}
+
+// GetFirewallRule returns a single firewall rule by UUID.
+func (s *OpnsenseService) GetFirewallRule(ctx context.Context, opts OpnsenseOptions, uuid string) (*OpnsenseFirewallRule, error) {
+	client := s.client(opts)
+	rule, err := client.GetFirewallRule(ctx, uuid)
+	if err != nil {
+		return nil, err
+	}
+	return &OpnsenseFirewallRule{
+		UUID:        rule.RuleUUID,
+		Enabled:     !rule.Disabled,
+		Disabled:    rule.Disabled,
+		Action:      rule.Action,
+		Interfaces:  rule.Interface,
+		Protocol:    rule.Protocol,
+		Source:      rule.Source,
+		Destination: rule.Destination,
+		Label:       rule.Label,
+	}, nil
+}
+
+// flattenNat maps the client's flat NAT rows into the service shape.
+func flattenNat(rules []opnsensebackend.NatRule) []OpnsenseNatRule {
+	out := make([]OpnsenseNatRule, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, OpnsenseNatRule{
+			UUID:        r.RuleUUID,
+			Enabled:     !r.Disabled,
+			Interfaces:  r.Interface,
+			Protocol:    r.Protocol,
+			Source:      r.Source,
+			Destination: r.Destination,
+			Port:        r.Port,
+			LocalPort:   r.LocalPort,
+			Target:      r.Target,
+			Mode:        r.Mode,
+			Type:        r.Type,
+			SNATMode:    r.SNATMode,
+			Label:       r.Label,
+		})
+	}
+	return out
+}
+
+// ListPortForwardRules returns the destination-NAT (port forward) rules.
+func (s *OpnsenseService) ListPortForwardRules(ctx context.Context, opts OpnsenseOptions) ([]OpnsenseNatRule, error) {
+	client := s.client(opts)
+	rules, err := client.GetPortForwardRules(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching port forward rules: %w", err)
+	}
+	return flattenNat(rules), nil
+}
+
+// ListOneToOneRules returns the one-to-one NAT rules.
+func (s *OpnsenseService) ListOneToOneRules(ctx context.Context, opts OpnsenseOptions) ([]OpnsenseNatRule, error) {
+	client := s.client(opts)
+	rules, err := client.GetOneToOneRules(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching one-to-one rules: %w", err)
+	}
+	return flattenNat(rules), nil
+}
+
+// ListSourceNatRules returns the source-NAT rules, including the generic
+// outbound-NAT row that carries the snat_mode field.
+func (s *OpnsenseService) ListSourceNatRules(ctx context.Context, opts OpnsenseOptions) ([]OpnsenseNatRule, error) {
+	client := s.client(opts)
+	rules, err := client.GetSourceNatRules(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching source NAT rules: %w", err)
+	}
+	return flattenNat(rules), nil
+}
+
+// ListAliases returns all firewall aliases.
+func (s *OpnsenseService) ListAliases(ctx context.Context, opts OpnsenseOptions) ([]OpnsenseAlias, error) {
+	client := s.client(opts)
+	aliases, err := client.GetAliases(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching aliases: %w", err)
+	}
+	out := make([]OpnsenseAlias, 0, len(aliases))
+	for _, a := range aliases {
+		out = append(out, OpnsenseAlias{
+			UUID:        a.UUID,
+			Name:        a.Name,
+			Type:        a.Type,
+			Addresses:   a.Addresses,
+			Description: a.Description,
+			Disabled:    a.Disabled,
+		})
+	}
+	return out, nil
+}
+
+// GetOutboundNatMode returns the outbound (source) NAT mode — one of
+// automatic|hybrid|advanced|disabled. It is the key double-NAT signal.
+func (s *OpnsenseService) GetOutboundNatMode(ctx context.Context, opts OpnsenseOptions) (string, error) {
+	client := s.client(opts)
+	mode, err := client.GetOutboundNatMode(ctx)
+	if err != nil {
+		return "", fmt.Errorf("fetching outbound NAT mode: %w", err)
+	}
+	return mode, nil
+}
+
+// GetNAT returns the full NAT posture in one call: outbound mode + every NAT
+// rule set. A failure on any read is surfaced — a partial NAT picture would
+// mislead the double-NAT verdict.
+func (s *OpnsenseService) GetNAT(ctx context.Context, opts OpnsenseOptions) (*OpnsenseNatSummary, error) {
+	client := s.client(opts)
+	mode, err := client.GetOutboundNatMode(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching outbound NAT mode: %w", err)
+	}
+	var pf, o2o, snat []opnsensebackend.NatRule
+	if pf, err = client.GetPortForwardRules(ctx); err != nil {
+		return nil, fmt.Errorf("fetching port forward rules: %w", err)
+	}
+	if o2o, err = client.GetOneToOneRules(ctx); err != nil {
+		return nil, fmt.Errorf("fetching one-to-one rules: %w", err)
+	}
+	if snat, err = client.GetSourceNatRules(ctx); err != nil {
+		return nil, fmt.Errorf("fetching source NAT rules: %w", err)
+	}
+	return &OpnsenseNatSummary{
+		OutboundNatMode:  mode,
+		PortForwardRules: flattenNat(pf),
+		OneToOneRules:    flattenNat(o2o),
+		SourceNatRules:   flattenNat(snat),
+	}, nil
 }
 
 func (s *OpnsenseService) client(opts OpnsenseOptions) *opnsensebackend.Client {

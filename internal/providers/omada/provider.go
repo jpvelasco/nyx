@@ -224,6 +224,88 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 	return result, nil
 }
 
+// NatCheck reads the site's NAT posture and evaluates it against the
+// expected value. Omada exposes no outbound NAT mode — only managed-gateway
+// presence and rule counts — so only the "present" expectation is
+// definitive; mode expectations are reported as warn (observe the opnsense
+// posture instead).
+func (o *OmadaProvider) NatCheck(ctx context.Context, req providers.NatCheckRequest, opts providers.ImportOptions) (*models.CheckResult, error) {
+	result := models.NewCheckResult("omada", "nat_check", "omada", req.ExpectMode)
+	result.Expected["nat_mode"] = req.ExpectMode
+
+	client, err := omadabackend.NewClient(ctx, opts.Host, opts.SkipTLSVerify, opts.CACertPath)
+	if err != nil {
+		return natCheckResult(result, "failed to connect to Omada: %v", err), nil
+	}
+	client.SetLogger(opts.Logger)
+	if err := client.Login(ctx, opts.ClientID, opts.ClientSecret); err != nil {
+		return natCheckResult(result, "Omada token mint failed: %v", err), nil
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+
+	sites, err := client.GetSites(ctx)
+	if err != nil {
+		return natCheckResult(result, "failed to fetch sites: %v", err), nil
+	}
+	site, err := omadabackend.SelectSite(sites, opts.Site)
+	if err != nil {
+		return natCheckResult(result, "%v", err), nil
+	}
+	siteID := site.EffectiveID()
+
+	devices, err := client.GetDevices(ctx, siteID)
+	if err != nil {
+		return natCheckResult(result, "fetching devices: %v", err), nil
+	}
+	pfs, err := client.GetPortForwardings(ctx, siteID)
+	if err != nil {
+		return natCheckResult(result, "fetching port-forwarding rules: %v", err), nil
+	}
+	o2o, err := client.GetOneToOneNAT(ctx, siteID)
+	if err != nil {
+		return natCheckResult(result, "fetching one-to-one NAT rules: %v", err), nil
+	}
+	result.Finish()
+
+	var hasGateway bool
+	for _, d := range devices {
+		if d.IsGateway() {
+			hasGateway = true
+			break
+		}
+	}
+	result.Observed["managed_gateway"] = hasGateway
+	result.Observed["site"] = site.Name
+	result.Observed["port_forward_rules"] = len(pfs)
+	result.Observed["one_to_one_rules"] = len(o2o)
+
+	switch {
+	case hasGateway && req.ExpectMode == "present":
+		result.Status = models.StatusPass
+		result.Summary = fmt.Sprintf("managed gateway present in site %s (port forward rules: %d, one-to-one rules: %d)", site.Name, len(pfs), len(o2o))
+	case !hasGateway && req.ExpectMode == "present":
+		result.Status = models.StatusFail
+		result.Violations = append(result.Violations, "no managed gateway device in site; outbound NAT mode cannot be assessed")
+		result.Summary = fmt.Sprintf("no managed gateway in site %s", site.Name)
+	case !hasGateway:
+		result.Status = models.StatusWarn
+		result.Summary = fmt.Sprintf("no managed gateway in site %s — expect %q is not evaluable for Omada; observe the opnsense posture instead", site.Name, req.ExpectMode)
+	default:
+		result.Status = models.StatusWarn
+		result.Summary = fmt.Sprintf("Omada site %s has a managed gateway; expect %q refers to an outbound NAT mode that Omada does not expose — use provider: opnsense for mode checks", site.Name, req.ExpectMode)
+	}
+	return result, nil
+}
+
+// natCheckResult finishes a failed NatCheck read with a StatusError and the
+// given formatted summary.
+func natCheckResult(result *models.CheckResult, format string, args ...any) *models.CheckResult {
+	result.Status = models.StatusError
+	result.Summary = fmt.Sprintf(format, args...)
+	result.Finish()
+	return result
+}
+
 // aclCheckMatch identifies the rule a policy refers to and the scope that
 // rule lives in.
 type aclCheckMatch struct {
@@ -261,6 +343,7 @@ func lookupACLMatch(rules []omadabackend.ACLRule, req providers.ACLCheckRequest)
 var _ providers.Provider = (*OmadaProvider)(nil)
 var _ providers.ACLApplier = (*OmadaProvider)(nil)
 var _ providers.InventoryProvider = (*OmadaProvider)(nil)
+var _ providers.NatChecker = (*OmadaProvider)(nil)
 
 func init() {
 	_ = providers.Register(&OmadaProvider{})

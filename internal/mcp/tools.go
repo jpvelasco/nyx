@@ -20,28 +20,38 @@ type toolHandler func(*Server, context.Context, map[string]interface{}) toolDisp
 // toolHandlers routes tool names to their implementations. Adding a tool
 // means writing one method and adding one entry here.
 var toolHandlers = map[string]toolHandler{
-	"discover_subnet":              (*Server).toolDiscoverSubnet,
-	"check_routes":                 (*Server).toolCheckRoutes,
-	"check_vpn":                    (*Server).toolCheckVPN,
-	"verify_isolation":             (*Server).toolVerifyIsolation,
-	"run_audit":                    (*Server).toolRunAudit,
-	"load_spec":                    (*Server).toolLoadSpec,
-	"get_interfaces":               (*Server).toolGetInterfaces,
-	"ping_target":                  (*Server).toolPingTarget,
-	"run_doctor":                   (*Server).toolRunDoctor,
-	"provider_list":                (*Server).toolProviderList,
-	"omada_get_info":               (*Server).toolOmadaGetInfo,
-	"omada_list_networks":          (*Server).toolOmadaListNetworks,
-	"omada_list_acls":              (*Server).toolOmadaListACLs,
-	"omada_list_clients":           (*Server).toolOmadaListClients,
-	"omada_inventory":              (*Server).toolOmadaInventory,
-	"omada_import":                 (*Server).toolOmadaImport,
-	"omada_plan":                   (*Server).toolOmadaPlan,
-	"omada_apply_acl":              (*Server).toolOmadaApplyACL,
-	"opnsense_get_info":            (*Server).toolOpnsenseGetInfo,
-	"opnsense_list_interfaces":     (*Server).toolOpnsenseListInterfaces,
-	"opnsense_list_firewall_rules": (*Server).toolOpnsenseListFirewallRules,
-	"opnsense_list_clients":        (*Server).toolOpnsenseListClients,
+	"discover_subnet":                  (*Server).toolDiscoverSubnet,
+	"check_routes":                     (*Server).toolCheckRoutes,
+	"check_vpn":                        (*Server).toolCheckVPN,
+	"verify_isolation":                 (*Server).toolVerifyIsolation,
+	"run_audit":                        (*Server).toolRunAudit,
+	"load_spec":                        (*Server).toolLoadSpec,
+	"get_interfaces":                   (*Server).toolGetInterfaces,
+	"ping_target":                      (*Server).toolPingTarget,
+	"run_doctor":                       (*Server).toolRunDoctor,
+	"provider_list":                    (*Server).toolProviderList,
+	"omada_get_info":                   (*Server).toolOmadaGetInfo,
+	"omada_list_networks":              (*Server).toolOmadaListNetworks,
+	"omada_list_acls":                  (*Server).toolOmadaListACLs,
+	"omada_list_clients":               (*Server).toolOmadaListClients,
+	"omada_inventory":                  (*Server).toolOmadaInventory,
+	"omada_import":                     (*Server).toolOmadaImport,
+	"omada_plan":                       (*Server).toolOmadaPlan,
+	"omada_apply_acl":                  (*Server).toolOmadaApplyACL,
+	"omada_list_port_forwardings":      (*Server).toolOmadaListPortForwardings,
+	"omada_list_one_to_one_nat":        (*Server).toolOmadaListOneToOneNAT,
+	"omada_get_nat_settings":           (*Server).toolOmadaGetNatSettings,
+	"omada_nat_facts":                  (*Server).toolOmadaNatFacts,
+	"opnsense_get_info":                (*Server).toolOpnsenseGetInfo,
+	"opnsense_list_interfaces":         (*Server).toolOpnsenseListInterfaces,
+	"opnsense_list_firewall_rules":     (*Server).toolOpnsenseListFirewallRules,
+	"opnsense_list_clients":            (*Server).toolOpnsenseListClients,
+	"opnsense_list_port_forward_rules": (*Server).toolOpnsenseListPortForwardRules,
+	"opnsense_list_one_to_one_rules":   (*Server).toolOpnsenseListOneToOneRules,
+	"opnsense_list_source_nat_rules":   (*Server).toolOpnsenseListSourceNatRules,
+	"opnsense_list_aliases":            (*Server).toolOpnsenseListAliases,
+	"opnsense_get_nat":                 (*Server).toolOpnsenseGetNAT,
+	"topology":                         (*Server).toolTopology,
 }
 
 func (s *Server) toolDiscoverSubnet(ctx context.Context, args map[string]interface{}) toolDispatchResult {
@@ -359,6 +369,64 @@ func (s *Server) toolOmadaApplyACL(ctx context.Context, args map[string]interfac
 	return okResult(toJSON(res))
 }
 
+func (s *Server) toolOmadaListPortForwardings(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	pfs, err := s.omadaSvc.ListPortForwardings(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("omada port forwardings request failed: %v", err))
+	}
+	return okResult(toJSON(pfs))
+}
+
+func (s *Server) toolOmadaListOneToOneNAT(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	rules, err := s.omadaSvc.ListOneToOneNAT(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("omada one-to-one NAT request failed: %v", err))
+	}
+	return okResult(toJSON(rules))
+}
+
+// toolOmadaGetNatSettings reads the Omada ALG and firewall settings and
+// returns both in one flat response.
+func (s *Server) toolOmadaGetNatSettings(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	type natSettings struct {
+		ALG      *service.OmadaALGSettings      `json:"alg"`
+		Firewall *service.OmadaFirewallSettings `json:"firewall"`
+	}
+	alg, err := s.omadaSvc.GetALGSettings(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("omada ALG settings request failed: %v", err))
+	}
+	fw, err := s.omadaSvc.GetFirewallSettings(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("omada firewall settings request failed: %v", err))
+	}
+	return okResult(toJSON(natSettings{ALG: alg, Firewall: fw}))
+}
+
+func (s *Server) toolOmadaNatFacts(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	facts, err := s.omadaSvc.NatFacts(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("omada nat facts request failed: %v", err))
+	}
+	return okResult(toJSON(facts))
+}
+
 func (s *Server) toolOpnsenseGetInfo(ctx context.Context, args map[string]interface{}) toolDispatchResult {
 	opts, msg := s.opnsenseOptionsFromArgs(args, true)
 	if msg != "" {
@@ -405,4 +473,105 @@ func (s *Server) toolOpnsenseListClients(ctx context.Context, args map[string]in
 		return errResult(fmt.Sprintf("opnsense clients request failed: %v", err))
 	}
 	return okResult(toJSON(clients))
+}
+
+func (s *Server) toolOpnsenseListPortForwardRules(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	rules, err := s.opnsenseSvc.ListPortForwardRules(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense port forward rules request failed: %v", err))
+	}
+	return okResult(toJSON(rules))
+}
+
+func (s *Server) toolOpnsenseListOneToOneRules(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	rules, err := s.opnsenseSvc.ListOneToOneRules(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense one-to-one rules request failed: %v", err))
+	}
+	return okResult(toJSON(rules))
+}
+
+func (s *Server) toolOpnsenseListSourceNatRules(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	rules, err := s.opnsenseSvc.ListSourceNatRules(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense source NAT rules request failed: %v", err))
+	}
+	return okResult(toJSON(rules))
+}
+
+func (s *Server) toolOpnsenseListAliases(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	aliases, err := s.opnsenseSvc.ListAliases(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense aliases request failed: %v", err))
+	}
+	return okResult(toJSON(aliases))
+}
+
+func (s *Server) toolOpnsenseGetNAT(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	nat, err := s.opnsenseSvc.GetNAT(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense NAT posture request failed: %v", err))
+	}
+	return okResult(toJSON(nat))
+}
+
+// toolTopology reports NAT posture across the configured providers. A
+// provider is skipped (not an error) when no host is configured for it;
+// when both are skipped the call fails with a guidance message.
+func (s *Server) toolTopology(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	var (
+		omadaOpts *service.OmadaOptions
+		opnsOpts  *service.OpnsenseOptions
+	)
+	if o, msg := s.omadaOptionsFromArgs(subArgs(args, "omada_"), true); msg == "" {
+		omadaOpts = &o
+	} else if msg != requiredHostMsg {
+		return errResult(msg)
+	}
+	if o, msg := s.opnsenseOptionsFromArgs(subArgs(args, "opnsense_"), true); msg == "" {
+		opnsOpts = &o
+	} else if msg != requiredHostMsg {
+		return errResult(msg)
+	}
+	if omadaOpts == nil && opnsOpts == nil {
+		return errResult("topology requires a host for at least one provider: set omada_host or opnsense_host (or the OMADA_HOST / OPNSENSE_HOST environment variables or the credential store)")
+	}
+	rep, err := s.topoSvc.Report(ctx, service.TopologyOptions{Omada: omadaOpts, Opnsense: opnsOpts})
+	if err != nil {
+		return errResult(fmt.Sprintf("topology report failed: %v", err))
+	}
+	return okResult(toJSON(rep))
+}
+
+// subArgs remaps prefixed topology arguments (e.g. omada_host) onto the
+// bare keys the per-provider options builders expect (host, client_id, ...).
+func subArgs(args map[string]interface{}, prefix string) map[string]interface{} {
+	known := []string{"host", "client_id", "client_secret", "site", "api_key", "api_secret", "skip_tls_verify", "ca_cert_path"}
+	sub := make(map[string]interface{}, len(known))
+	for _, k := range known {
+		if v, ok := args[prefix+k]; ok {
+			sub[k] = v
+		}
+	}
+	return sub
 }

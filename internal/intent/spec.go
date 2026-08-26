@@ -123,6 +123,7 @@ type Assertion struct {
 	ExpectMTU       int     `yaml:"expect_mtu,omitempty" json:"expect_mtu,omitempty"`
 	Provider        string  `yaml:"provider,omitempty" json:"provider,omitempty"`
 	Policy          string  `yaml:"policy,omitempty" json:"policy,omitempty"`
+	NatMode         string  `yaml:"nat_mode,omitempty" json:"nat_mode,omitempty"`
 	Runner          string  `yaml:"runner,omitempty" json:"runner,omitempty"`
 }
 
@@ -276,6 +277,7 @@ var assertionValidators = map[string]func(int, *Assertion) error{
 	"dns_check":        validateDNSCheckAssertion,
 	"network_health":   validateNetworkHealthAssertion,
 	"acl_check":        validateACLCheckAssertion,
+	"nat_check":        validateNatCheckAssertion,
 }
 
 func validateSubnetDiscoveryAssertion(i int, a *Assertion) error {
@@ -356,6 +358,27 @@ func validateACLCheckAssertion(i int, a *Assertion) error {
 		return fmt.Errorf("assertion[%d]: acl_check requires 'expect' (enforced or not_enforced)", i)
 	}
 	return nil
+}
+
+// validateNatCheckAssertion enforces the nat_check field contract: provider
+// (omada|opnsense) and nat_mode (automatic|hybrid|advanced|disabled|
+// nat_router|bridge|indeterminate|unknown|present). Unknown expect values
+// are rejected here rather than evaluated at run time.
+func validateNatCheckAssertion(i int, a *Assertion) error {
+	if a.Provider == "" || (a.Provider != "omada" && a.Provider != "opnsense") {
+		return fmt.Errorf("assertion[%d]: nat_check requires 'provider' (omada or opnsense)", i)
+	}
+	if a.NatMode == "" || !natCheckModes[a.NatMode] {
+		return fmt.Errorf("assertion[%d]: nat_check requires 'nat_mode' (automatic, hybrid, advanced, disabled, nat_router, bridge, indeterminate, unknown, or present)", i)
+	}
+	return nil
+}
+
+// natCheckModes is the accepted set for the nat_check nat_mode field.
+var natCheckModes = map[string]bool{
+	"automatic": true, "hybrid": true, "advanced": true, "disabled": true,
+	"nat_router": true, "bridge": true, "indeterminate": true,
+	"unknown": true, "present": true,
 }
 
 func validateAssertions(assertions []Assertion, probeNames map[string]bool) error {

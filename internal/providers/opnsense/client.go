@@ -11,7 +11,10 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/jpvelasco/nyx/internal/logger"
 )
 
 // FirmwareInfoResponse holds the firmware version, name, and architecture from OPNsense.
@@ -55,11 +58,22 @@ type DHCPLease struct {
 
 // Client is a read-only OPNsense API client using API key/secret auth.
 // TLS verification is enabled by default; use NewClient options to customize.
+//
+// The client is safe for concurrent use: requests are serialised internally.
+// The API is stateless (no session, token, or re-login), so a 401 is always a
+// stable credential failure and is never retried. Transient failures (network
+// errors, HTTP 5xx) are retried with exponential backoff.
 type Client struct {
-	host       string
-	apiKey     string
-	apiSecret  string
-	httpClient *http.Client
+	mu            sync.Mutex
+	host          string
+	apiKey        string
+	apiSecret     string
+	httpClient    *http.Client
+	log           *logger.Logger
+	Debug         bool // when true, raw API responses are printed to stderr
+	maxRetries    int
+	retryBase     time.Duration
+	retryMaxDelay time.Duration
 }
 
 // NewClient creates an OPNsense client. No network calls are made here.
@@ -70,9 +84,12 @@ func NewClient(host, apiKey, apiSecret string, skipTLSVerify bool, caCertPath st
 	host = strings.TrimPrefix(host, "http://")
 	host = strings.TrimRight(host, "/")
 	return &Client{
-		host:      host,
-		apiKey:    apiKey,
-		apiSecret: apiSecret,
+		host:          host,
+		apiKey:        apiKey,
+		apiSecret:     apiSecret,
+		maxRetries:    defaultMaxRetries,
+		retryBase:     defaultRetryBase,
+		retryMaxDelay: maxRetryDelay,
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 			Transport: &http.Transport{
@@ -83,27 +100,9 @@ func NewClient(host, apiKey, apiSecret string, skipTLSVerify bool, caCertPath st
 }
 
 // doRequest performs an authenticated GET request to the OPNsense API.
+// Kept as a thin wrapper over do so existing callers read naturally.
 func (c *Client) doRequest(ctx context.Context, path string) (*http.Response, error) {
-	url := fmt.Sprintf("https://%s/api%s", c.host, path)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.SetBasicAuth(c.apiKey, c.apiSecret)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("connecting to OPNsense at %s: %w", c.host, err)
-	}
-	if resp.StatusCode == http.StatusUnauthorized {
-		resp.Body.Close() // #nosec G104 — close error unactionable in error path
-		return nil, fmt.Errorf("authentication failed — check API key and secret")
-	}
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		return nil, fmt.Errorf("unexpected status %d from OPNsense for %s", resp.StatusCode, path)
-	}
-	return resp, nil
+	return c.do(ctx, http.MethodGet, path, nil)
 }
 
 // GetFirmwareInfo returns the running firmware version from the controller.

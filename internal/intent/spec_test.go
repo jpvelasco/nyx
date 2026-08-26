@@ -307,6 +307,52 @@ func TestValidateSpec_ACLCheckValid(t *testing.T) {
 	}
 }
 
+func TestValidateSpec_NatCheckMissingProvider(t *testing.T) {
+	spec := &Spec{Version: 1, Site: "test",
+		Assertions: []Assertion{{Type: "nat_check", NatMode: "disabled"}}}
+	err := ValidateSpec(spec)
+	if err == nil || !contains(err.Error(), "provider") {
+		t.Errorf("error = %v, want provider required", err)
+	}
+}
+
+func TestValidateSpec_NatCheckBadProvider(t *testing.T) {
+	spec := &Spec{Version: 1, Site: "test",
+		Assertions: []Assertion{{Type: "nat_check", Provider: "fortinet", NatMode: "disabled"}}}
+	if err := ValidateSpec(spec); err == nil {
+		t.Fatal("expected error for unsupported provider")
+	}
+}
+
+func TestValidateSpec_NatCheckMissingMode(t *testing.T) {
+	spec := &Spec{Version: 1, Site: "test",
+		Assertions: []Assertion{{Type: "nat_check", Provider: "opnsense"}}}
+	err := ValidateSpec(spec)
+	if err == nil || !contains(err.Error(), "nat_mode") {
+		t.Errorf("error = %v, want nat_mode required", err)
+	}
+}
+
+func TestValidateSpec_NatCheckBadMode(t *testing.T) {
+	spec := &Spec{Version: 1, Site: "test",
+		Assertions: []Assertion{{Type: "nat_check", Provider: "opnsense", NatMode: "turbo"}}}
+	if err := ValidateSpec(spec); err == nil {
+		t.Fatal("expected error for invalid nat_mode")
+	}
+}
+
+func TestValidateSpec_NatCheckValid(t *testing.T) {
+	spec := &Spec{Version: 1, Site: "test",
+		Assertions: []Assertion{
+			{Type: "nat_check", Provider: "opnsense", NatMode: "disabled"},
+			{Type: "nat_check", Provider: "opnsense", NatMode: "bridge"},
+			{Type: "nat_check", Provider: "omada", NatMode: "present"},
+		}}
+	if err := ValidateSpec(spec); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateSpec_InventoryValid(t *testing.T) {
 	spec := &Spec{Version: 1, Site: "test", Inventory: &Inventory{
 		ControllerVersion: "6.4.5.1",

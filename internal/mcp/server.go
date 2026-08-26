@@ -14,7 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jpvelasco/nyx/internal/audit"
 	"github.com/jpvelasco/nyx/internal/credentials"
+	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/storepath"
@@ -113,6 +115,11 @@ type omadaSurface interface {
 	Import(ctx context.Context, opts service.OmadaOptions) (*service.OmadaImport, error)
 	Plan(ctx context.Context, opts service.OmadaOptions, proposedYAML string) (*service.OmadaPlan, error)
 	ApplyACL(ctx context.Context, opts service.OmadaOptions, req service.OmadaACLApplyRequest) (*service.OmadaACLApplyResult, error)
+	ListPortForwardings(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaPortForwarding, error)
+	ListOneToOneNAT(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaOneToOneNAT, error)
+	GetALGSettings(ctx context.Context, opts service.OmadaOptions) (*service.OmadaALGSettings, error)
+	GetFirewallSettings(ctx context.Context, opts service.OmadaOptions) (*service.OmadaFirewallSettings, error)
+	NatFacts(ctx context.Context, opts service.OmadaOptions) (*service.OmadaNatFacts, error)
 }
 
 // opnsenseSurface is the OPNsense observation surface exposed to agents.
@@ -121,6 +128,18 @@ type opnsenseSurface interface {
 	ListInterfaces(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseInterface, error)
 	ListFirewallRules(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseFirewallRule, error)
 	ListClients(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseClient, error)
+	ListPortForwardRules(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseNatRule, error)
+	ListOneToOneRules(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseNatRule, error)
+	ListSourceNatRules(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseNatRule, error)
+	ListAliases(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseAlias, error)
+	GetOutboundNatMode(ctx context.Context, opts service.OpnsenseOptions) (string, error)
+	GetNAT(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseNatSummary, error)
+}
+
+// topologySurface is the cross-provider topology assessment exposed to
+// agents: per-provider NAT posture plus the double-NAT risk verdict.
+type topologySurface interface {
+	Report(ctx context.Context, opts service.TopologyOptions) (*service.TopologyReport, error)
 }
 
 // Server is the MCP stdio server
@@ -131,6 +150,7 @@ type Server struct {
 	checkSvc    *service.CheckService
 	omadaSvc    omadaSurface
 	opnsenseSvc opnsenseSurface
+	topoSvc     topologySurface
 	// credEnv reads the Omada credential env vars (keys OMADA_HOST /
 	// OMADA_CLIENT_ID / OMADA_CLIENT_SECRET / OMADA_SITE) and opnsenseCredEnv
 	// the OPNsense ones (OPNSENSE_HOST / OPNSENSE_API_KEY /
@@ -141,12 +161,17 @@ type Server struct {
 
 // NewServer creates a new MCP server
 func NewServer() *Server {
+	omadaSvc := service.NewOmadaService()
+	omadaSvc.PostAudit = func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
+		return audit.NewEngine(spec).Run(ctx)
+	}
 	return &Server{
 		reader:          os.Stdin,
 		writer:          os.Stdout,
 		checkSvc:        service.NewCheckService(),
-		omadaSvc:        service.NewOmadaService(),
+		omadaSvc:        omadaSvc,
 		opnsenseSvc:     service.NewOpnsenseService(),
+		topoSvc:         service.NewTopologyService(),
 		credEnv:         map[string]func(string) string{"OMADA_HOST": os.Getenv, "OMADA_CLIENT_ID": os.Getenv, "OMADA_CLIENT_SECRET": os.Getenv, "OMADA_SITE": os.Getenv},
 		opnsenseCredEnv: map[string]func(string) string{"OPNSENSE_HOST": os.Getenv, "OPNSENSE_API_KEY": os.Getenv, "OPNSENSE_API_SECRET": os.Getenv},
 	}
@@ -413,182 +438,132 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		{
 			Name:        "omada_list_networks",
 			Description: "List LAN networks/VLANs configured on an Omada SDN controller site.",
-			InputSchema: inputSchema{
-				Type: "object",
-				Properties: map[string]propSchema{
-					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"client_id":       {Type: "string", Description: "Omada Open API client ID"},
-					"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
-					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
-					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
-					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
-				},
-				Required: []string{"host"},
-			},
+			InputSchema: omadaToolSchema(),
 		},
 		{
 			Name:        "omada_list_acls",
 			Description: "List ACL (firewall) rules, including gateway ACLs, on an Omada SDN controller site.",
-			InputSchema: inputSchema{
-				Type: "object",
-				Properties: map[string]propSchema{
-					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"client_id":       {Type: "string", Description: "Omada Open API client ID"},
-					"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
-					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
-					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
-					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
-				},
-				Required: []string{"host"},
-			},
+			InputSchema: omadaToolSchema(),
 		},
 		{
 			Name:        "omada_list_clients",
 			Description: "List currently connected clients on an Omada SDN controller site.",
-			InputSchema: inputSchema{
-				Type: "object",
-				Properties: map[string]propSchema{
-					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"client_id":       {Type: "string", Description: "Omada Open API client ID"},
-					"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
-					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
-					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
-					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
-				},
-				Required: []string{"host"},
-			},
+			InputSchema: omadaToolSchema(),
 		},
 		{
 			Name:        "omada_inventory",
 			Description: "Observe the Omada site point-in-time: managed devices (with firmware + upgrade flags), LAN networks with their gateway bindings, both ACL scopes and their rule counts, and the active client count. Read-only.",
-			InputSchema: inputSchema{
-				Type: "object",
-				Properties: map[string]propSchema{
-					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"client_id":       {Type: "string", Description: "Omada Open API client ID"},
-					"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
-					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
-					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
-					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
-				},
-				Required: []string{"host"},
-			},
+			InputSchema: omadaToolSchema(),
 		},
 		{
 			Name:        "omada_import",
 			Description: "Import the Omada controller state into an intent spec (networks, policies, assertions) for the selected site.",
-			InputSchema: inputSchema{
-				Type: "object",
-				Properties: map[string]propSchema{
-					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"client_id":       {Type: "string", Description: "Omada Open API client ID"},
-					"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
-					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
-					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
-					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
-				},
-				Required: []string{"host"},
-			},
+			InputSchema: omadaToolSchema(),
 		},
 		{
 			Name:        "omada_plan",
 			Description: "Preview the difference between the controller's current ACL rules and a proposed intent spec. Read-only: nothing is applied.",
-			InputSchema: inputSchema{
-				Type: "object",
-				Properties: map[string]propSchema{
-					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"client_id":       {Type: "string", Description: "Omada Open API client ID"},
-					"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
-					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
-					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
-					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
-					"spec":            {Type: "string", Description: "Proposed intent spec (YAML): networks and policies to preview"},
-				},
-				Required: []string{"host", "spec"},
-			},
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"spec": {Type: "string", Description: "Proposed intent spec (YAML): networks and policies to preview"},
+			}, []string{"host", "spec"}),
 		},
 		{
 			Name:        "omada_apply_acl",
 			Description: "Apply an ACL policy change on the controller: create the rule or enable a disabled matching rule, across every from-to pair. Dry-run is the default: set dry_run=false to apply for real. A real apply is followed by a targeted isolation audit of the changed endpoints (disable with post_audit=false).",
-			InputSchema: inputSchema{
-				Type: "object",
-				Properties: map[string]propSchema{
-					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"client_id":       {Type: "string", Description: "Omada Open API client ID"},
-					"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
-					"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
-					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
-					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
-					"from":            {Type: "string", Description: "Source network name(s), comma-separated for one-to-many or many-to-many"},
-					"to":              {Type: "string", Description: "Destination network name(s), comma-separated for one-to-many or many-to-many"},
-					"action":          {Type: "string", Description: "Policy action: allow or deny"},
-					"policy_name":     {Type: "string", Description: "Optional rule name; a from-to-action name is derived when empty"},
-					"scope":           {Type: "string", Description: "ACL scope: switch (default) or gateway. eap is not supported."},
-					"protocols":       {Type: "string", Description: "Optional comma-separated IP protocol numbers (e.g. 6,17). Empty means all protocols."},
-					"dry_run":         {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
-					"post_audit":      {Type: "boolean", Description: "Run a targeted isolation audit after a real apply. Default true."},
-				},
-				Required: []string{"host", "from", "to", "action"},
-			},
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"from":        {Type: "string", Description: "Source network name(s), comma-separated for one-to-many or many-to-many"},
+				"to":          {Type: "string", Description: "Destination network name(s), comma-separated for one-to-many or many-to-many"},
+				"action":      {Type: "string", Description: "Policy action: allow or deny"},
+				"policy_name": {Type: "string", Description: "Optional rule name; a from-to-action name is derived when empty"},
+				"scope":       {Type: "string", Description: "ACL scope: switch (default) or gateway. eap is not supported."},
+				"protocols":   {Type: "string", Description: "Optional comma-separated IP protocol numbers (e.g. 6,17). Empty means all protocols."},
+				"dry_run":     {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
+				"post_audit":  {Type: "boolean", Description: "Run a targeted isolation audit after a real apply. Default true."},
+			}, []string{"host", "from", "to", "action"}),
+		},
+		{
+			Name:        "omada_list_port_forwardings",
+			Description: "List the Omada gateway's NAT port-forwarding rules for a site.",
+			InputSchema: omadaToolSchema(),
+		},
+		{
+			Name:        "omada_list_one_to_one_nat",
+			Description: "List the Omada gateway's one-to-one NAT rules for a site.",
+			InputSchema: omadaToolSchema(),
+		},
+		{
+			Name:        "omada_get_nat_settings",
+			Description: "Read the Omada gateway's NAT application-layer gateways (ALG) and firewall session-timeout settings for a site.",
+			InputSchema: omadaToolSchema(),
+		},
+		{
+			Name:        "omada_nat_facts",
+			Description: "Observe the Omada site's NAT posture in one call: port-forward and one-to-one rule counts, ALG and firewall settings, and whether a managed gateway is present. Read-only input to the topology report.",
+			InputSchema: omadaToolSchema(),
 		},
 		{
 			Name:        "opnsense_get_info",
 			Description: "Fetch firmware metadata (version, product, arch) from an OPNsense firewall.",
-			InputSchema: inputSchema{
-				Type: "object",
-				Properties: map[string]propSchema{
-					"host":            {Type: "string", Description: "OPNsense firewall hostname or IP"},
-					"api_key":         {Type: "string", Description: "OPNsense API key"},
-					"api_secret":      {Type: "string", Description: "OPNsense API secret"},
-					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
-					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
-				},
-				Required: []string{"host"},
-			},
+			InputSchema: opnsenseToolSchema(),
 		},
 		{
 			Name:        "opnsense_list_interfaces",
 			Description: "List OPNsense interfaces with their IP configuration.",
-			InputSchema: inputSchema{
-				Type: "object",
-				Properties: map[string]propSchema{
-					"host":            {Type: "string", Description: "OPNsense firewall hostname or IP"},
-					"api_key":         {Type: "string", Description: "OPNsense API key"},
-					"api_secret":      {Type: "string", Description: "OPNsense API secret"},
-					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
-					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
-				},
-				Required: []string{"host"},
-			},
+			InputSchema: opnsenseToolSchema(),
 		},
 		{
 			Name:        "opnsense_list_firewall_rules",
 			Description: "List OPNsense firewall filter rules (actions pass/block/reject).",
-			InputSchema: inputSchema{
-				Type: "object",
-				Properties: map[string]propSchema{
-					"host":            {Type: "string", Description: "OPNsense firewall hostname or IP"},
-					"api_key":         {Type: "string", Description: "OPNsense API key"},
-					"api_secret":      {Type: "string", Description: "OPNsense API secret"},
-					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
-					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
-				},
-				Required: []string{"host"},
-			},
+			InputSchema: opnsenseToolSchema(),
 		},
 		{
 			Name:        "opnsense_list_clients",
 			Description: "List OPNsense DHCP leases as the host inventory (OPNsense exposes no live client state).",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_port_forward_rules",
+			Description: "List OPNsense destination NAT (port forward) rules.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_one_to_one_rules",
+			Description: "List OPNsense one-to-one NAT rules.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_source_nat_rules",
+			Description: "List OPNsense source NAT rules, including the generic outbound-NAT row.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_aliases",
+			Description: "List OPNsense firewall address aliases.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_get_nat",
+			Description: "Read the OPNsense NAT posture in one call: outbound (source) NAT mode plus every NAT rule set. The outbound mode is the key double-NAT signal — a transparent proxy reports 'disabled'.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "topology",
+			Description: "Assess the network topology from both providers' NAT posture: per-device NAT role and a site-level double-NAT risk verdict. Configure credentials for omada and/or opnsense (parameters, env vars, or the credential store) to observe that provider; omit a provider's host to skip it.",
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]propSchema{
-					"host":            {Type: "string", Description: "OPNsense firewall hostname or IP"},
-					"api_key":         {Type: "string", Description: "OPNsense API key"},
-					"api_secret":      {Type: "string", Description: "OPNsense API secret"},
-					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
-					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
+					"omada_host":               {Type: "string", Description: "Omada controller hostname or IP (omit to skip Omada)"},
+					"omada_client_id":          {Type: "string", Description: "Omada Open API client ID"},
+					"omada_client_secret":      {Type: "string", Description: "Omada Open API client secret"},
+					"omada_site":               {Type: "string", Description: "Optional Omada site name; defaults to the first site"},
+					"omada_skip_tls_verify":    {Type: "boolean", Description: "Skip TLS certificate verification for the Omada controller (self-signed certs)"},
+					"omada_ca_cert_path":       {Type: "string", Description: "Path to a CA certificate for the Omada controller"},
+					"opnsense_host":            {Type: "string", Description: "OPNsense firewall hostname or IP (omit to skip OPNsense)"},
+					"opnsense_api_key":         {Type: "string", Description: "OPNsense API key"},
+					"opnsense_api_secret":      {Type: "string", Description: "OPNsense API secret"},
+					"opnsense_skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification for the firewall (self-signed certs)"},
+					"opnsense_ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
 				},
-				Required: []string{"host"},
 			},
 		},
 	}
@@ -597,6 +572,52 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		JSONRPC: "2.0",
 		ID:      req.ID,
 		Result:  toolsListResult{Tools: tools},
+	}
+}
+
+// omadaToolSchema returns the credential input schema shared by every
+// credential-bearing Omada tool. Required lists only host — client_id /
+// client_secret have env and credential-store fallbacks (BDD S3.1), and
+// TLS opts are optional.
+func omadaToolSchema() inputSchema {
+	return inputSchema{
+		Type: "object",
+		Properties: map[string]propSchema{
+			"host":            {Type: "string", Description: "Omada controller hostname or IP"},
+			"client_id":       {Type: "string", Description: "Omada Open API client ID"},
+			"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
+			"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
+			"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
+			"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
+		},
+		Required: []string{"host"},
+	}
+}
+
+// omadaToolSchemaExtra returns an Omada credential schema plus extra
+// tool-specific properties and a custom required list.
+func omadaToolSchemaExtra(extra map[string]propSchema, required []string) inputSchema {
+	s := omadaToolSchema()
+	for k, v := range extra {
+		s.Properties[k] = v
+	}
+	s.Required = required
+	return s
+}
+
+// opnsenseToolSchema returns the credential input schema shared by every
+// credential-bearing OPNsense tool.
+func opnsenseToolSchema() inputSchema {
+	return inputSchema{
+		Type: "object",
+		Properties: map[string]propSchema{
+			"host":            {Type: "string", Description: "OPNsense firewall hostname or IP"},
+			"api_key":         {Type: "string", Description: "OPNsense API key"},
+			"api_secret":      {Type: "string", Description: "OPNsense API secret"},
+			"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
+			"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
+		},
+		Required: []string{"host"},
 	}
 }
 
@@ -679,6 +700,11 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 	return res.text, res.isErr
 }
 
+// requiredHostMsg is the options-builder error for a host that cannot be
+// resolved after the args → env → credential-store chain. The topology tool
+// treats it as "skip this provider" rather than a failure.
+const requiredHostMsg = "host parameter is required"
+
 // omadaOptionsFromArgs extracts Omada connection options from tool arguments,
 // falling back to env vars and then the encrypted credential store (entry
 // omada/default) for any value left empty — the same resolution order as the
@@ -695,7 +721,7 @@ func (s *Server) omadaOptionsFromArgs(args map[string]interface{}, needCredentia
 		// and env and never touch the store, so they cannot carry
 		// credentials.
 		if opts.Host == "" {
-			return opts, "host parameter is required"
+			return opts, requiredHostMsg
 		}
 		return opts, ""
 	}
@@ -713,7 +739,7 @@ func (s *Server) omadaOptionsFromArgs(args map[string]interface{}, needCredentia
 	credentials.Overlay(storepath.StoreFile(), "omada", "default", &fields)
 	opts.Host, opts.ClientID, opts.ClientSecret, opts.Site = fields.Host, fields.ClientID, fields.ClientSecret, fields.Site
 	if opts.Host == "" {
-		return opts, "host parameter is required"
+		return opts, requiredHostMsg
 	}
 	if opts.ClientID == "" || opts.ClientSecret == "" {
 		return opts, "client_id and client_secret parameters are required: " +
@@ -819,7 +845,7 @@ func (s *Server) opnsenseOptionsFromArgs(args map[string]interface{}, needCreden
 	credentials.Overlay(storepath.StoreFile(), "opnsense", "default", &fields)
 	opts.Host, opts.APIKey, opts.APISecret = fields.Host, fields.APIKey, fields.APISecret
 	if opts.Host == "" {
-		return opts, "host parameter is required"
+		return opts, requiredHostMsg
 	}
 	if opts.APIKey == "" || opts.APISecret == "" {
 		return opts, "api_key and api_secret parameters are required: " +

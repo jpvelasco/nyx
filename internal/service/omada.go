@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jpvelasco/nyx/internal/audit"
 	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
@@ -113,6 +112,236 @@ type OmadaPlan struct {
 	Warnings      []string          `json:"warnings"`
 }
 
+// OmadaPortForwarding is one NAT port-forwarding rule in a flat,
+// agent-friendly shape (protocol as a name: ALL/TCP/UDP).
+type OmadaPortForwarding struct {
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Enabled          bool     `json:"enabled"`
+	From             int      `json:"from"` // 0 = anywhere, 1 = limited addresses
+	LimitedAddresses []string `json:"limited_addresses,omitempty"`
+	ExternalPort     string   `json:"external_port"`
+	ForwardIP        string   `json:"forward_ip"`
+	ForwardPort      string   `json:"forward_port"`
+	Protocol         string   `json:"protocol"`
+	DMZ              bool     `json:"dmz"`
+}
+
+// OmadaOneToOneNAT is one one-to-one NAT rule.
+type OmadaOneToOneNAT struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Enabled     bool   `json:"enabled"`
+	InternalIP  string `json:"internal_ip"`
+	ExternalIP  string `json:"external_ip"`
+	DMZ         bool   `json:"dmz"`
+	Description string `json:"description,omitempty"`
+}
+
+// OmadaALGSettings reports the enabled NAT application-layer gateways.
+type OmadaALGSettings struct {
+	FTP   bool `json:"ftp"`
+	H323  bool `json:"h323"`
+	PPTP  bool `json:"pptp"`
+	SIP   bool `json:"sip"`
+	IPsec bool `json:"ipsec"`
+}
+
+// OmadaFirewallSettings is the gateway firewall session-timeout and
+// connection-configuration block. Timeouts are in seconds.
+type OmadaFirewallSettings struct {
+	ICMP           int `json:"icmp"`
+	Other          int `json:"other"`
+	TCPClose       int `json:"tcp_close"`
+	TCPCloseWait   int `json:"tcp_close_wait"`
+	TCPEstablished int `json:"tcp_established"`
+	TCPFinWait     int `json:"tcp_fin_wait"`
+	TCPLastAck     int `json:"tcp_last_ack"`
+	TCPSynReceive  int `json:"tcp_syn_receive"`
+	TCPSynSent     int `json:"tcp_syn_sent"`
+	TCPTimeWait    int `json:"tcp_time_wait"`
+	UDPOther       int `json:"udp_other"`
+	UDPStream      int `json:"udp_stream"`
+
+	BroadcastPing    bool `json:"broadcast_ping"`
+	ReceiveRedirects bool `json:"receive_redirects"`
+	SendRedirects    bool `json:"send_redirects"`
+	SynCookies       bool `json:"syn_cookies"`
+}
+
+// OmadaNatFacts is the Omada-side NAT observation in one session: NAT rule
+// counts, ALG and firewall settings, and whether a managed gateway is
+// present. It is the input the topology report consumes for the Omada
+// device.
+type OmadaNatFacts struct {
+	Site              string                `json:"site"`
+	HasManagedGateway bool                  `json:"has_managed_gateway"`
+	PortForwardRules  int                   `json:"port_forward_rules"`
+	OneToOneRules     int                   `json:"one_to_one_rules"`
+	ALG               OmadaALGSettings      `json:"alg"`
+	Firewall          OmadaFirewallSettings `json:"firewall"`
+}
+
+// NatFacts gathers the Omada-side NAT observations in a single session.
+// Every read must succeed: a partial picture would mislead the double-NAT
+// verdict, so a failure is a hard error.
+func (s *OmadaService) NatFacts(ctx context.Context, opts OmadaOptions) (*OmadaNatFacts, error) {
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+
+	siteID := site.EffectiveID()
+	devices, err := client.GetDevices(ctx, siteID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching devices: %w", err)
+	}
+	pfs, err := client.GetPortForwardings(ctx, siteID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching port forwardings: %w", err)
+	}
+	o2o, err := client.GetOneToOneNAT(ctx, siteID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching one-to-one NAT rules: %w", err)
+	}
+	alg, err := client.GetALG(ctx, siteID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching ALG settings: %w", err)
+	}
+	fw, err := client.GetFirewallSettings(ctx, siteID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching firewall settings: %w", err)
+	}
+	facts := &OmadaNatFacts{
+		Site:             site.Name,
+		PortForwardRules: len(pfs),
+		OneToOneRules:    len(o2o),
+		ALG: OmadaALGSettings{
+			FTP: alg.FTP, H323: alg.H323, PPTP: alg.PPTP, SIP: alg.SIP, IPsec: alg.IPsec,
+		},
+		Firewall: OmadaFirewallSettings{
+			ICMP: fw.ICMP, Other: fw.Other, TCPClose: fw.TCPClose, TCPCloseWait: fw.TCPCloseWait,
+			TCPEstablished: fw.TCPEstablished, TCPFinWait: fw.TCPFinWait, TCPLastAck: fw.TCPLastAck,
+			TCPSynReceive: fw.TCPSynReceive, TCPSynSent: fw.TCPSynSent, TCPTimeWait: fw.TCPTimeWait,
+			UDPOther: fw.UDPOther, UDPStream: fw.UDPStream,
+			BroadcastPing: fw.BroadcastPing, ReceiveRedirects: fw.ReceiveRedirects,
+			SendRedirects: fw.SendRedirects, SynCookies: fw.SynCookies,
+		},
+	}
+	for _, d := range devices {
+		if d.IsGateway() {
+			facts.HasManagedGateway = true
+			break
+		}
+	}
+	return facts, nil
+}
+
+// ListPortForwardings returns the site's NAT port-forwarding rules.
+func (s *OmadaService) ListPortForwardings(ctx context.Context, opts OmadaOptions) ([]OmadaPortForwarding, error) {
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+
+	rows, err := client.GetPortForwardings(ctx, site.EffectiveID())
+	if err != nil {
+		return nil, fmt.Errorf("fetching port forwardings: %w", err)
+	}
+	out := make([]OmadaPortForwarding, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, OmadaPortForwarding{
+			ID:               r.ID,
+			Name:             r.Name,
+			Enabled:          r.Enabled,
+			From:             r.From,
+			LimitedAddresses: r.LimitedAddresses,
+			ExternalPort:     r.ExternalPort,
+			ForwardIP:        r.ForwardIP,
+			ForwardPort:      r.ForwardPort,
+			Protocol:         r.Protocol,
+			DMZ:              r.DMZ,
+		})
+	}
+	return out, nil
+}
+
+// ListOneToOneNAT returns the site's one-to-one NAT rules.
+func (s *OmadaService) ListOneToOneNAT(ctx context.Context, opts OmadaOptions) ([]OmadaOneToOneNAT, error) {
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+
+	rules, err := client.GetOneToOneNAT(ctx, site.EffectiveID())
+	if err != nil {
+		return nil, fmt.Errorf("fetching one-to-one NAT rules: %w", err)
+	}
+	out := make([]OmadaOneToOneNAT, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, OmadaOneToOneNAT{
+			ID:          r.ID,
+			Name:        r.Name,
+			Enabled:     r.Enabled,
+			InternalIP:  r.InternalIP,
+			ExternalIP:  r.ExternalIP,
+			DMZ:         r.DMZ,
+			Description: r.Description,
+		})
+	}
+	return out, nil
+}
+
+// GetALGSettings returns the site's NAT application-layer gateway settings.
+func (s *OmadaService) GetALGSettings(ctx context.Context, opts OmadaOptions) (*OmadaALGSettings, error) {
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+
+	alg, err := client.GetALG(ctx, site.EffectiveID())
+	if err != nil {
+		return nil, fmt.Errorf("fetching ALG settings: %w", err)
+	}
+	return &OmadaALGSettings{FTP: alg.FTP, H323: alg.H323, PPTP: alg.PPTP, SIP: alg.SIP, IPsec: alg.IPsec}, nil
+}
+
+// GetFirewallSettings returns the site's gateway firewall settings.
+func (s *OmadaService) GetFirewallSettings(ctx context.Context, opts OmadaOptions) (*OmadaFirewallSettings, error) {
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+
+	fw, err := client.GetFirewallSettings(ctx, site.EffectiveID())
+	if err != nil {
+		return nil, fmt.Errorf("fetching firewall settings: %w", err)
+	}
+	return &OmadaFirewallSettings{
+		ICMP:             fw.ICMP,
+		Other:            fw.Other,
+		TCPClose:         fw.TCPClose,
+		TCPCloseWait:     fw.TCPCloseWait,
+		TCPEstablished:   fw.TCPEstablished,
+		TCPFinWait:       fw.TCPFinWait,
+		TCPLastAck:       fw.TCPLastAck,
+		TCPSynReceive:    fw.TCPSynReceive,
+		TCPSynSent:       fw.TCPSynSent,
+		TCPTimeWait:      fw.TCPTimeWait,
+		UDPOther:         fw.UDPOther,
+		UDPStream:        fw.UDPStream,
+		BroadcastPing:    fw.BroadcastPing,
+		ReceiveRedirects: fw.ReceiveRedirects,
+		SendRedirects:    fw.SendRedirects,
+		SynCookies:       fw.SynCookies,
+	}, nil
+}
+
 // OmadaACLApplyRequest describes a desired ACL change on the site: the
 // action to take between each From endpoint and each To endpoint
 // (one-to-many and many-to-many supported). DryRun previews without
@@ -156,8 +385,9 @@ type OmadaACLApplyResult struct {
 }
 
 // OmadaService exposes the Omada observation surface shared by the MCP server
-// and any future CLI commands. NewClient is a seam for tests; PostAudit runs
-// the targeted post-apply audit and defaults to the real audit engine.
+// and any future CLI commands. NewClient is a seam for tests; PostAudit is the
+// post-apply audit seam (service must not import the audit engine — callers
+// inject it). A nil PostAudit reports "post-mutation audit unavailable".
 type OmadaService struct {
 	NewClient func(ctx context.Context, host string, skipTLSVerify bool, caCertPath string) (*omadabackend.Client, error)
 	PostAudit func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error)
@@ -165,12 +395,7 @@ type OmadaService struct {
 
 // NewOmadaService creates an OmadaService using the real controller client.
 func NewOmadaService() *OmadaService {
-	return &OmadaService{
-		NewClient: omadabackend.NewClient,
-		PostAudit: func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
-			return audit.NewEngine(spec).Run(ctx)
-		},
-	}
+	return &OmadaService{NewClient: omadabackend.NewClient}
 }
 
 // Info fetches controller metadata without authentication.
