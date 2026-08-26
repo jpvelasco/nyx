@@ -17,6 +17,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/service"
+	"github.com/jpvelasco/nyx/internal/topology"
 )
 
 // hermeticCreds pins the credential-resolution inputs for missing-credential
@@ -297,8 +298,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 22 {
-		t.Fatalf("expected 22 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 32 {
+		t.Fatalf("expected 32 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -307,7 +308,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -335,17 +336,26 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 	}
 
 	want := map[string][]string{
-		"omada_list_networks":          {"host"},
-		"omada_list_acls":              {"host"},
-		"omada_list_clients":           {"host"},
-		"omada_inventory":              {"host"},
-		"omada_import":                 {"host"},
-		"omada_plan":                   {"host", "spec"},
-		"omada_apply_acl":              {"host", "from", "to", "action"},
-		"opnsense_get_info":            {"host"},
-		"opnsense_list_interfaces":     {"host"},
-		"opnsense_list_firewall_rules": {"host"},
-		"opnsense_list_clients":        {"host"},
+		"omada_list_networks":              {"host"},
+		"omada_list_acls":                  {"host"},
+		"omada_list_clients":               {"host"},
+		"omada_inventory":                  {"host"},
+		"omada_import":                     {"host"},
+		"omada_plan":                       {"host", "spec"},
+		"omada_apply_acl":                  {"host", "from", "to", "action"},
+		"omada_list_port_forwardings":      {"host"},
+		"omada_list_one_to_one_nat":        {"host"},
+		"omada_get_nat_settings":           {"host"},
+		"omada_nat_facts":                  {"host"},
+		"opnsense_get_info":                {"host"},
+		"opnsense_list_interfaces":         {"host"},
+		"opnsense_list_firewall_rules":     {"host"},
+		"opnsense_list_clients":            {"host"},
+		"opnsense_list_port_forward_rules": {"host"},
+		"opnsense_list_one_to_one_rules":   {"host"},
+		"opnsense_list_source_nat_rules":   {"host"},
+		"opnsense_list_aliases":            {"host"},
+		"opnsense_get_nat":                 {"host"},
 	}
 	for name, wantReq := range want {
 		tl, ok := byName[name]
@@ -1421,6 +1431,11 @@ type stubOmadaSvc struct {
 	imp          *service.OmadaImport
 	plan         *service.OmadaPlan
 	apply        *service.OmadaACLApplyResult
+	portFwd      []service.OmadaPortForwarding
+	oneToOne     []service.OmadaOneToOneNAT
+	alg          *service.OmadaALGSettings
+	firewall     *service.OmadaFirewallSettings
+	natFacts     *service.OmadaNatFacts
 	err          error
 	lastOpts     service.OmadaOptions
 	lastApplyReq service.OmadaACLApplyRequest
@@ -1476,6 +1491,36 @@ func (s *stubOmadaSvc) ApplyACL(_ context.Context, opts service.OmadaOptions, re
 	return s.apply, s.err
 }
 
+func (s *stubOmadaSvc) ListPortForwardings(_ context.Context, opts service.OmadaOptions) ([]service.OmadaPortForwarding, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.portFwd, s.err
+}
+
+func (s *stubOmadaSvc) ListOneToOneNAT(_ context.Context, opts service.OmadaOptions) ([]service.OmadaOneToOneNAT, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.oneToOne, s.err
+}
+
+func (s *stubOmadaSvc) GetALGSettings(_ context.Context, opts service.OmadaOptions) (*service.OmadaALGSettings, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.alg, s.err
+}
+
+func (s *stubOmadaSvc) GetFirewallSettings(_ context.Context, opts service.OmadaOptions) (*service.OmadaFirewallSettings, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.firewall, s.err
+}
+
+func (s *stubOmadaSvc) NatFacts(_ context.Context, opts service.OmadaOptions) (*service.OmadaNatFacts, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.natFacts, s.err
+}
+
 func sliceEq(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -1506,6 +1551,12 @@ type stubOpnsenseSvc struct {
 	interfaces []service.OpnsenseInterface
 	rules      []service.OpnsenseFirewallRule
 	clients    []service.OpnsenseClient
+	portFwd    []service.OpnsenseNatRule
+	oneToOne   []service.OpnsenseNatRule
+	sourceNat  []service.OpnsenseNatRule
+	aliases    []service.OpnsenseAlias
+	natMode    string
+	natSummary *service.OpnsenseNatSummary
 	err        error
 	lastOpts   service.OpnsenseOptions
 }
@@ -1530,6 +1581,50 @@ func (s *stubOpnsenseSvc) ListClients(_ context.Context, opts service.OpnsenseOp
 	return s.clients, s.err
 }
 
+func (s *stubOpnsenseSvc) ListPortForwardRules(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseNatRule, error) {
+	s.lastOpts = opts
+	return s.portFwd, s.err
+}
+
+func (s *stubOpnsenseSvc) ListOneToOneRules(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseNatRule, error) {
+	s.lastOpts = opts
+	return s.oneToOne, s.err
+}
+
+func (s *stubOpnsenseSvc) ListSourceNatRules(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseNatRule, error) {
+	s.lastOpts = opts
+	return s.sourceNat, s.err
+}
+
+func (s *stubOpnsenseSvc) ListAliases(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseAlias, error) {
+	s.lastOpts = opts
+	return s.aliases, s.err
+}
+
+func (s *stubOpnsenseSvc) GetOutboundNatMode(_ context.Context, opts service.OpnsenseOptions) (string, error) {
+	s.lastOpts = opts
+	return s.natMode, s.err
+}
+
+func (s *stubOpnsenseSvc) GetNAT(_ context.Context, opts service.OpnsenseOptions) (*service.OpnsenseNatSummary, error) {
+	s.lastOpts = opts
+	return s.natSummary, s.err
+}
+
+// stubTopoSvc is a hermetic stand-in for the cross-provider topology report.
+type stubTopoSvc struct {
+	report *service.TopologyReport
+	err    error
+	opts   service.TopologyOptions
+	calls  int
+}
+
+func (s *stubTopoSvc) Report(_ context.Context, opts service.TopologyOptions) (*service.TopologyReport, error) {
+	s.calls++
+	s.opts = opts
+	return s.report, s.err
+}
+
 func serverWithOpnsenseStub(stub *stubOpnsenseSvc) *Server {
 	omada, opnsense := credEnvReaders()
 	return &Server{
@@ -1537,6 +1632,7 @@ func serverWithOpnsenseStub(stub *stubOpnsenseSvc) *Server {
 		writer:          &bytes.Buffer{},
 		checkSvc:        service.NewCheckService(),
 		opnsenseSvc:     stub,
+		topoSvc:         &stubTopoSvc{},
 		credEnv:         omada,
 		opnsenseCredEnv: opnsense,
 	}
@@ -1549,7 +1645,332 @@ func serverWithOmadaStub(stub *stubOmadaSvc) *Server {
 		writer:          &bytes.Buffer{},
 		checkSvc:        service.NewCheckService(),
 		omadaSvc:        stub,
+		topoSvc:         &stubTopoSvc{},
 		credEnv:         omada,
 		opnsenseCredEnv: opnsense,
+	}
+}
+
+func TestDispatchOmadaNatReads(t *testing.T) {
+	stub := &stubOmadaSvc{
+		portFwd:  []service.OmadaPortForwarding{{ID: "pf1", Name: "web", ExternalPort: "443", ForwardPort: "80", Protocol: "TCP"}},
+		oneToOne: []service.OmadaOneToOneNAT{{ID: "o1", Name: "binat", ExternalIP: "203.0.113.20"}},
+		alg:      &service.OmadaALGSettings{FTP: true, SIP: true},
+		firewall: &service.OmadaFirewallSettings{ICMP: 30, SynCookies: true},
+		natFacts: &service.OmadaNatFacts{Site: "HQ", HasManagedGateway: true, PortForwardRules: 1, OneToOneRules: 1},
+	}
+	server := serverWithOmadaStub(stub)
+	args := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "site": "HQ"}
+
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_list_port_forwardings", args); isErr {
+		t.Fatalf("port forwardings: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"name": "web"`) || !strings.Contains(text, `"protocol": "TCP"`) {
+		t.Errorf("port forwardings JSON = %s", text)
+	}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_list_one_to_one_nat", args); isErr {
+		t.Fatalf("one-to-one: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"external_ip": "203.0.113.20"`) {
+		t.Errorf("one-to-one JSON = %s", text)
+	}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_get_nat_settings", args); isErr {
+		t.Fatalf("nat settings: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"ftp": true`) || !strings.Contains(text, `"icmp": 30`) {
+		t.Errorf("nat settings JSON = %s", text)
+	}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_nat_facts", args); isErr {
+		t.Fatalf("nat facts: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"has_managed_gateway": true`) {
+		t.Errorf("nat facts JSON = %s", text)
+	}
+	if stub.lastOpts.Host != "omada.local" || stub.lastOpts.Site != "HQ" {
+		t.Errorf("options = %+v", stub.lastOpts)
+	}
+}
+
+func TestDispatchOmadaNatReads_ServiceError(t *testing.T) {
+	server := serverWithOmadaStub(&stubOmadaSvc{err: errors.New("site not found")})
+	text, isErr := server.DispatchToolForTest(context.Background(), "omada_nat_facts", map[string]interface{}{
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw",
+	})
+	if !isErr || !strings.Contains(text, "omada nat facts request failed") || !strings.Contains(text, "site not found") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchOpnsenseNatReads(t *testing.T) {
+	stub := &stubOpnsenseSvc{
+		portFwd:   []service.OpnsenseNatRule{{UUID: "n1", Protocol: "tcp", Source: "any", Destination: "10.0.40.0/24"}},
+		oneToOne:  []service.OpnsenseNatRule{{UUID: "o1", Mode: "binat", Target: "10.0.10.5"}},
+		sourceNat: []service.OpnsenseNatRule{{UUID: "s1", Target: "203.0.113.100", SNATMode: "one-to-one"}},
+		aliases:   []service.OpnsenseAlias{{Name: "trusted", Addresses: []string{"10.0.10.0/24"}}},
+		natSummary: &service.OpnsenseNatSummary{
+			OutboundNatMode:  "disabled",
+			PortForwardRules: []service.OpnsenseNatRule{{UUID: "n1"}},
+			SourceNatRules:   []service.OpnsenseNatRule{{UUID: "s1"}},
+		},
+	}
+	server := serverWithOpnsenseStub(stub)
+	args := map[string]interface{}{"host": "fw.local", "api_key": "key1", "api_secret": "secret1"}
+
+	if text, isErr := server.DispatchToolForTest(context.Background(), "opnsense_list_port_forward_rules", args); isErr {
+		t.Fatalf("port forward rules: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"uuid": "n1"`) || !strings.Contains(text, `"destination": "10.0.40.0/24"`) {
+		t.Errorf("port forward rules JSON = %s", text)
+	}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "opnsense_list_one_to_one_rules", args); isErr {
+		t.Fatalf("one-to-one rules: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"mode": "binat"`) {
+		t.Errorf("one-to-one rules JSON = %s", text)
+	}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "opnsense_list_source_nat_rules", args); isErr {
+		t.Fatalf("source NAT rules: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"snat_mode": "one-to-one"`) {
+		t.Errorf("source NAT rules JSON = %s", text)
+	}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "opnsense_list_aliases", args); isErr {
+		t.Fatalf("aliases: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"name": "trusted"`) {
+		t.Errorf("aliases JSON = %s", text)
+	}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "opnsense_get_nat", args); isErr {
+		t.Fatalf("get nat: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"outbound_nat_mode": "disabled"`) {
+		t.Errorf("get nat JSON = %s", text)
+	} else if strings.Contains(text, "secret1") {
+		t.Error("tool output must not echo the API secret")
+	}
+}
+
+func TestDispatchOpnsenseNatReads_ServiceError(t *testing.T) {
+	server := serverWithOpnsenseStub(&stubOpnsenseSvc{err: errors.New("boom")})
+	text, isErr := server.DispatchToolForTest(context.Background(), "opnsense_get_nat", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+	})
+	if !isErr || !strings.Contains(text, "opnsense NAT posture request failed") || !strings.Contains(text, "boom") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchTopology(t *testing.T) {
+	hermeticCreds(t)
+	topo := &stubTopoSvc{report: &service.TopologyReport{
+		Devices: []topology.DeviceReport{{Provider: "opnsense", Role: topology.RoleBridge}},
+		Risk:    "none",
+		Reason:  "one NAT owner",
+	}}
+	server := serverWithOmadaStub(&stubOmadaSvc{})
+	server.topoSvc = topo
+	text, isErr := server.DispatchToolForTest(context.Background(), "topology", map[string]interface{}{
+		"omada_host":          "omada.local",
+		"omada_client_id":     "cid-1",
+		"omada_client_secret": "pw",
+		"omada_site":          "HQ",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if topo.calls != 1 {
+		t.Fatalf("topology calls = %d, want 1", topo.calls)
+	}
+	if topo.opts.Omada == nil || topo.opts.Omada.Host != "omada.local" || topo.opts.Omada.Site != "HQ" || topo.opts.Opnsense != nil {
+		t.Errorf("topology options = %+v", topo.opts)
+	}
+	if !strings.Contains(text, `"risk": "none"`) || !strings.Contains(text, `"provider": "opnsense"`) {
+		t.Errorf("report JSON = %s", text)
+	}
+	if strings.Contains(text, "secret") {
+		t.Error("tool output must not echo credentials")
+	}
+}
+
+func TestDispatchTopology_SkipsUnconfiguredProvider(t *testing.T) {
+	hermeticCreds(t)
+	omada, opnsense := credEnvReaders()
+	topo := &stubTopoSvc{}
+	server := &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{},
+		checkSvc: service.NewCheckService(), topoSvc: topo,
+		credEnv: omada, opnsenseCredEnv: opnsense}
+	text, isErr := server.DispatchToolForTest(context.Background(), "topology", map[string]interface{}{
+		"opnsense_host": "fw.local", "opnsense_api_key": "key1", "opnsense_api_secret": "secret1",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if topo.calls != 1 || topo.opts.Opnsense == nil || topo.opts.Omada != nil {
+		t.Errorf("options = %+v (omada must be skipped)", topo.opts)
+	}
+	_ = text
+}
+
+func TestDispatchTopology_NoProviders(t *testing.T) {
+	hermeticCreds(t)
+	omada, opnsense := credEnvReaders()
+	server := &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{},
+		checkSvc: service.NewCheckService(), topoSvc: &stubTopoSvc{},
+		credEnv: omada, opnsenseCredEnv: opnsense}
+	text, isErr := server.DispatchToolForTest(context.Background(), "topology", map[string]interface{}{})
+	if !isErr || !strings.Contains(text, "at least one provider") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchTopology_ReportError(t *testing.T) {
+	hermeticCreds(t)
+	omada, opnsense := credEnvReaders()
+	server := &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{},
+		checkSvc: service.NewCheckService(),
+		topoSvc:  &stubTopoSvc{err: errors.New("fetch failed")},
+		credEnv:  omada, opnsenseCredEnv: opnsense}
+	text, isErr := server.DispatchToolForTest(context.Background(), "topology", map[string]interface{}{
+		"opnsense_host": "fw.local", "opnsense_api_key": "key1", "opnsense_api_secret": "secret1",
+	})
+	if !isErr || !strings.Contains(text, "topology report failed") || !strings.Contains(text, "fetch failed") {
+		t.Errorf("got (%q, %v)", text, isErr)
+	}
+}
+
+// fwOnlyOmadaSvc succeeds at ALG and fails at firewall settings so the
+// get_nat_settings dispatch test can exercise the second (firewall) error
+// branch, which a plain err stub cannot reach.
+type fwOnlyOmadaSvc struct {
+	stubOmadaSvc
+}
+
+func (s *fwOnlyOmadaSvc) GetFirewallSettings(_ context.Context, opts service.OmadaOptions) (*service.OmadaFirewallSettings, error) {
+	s.calls++
+	s.lastOpts = opts
+	return nil, errors.New("firewall endpoint missing")
+}
+
+func TestDispatchOmadaNatReads_Errors(t *testing.T) {
+	hermeticCreds(t)
+	args := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw"}
+
+	cases := []struct {
+		tool, want string
+	}{
+		{"omada_list_port_forwardings", "omada port forwardings request failed"},
+		{"omada_list_one_to_one_nat", "omada one-to-one NAT request failed"},
+		{"omada_nat_facts", "omada nat facts request failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.tool, func(t *testing.T) {
+			server := serverWithOmadaStub(&stubOmadaSvc{err: errors.New("controller down")})
+			text, isErr := server.DispatchToolForTest(context.Background(), tc.tool, args)
+			if !isErr || !strings.Contains(text, tc.want) || !strings.Contains(text, "controller down") {
+				t.Errorf("got (%q, %v), want %q", text, isErr, tc.want)
+			}
+		})
+	}
+
+	// ALG failure is reported by the first read.
+	t.Run("get_nat_settings_alg_error", func(t *testing.T) {
+		server := serverWithOmadaStub(&stubOmadaSvc{err: errors.New("alg down")})
+		text, isErr := server.DispatchToolForTest(context.Background(), "omada_get_nat_settings", args)
+		if !isErr || !strings.Contains(text, "omada ALG settings request failed") {
+			t.Errorf("got (%q, %v)", text, isErr)
+		}
+	})
+
+	// Firewall failure is reported only when ALG succeeds.
+	t.Run("get_nat_settings_firewall_error", func(t *testing.T) {
+		omadaEnv, opnsenseEnv := credEnvReaders()
+		server := &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{},
+			checkSvc: service.NewCheckService(),
+			omadaSvc: &fwOnlyOmadaSvc{stubOmadaSvc{alg: &service.OmadaALGSettings{}}},
+			topoSvc:  &stubTopoSvc{},
+			credEnv:  omadaEnv, opnsenseCredEnv: opnsenseEnv}
+		text, isErr := server.DispatchToolForTest(context.Background(), "omada_get_nat_settings", args)
+		if !isErr || !strings.Contains(text, "omada firewall settings request failed") ||
+			!strings.Contains(text, "firewall endpoint missing") {
+			t.Errorf("got (%q, %v)", text, isErr)
+		}
+	})
+}
+
+func TestDispatchOpnsenseNatReads_Errors(t *testing.T) {
+	hermeticCreds(t)
+	args := map[string]interface{}{"host": "fw.local", "api_key": "key1", "api_secret": "secret1"}
+
+	cases := []struct {
+		tool, want string
+	}{
+		{"opnsense_list_port_forward_rules", "opnsense port forward rules request failed"},
+		{"opnsense_list_one_to_one_rules", "opnsense one-to-one rules request failed"},
+		{"opnsense_list_source_nat_rules", "opnsense source NAT rules request failed"},
+		{"opnsense_list_aliases", "opnsense aliases request failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.tool, func(t *testing.T) {
+			server := serverWithOpnsenseStub(&stubOpnsenseSvc{err: errors.New("controller down")})
+			text, isErr := server.DispatchToolForTest(context.Background(), tc.tool, args)
+			if !isErr || !strings.Contains(text, tc.want) || !strings.Contains(text, "controller down") {
+				t.Errorf("got (%q, %v), want %q", text, isErr, tc.want)
+			}
+		})
+	}
+}
+
+// A host present without credentials must fail the topology call with the
+// options-builder message, not silently skip the provider (a partial picture
+// would mislead the double-NAT verdict).
+func TestDispatchTopology_MissingCredentials(t *testing.T) {
+	hermeticCreds(t)
+	omada, opnsense := credEnvReaders()
+	server := &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{},
+		checkSvc: service.NewCheckService(), topoSvc: &stubTopoSvc{},
+		credEnv: omada, opnsenseCredEnv: opnsense}
+
+	text, isErr := server.DispatchToolForTest(context.Background(), "topology", map[string]interface{}{
+		"omada_host": "omada.local",
+	})
+	if !isErr || !strings.Contains(text, "client_id and client_secret parameters are required") {
+		t.Errorf("omada: got (%q, %v), want missing-credential message", text, isErr)
+	}
+
+	text, isErr = server.DispatchToolForTest(context.Background(), "topology", map[string]interface{}{
+		"opnsense_host": "fw.local",
+	})
+	if !isErr || !strings.Contains(text, "api_key and api_secret parameters are required") {
+		t.Errorf("opnsense: got (%q, %v), want missing-credential message", text, isErr)
+	}
+}
+
+// Every NAT read tool must reject a call that carries no host with the
+// options-builder message, before any provider call happens.
+func TestDispatchNatReads_MissingHost(t *testing.T) {
+	hermeticCreds(t)
+
+	omadaTools := []string{
+		"omada_list_port_forwardings",
+		"omada_list_one_to_one_nat",
+		"omada_get_nat_settings",
+		"omada_nat_facts",
+	}
+	for _, tool := range omadaTools {
+		t.Run(tool, func(t *testing.T) {
+			server := serverWithOmadaStub(&stubOmadaSvc{})
+			text, isErr := server.DispatchToolForTest(context.Background(), tool, map[string]interface{}{})
+			if !isErr || !strings.Contains(text, "host parameter is required") {
+				t.Errorf("got (%q, %v), want host-parameter error", text, isErr)
+			}
+		})
+	}
+
+	opnsenseTools := []string{
+		"opnsense_list_port_forward_rules",
+		"opnsense_list_one_to_one_rules",
+		"opnsense_list_source_nat_rules",
+		"opnsense_list_aliases",
+		"opnsense_get_nat",
+	}
+	for _, tool := range opnsenseTools {
+		t.Run(tool, func(t *testing.T) {
+			server := serverWithOpnsenseStub(&stubOpnsenseSvc{})
+			text, isErr := server.DispatchToolForTest(context.Background(), tool, map[string]interface{}{})
+			if !isErr || !strings.Contains(text, "host parameter is required") {
+				t.Errorf("got (%q, %v), want host-parameter error", text, isErr)
+			}
+		})
 	}
 }

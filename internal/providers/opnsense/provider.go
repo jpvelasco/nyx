@@ -11,6 +11,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	providers "github.com/jpvelasco/nyx/internal/providers"
+	"github.com/jpvelasco/nyx/internal/topology"
 )
 
 // Provider implements providers.Provider for OPNsense firewalls.
@@ -223,6 +224,90 @@ func (o *Provider) CheckACL(_ context.Context, req providers.ACLCheckRequest, _ 
 	return result, nil
 }
 
+// NatCheck reads the firewall's NAT posture (outbound NAT mode plus the
+// rule counts) and evaluates it against the expected value: an outbound
+// mode (automatic, hybrid, advanced, disabled) is an equality check; a
+// topology role (nat_router, bridge, indeterminate) is the classification
+// of this device; "unknown" asserts the mode is not reported (key drift).
+// A missing snat_mode key is reported as unknown — never guessed (version
+// drift across releases).
+func (o *Provider) NatCheck(ctx context.Context, req providers.NatCheckRequest, opts providers.ImportOptions) (*models.CheckResult, error) {
+	result := models.NewCheckResult("opnsense", "nat_check", "opnsense", req.ExpectMode)
+	result.Expected["nat_mode"] = req.ExpectMode
+
+	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	mode, err := client.GetOutboundNatMode(ctx)
+	if err != nil {
+		return natCheckError(result, "reading outbound NAT mode: %v", err), nil
+	}
+	pf, err := client.GetPortForwardRules(ctx)
+	if err != nil {
+		return natCheckError(result, "reading port forward rules: %v", err), nil
+	}
+	o2o, err := client.GetOneToOneRules(ctx)
+	if err != nil {
+		return natCheckError(result, "reading one-to-one rules: %v", err), nil
+	}
+	snat, err := client.GetSourceNatRules(ctx)
+	if err != nil {
+		return natCheckError(result, "reading source NAT rules: %v", err), nil
+	}
+	result.Finish()
+	result.Observed["outbound_nat_mode"] = mode
+	result.Observed["source_nat_rules"] = len(snat)
+	result.Observed["port_forward_rules"] = len(pf)
+	result.Observed["one_to_one_rules"] = len(o2o)
+
+	expect := req.ExpectMode
+	var role topology.NatRole
+	if topology.IsRole(expect) {
+		report := topology.BuildReport([]topology.DeviceFacts{{
+			Provider:         topology.ProviderOpnsense,
+			OutboundNatMode:  mode,
+			SourceNatRules:   len(snat),
+			PortForwardRules: len(pf),
+			OneToOneRules:    len(o2o),
+		}})
+		if len(report.Devices) != 1 {
+			return natCheckError(result, "internal: topology classification returned no device"), nil
+		}
+		role = report.Devices[0].Role
+		result.Evidence = append(result.Evidence, report.Devices[0].Evidence...)
+	}
+
+	switch {
+	case role != "" && string(role) == expect:
+		result.Status = models.StatusPass
+		result.Summary = fmt.Sprintf("outbound NAT mode %q classifies as %s (source NAT rules: %d)", mode, expect, len(snat))
+	case mode == expect:
+		result.Status = models.StatusPass
+		result.Summary = fmt.Sprintf("outbound NAT mode %q matches expect %q (source NAT rules: %d)", mode, expect, len(snat))
+	case mode == "" && expect != "unknown":
+		// The controller answered but not with the known snat_mode field —
+		// report unknown and never guess (version key drift).
+		result.Status = models.StatusWarn
+		result.Observed["outbound_nat_mode"] = "unknown"
+		result.Violations = append(result.Violations, fmt.Sprintf("outbound NAT mode missing from filter_base, cannot compare against %q", expect))
+		result.Summary = fmt.Sprintf("outbound NAT mode not reported by the controller (key drift across versions?) — treat as unknown; expected %q", expect)
+	case mode == "" && expect == "unknown":
+		result.Status = models.StatusPass
+		result.Summary = "outbound NAT mode not reported by the controller; expect unknown matches"
+	default:
+		result.Status = models.StatusFail
+		result.Violations = append(result.Violations, fmt.Sprintf("outbound NAT mode is %q, expected %q", mode, expect))
+		result.Summary = fmt.Sprintf("outbound NAT mode %q does not match expect %q", mode, expect)
+	}
+	return result, nil
+}
+
+// natCheckError finishes a failed read with a StatusError result.
+func natCheckError(result *models.CheckResult, format string, args ...any) *models.CheckResult {
+	result.Status = models.StatusError
+	result.Summary = fmt.Sprintf(format, args...)
+	result.Finish()
+	return result
+}
+
 // inferZone guesses a zone name from the OPNsense interface name or description.
 func inferZone(name, description string) string {
 	lower := strings.ToLower(name)
@@ -277,6 +362,7 @@ func ptrInt(i int) *int {
 }
 
 var _ providers.Provider = (*Provider)(nil)
+var _ providers.NatChecker = (*Provider)(nil)
 
 func init() {
 	_ = providers.Register(&Provider{})

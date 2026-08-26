@@ -108,7 +108,7 @@ var auditCmd = &cobra.Command{
 			if include {
 				// Skip pure configuration / credential errors — these are not
 				// network behavior problems the user can fix via probes or routing.
-				if f.CheckType == "acl_check" && strings.Contains(f.Summary, "requires") {
+				if (f.CheckType == "acl_check" || f.CheckType == "nat_check") && strings.Contains(f.Summary, "requires") {
 					include = false
 				}
 			}

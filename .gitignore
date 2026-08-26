@@ -45,3 +45,6 @@ Thumbs.db
 .codacy/server-issues.json
 coverage
 coverage.out
+
+# editor backup of built binaries (file-locked on Windows)
+*.exe~

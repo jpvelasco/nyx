@@ -117,6 +117,21 @@ type ACLApplier interface {
 	ApplyACL(ctx context.Context, req ACLApplyRequest, opts ImportOptions) (*ACLApplyResult, error)
 }
 
+// NatCheckRequest is the expected NAT posture for a nat_check assertion:
+// an outbound mode (automatic, hybrid, advanced, disabled), a topology role
+// (nat_router, bridge, indeterminate), "unknown", or "present" (Omada
+// managed-gateway presence).
+type NatCheckRequest struct {
+	ExpectMode string
+}
+
+// NatChecker is the optional read-only surface behind the nat_check
+// assertion. The audit engine looks it up with a type assertion (like
+// ACLApplier); a provider without it is refused with a clear error.
+type NatChecker interface {
+	NatCheck(ctx context.Context, req NatCheckRequest, opts ImportOptions) (*models.CheckResult, error)
+}
+
 // Provider is implemented by each vendor backend.
 type Provider interface {
 	Name() string

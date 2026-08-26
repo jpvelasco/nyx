@@ -67,6 +67,7 @@ func init() {
 	rootCmd.AddCommand(checkVPNCmd)
 	rootCmd.AddCommand(verifyIsolationCmd)
 	rootCmd.AddCommand(auditCmd)
+	rootCmd.AddCommand(topologyCmd)
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(providerCmd)
 	rootCmd.AddCommand(credentialsCmd)
