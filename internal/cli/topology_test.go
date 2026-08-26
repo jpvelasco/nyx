@@ -362,7 +362,7 @@ func TestTopologyCmd_RunE_OutputFile(t *testing.T) {
 	}
 
 	// File variant: verify the writer path was taken by reading the file back.
-	data, err := os.ReadFile(outFile)
+	data, err := os.ReadFile(outFile) // nosemgrep: go_filesystem_rule-fileread — outFile is a fixed name under t.TempDir()
 	if err != nil {
 		t.Fatalf("output file not written: %v", err)
 	}

@@ -331,7 +331,7 @@ func TestDoRetriesAreLogged(t *testing.T) {
 	resp.Body.Close()
 	l.Close()
 
-	raw, err := os.ReadFile(dir + "/nyx.log")
+	raw, err := os.ReadFile(dir + "/nyx.log") // nosemgrep: go_filesystem_rule-fileread — path is a fixed test log name under t.TempDir()
 	if err != nil {
 		t.Fatalf("reading log: %v", err)
 	}
