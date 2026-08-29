@@ -286,6 +286,14 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 // providerEnvNames lists the per-provider env var names for the credential
 // fields. The opnsense provider carries the API pair under OPNSENSE_API_KEY /
 // OPNSENSE_API_SECRET (matching `nyx topology`) and has no site.
+//
+// #nosec G101 — env var names, not credential values
+const (
+	omadaHostEnv = "OMADA_HOST"
+	// #nosec G101
+	omadaCredEnv = "OMADA_CLIENT_ID / OMADA_CLIENT_SECRET"
+)
+
 var providerEnvNames = map[string][4]string{
 	// host, credential 1, credential 2, site
 	"omada":    {"OMADA_HOST", "OMADA_CLIENT_ID", "OMADA_CLIENT_SECRET", "OMADA_SITE"},
@@ -346,7 +354,7 @@ func requireProviderHost(opts providers.ImportOptions, providerName string) erro
 	if opts.Host != "" {
 		return nil
 	}
-	hostEnv, credEnv := "OMADA_HOST", "OMADA_CLIENT_ID / OMADA_CLIENT_SECRET"
+	hostEnv, credEnv := omadaHostEnv, omadaCredEnv
 	providerName = strings.ToLower(providerName)
 	if names, ok := providerEnvNames[providerName]; ok && names[0] != "" {
 		hostEnv = names[0]
