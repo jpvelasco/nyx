@@ -234,25 +234,38 @@ func (c *Client) GetAliases(ctx context.Context) ([]Alias, error) {
 	return out, nil
 }
 
-// GetOutboundNatMode returns the outbound (source) NAT mode from the general
-// firewall config (GET /api/firewall/filter_base/get). The mode is one of
-// "automatic", "hybrid", "advanced", or "disabled" — the key signal for the
-// double-NAT check: a transparent-proxy OPNsense should report "disabled"
-// (or "advanced" with no source NAT rules).
+// GetOutboundNatMode returns the outbound (source) NAT mode (GET
+// /api/firewall/source_nat/get). The response is a selected-map:
+// general.snat_mode holds one entry per mode (automatic, hybrid, advanced,
+// disabled) and the entry whose selected flag is 1 is the active one. An
+// empty result means the controller answered without a recognised selection
+// (key drift across versions) — callers treat that as "unknown" and must
+// not guess. The mode is the key signal for the double-NAT check: a
+// transparent-proxy OPNsense should report "disabled" (or "advanced" with no
+// source NAT rules).
 func (c *Client) GetOutboundNatMode(ctx context.Context) (string, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/firewall/filter_base/get", nil)
+	resp, err := c.do(ctx, http.MethodGet, "/firewall/source_nat/get", nil)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	var result struct {
-		General struct {
-			SNATMode string `json:"snat_mode"`
-		} `json:"general"`
+		Filter struct {
+			General struct {
+				SNATMode map[string]struct {
+					Selected int `json:"selected"`
+				} `json:"snat_mode"`
+			} `json:"general"`
+		} `json:"filter"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decoding firewall base response: %w", err)
+		return "", fmt.Errorf("decoding outbound NAT mode response: %w", err)
 	}
-	return result.General.SNATMode, nil
+	for mode, opt := range result.Filter.General.SNATMode {
+		if opt.Selected != 0 {
+			return mode, nil
+		}
+	}
+	return "", nil
 }

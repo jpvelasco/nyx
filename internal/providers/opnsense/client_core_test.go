@@ -196,8 +196,29 @@ func TestDoClientErrorNoRetry(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	_, err := c.do(context.Background(), http.MethodGet, "/x", nil)
-	if err == nil || !strings.Contains(err.Error(), "unexpected status 403") {
-		t.Errorf("error = %v, want unexpected status 403", err)
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("error = %v, want permission denied", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("requests = %d, want 1 (403 must not be retried)", got)
+	}
+}
+
+// S1.7b — 403 is a stable failure with an actionable privilege hint: the
+// error must name the endpoint and point at the user privilege settings,
+// because a Forbidden means the API user lacks the page privilege.
+func TestDoForbiddenPrivilegeHint(t *testing.T) {
+	var calls int32
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusForbidden)
+		testutil.WriteBody(w, `{"status":403,"message":"Forbidden"}`)
+	}))
+	_, err := c.do(context.Background(), http.MethodGet, "/core/firmware/running", nil)
+	for _, want := range []string{"/core/firmware/running", "permission denied", "lacks the privilege"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v, want it to contain %q", err, want)
+		}
 	}
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Errorf("requests = %d, want 1 (403 must not be retried)", got)
@@ -456,7 +477,7 @@ func TestFetchPagedList(t *testing.T) {
 			}
 		}))
 		var got []json.RawMessage
-		total, err := fetchPagedList(context.Background(), c, "/firewall/filter/searchRule", 2, &got)
+		total, err := fetchPagedList(context.Background(), c, "/firewall/filter/search_rule", 2, &got)
 		if err != nil {
 			t.Fatalf("fetchPagedList: %v", err)
 		}
@@ -481,7 +502,7 @@ func TestFetchPagedList(t *testing.T) {
 			testutil.WriteBody(w, `{"total":0,"rowCount":200,"current":1,"rows":[]}`)
 		}))
 		var got []json.RawMessage
-		if _, err := fetchPagedList(context.Background(), c, "/firewall/filter/searchRule", 200, &got); err != nil {
+		if _, err := fetchPagedList(context.Background(), c, "/firewall/filter/search_rule", 200, &got); err != nil {
 			t.Fatalf("fetchPagedList: %v", err)
 		}
 		if !strings.Contains(gotQuery, "current=1") || !strings.Contains(gotQuery, "rowCount=200") {
@@ -517,7 +538,7 @@ func TestFetchPagedList(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 		}))
 		var got []json.RawMessage
-		_, err := fetchPagedList(context.Background(), c, "/firewall/filter/searchRule", 200, &got)
+		_, err := fetchPagedList(context.Background(), c, "/firewall/filter/search_rule", 200, &got)
 		if err != nil {
 			t.Fatalf("fetchPagedList: %v", err)
 		}
@@ -531,7 +552,7 @@ func TestFetchPagedList(t *testing.T) {
 			testutil.WriteBody(w, `not json`)
 		}))
 		var got []json.RawMessage
-		_, err := fetchPagedList(context.Background(), c, "/firewall/filter/searchRule", 200, &got)
+		_, err := fetchPagedList(context.Background(), c, "/firewall/filter/search_rule", 200, &got)
 		if err == nil || !strings.Contains(err.Error(), "decoding paged list response") {
 			t.Errorf("error = %v, want decoding paged list response", err)
 		}
@@ -544,7 +565,7 @@ func TestFetchPagedList(t *testing.T) {
 			testutil.WriteBody(w, fmt.Sprintf(`{"total":4,"rowCount":2,"current":%d,"rows":[{"n":1},{"n":2}]}`, n))
 		}))
 		var got []json.RawMessage
-		total, err := fetchPagedList(context.Background(), c, "/firewall/filter/searchRule", 2, &got)
+		total, err := fetchPagedList(context.Background(), c, "/firewall/filter/search_rule", 2, &got)
 		if err != nil {
 			t.Fatalf("fetchPagedList: %v", err)
 		}
@@ -568,7 +589,7 @@ func TestFetchPagedList(t *testing.T) {
 			testutil.WriteBody(w, `{"total":0,"rowCount":3,"current":1,"rows":[{"n":1},{"n":2}]}`)
 		}))
 		var got []json.RawMessage
-		if _, err := fetchPagedList(context.Background(), c, "/firewall/filter/searchRule", 2, &got); err != nil {
+		if _, err := fetchPagedList(context.Background(), c, "/firewall/filter/search_rule", 2, &got); err != nil {
 			t.Fatalf("fetchPagedList: %v", err)
 		}
 		if len(got) != 2 {
@@ -584,7 +605,7 @@ func TestFetchPagedList(t *testing.T) {
 			testutil.WriteBody(w, `{"total":1,"rowCount":1,"current":1,"rows":{"not":"array"}}`)
 		}))
 		var got []json.RawMessage
-		_, err := fetchPagedList(context.Background(), c, "/firewall/filter/searchRule", 200, &got)
+		_, err := fetchPagedList(context.Background(), c, "/firewall/filter/search_rule", 200, &got)
 		if err == nil || !strings.Contains(err.Error(), "decoding paged list response") {
 			t.Errorf("error = %v, want decoding paged list response", err)
 		}
@@ -596,7 +617,7 @@ func TestFetchPagedList(t *testing.T) {
 			testutil.WriteBody(w, `{"total":0,"rowCount":2,"current":99,"rows":[{"n":1},{"n":2}]}`)
 		}))
 		var got []json.RawMessage
-		_, err := fetchPagedList(context.Background(), c, "/firewall/filter/searchRule", 2, &got)
+		_, err := fetchPagedList(context.Background(), c, "/firewall/filter/search_rule", 2, &got)
 		if err == nil || !strings.Contains(err.Error(), "did not terminate after 100 pages") {
 			t.Errorf("error = %v, want the page-cap error", err)
 		}

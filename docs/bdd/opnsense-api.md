@@ -114,7 +114,7 @@ When `GetInterfaces` is called
 Then each interface is returned sorted by name with IP split from the `ip/prefix` form and prefix bits as `Subnet`
 
 ### S2.3 Firewall rules
-Given `GET /api/firewall/filter/searchRule` → `{"total":N,"rows":[{...}]}`
+Given `GET /api/firewall/filter/search_rule` → `{"total":N,"rows":[{...}]}`
 When `GetFirewallRules` is called
 Then every row is returned with `Disabled` derived as `Enabled != "1"`
 
@@ -148,9 +148,9 @@ Then each rule's interface, source/destination nets, local address, mode, and de
 And the generic outbound-NAT row (`snat_mode` field) is preserved in `SNATMode`
 
 ### S2.9 Outbound NAT mode
-Given `GET /api/firewall/filter_base/get` → `{"general":{"snat_mode":"disabled"}}`
+Given `GET /api/firewall/source_nat/get` → `{"filter":{"general":{"snat_mode":{"automatic":{"selected":0},"hybrid":{"selected":0},"advanced":{"selected":0},"disabled":{"selected":1}}}}}`
 When `GetOutboundNatMode` is called
-Then the mode is `disabled` (one of `automatic|hybrid|advanced|disabled`)
+Then the mode is `disabled` — the entry whose `selected` flag is 1 (one of `automatic|hybrid|advanced|disabled`)
 And the mode is the key double-NAT signal: a transparent-proxy OPNsense must not NAT
 
 ### S2.10 Aliases
@@ -197,9 +197,9 @@ against a bridge/indeterminate-classified device are refused without explicit
   stages (`filter_base/apply` required) or applies live; the plan result
   always states the provider name and the exact API endpoints it would
   call.
-- **Outbound NAT mode drift → `unknown`.** A missing `snat_mode` key is
-  reported as `unknown` and never guessed; mutation plans against an
-  `unknown` device are refused.
+- **Outbound NAT mode drift → `unknown`.** An absent or unselected
+  `snat_mode` entry is reported as `unknown` and never guessed; mutation
+  plans against an `unknown` device are refused.
 
 ## §4 Topology & `nat_check` (Implemented — PR 1)
 

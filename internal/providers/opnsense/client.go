@@ -35,7 +35,7 @@ type Interface struct {
 }
 
 // FirewallRule represents a single firewall rule from OPNsense
-// (GET /api/firewall/filter/searchRule row shape).
+// (GET /api/firewall/filter/search_rule row shape).
 type FirewallRule struct {
 	RuleUUID    string   `json:"uuid"`
 	Enabled     string   `json:"enabled"` // "1" = enabled
@@ -164,11 +164,11 @@ func (c *Client) GetInterfaces(ctx context.Context) ([]Interface, error) {
 }
 
 // GetFirewallRules returns all firewall rules from OPNsense.
-// Rules are served by a single paged endpoint (GET /api/firewall/filter/searchRule);
+// Rules are served by a single paged endpoint (GET /api/firewall/filter/search_rule);
 // any fetch failure is surfaced to the caller — a silent "0 policies" import
 // would hide real problems like revoked keys or an unreachable controller.
 func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
-	resp, err := c.doRequest(ctx, "/firewall/filter/searchRule")
+	resp, err := c.doRequest(ctx, "/firewall/filter/search_rule")
 	if err != nil {
 		return nil, err
 	}

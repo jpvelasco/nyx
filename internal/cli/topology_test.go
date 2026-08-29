@@ -219,8 +219,8 @@ func topoOpnsenseServer(t *testing.T) *httptest.Server {
 			return
 		}
 		switch r.URL.Path {
-		case "/api/firewall/filter_base/get":
-			testutil.WriteBody(w, `{"general":{"snat_mode":"disabled"}}`)
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody("disabled"))
 		case "/api/firewall/d_nat/search_rule",
 			"/api/firewall/one_to_one/search_rule",
 			"/api/firewall/source_nat/search_rule":

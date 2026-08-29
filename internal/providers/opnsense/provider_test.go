@@ -107,7 +107,7 @@ func TestProviderInfo(t *testing.T) {
 }
 
 // opnsenseServer returns a test server serving a canned OPNsense API
-// (real endpoint shapes: interfaces_info map, paged searchRule rows).
+// (real endpoint shapes: interfaces_info map, paged search_rule rows).
 func opnsenseServer(t *testing.T, leases string) *httptest.Server {
 	t.Helper()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +121,7 @@ func opnsenseServer(t *testing.T, leases string) *httptest.Server {
 				"no-ip":{"description":"","dhcp":false,"ipv4":"","ipv4_gateway":""},
 				"bad-cidr":{"description":"","dhcp":false,"ipv4":"999.1.1.1/99","ipv4_gateway":""}
 			}}`)
-		case "/api/firewall/filter/searchRule":
+		case "/api/firewall/filter/search_rule":
 			testutil.WriteBody(w, `{"total":5,"rows":[
 				{"uuid":"u1","enabled":"1","action":"block","description":"Deny LAN to IOT","interface":["lan"],"source_net":"10.0.0.5","destination_net":"203.0.113.9"},
 				{"uuid":"u2","enabled":"1","action":"reject","interface":["lan"],"source_net":"10.0.0.6","destination_net":"203.0.113.10"},
@@ -239,7 +239,7 @@ func TestProviderImportSpec(t *testing.T) {
 				testutil.WriteBody(w, firmwareJSON)
 			case "/api/interfaces/overview/interfaces_info":
 				testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`)
-			case "/api/firewall/filter/searchRule":
+			case "/api/firewall/filter/search_rule":
 				w.WriteHeader(http.StatusInternalServerError)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -260,7 +260,7 @@ func TestProviderImportSpec(t *testing.T) {
 				testutil.WriteBody(w, firmwareJSON)
 			case "/api/interfaces/overview/interfaces_info":
 				testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`)
-			case "/api/firewall/filter/searchRule":
+			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
 			case "/api/dhcpd/leases":
 				w.WriteHeader(http.StatusInternalServerError)
@@ -287,7 +287,7 @@ func TestProviderCheck(t *testing.T) {
 				testutil.WriteBody(w, firmwareJSON)
 			case "/api/interfaces/overview/interfaces_info":
 				testutil.WriteBody(w, `{"interfaces":{}}`)
-			case "/api/firewall/filter/searchRule":
+			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
 			case "/api/dhcpd/leases":
 				testutil.WriteBody(w, `{"leases":[]}`)

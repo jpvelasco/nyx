@@ -14,8 +14,8 @@ import (
 func opnsenseNatHandlers(unexpected *strings.Builder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/firewall/filter_base/get":
-			testutil.WriteBody(w, `{"general":{"snat_mode":"disabled"}}`)
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody("disabled"))
 		case "/api/firewall/d_nat/search_rule":
 			testutil.WriteBody(w, `{"total":1,"rows":[
 				{"rule":[{"uuid":"n1","interface":["wan"],"protocol":"tcp","source":{"network":"any"},"destination":{"network":"203.0.113.1","port":"443"},"local-port":"443","disabled":false,"descr":"web-iot"}]}]}`)
@@ -75,8 +75,8 @@ func TestOpnsenseServiceGetNAT(t *testing.T) {
 func TestOpnsenseServiceGetNAT_HardError(t *testing.T) {
 	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/firewall/filter_base/get":
-			testutil.WriteBody(w, `{"general":{"snat_mode":"disabled"}}`)
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody("disabled"))
 		case "/api/firewall/d_nat/search_rule":
 			w.WriteHeader(http.StatusNotFound)
 			testutil.WriteBody(w, `{}`)
@@ -187,7 +187,7 @@ func TestOpnsenseServiceGetNAT_LaterReadFailures(t *testing.T) {
 	cases := []struct {
 		name, failPath, want string
 	}{
-		{"mode", "/api/firewall/filter_base/get", "fetching outbound NAT mode"},
+		{"mode", "/api/firewall/source_nat/get", "fetching outbound NAT mode"},
 		{"one-to-one", "/api/firewall/one_to_one/search_rule", "fetching one-to-one rules"},
 		{"source nat", "/api/firewall/source_nat/search_rule", "fetching source NAT rules"},
 	}

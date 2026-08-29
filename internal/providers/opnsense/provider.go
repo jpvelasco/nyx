@@ -287,7 +287,7 @@ func (o *Provider) NatCheck(ctx context.Context, req providers.NatCheckRequest, 
 		// report unknown and never guess (version key drift).
 		result.Status = models.StatusWarn
 		result.Observed["outbound_nat_mode"] = "unknown"
-		result.Violations = append(result.Violations, fmt.Sprintf("outbound NAT mode missing from filter_base, cannot compare against %q", expect))
+		result.Violations = append(result.Violations, fmt.Sprintf("outbound NAT mode missing from source_nat general config, cannot compare against %q", expect))
 		result.Summary = fmt.Sprintf("outbound NAT mode not reported by the controller (key drift across versions?) — treat as unknown; expected %q", expect)
 	case mode == "" && expect == "unknown":
 		result.Status = models.StatusPass
