@@ -11,20 +11,16 @@ import (
 	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
-// natModeServer serves the four NAT-read endpoints. mode is the value of
-// general.snat_mode in /filter_base/get; an empty mode omits the key entirely
-// (simulating version key drift).
+// natModeServer serves the four NAT-read endpoints. mode is the selected
+// entry of general.snat_mode in /source_nat/get (a selected-map); an empty
+// mode omits the key entirely (simulating version key drift).
 func natModeServer(t *testing.T, mode string) *httptest.Server {
 	t.Helper()
-	base := `{"general":{`
-	if mode != "" {
-		base += `"snat_mode":"` + mode + `"`
-	}
-	base += `}}`
+	modeBody := testutil.SNATModeBody(mode)
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/firewall/filter_base/get":
-			testutil.WriteBody(w, base)
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, modeBody)
 		case "/api/firewall/d_nat/search_rule":
 			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
 		case "/api/firewall/one_to_one/search_rule":
@@ -168,8 +164,8 @@ func TestProviderNatCheck_LaterReadFailures(t *testing.T) {
 					return
 				}
 				switch r.URL.Path {
-				case "/api/firewall/filter_base/get":
-					testutil.WriteBody(w, `{"general":{"snat_mode":"disabled"}}`)
+				case "/api/firewall/source_nat/get":
+					testutil.WriteBody(w, testutil.SNATModeBody("disabled"))
 				case "/api/firewall/d_nat/search_rule",
 					"/api/firewall/one_to_one/search_rule",
 					"/api/firewall/source_nat/search_rule":

@@ -118,6 +118,9 @@ func (c *Client) classifyStatus(resp *http.Response, path string) error {
 	if resp.StatusCode == http.StatusUnauthorized {
 		return &stableError{fmt.Errorf("authentication failed — check API key and secret")}
 	}
+	if resp.StatusCode == http.StatusForbidden {
+		return &stableError{fmt.Errorf("permission denied: %s on OPNsense at %s — the API user lacks the privilege for this endpoint; grant the matching page privilege to the user (System ‣ Access ‣ Users)", path, c.host)}
+	}
 	if resp.StatusCode == http.StatusNotFound {
 		return &stableError{fmt.Errorf("resource not found: %s on OPNsense at %s", path, c.host)}
 	}

@@ -37,7 +37,7 @@ const (
 )
 
 // NatMode constants for the OPNsense outbound (source) NAT mode, as read from
-// /api/firewall/filter_base/get (filter general.snat_mode).
+// /api/firewall/source_nat/get (filter.general.snat_mode selected-map).
 const (
 	NatModeAutomatic = "automatic"
 	NatModeHybrid    = "hybrid"

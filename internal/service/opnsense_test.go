@@ -95,8 +95,8 @@ func TestOpnsenseServiceListInterfaces(t *testing.T) {
 
 func TestOpnsenseServiceListFirewallRules(t *testing.T) {
 	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/firewall/filter/searchRule" {
-			t.Errorf("path = %s, want searchRule", r.URL.Path)
+		if r.URL.Path != "/api/firewall/filter/search_rule" {
+			t.Errorf("path = %s, want search_rule", r.URL.Path)
 		}
 		testutil.WriteBody(w, `{"total":2,"rows":[
 			{"uuid":"u1","enabled":"1","action":"block","interface":["lan"],"protocol":"tcp","source_net":"10.0.20.0/24","destination_net":"10.0.10.0/24","description":"Block IoT"},

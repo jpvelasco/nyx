@@ -51,8 +51,8 @@ func opnsenseNatModeServer(t *testing.T, snatMode string, dNatNotFound bool) *ht
 			return
 		}
 		switch r.URL.Path {
-		case "/api/firewall/filter_base/get":
-			testutil.WriteBody(w, `{"general":{"snat_mode":"`+snatMode+`"}}`)
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody(snatMode))
 		case "/api/firewall/d_nat/search_rule",
 			"/api/firewall/one_to_one/search_rule",
 			"/api/firewall/source_nat/search_rule":

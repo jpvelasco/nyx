@@ -155,8 +155,8 @@ func TestGetInterfaces(t *testing.T) {
 func TestGetFirewallRules(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/api/firewall/filter/searchRule" {
-				t.Errorf("path = %q, want /api/firewall/filter/searchRule", r.URL.Path)
+			if r.URL.Path != "/api/firewall/filter/search_rule" {
+				t.Errorf("path = %q, want /api/firewall/filter/search_rule", r.URL.Path)
 			}
 			testutil.WriteBody(w, `{"total":3,"rows":[
 				{"uuid":"u1","enabled":"1","action":"block","description":"deny lan to iot","interface":["lan"],"source_net":"10.0.0.5","destination_net":"203.0.113.9"},

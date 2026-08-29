@@ -637,6 +637,9 @@ func (f *fakeProvider) Check(ctx context.Context, opts providers.ImportOptions) 
 func (f *fakeProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequest, opts providers.ImportOptions) (*models.CheckResult, error) {
 	return models.NewCheckResult("fake", "acl_check", "local", req.PolicyName), nil
 }
+func (f *fakeProvider) Inventory(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInventory, error) {
+	return &providers.ProviderInventory{Site: "fake-site", Human: "fake inventory for " + opts.Host}, nil
+}
 
 func (e *errProvider) Check(ctx context.Context, opts providers.ImportOptions) (*providers.AuditResult, error) {
 	return nil, fmt.Errorf("connection refused")
@@ -1631,4 +1634,56 @@ func TestDriftStatusCmd_WarningsOnly(t *testing.T) {
 	}
 	err := driftStatusCmd.RunE(driftStatusCmd, nil)
 	requireExitCode(t, err, 3) // new warnings only => exit 3
+}
+
+func TestBuildInventoryCmd_Run(t *testing.T) {
+	saveRestoreGlobals(t)
+	clearProviderEnv(t)
+	// Globals must be set after buildInventoryCmd: addProviderFlags resets
+	// them to flag defaults via StringVar at registration time.
+	cmd := buildInventoryCmd(&fakeProvider{name: "fake"})
+	providerHost = "10.0.0.6"
+	providerClientID = "admin"
+	providerClientSecret = "pw"
+	var err error
+	out := captureStdout(func() { err = cmd.RunE(cmd, nil) })
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "fake inventory for 10.0.0.6") {
+		t.Errorf("output %q does not contain expected inventory", out)
+	}
+}
+
+func TestBuildInventoryCmd_MissingHost(t *testing.T) {
+	saveRestoreGlobals(t)
+	clearProviderEnv(t)
+
+	cmd := buildInventoryCmd(&fakeProvider{name: "fake"})
+	if err := cmd.RunE(cmd, nil); err == nil {
+		t.Fatal("expected missing-host error")
+	}
+}
+
+func TestBuildInventoryCmd_JSON(t *testing.T) {
+	saveRestoreGlobals(t)
+	clearProviderEnv(t)
+	jsonOutput = true
+	// Set globals after building the command (see TestBuildInventoryCmd_Run).
+	cmd := buildInventoryCmd(&fakeProvider{name: "fake"})
+	providerHost = "10.0.0.6"
+	providerClientID = "admin"
+	providerClientSecret = "pw"
+	var err error
+	out := captureStdout(func() { err = cmd.RunE(cmd, nil) })
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var inv providers.ProviderInventory
+	if err := json.Unmarshal([]byte(out), &inv); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out)
+	}
+	if inv.Site != "fake-site" {
+		t.Errorf("Site = %q, want fake-site", inv.Site)
+	}
 }

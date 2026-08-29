@@ -171,14 +171,14 @@ func TestGetSourceNatRules(t *testing.T) {
 	})
 }
 
-// S2.9 — outbound NAT mode from the general firewall config.
+// S2.9 — outbound NAT mode from the general source-NAT config.
 func TestGetOutboundNatMode(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/api/firewall/filter_base/get" {
-				t.Errorf("path = %q, want /api/firewall/filter_base/get", r.URL.Path)
+			if r.URL.Path != "/api/firewall/source_nat/get" {
+				t.Errorf("path = %q, want /api/firewall/source_nat/get", r.URL.Path)
 			}
-			testutil.WriteBody(w, `{"general":{"snat_mode":"disabled"}}`)
+			testutil.WriteBody(w, `{"filter":{"general":{"snat_mode":{"automatic":{"selected":0},"hybrid":{"selected":0},"advanced":{"selected":0},"disabled":{"selected":1}}}}}`)
 		}))
 		mode, err := c.GetOutboundNatMode(context.Background())
 		if err != nil {
@@ -189,10 +189,10 @@ func TestGetOutboundNatMode(t *testing.T) {
 		}
 	})
 
-	t.Run("other modes decode", func(t *testing.T) {
+	t.Run("each selected entry decodes", func(t *testing.T) {
 		for _, want := range []string{"automatic", "hybrid", "advanced", "disabled"} {
 			c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				testutil.WriteBody(w, `{"general":{"snat_mode":"`+want+`"}}`)
+				testutil.WriteBody(w, testutil.SNATModeBody(want))
 			}))
 			mode, err := c.GetOutboundNatMode(context.Background())
 			if err != nil {
@@ -204,13 +204,26 @@ func TestGetOutboundNatMode(t *testing.T) {
 		}
 	})
 
+	t.Run("no selection is empty (key drift)", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, testutil.SNATModeBody(""))
+		}))
+		mode, err := c.GetOutboundNatMode(context.Background())
+		if err != nil {
+			t.Fatalf("GetOutboundNatMode: %v", err)
+		}
+		if mode != "" {
+			t.Errorf("mode = %q, want empty (no known selection)", mode)
+		}
+	})
+
 	t.Run("bad json", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			testutil.WriteBody(w, `not json`)
 		}))
 		_, err := c.GetOutboundNatMode(context.Background())
-		if err == nil || !strings.Contains(err.Error(), "decoding firewall base response") {
-			t.Errorf("error = %v, want decoding firewall base response", err)
+		if err == nil || !strings.Contains(err.Error(), "decoding outbound NAT mode response") {
+			t.Errorf("error = %v, want decoding outbound NAT mode response", err)
 		}
 	})
 }
@@ -386,8 +399,8 @@ func TestReadsIssueNoMutations(t *testing.T) {
 			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
 		case "/api/firewall/source_nat/search_rule":
 			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
-		case "/api/firewall/filter_base/get":
-			testutil.WriteBody(w, `{"general":{"snat_mode":"disabled"}}`)
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody("disabled"))
 		case "/api/firewall/alias/search_item":
 			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
 		default:
