@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
@@ -110,7 +111,7 @@ func buildInfoCmd(p providers.Provider) *cobra.Command {
 		Short: fmt.Sprintf("Show %s controller version and connection info", p.Name()),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			opts := providerImportOptions(p.Name())
-			if err := requireProviderHost(opts); err != nil {
+			if err := requireProviderHost(opts, p.Name()); err != nil {
 				return err
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -154,7 +155,7 @@ func buildImportCmd(p providers.Provider) *cobra.Command {
 
 			opts := providerImportOptions(p.Name())
 			opts.Debug = providerDebug
-			if err := requireProviderHost(opts); err != nil {
+			if err := requireProviderHost(opts, p.Name()); err != nil {
 				return err
 			}
 			result, err := p.ImportSpec(ctx, opts)
@@ -207,7 +208,7 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 
 			opts := providerImportOptions(p.Name())
 			opts.Debug = providerDebug
-			if err := requireProviderHost(opts); err != nil {
+			if err := requireProviderHost(opts, p.Name()); err != nil {
 				return err
 			}
 			result, err := p.Check(ctx, opts)
@@ -258,7 +259,7 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 			defer cancel()
 
 			opts := providerImportOptions(p.Name())
-			if err := requireProviderHost(opts); err != nil {
+			if err := requireProviderHost(opts, p.Name()); err != nil {
 				return err
 			}
 			res, err := inv.Inventory(ctx, opts)
@@ -282,41 +283,77 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 	return cmd
 }
 
-// providerImportOptions builds ImportOptions from flags, then OMADA_* env
-// vars, then the encrypted credential store. Flags win over env; env wins
-// over the store. Missing host after all three is left empty so the
+// providerEnvNames lists the per-provider env var names for the credential
+// fields. The opnsense provider carries the API pair under OPNSENSE_API_KEY /
+// OPNSENSE_API_SECRET (matching `nyx topology`) and has no site.
+var providerEnvNames = map[string][4]string{
+	// host, credential 1, credential 2, site
+	"omada":    {"OMADA_HOST", "OMADA_CLIENT_ID", "OMADA_CLIENT_SECRET", "OMADA_SITE"},
+	"opnsense": {"OPNSENSE_HOST", "OPNSENSE_API_KEY", "OPNSENSE_API_SECRET", ""},
+}
+
+// providerImportOptions builds ImportOptions from flags, then per-provider
+// env vars, then the encrypted credential store. Flags win over env; env
+// wins over the store. Missing host after all three is left empty so the
 // provider surfaces its own connection error.
 func providerImportOptions(providerName string) providers.ImportOptions {
+	names, ok := providerEnvNames[providerName]
+	// Unknown providers keep the historical omada env names.
+	if !ok {
+		names = providerEnvNames["omada"]
+	}
 	opts := providers.ImportOptions{
-		Host:          storepath.FirstNonEmpty(providerHost, os.Getenv("OMADA_HOST")),
-		ClientID:      storepath.FirstNonEmpty(providerClientID, os.Getenv("OMADA_CLIENT_ID")),
-		ClientSecret:  storepath.FirstNonEmpty(providerClientSecret, os.Getenv("OMADA_CLIENT_SECRET")),
-		Site:          storepath.FirstNonEmpty(providerSite, os.Getenv("OMADA_SITE")),
+		Host:          storepath.FirstNonEmpty(providerHost, os.Getenv(names[0])),
+		ClientID:      storepath.FirstNonEmpty(providerClientID, os.Getenv(names[1])),
+		ClientSecret:  storepath.FirstNonEmpty(providerClientSecret, os.Getenv(names[2])),
+		Site:          storepath.FirstNonEmpty(providerSite, os.Getenv(names[3])),
 		SkipTLSVerify: providerSkipTLS,
 		CACertPath:    providerCACertPath,
 		Logger:        log,
 	}
+	// Overlay is fill-only: a partial store entry must never clear values
+	// already resolved from flags or env vars.
 	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
 		fields := credentials.Fields{
 			Host:         opts.Host,
 			ClientID:     opts.ClientID,
 			ClientSecret: opts.ClientSecret,
 			Site:         opts.Site,
+			APIKey:       opts.ClientID,
+			APISecret:    opts.ClientSecret,
 		}
 		credentials.Overlay(storepath.StoreFile(), providerName, "default", &fields)
 		opts.Host = fields.Host
-		opts.ClientID = fields.ClientID
-		opts.ClientSecret = fields.ClientSecret
 		opts.Site = fields.Site
+		if providerName == "opnsense" {
+			opts.ClientID = fields.APIKey
+			opts.ClientSecret = fields.APISecret
+		} else {
+			if fields.ClientID != "" {
+				opts.ClientID = fields.ClientID
+			}
+			if fields.ClientSecret != "" {
+				opts.ClientSecret = fields.ClientSecret
+			}
+		}
 	}
 	return opts
 }
 
-func requireProviderHost(opts providers.ImportOptions) error {
+// requireProviderHost errors when no host was resolved from flags, env, or
+// the store, naming the provider's env vars in the hint.
+func requireProviderHost(opts providers.ImportOptions, providerName string) error {
 	if opts.Host != "" {
 		return nil
 	}
-	return fmt.Errorf("controller host is required: pass --host, set OMADA_HOST, or run `nyx credentials set omada --set host=...`")
+	hostEnv, credEnv := "OMADA_HOST", "OMADA_CLIENT_ID / OMADA_CLIENT_SECRET"
+	providerName = strings.ToLower(providerName)
+	if names, ok := providerEnvNames[providerName]; ok && names[0] != "" {
+		hostEnv = names[0]
+		credEnv = names[1] + " / " + names[2]
+	}
+	return fmt.Errorf("controller host is required: pass --host, set %s, or run `nyx credentials set %s --set host=...` (credentials: %s)",
+		hostEnv, providerName, credEnv)
 }
 
 func addProviderFlags(cmd *cobra.Command) {
