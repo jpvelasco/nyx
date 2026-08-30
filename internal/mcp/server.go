@@ -503,7 +503,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		},
 		{
 			Name:        "opnsense_get_info",
-			Description: "Fetch firmware metadata (version, product, arch) from an OPNsense firewall.",
+			Description: "Fetch system metadata (version, product, arch) from an OPNsense firewall. Reads the Dashboard-privileged system-information endpoint (no System: Firmware privilege required).",
 			InputSchema: opnsenseToolSchema(),
 		},
 		{

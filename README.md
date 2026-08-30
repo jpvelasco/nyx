@@ -258,7 +258,7 @@ Add to your MCP config:
 | `omada_import` | Import Omada state into an intent spec (networks, policies, assertions) |
 | `omada_plan` | Preview ACL rule differences between the controller and a proposed spec (read-only) |
 | `omada_apply_acl` | Apply an ACL policy change: create a rule or enable a disabled matching rule. Dry-run is the default; a real apply is followed by a targeted isolation audit |
-| `opnsense_get_info` | Fetch OPNsense firmware metadata |
+| `opnsense_get_info` | Fetch OPNsense system metadata (version, product, arch) |
 | `opnsense_list_interfaces` | List OPNsense interfaces with IP configuration |
 | `opnsense_list_firewall_rules` | List OPNsense firewall filter rules |
 | `opnsense_list_clients` | List OPNsense DHCP leases (host inventory) |

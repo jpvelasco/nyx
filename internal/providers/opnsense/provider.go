@@ -26,23 +26,26 @@ func (o *Provider) Capabilities() []string {
 	return []string{"info", "import", "check"}
 }
 
-// Info fetches firmware and system info from the OPNsense device (no auth required for basic info).
+// Info fetches system info from the OPNsense device (version, product,
+// arch). The version read uses /diagnostics/system/system_information, which
+// is covered by the Dashboard page privilege — the firmware endpoints
+// require the separate System: Firmware privilege.
 func (o *Provider) Info(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInfo, error) {
 	if opts.Host == "" {
 		return nil, fmt.Errorf("--host is required for opnsense provider")
 	}
 	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
-	fw, err := client.GetFirmwareInfo(ctx)
+	sys, err := client.GetSystemInformation(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &providers.ProviderInfo{
 		Provider: "opnsense",
 		Host:     opts.Host,
-		Version:  fw.ProductVersion,
+		Version:  sys.ProductVersion(),
 		Extra: map[string]string{
-			"product": fw.ProductName,
-			"arch":    fw.ProductArch,
+			"product": "OPNsense",
+			"arch":    sys.Arch(),
 		},
 	}, nil
 }
@@ -58,10 +61,10 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 
 	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
 
-	// Get firmware info for version
-	fw, err := client.GetFirmwareInfo(ctx)
+	// Get system info for version
+	sys, err := client.GetSystemInformation(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("fetching firmware info: %w", err)
+		return nil, fmt.Errorf("fetching system info: %w", err)
 	}
 
 	// Get interfaces with IP configuration
@@ -185,10 +188,10 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		ProviderInfo: providers.ProviderInfo{
 			Provider: "opnsense",
 			Host:     opts.Host,
-			Version:  fw.ProductVersion,
+			Version:  sys.ProductVersion(),
 			Extra: map[string]string{
-				"product": fw.ProductName,
-				"arch":    fw.ProductArch,
+				"product": "OPNsense",
+				"arch":    sys.Arch(),
 			},
 		},
 		NetworkCount: len(networks),

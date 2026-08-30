@@ -33,17 +33,17 @@ func opnsenseOptions(ts *httptest.Server) OpnsenseOptions {
 
 func TestOpnsenseServiceInfo(t *testing.T) {
 	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/core/firmware/running" {
-			t.Errorf("path = %s, want /api/core/firmware/running", r.URL.Path)
+		if r.URL.Path != "/api/diagnostics/system/system_information" {
+			t.Errorf("path = %s, want /api/diagnostics/system/system_information", r.URL.Path)
 		}
-		testutil.WriteBody(w, `{"product_version":"24.7.11","product_name":"OPNsense","product_arch":"amd64"}`)
+		testutil.WriteBody(w, `{"name":"fw","versions":["OPNsense 24.7.11_2-amd64","FreeBSD 14.2-RELEASE-p1","OpenSSL 3.0.13"],"updates":"ok"}`)
 	})
 
 	info, err := NewOpnsenseService().Info(context.Background(), opnsenseOptions(ts))
 	if err != nil {
 		t.Fatalf("Info: %v", err)
 	}
-	if info.Provider != "opnsense" || info.Version != "24.7.11" || info.Product != "OPNsense" || info.Arch != "amd64" {
+	if info.Provider != "opnsense" || info.Version != "24.7.11_2" || info.Product != "OPNsense" || info.Arch != "amd64" {
 		t.Errorf("info = %+v", info)
 	}
 }

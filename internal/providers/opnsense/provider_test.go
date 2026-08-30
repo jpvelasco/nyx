@@ -72,7 +72,7 @@ func TestProviderInfo(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			testutil.WriteBody(w, firmwareJSON)
+			testutil.WriteBody(w, systemInfoJSON)
 		}))
 		defer ts.Close()
 
@@ -84,7 +84,7 @@ func TestProviderInfo(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Info: %v", err)
 		}
-		if info.Provider != "opnsense" || info.Version != "24.1.7" {
+		if info.Provider != "opnsense" || info.Version != "24.1.7_2" {
 			t.Errorf("info = %+v", info)
 		}
 		if info.Extra["product"] != "OPNsense" || info.Extra["arch"] != "amd64" {
@@ -92,7 +92,7 @@ func TestProviderInfo(t *testing.T) {
 		}
 	})
 
-	t.Run("firmware fetch fails", func(t *testing.T) {
+	t.Run("system info fetch fails", func(t *testing.T) {
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
@@ -101,7 +101,7 @@ func TestProviderInfo(t *testing.T) {
 		p := &Provider{}
 		_, err := p.Info(context.Background(), providers.ImportOptions{Host: ts.URL, SkipTLSVerify: true})
 		if err == nil {
-			t.Error("expected error for firmware fetch failure")
+			t.Error("expected error for system info fetch failure")
 		}
 	})
 }
@@ -112,8 +112,8 @@ func opnsenseServer(t *testing.T, leases string) *httptest.Server {
 	t.Helper()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/core/firmware/running":
-			testutil.WriteBody(w, firmwareJSON)
+		case "/api/diagnostics/system/system_information":
+			testutil.WriteBody(w, systemInfoJSON)
 		case "/api/interfaces/overview/interfaces_info":
 			testutil.WriteBody(w, `{"interfaces":{
 				"lan":{"description":"LAN","dhcp":false,"ipv4":"10.0.0.1/24","ipv4_gateway":"10.0.0.254"},
@@ -202,22 +202,22 @@ func TestProviderImportSpec(t *testing.T) {
 		}
 	})
 
-	t.Run("firmware fails", func(t *testing.T) {
+	t.Run("system info fails", func(t *testing.T) {
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
 		defer ts.Close()
 		p := &Provider{}
 		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
-		if err == nil || !strings.Contains(err.Error(), "fetching firmware info") {
-			t.Errorf("error = %v, want fetching firmware info", err)
+		if err == nil || !strings.Contains(err.Error(), "fetching system info") {
+			t.Errorf("error = %v, want fetching system info", err)
 		}
 	})
 
 	t.Run("interfaces fail", func(t *testing.T) {
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/api/core/firmware/running" {
-				testutil.WriteBody(w, firmwareJSON)
+			if r.URL.Path == "/api/diagnostics/system/system_information" {
+				testutil.WriteBody(w, systemInfoJSON)
 				return
 			}
 			w.WriteHeader(http.StatusInternalServerError)
@@ -235,8 +235,8 @@ func TestProviderImportSpec(t *testing.T) {
 		// policies" import would hide revoked keys or an unreachable API.
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/api/core/firmware/running":
-				testutil.WriteBody(w, firmwareJSON)
+			case "/api/diagnostics/system/system_information":
+				testutil.WriteBody(w, systemInfoJSON)
 			case "/api/interfaces/overview/interfaces_info":
 				testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`)
 			case "/api/firewall/filter/search_rule":
@@ -256,8 +256,8 @@ func TestProviderImportSpec(t *testing.T) {
 	t.Run("leases fail", func(t *testing.T) {
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/api/core/firmware/running":
-				testutil.WriteBody(w, firmwareJSON)
+			case "/api/diagnostics/system/system_information":
+				testutil.WriteBody(w, systemInfoJSON)
 			case "/api/interfaces/overview/interfaces_info":
 				testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`)
 			case "/api/firewall/filter/search_rule":
@@ -283,8 +283,8 @@ func TestProviderCheck(t *testing.T) {
 		// engine runs with an empty assertion list (hermetic, no network I/O).
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/api/core/firmware/running":
-				testutil.WriteBody(w, firmwareJSON)
+			case "/api/diagnostics/system/system_information":
+				testutil.WriteBody(w, systemInfoJSON)
 			case "/api/interfaces/overview/interfaces_info":
 				testutil.WriteBody(w, `{"interfaces":{}}`)
 			case "/api/firewall/filter/search_rule":

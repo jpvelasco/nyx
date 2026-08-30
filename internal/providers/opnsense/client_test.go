@@ -10,7 +10,9 @@ import (
 	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
-const firmwareJSON = `{"product_version":"24.1.7","product_name":"OPNsense","product_arch":"amd64"}`
+// systemInfoJSON mirrors GET /diagnostics/system/system_information: the
+// product version string embeds the build number and architecture.
+const systemInfoJSON = `{"name":"fw","versions":["OPNsense 24.1.7_2-amd64","FreeBSD 14.2-RELEASE-p1","OpenSSL 3.0.13"],"updates":"Click to check for updates."}`
 
 // newTestClient spins up a TLS test server (skipTLSVerify client) pointing at it.
 func newTestClient(t *testing.T, h http.HandlerFunc) (*Client, *httptest.Server) {
@@ -23,7 +25,7 @@ func newTestClient(t *testing.T, h http.HandlerFunc) (*Client, *httptest.Server)
 
 func TestNewClientNormalisesHost(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		testutil.WriteBody(w, firmwareJSON)
+		testutil.WriteBody(w, systemInfoJSON)
 	}))
 	defer ts.Close()
 	host := strings.TrimPrefix(ts.URL, "https://")
@@ -38,15 +40,15 @@ func TestDoRequest(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		var sawKey, sawSecret string
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/api/core/firmware/running" {
-				t.Errorf("path = %q, want /api/core/firmware/running", r.URL.Path)
+			if r.URL.Path != "/api/diagnostics/system/system_information" {
+				t.Errorf("path = %q, want /api/diagnostics/system/system_information", r.URL.Path)
 			}
 			if k, s, ok := r.BasicAuth(); ok {
 				sawKey, sawSecret = k, s
 			}
-			testutil.WriteBody(w, firmwareJSON)
+			testutil.WriteBody(w, systemInfoJSON)
 		}))
-		resp, err := c.doRequest(context.Background(), "/core/firmware/running")
+		resp, err := c.doRequest(context.Background(), "/diagnostics/system/system_information")
 		if err != nil {
 			t.Fatalf("doRequest: %v", err)
 		}
@@ -85,17 +87,45 @@ func TestDoRequest(t *testing.T) {
 	})
 }
 
-func TestGetFirmwareInfo(t *testing.T) {
+func TestGetSystemInformation(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			testutil.WriteBody(w, firmwareJSON)
+			if r.URL.Path != "/api/diagnostics/system/system_information" {
+				t.Errorf("path = %q, want /api/diagnostics/system/system_information", r.URL.Path)
+			}
+			testutil.WriteBody(w, systemInfoJSON)
 		}))
-		info, err := c.GetFirmwareInfo(context.Background())
+		info, err := c.GetSystemInformation(context.Background())
 		if err != nil {
-			t.Fatalf("GetFirmwareInfo: %v", err)
+			t.Fatalf("GetSystemInformation: %v", err)
 		}
-		if info.ProductVersion != "24.1.7" || info.ProductName != "OPNsense" || info.ProductArch != "amd64" {
-			t.Errorf("info = %+v", info)
+		if info.ProductVersion() != "24.1.7_2" {
+			t.Errorf("ProductVersion = %q, want 24.1.7_2", info.ProductVersion())
+		}
+		if info.Arch() != "amd64" {
+			t.Errorf("Arch = %q, want amd64", info.Arch())
+		}
+		if info.FreeBSDVersion() != "14.2-RELEASE-p1" {
+			t.Errorf("FreeBSDVersion = %q", info.FreeBSDVersion())
+		}
+		if info.OpenSSLVersion() != "3.0.13" {
+			t.Errorf("OpenSSLVersion = %q", info.OpenSSLVersion())
+		}
+	})
+
+	t.Run("version without arch suffix", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"name":"fw","versions":["OPNsense 24.1.7","FreeBSD 14.2-RELEASE"],"updates":""}`)
+		}))
+		info, err := c.GetSystemInformation(context.Background())
+		if err != nil {
+			t.Fatalf("GetSystemInformation: %v", err)
+		}
+		if info.ProductVersion() != "24.1.7" {
+			t.Errorf("ProductVersion = %q, want 24.1.7 (whole string, no arch to split)", info.ProductVersion())
+		}
+		if info.Arch() != "" {
+			t.Errorf("Arch = %q, want empty (never guessed)", info.Arch())
 		}
 	})
 
@@ -103,9 +133,9 @@ func TestGetFirmwareInfo(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			testutil.WriteBody(w, `not json`)
 		}))
-		_, err := c.GetFirmwareInfo(context.Background())
-		if err == nil || !strings.Contains(err.Error(), "decoding firmware response") {
-			t.Errorf("error = %v, want decoding firmware response", err)
+		_, err := c.GetSystemInformation(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "decoding system information response") {
+			t.Errorf("error = %v, want decoding system information response", err)
 		}
 	})
 }

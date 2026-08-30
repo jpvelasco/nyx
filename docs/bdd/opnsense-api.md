@@ -31,7 +31,7 @@ yet.
 | Phase | Surface | Status |
 | ----- | ------- | ------ |
 | 1 (PR 1) | Client core (`do` GET + POST/JSON, mutex, retry/backoff, paged-list helper, logger) | **Implemented** |
-| 1 (PR 1) | Reads: firmware, interfaces, firewall rules, DHCP leases (preserved contracts) | **Implemented** |
+| 1 (PR 1) | Reads: system info, interfaces, firewall rules, DHCP leases (preserved contracts) | **Implemented** |
 | 1 (PR 1) | Reads: NAT rules (port forward / one-to-one / source NAT), outbound NAT mode, aliases | **Implemented** |
 | 1 (PR 1) | Reads (Omada): NAT port-forward / one-to-one, ALG, firewall settings, gateway presence | **Implemented** |
 | 1 (PR 1) | Topology report + `nat_check` assertion + `nyx topology` / MCP surface | **Implemented** |
@@ -103,10 +103,12 @@ And no log event carries credentials, hostnames, or IP addresses
 Every read returns typed data decoded from the documented wire shape; a
 malformed JSON body yields an error containing `decoding <what> response`.
 
-### S2.1 Firmware info
-Given `GET /api/core/firmware/running` → `{"product_version":"24.1.7","product_name":"OPNsense","product_arch":"amd64"}`
-When `GetFirmwareInfo` is called
-Then the result carries version `24.1.7`, name `OPNsense`, arch `amd64`
+### S2.1 System information
+Given `GET /api/diagnostics/system/system_information` → `{"name":"fw","versions":["OPNsense 24.1.7_2-amd64","FreeBSD 14.2-RELEASE-p1","OpenSSL 3.0.13"],"updates":"ok"}`
+When `GetSystemInformation` is called
+Then the product version is `24.1.7_2` (product name and architecture stripped from the `OPNsense` entry) and the arch is `amd64`
+And the FreeBSD and OpenSSL entries are exposed without their prefixes
+And when the product entry carries no known-arch suffix, the version is the whole entry and the arch is empty (never guessed)
 
 ### S2.2 Interfaces
 Given `GET /api/interfaces/overview/interfaces_info` → `{"interfaces":{"lan":{"description":"LAN","ipv4":"10.0.0.1/24",...}}}`
