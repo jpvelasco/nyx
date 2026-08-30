@@ -5,7 +5,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -257,20 +259,49 @@ func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
 	return result.Rows, nil
 }
 
-// GetDHCPLeases returns all DHCP leases from OPNsense.
-// Accepts both the {"leases": [...]} and paged {"rows": [...]} response shapes.
-func (c *Client) GetDHCPLeases(ctx context.Context) ([]DHCPLease, error) {
-	resp, err := c.doRequest(ctx, "/dhcpd/leases")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+// leaseRoutes lists the DHCP lease endpoints per active DHCP backend. The
+// 26.x generation ships dnsmasq as the default backend, so its route is
+// probed first; pre-26.x used the dhcpd backend. Probing order distinguishes
+// a missing route (404, skip and try the next) from a present route the API
+// user lacks the page privilege for (403, stable — the actionable
+// permission-denied error is returned, never retried or masked).
+var leaseRoutes = []string{"/dnsmasq/leases/search", "/dhcpd/leases"}
 
+// GetDHCPLeases returns all DHCP leases from OPNsense. The active DHCP
+// backend's route is probed in order (see leaseRoutes); a 404 falls through
+// to the next route, a 403 fails immediately with the privilege error.
+// Accepts both the {"leases": [...]} and paged {"rows": [...]} response
+// shapes.
+func (c *Client) GetDHCPLeases(ctx context.Context) ([]DHCPLease, error) {
+	var lastErr error
+	for _, path := range leaseRoutes {
+		resp, err := c.doRequest(ctx, path)
+		if err != nil {
+			var notFound *stableError
+			if errors.As(err, &notFound) && strings.Contains(err.Error(), "resource not found") {
+				lastErr = err
+				continue
+			}
+			return nil, err
+		}
+		leases, derr := decodeDHCPLeases(resp.Body)
+		resp.Body.Close()
+		if derr != nil {
+			return nil, derr
+		}
+		return leases, nil
+	}
+	return nil, lastErr
+}
+
+// decodeDHCPLeases decodes either the {"leases": [...]} or paged {"rows":
+// [...]} DHCP leases response shape.
+func decodeDHCPLeases(r io.Reader) ([]DHCPLease, error) {
 	var result struct {
 		Leases []DHCPLease `json:"leases"`
 		Rows   []DHCPLease `json:"rows"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(r).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decoding DHCP leases response: %w", err)
 	}
 	if len(result.Leases) > 0 {

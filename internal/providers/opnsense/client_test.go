@@ -234,10 +234,12 @@ func TestGetFirewallRules(t *testing.T) {
 }
 
 func TestGetDHCPLeases(t *testing.T) {
-	t.Run("success rows shape", func(t *testing.T) {
+	t.Run("success rows shape on dnsmasq route", func(t *testing.T) {
+		var hits []string
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/api/dhcpd/leases" {
-				t.Errorf("path = %q, want /api/dhcpd/leases", r.URL.Path)
+			hits = append(hits, r.URL.Path)
+			if r.URL.Path != "/api/dnsmasq/leases/search" {
+				t.Errorf("path = %q, want /api/dnsmasq/leases/search", r.URL.Path)
 			}
 			testutil.WriteBody(w, `{"total":1,"rows":[
 				{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.0.10","hostname":"laptop"}
@@ -246,6 +248,9 @@ func TestGetDHCPLeases(t *testing.T) {
 		leases, err := c.GetDHCPLeases(context.Background())
 		if err != nil {
 			t.Fatalf("GetDHCPLeases: %v", err)
+		}
+		if len(hits) != 1 {
+			t.Errorf("requests = %v, want exactly 1 (dnsmasq probed first, no fallback needed)", hits)
 		}
 		if len(leases) != 1 || leases[0].Hostname != "laptop" {
 			t.Errorf("leases = %+v", leases)
@@ -264,6 +269,64 @@ func TestGetDHCPLeases(t *testing.T) {
 		}
 		if len(leases) != 1 || leases[0].Hostname != "laptop" {
 			t.Errorf("leases = %+v", leases)
+		}
+	})
+
+	t.Run("404 on dnsmasq falls back to dhcpd", func(t *testing.T) {
+		var hits []string
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits = append(hits, r.URL.Path)
+			switch r.URL.Path {
+			case "/api/dnsmasq/leases/search":
+				w.WriteHeader(http.StatusNotFound)
+			case "/api/dhcpd/leases":
+				testutil.WriteBody(w, `{"leases":[
+					{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.0.10","hostname":"laptop"}
+				]}`)
+			default:
+				t.Errorf("unexpected path %q", r.URL.Path)
+			}
+		}))
+		leases, err := c.GetDHCPLeases(context.Background())
+		if err != nil {
+			t.Fatalf("GetDHCPLeases: %v", err)
+		}
+		if len(hits) != 2 || hits[0] != "/api/dnsmasq/leases/search" || hits[1] != "/api/dhcpd/leases" {
+			t.Errorf("requests = %v, want dnsmasq then dhcpd in order", hits)
+		}
+		if len(leases) != 1 || leases[0].IP != "10.0.0.10" {
+			t.Errorf("leases = %+v", leases)
+		}
+	})
+
+	t.Run("403 on first route is stable, not masked", func(t *testing.T) {
+		var hits []string
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits = append(hits, r.URL.Path)
+			w.WriteHeader(http.StatusForbidden)
+		}))
+		_, err := c.GetDHCPLeases(context.Background())
+		if len(hits) != 1 {
+			t.Errorf("requests = %v, want exactly 1 (403 must not retry or fall through)", hits)
+		}
+		if err == nil || !strings.Contains(err.Error(), "permission denied") {
+			t.Errorf("error = %v, want permission denied", err)
+		}
+		if !strings.Contains(err.Error(), "/dnsmasq/leases/search") {
+			t.Errorf("error = %v, want the probed route named", err)
+		}
+	})
+
+	t.Run("404 on all routes surfaces the last error", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		_, err := c.GetDHCPLeases(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "resource not found") {
+			t.Errorf("error = %v, want resource not found", err)
+		}
+		if !strings.Contains(err.Error(), "/dhcpd/leases") {
+			t.Errorf("error = %v, want the last probed route named", err)
 		}
 	})
 

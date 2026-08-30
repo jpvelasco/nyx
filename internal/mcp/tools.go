@@ -51,6 +51,7 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_list_source_nat_rules":   (*Server).toolOpnsenseListSourceNatRules,
 	"opnsense_list_aliases":            (*Server).toolOpnsenseListAliases,
 	"opnsense_get_nat":                 (*Server).toolOpnsenseGetNAT,
+	"opnsense_inventory":               (*Server).toolOpnsenseInventory,
 	"topology":                         (*Server).toolTopology,
 }
 
@@ -533,6 +534,18 @@ func (s *Server) toolOpnsenseGetNAT(ctx context.Context, args map[string]interfa
 		return errResult(fmt.Sprintf("opnsense NAT posture request failed: %v", err))
 	}
 	return okResult(toJSON(nat))
+}
+
+func (s *Server) toolOpnsenseInventory(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	inv, err := s.opnsenseSvc.Inventory(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense inventory request failed: %v", err))
+	}
+	return okResult(toJSON(inv))
 }
 
 // toolTopology reports NAT posture across the configured providers. A
