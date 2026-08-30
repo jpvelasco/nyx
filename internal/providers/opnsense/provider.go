@@ -23,7 +23,7 @@ func (o *Provider) Name() string { return "opnsense" }
 
 // Capabilities lists the supported operations for this provider.
 func (o *Provider) Capabilities() []string {
-	return []string{"info", "import", "check"}
+	return []string{"info", "import", "check", "inventory"}
 }
 
 // Info fetches system info from the OPNsense device (version, product,
@@ -47,6 +47,30 @@ func (o *Provider) Info(ctx context.Context, opts providers.ImportOptions) (*pro
 			"product": "OPNsense",
 			"arch":    sys.Arch(),
 		},
+	}, nil
+}
+
+// Inventory returns the firewall's point-in-time observation: system
+// metadata, its interfaces as networks, the firewall rule count, and the
+// active DHCP-lease (client) count. It is read-only and never mutates.
+func (o *Provider) Inventory(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInventory, error) {
+	if opts.Host == "" {
+		return nil, fmt.Errorf("--host is required for opnsense provider")
+	}
+	if opts.ClientID == "" || opts.ClientSecret == "" {
+		return nil, fmt.Errorf("--client-id and --client-secret are required (API key and secret)")
+	}
+	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	snap, err := client.FetchInventory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &providers.ProviderInventory{
+		Site:        "opnsense-firewall",
+		Human:       RenderInventory(snap, "opnsense-firewall"),
+		Inventory:   BuildSpecInventory(snap),
+		ClientCount: snap.LeaseCount(),
+		Warnings:    snap.Warnings,
 	}, nil
 }
 
@@ -366,6 +390,7 @@ func ptrInt(i int) *int {
 
 var _ providers.Provider = (*Provider)(nil)
 var _ providers.NatChecker = (*Provider)(nil)
+var _ providers.InventoryProvider = (*Provider)(nil)
 
 func init() {
 	_ = providers.Register(&Provider{})

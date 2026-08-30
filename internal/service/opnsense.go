@@ -87,6 +87,24 @@ type OpnsenseNatSummary struct {
 	SourceNatRules   []OpnsenseNatRule `json:"source_nat_rules"`
 }
 
+// OpnsenseInventory is the firewall's point-in-time observation in a flat,
+// agent-friendly shape: system metadata, the interface-derived networks with
+// their gateway bindings, one device entry per networked interface, the
+// firewall rule count, and the active client (DHCP lease) count. OPNsense
+// exposes no managed-device inventory, so model/firmware/upgrade fields are
+// intentionally empty.
+type OpnsenseInventory struct {
+	Host              string            `json:"host"`
+	ControllerVersion string            `json:"controller_version,omitempty"`
+	Arch              string            `json:"arch,omitempty"`
+	Devices           []serviceDevice   `json:"devices"`
+	NetworkGateways   map[string]string `json:"network_gateways,omitempty"`
+	FirewallRuleCount int               `json:"firewall_rule_count"`
+	FirewallRulesOK   bool              `json:"firewall_rules_ok"`
+	ClientCount       int               `json:"client_count"`
+	Warnings          []string          `json:"warnings,omitempty"`
+}
+
 // OpnsenseAlias is a firewall address alias.
 type OpnsenseAlias struct {
 	UUID        string   `json:"uuid"`
@@ -314,6 +332,41 @@ func (s *OpnsenseService) GetNAT(ctx context.Context, opts OpnsenseOptions) (*Op
 		OneToOneRules:    flattenNat(o2o),
 		SourceNatRules:   flattenNat(snat),
 	}, nil
+}
+
+// Inventory returns the firewall's point-in-time observation. The interfaces
+// fetch is fatal (networks are the inventory); system info, rules, and leases
+// degrade to warnings. It is read-only: no controller state is mutated.
+func (s *OpnsenseService) Inventory(ctx context.Context, opts OpnsenseOptions) (*OpnsenseInventory, error) {
+	client := s.client(opts)
+	snap, err := client.FetchInventory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	inv := &OpnsenseInventory{
+		Host:            opts.Host,
+		Devices:         []serviceDevice{},
+		NetworkGateways: map[string]string{},
+		Warnings:        snap.Warnings,
+	}
+	if snap.System != nil {
+		inv.ControllerVersion = snap.System.ProductVersion()
+		inv.Arch = snap.System.Arch()
+	}
+	specInv := opnsensebackend.BuildSpecInventory(snap)
+	inv.NetworkGateways = specInv.NetworkGateways
+	inv.FirewallRuleCount = len(snap.Rules)
+	inv.FirewallRulesOK = snap.RulesOK
+	inv.ClientCount = snap.LeaseCount()
+	for _, d := range specInv.Devices {
+		inv.Devices = append(inv.Devices, serviceDevice{
+			Type:     d.Type,
+			Name:     d.Name,
+			IP:       d.IP,
+			Networks: d.Networks,
+		})
+	}
+	return inv, nil
 }
 
 func (s *OpnsenseService) client(opts OpnsenseOptions) *opnsensebackend.Client {

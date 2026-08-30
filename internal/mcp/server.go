@@ -134,6 +134,7 @@ type opnsenseSurface interface {
 	ListAliases(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseAlias, error)
 	GetOutboundNatMode(ctx context.Context, opts service.OpnsenseOptions) (string, error)
 	GetNAT(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseNatSummary, error)
+	Inventory(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseInventory, error)
 }
 
 // topologySurface is the cross-provider topology assessment exposed to
@@ -544,6 +545,11 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		{
 			Name:        "opnsense_get_nat",
 			Description: "Read the OPNsense NAT posture in one call: outbound (source) NAT mode plus every NAT rule set. The outbound mode is the key double-NAT signal — a transparent proxy reports 'disabled'.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_inventory",
+			Description: "Observe the OPNsense firewall point-in-time: system metadata, its interfaces as networks with gateway bindings, the firewall rule count, and the active client (DHCP lease) count. Read-only.",
 			InputSchema: opnsenseToolSchema(),
 		},
 		{

@@ -34,6 +34,7 @@ yet.
 | 1 (PR 1) | Reads: system info, interfaces, firewall rules, DHCP leases (preserved contracts) | **Implemented** |
 | 1 (PR 1) | Reads: NAT rules (port forward / one-to-one / source NAT), outbound NAT mode, aliases | **Implemented** |
 | 1 (PR 1) | Reads (Omada): NAT port-forward / one-to-one, ALG, firewall settings, gateway presence | **Implemented** |
+| 1 (PR 1) | Inventory snapshot (interfaces as networks + device entries + rule/lease counts) + `nyx opnsense inventory` / `opnsense_inventory` MCP tool | **Implemented** |
 | 1 (PR 1) | Topology report + `nat_check` assertion + `nyx topology` / MCP surface | **Implemented** |
 | 2 (PR 2) | Mutations: NAT add/set/del, alias add/set/del, `filter_base/apply`, commit/flush | Planned |
 
@@ -125,10 +126,11 @@ Given `GET /api/firewall/filter/get_rule/<uuid>` → a single rule object
 When `GetFirewallRule` is called with the UUID
 Then the rule is returned with `Disabled` derived the same way
 
-### S2.5 DHCP leases
-Given `GET /api/dhcpd/leases` → either `{"leases":[...]}` or paged `{"rows":[...]}`
+### S2.5 DHCP leases (dual-backend route probing)
+Given the active DHCP backend's route is probed in order: `GET /api/dnsmasq/leases/search` (26.x default), then `GET /api/dhcpd/leases` (pre-26.x), each returning either `{"leases":[...]}` or paged `{"rows":[...]}`
 When `GetDHCPLeases` is called
-Then the leases are returned from whichever shape the controller used
+Then the first route that answers (a success or a stable non-404) wins; a 404 falls through to the next route, and a 403/401/other 4xx is returned immediately as the stable privilege/credential error (never retried, masked, or hidden behind a fallback)
+And both response shapes decode to the same lease list
 
 ### S2.6 Port forward rules (destination NAT)
 Given `GET /api/firewall/d_nat/search_rule?current=1&rowCount=500` →
@@ -161,6 +163,16 @@ Given `GET /api/firewall/alias/search_item?current=1&rowCount=500` →
 When `GetAliases` is called
 Then the alias is returned with its name, type, address list, and description
 And a missing `uuid` yields an empty ID, not an error
+
+### S2.11 Inventory snapshot (read-only)
+Given a firewall reachable via its interfaces, system info, firewall-rules, and DHCP-lease endpoints
+When the provider's `Inventory` (or the `opnsense_inventory` MCP tool / `nyx opnsense inventory`) is called
+Then the interfaces fetch is mandatory and a failure there fails the whole call
+And system info, firewall rules, and DHCP leases are best-effort: each failure is recorded as a `Warning` and the snapshot is still returned (rules reported as unknown, client count `0`)
+And one device entry of type `gateway` is emitted per interface that carries an IPv4 address, named after the interface, with `NetworkGateways` mapping each interface name to its gateway
+And the controller version/arch come from the product-version entry (never guessed); OPNsense exposes no managed-device inventory, so model/firmware/upgrade stay empty and no ACL scopes are reported
+And `ClientCount` is the DHCP-lease count (0 when the lease fetch failed)
+And the test: `TestProviderInventory` plus `TestOpnsenseServiceInventory` / `TestDispatchOpnsenseInventory`
 
 ## §3 Mutations (Planned — PR 2)
 

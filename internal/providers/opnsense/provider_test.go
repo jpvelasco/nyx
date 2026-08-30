@@ -56,8 +56,8 @@ func TestProviderIdentity(t *testing.T) {
 		t.Errorf("Name() = %q, want opnsense", p.Name())
 	}
 	caps := p.Capabilities()
-	if len(caps) != 3 || caps[0] != "info" || caps[1] != "import" || caps[2] != "check" {
-		t.Errorf("Capabilities() = %v, want [info import check]", caps)
+	if len(caps) != 4 || caps[0] != "info" || caps[1] != "import" || caps[2] != "check" || caps[3] != "inventory" {
+		t.Errorf("Capabilities() = %v, want [info import check inventory]", caps)
 	}
 }
 
@@ -129,7 +129,7 @@ func opnsenseServer(t *testing.T, leases string) *httptest.Server {
 				{"uuid":"u4","enabled":"0","action":"block","interface":["lan"],"source_net":"10.0.0.7","destination_net":"203.0.113.11"},
 				{"uuid":"u5","enabled":"1","action":"block","description":"unresolvable endpoints","interface":["lan"],"source_net":"any","destination_net":"203.0.113.9"}
 			]}`)
-		case "/api/dhcpd/leases":
+		case "/api/dnsmasq/leases/search":
 			testutil.WriteBody(w, leases)
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -262,7 +262,7 @@ func TestProviderImportSpec(t *testing.T) {
 				testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
-			case "/api/dhcpd/leases":
+			case "/api/dnsmasq/leases/search":
 				w.WriteHeader(http.StatusInternalServerError)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -289,7 +289,7 @@ func TestProviderCheck(t *testing.T) {
 				testutil.WriteBody(w, `{"interfaces":{}}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
-			case "/api/dhcpd/leases":
+			case "/api/dnsmasq/leases/search":
 				testutil.WriteBody(w, `{"leases":[]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -317,6 +317,109 @@ func TestProviderCheck(t *testing.T) {
 		_, err := p.Check(context.Background(), providers.ImportOptions{Host: "https://127.0.0.1:1", ClientID: "k", ClientSecret: "s"})
 		if err == nil {
 			t.Error("expected import failure to propagate")
+		}
+	})
+}
+
+func TestProviderInventory(t *testing.T) {
+	t.Run("missing host", func(t *testing.T) {
+		p := &Provider{}
+		_, err := p.Inventory(context.Background(), providers.ImportOptions{})
+		if err == nil || !strings.Contains(err.Error(), "--host is required") {
+			t.Errorf("error = %v, want --host is required", err)
+		}
+	})
+
+	t.Run("missing credentials", func(t *testing.T) {
+		p := &Provider{}
+		_, err := p.Inventory(context.Background(), providers.ImportOptions{Host: "h"})
+		if err == nil || !strings.Contains(err.Error(), "--client-id and --client-secret are required") {
+			t.Errorf("error = %v, want credentials required", err)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		ts := opnsenseServer(t, `{"leases":[{"mac":"aa","ip":"10.0.0.10","hostname":"laptop"},{"mac":"bb","ip":"10.0.0.11","hostname":"nas"}]}`)
+		p := &Provider{}
+		res, err := p.Inventory(context.Background(), providers.ImportOptions{
+			Host: ts.URL, ClientID: "key", ClientSecret: "secret", SkipTLSVerify: true,
+		})
+		if err != nil {
+			t.Fatalf("Inventory: %v", err)
+		}
+		if res.Site != "opnsense-firewall" {
+			t.Errorf("Site = %q, want opnsense-firewall", res.Site)
+		}
+		if res.ClientCount != 2 {
+			t.Errorf("ClientCount = %d, want 2", res.ClientCount)
+		}
+		inv := res.Inventory
+		if inv == nil {
+			t.Fatal("Inventory is nil")
+		}
+		if inv.ControllerVersion != "24.1.7_2" {
+			t.Errorf("ControllerVersion = %q, want 24.1.7_2", inv.ControllerVersion)
+		}
+		if len(inv.Devices) != 2 {
+			t.Fatalf("Devices = %+v, want 2 (lan + wan)", inv.Devices)
+		}
+		if inv.Devices[0].Type != "gateway" || inv.Devices[0].Name != "lan" || inv.Devices[0].IP != "10.0.0.1" {
+			t.Errorf("device[0] = %+v", inv.Devices[0])
+		}
+		if inv.NetworkGateways["lan"] != "10.0.0.254" {
+			t.Errorf("NetworkGateways = %v", inv.NetworkGateways)
+		}
+		if len(res.Warnings) != 0 {
+			t.Errorf("Warnings = %v, want none on a clean fetch", res.Warnings)
+		}
+		if !strings.Contains(res.Human, "== Networks (2) ==") || !strings.Contains(res.Human, "2 active clients") {
+			t.Errorf("Human render missing sections:\n%s", res.Human)
+		}
+	})
+
+	t.Run("best-effort degradation", func(t *testing.T) {
+		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/interfaces/overview/interfaces_info":
+				testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`)
+			case "/api/diagnostics/system/system_information":
+				w.WriteHeader(http.StatusInternalServerError)
+			case "/api/firewall/filter/search_rule":
+				w.WriteHeader(http.StatusInternalServerError)
+			case "/api/dnsmasq/leases/search":
+				w.WriteHeader(http.StatusInternalServerError)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer ts.Close()
+		p := &Provider{}
+		res, err := p.Inventory(context.Background(), providers.ImportOptions{
+			Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true,
+		})
+		if err != nil {
+			t.Fatalf("Inventory: %v (only interfaces is fatal)", err)
+		}
+		if len(res.Warnings) != 3 {
+			t.Errorf("Warnings = %v, want 3 (system info, rules, leases)", res.Warnings)
+		}
+		if len(res.Inventory.Devices) != 1 {
+			t.Errorf("Devices = %+v, want 1 (interfaces still fetched)", res.Inventory.Devices)
+		}
+		if res.ClientCount != 0 {
+			t.Errorf("ClientCount = %d, want 0 when leases failed", res.ClientCount)
+		}
+	})
+
+	t.Run("interfaces fatal", func(t *testing.T) {
+		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer ts.Close()
+		p := &Provider{}
+		_, err := p.Inventory(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err == nil {
+			t.Error("expected interfaces failure to be fatal")
 		}
 	})
 }
