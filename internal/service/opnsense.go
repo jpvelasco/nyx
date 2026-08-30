@@ -18,7 +18,7 @@ type OpnsenseOptions struct {
 	CACertPath    string
 }
 
-// OpnsenseInfo is the firmware metadata surfaced to agents.
+// OpnsenseInfo is the system metadata surfaced to agents.
 type OpnsenseInfo struct {
 	Provider string `json:"provider"`
 	Host     string `json:"host"`
@@ -108,19 +108,19 @@ func NewOpnsenseService() *OpnsenseService {
 	return &OpnsenseService{NewClient: opnsensebackend.NewClient}
 }
 
-// Info fetches firmware metadata from the firewall.
+// Info fetches system metadata from the firewall (version, product, arch).
 func (s *OpnsenseService) Info(ctx context.Context, opts OpnsenseOptions) (*OpnsenseInfo, error) {
 	client := s.client(opts)
-	fw, err := client.GetFirmwareInfo(ctx)
+	sys, err := client.GetSystemInformation(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &OpnsenseInfo{
 		Provider: "opnsense",
 		Host:     opts.Host,
-		Version:  fw.ProductVersion,
-		Product:  fw.ProductName,
-		Arch:     fw.ProductArch,
+		Version:  sys.ProductVersion(),
+		Product:  "OPNsense",
+		Arch:     sys.Arch(),
 	}, nil
 }
 

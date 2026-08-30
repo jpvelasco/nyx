@@ -17,11 +17,77 @@ import (
 	"github.com/jpvelasco/nyx/internal/logger"
 )
 
-// FirmwareInfoResponse holds the firmware version, name, and architecture from OPNsense.
-type FirmwareInfoResponse struct {
-	ProductVersion string `json:"product_version"`
-	ProductName    string `json:"product_name"`
-	ProductArch    string `json:"product_arch"`
+// SystemInformation is the response of GET /diagnostics/system/system_information.
+// Versions is a flat list of version strings, in order: OPNsense, FreeBSD,
+// OpenSSL. The endpoint is covered by the Dashboard page privilege;
+// /core/firmware/* requires the separate System: Firmware privilege, so
+// version reads must not go there (a Dashboard-only API user would get a
+// 403 on the firmware endpoints).
+type SystemInformation struct {
+	Name     string   `json:"name"`
+	Versions []string `json:"versions"`
+	Updates  string   `json:"updates"`
+}
+
+// productVersionAndArch parses the OPNsense version entry. The entry has
+// the form "OPNsense <version>-<arch>"; the trailing architecture is split
+// off only when it is a known arch, so a version with no arch suffix is
+// reported whole and arch stays empty (read from the controller, never
+// guessed).
+func (si SystemInformation) productVersionAndArch() (version, arch string) {
+	raw := si.stripVersionPrefix("OPNsense")
+	if raw == "" {
+		return "", ""
+	}
+	if i := strings.LastIndex(raw, "-"); i >= 0 {
+		if isKnownArch(raw[i+1:]) {
+			return raw[:i], raw[i+1:]
+		}
+	}
+	return raw, ""
+}
+
+// ProductVersion returns the OPNsense product version without the product
+// name and architecture (e.g. "26.7.3_8"), or "" when absent.
+func (si SystemInformation) ProductVersion() string {
+	v, _ := si.productVersionAndArch()
+	return v
+}
+
+// Arch returns the architecture of the OPNsense product (e.g. "amd64"), or
+// "" when the version carries no recognisable arch suffix.
+func (si SystemInformation) Arch() string {
+	_, a := si.productVersionAndArch()
+	return a
+}
+
+// FreeBSDVersion returns the FreeBSD base version without its prefix
+// (e.g. "15.1-RELEASE-p3"), or "" when absent.
+func (si SystemInformation) FreeBSDVersion() string {
+	return si.stripVersionPrefix("FreeBSD")
+}
+
+// OpenSSLVersion returns the OpenSSL version without its prefix (e.g.
+// "3.5.8"), or "" when absent.
+func (si SystemInformation) OpenSSLVersion() string {
+	return si.stripVersionPrefix("OpenSSL")
+}
+
+// knownArches are the architectures OPNsense ships.
+var knownArches = map[string]bool{"amd64": true, "armv6": true, "armv7": true, "aarch64": true}
+
+func isKnownArch(arch string) bool { return knownArches[arch] }
+
+// stripVersionPrefix matches the Versions entry carrying the given product
+// prefix (the list order can drift across releases) and returns it without
+// that prefix; a miss is "" — the version is reported absent, never guessed.
+func (si SystemInformation) stripVersionPrefix(prefix string) string {
+	for _, v := range si.Versions {
+		if strings.HasPrefix(v, prefix) {
+			return strings.TrimPrefix(v, prefix+" ")
+		}
+	}
+	return ""
 }
 
 // Interface represents an OPNsense interface with its IP configuration.
@@ -105,17 +171,21 @@ func (c *Client) doRequest(ctx context.Context, path string) (*http.Response, er
 	return c.do(ctx, http.MethodGet, path, nil)
 }
 
-// GetFirmwareInfo returns the running firmware version from the controller.
-func (c *Client) GetFirmwareInfo(ctx context.Context) (*FirmwareInfoResponse, error) {
-	resp, err := c.doRequest(ctx, "/core/firmware/running")
+// GetSystemInformation returns the system information from the controller
+// (GET /diagnostics/system/system_information). This endpoint is covered by
+// the Dashboard page privilege; the firmware endpoints (/core/firmware/*)
+// require the separate System: Firmware privilege and 403 for a
+// Dashboard-only API user.
+func (c *Client) GetSystemInformation(ctx context.Context) (*SystemInformation, error) {
+	resp, err := c.doRequest(ctx, "/diagnostics/system/system_information")
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var info FirmwareInfoResponse
+	var info SystemInformation
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return nil, fmt.Errorf("decoding firmware response: %w", err)
+		return nil, fmt.Errorf("decoding system information response: %w", err)
 	}
 	return &info, nil
 }

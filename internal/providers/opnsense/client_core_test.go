@@ -35,9 +35,9 @@ func TestDoBasicAuth(t *testing.T) {
 		if k, s, ok := r.BasicAuth(); ok {
 			sawKey, sawSecret = k, s
 		}
-		testutil.WriteBody(w, firmwareJSON)
+		testutil.WriteBody(w, systemInfoJSON)
 	}))
-	resp, err := c.do(context.Background(), http.MethodGet, "/core/firmware/running", nil)
+	resp, err := c.do(context.Background(), http.MethodGet, "/diagnostics/system/system_information", nil)
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestDoRetriesTransientThenSucceeds(t *testing.T) {
 		}
 		testutil.WriteBody(w, `{"ok":true}`)
 	}))
-	resp, err := c.do(context.Background(), http.MethodGet, "/core/firmware/running", nil)
+	resp, err := c.do(context.Background(), http.MethodGet, "/diagnostics/system/system_information", nil)
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
@@ -214,8 +214,8 @@ func TestDoForbiddenPrivilegeHint(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 		testutil.WriteBody(w, `{"status":403,"message":"Forbidden"}`)
 	}))
-	_, err := c.do(context.Background(), http.MethodGet, "/core/firmware/running", nil)
-	for _, want := range []string{"/core/firmware/running", "permission denied", "lacks the privilege"} {
+	_, err := c.do(context.Background(), http.MethodGet, "/diagnostics/system/system_information", nil)
+	for _, want := range []string{"/diagnostics/system/system_information", "permission denied", "lacks the privilege"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %v, want it to contain %q", err, want)
 		}
@@ -242,7 +242,7 @@ func TestDoRequestsSerialised(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			resp, err := c.do(context.Background(), http.MethodGet, "/core/firmware/running", nil)
+			resp, err := c.do(context.Background(), http.MethodGet, "/diagnostics/system/system_information", nil)
 			if err != nil {
 				t.Errorf("do: %v", err)
 				return
@@ -382,7 +382,7 @@ func TestDoNilLogger(t *testing.T) {
 		testutil.WriteBody(w, `{"ok":true}`)
 	}))
 	c.SetLogger(nil)
-	resp, err := c.do(context.Background(), http.MethodGet, "/core/firmware/running", nil)
+	resp, err := c.do(context.Background(), http.MethodGet, "/diagnostics/system/system_information", nil)
 	if err != nil {
 		t.Fatalf("do with nil logger: %v", err)
 	}
