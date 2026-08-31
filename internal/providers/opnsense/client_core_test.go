@@ -758,4 +758,23 @@ func TestDebugDumpPrintsRawResponse(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("unreadable body reports the read error", func(t *testing.T) {
+		resp := &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(errorReader{err: errors.New("boom")}),
+		}
+		c := &Client{host: "ctl.example:8443", Debug: true}
+		out := captureStderr(t, func() {
+			c.debugDump(resp, http.MethodGet, "/x")
+		})
+		if !strings.Contains(out, "-> 200") || !strings.Contains(out, "boom") {
+			t.Errorf("stderr = %q, want the status and the read error", out)
+		}
+	})
 }
+
+// errorReader is an io.Reader whose Read always fails.
+type errorReader struct{ err error }
+
+func (e errorReader) Read([]byte) (int, error) { return 0, e.err }
