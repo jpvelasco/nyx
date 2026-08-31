@@ -275,6 +275,54 @@ func TestProviderImportSpec(t *testing.T) {
 			t.Errorf("error = %v, want fetching DHCP leases", err)
 		}
 	})
+
+	t.Run("debug flag is threaded to the client", func(t *testing.T) {
+		ts := opnsenseServer(t, `{"leases":[]}`)
+		p := &Provider{}
+		out := captureStderr(t, func() {
+			_, err := p.ImportSpec(context.Background(), providers.ImportOptions{
+				Host:          ts.URL,
+				ClientID:      "key",
+				ClientSecret:  "secret",
+				SkipTLSVerify: true,
+				Debug:         true,
+			})
+			if err != nil {
+				t.Fatalf("ImportSpec: %v", err)
+			}
+		})
+		// Every raw read of the import goes through the client: system
+		// info, interfaces, firewall rules, and the lease route probe.
+		for _, want := range []string{
+			"[opnsense debug] GET https://",
+			"/api/diagnostics/system/system_information",
+			"/api/interfaces/overview/interfaces_info",
+			"/api/firewall/filter/search_rule",
+			"/api/dnsmasq/leases/search",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("stderr missing %q (Debug not threaded): %s", want, out)
+			}
+		}
+	})
+
+	t.Run("no debug output without the flag", func(t *testing.T) {
+		ts := opnsenseServer(t, `{"leases":[]}`)
+		p := &Provider{}
+		out := captureStderr(t, func() {
+			if _, err := p.ImportSpec(context.Background(), providers.ImportOptions{
+				Host:          ts.URL,
+				ClientID:      "key",
+				ClientSecret:  "secret",
+				SkipTLSVerify: true,
+			}); err != nil {
+				t.Fatalf("ImportSpec: %v", err)
+			}
+		})
+		if strings.Contains(out, "[opnsense debug]") {
+			t.Errorf("debug output without the flag: %s", out)
+		}
+	})
 }
 
 func TestProviderCheck(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/logger"
@@ -82,6 +83,9 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) (*htt
 			}
 			lastErr = fmt.Errorf("connecting to OPNsense at %s: %w", c.host, err)
 		} else {
+			if c.Debug {
+				c.debugDump(resp, method, path)
+			}
 			lastErr = c.classifyStatus(resp, path)
 			if lastErr == nil {
 				return resp, nil
@@ -193,4 +197,20 @@ func drainBody(body io.ReadCloser) {
 	}
 	_, _ = io.Copy(io.Discard, body)
 	_ = body.Close()
+}
+
+// debugDump prints the raw API response to stderr for the --debug flag
+// (method, path, status, body). It runs before the body is decoded, so on
+// success it reads the body and restores it for the caller. The payload
+// travels only in the response body and headers (basic auth), so no
+// credentials are printed; the host in the path is the operator's own
+// controller, the same exposure as the --host flag.
+func (c *Client) debugDump(resp *http.Response, method, path string) {
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[opnsense debug] %s %s -> %d (reading body: %v)\n", method, path, resp.StatusCode, err)
+		return
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(raw))
+	fmt.Fprintf(os.Stderr, "[opnsense debug] %s %s/api%s -> %d\n%s\n", method, "https://"+c.host, path, resp.StatusCode, string(raw))
 }
