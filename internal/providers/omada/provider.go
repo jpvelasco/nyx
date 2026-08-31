@@ -74,6 +74,13 @@ func (o *OmadaProvider) Check(ctx context.Context, opts providers.ImportOptions)
 		return nil, err
 	}
 	engine := audit.NewEngine(imported.Spec)
+	// Forward the TLS options so the audit-engine-backed assertions that talk
+	// to the controller (acl_check, nat_check) honor the same
+	// --skip-tls-verify / --ca-cert the import used. The import path and the
+	// direct provider calls already respect them; the engine-backed path
+	// builds its own client from the engine's fields.
+	engine.SkipTLSVerify = opts.SkipTLSVerify
+	engine.CACertPath = opts.CACertPath
 	report, err := engine.Run(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("audit failed: %w", err)
