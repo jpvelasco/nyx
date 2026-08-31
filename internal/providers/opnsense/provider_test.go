@@ -417,6 +417,114 @@ func TestProviderImportSpec(t *testing.T) {
 	})
 }
 
+// importStatusServer serves the canned import endpoints, returning the
+// given status codes on the firewall-rules and lease routes (a 200 carries
+// the matching canned body; a 403 the client's permission-denied body; a 401
+// the auth-failure body) and defaulting every other path to 404. The canned
+// shapes match opnsenseServer.
+func importStatusServer(t *testing.T, rulesStatus, leasesStatus int) *httptest.Server {
+	t.Helper()
+	const (
+		rulesBody = `{"total":0,"rows":[]}`
+		leaseBody = `{"leases":[{"mac":"aa","ip":"198.51.100.10","hostname":"laptop"}]}`
+	)
+	writeStatus := func(w http.ResponseWriter, status int, okBody string) {
+		w.WriteHeader(status)
+		switch status {
+		case http.StatusOK:
+			testutil.WriteBody(w, okBody)
+		case http.StatusForbidden:
+			testutil.WriteBody(w, `{"error":"page privilege denied"}`)
+		case http.StatusUnauthorized:
+			testutil.WriteBody(w, `{"error":"authentication failed"}`)
+		}
+	}
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/diagnostics/system/system_information":
+			testutil.WriteBody(w, systemInfoJSON)
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`)
+		case "/api/firewall/filter/search_rule":
+			writeStatus(w, rulesStatus, rulesBody)
+		case "/api/dnsmasq/leases/search", "/api/dhcpd/leases":
+			writeStatus(w, leasesStatus, leaseBody)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// TestImportSpecPrivilegeDegradation covers #58: a least-privilege
+// (Dashboard-only) API user gets stable 403s on the firewall-rules and
+// lease routes. The import degrades to a zero-policy, zero-client spec with
+// explicit warnings instead of a fatal error — the gateway is reachable and
+// the key is valid, so the import → audit loop must stay usable.
+func TestImportSpecPrivilegeDegradation(t *testing.T) {
+	t.Run("stable 403 on rules and leases degrades to warnings", func(t *testing.T) {
+		ts := importStatusServer(t, http.StatusForbidden, http.StatusForbidden)
+		p := &Provider{}
+		res, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err != nil {
+			t.Fatalf("ImportSpec: %v (a stable privilege 403 must degrade, not fail)", err)
+		}
+		if res.NetworkCount != 1 {
+			t.Errorf("NetworkCount = %d, want 1 (lan)", res.NetworkCount)
+		}
+		if res.PolicyCount != 0 {
+			t.Errorf("PolicyCount = %d, want 0", res.PolicyCount)
+		}
+		if res.ClientCount != 0 {
+			t.Errorf("ClientCount = %d, want 0 (no lease privilege)", res.ClientCount)
+		}
+		if len(res.Spec.Policies) != 0 || len(res.Spec.Networks) != 1 {
+			t.Fatalf("spec = %d networks / %d policies, want 1/0", len(res.Spec.Networks), len(res.Spec.Policies))
+		}
+		if len(res.Warnings) != 4 {
+			t.Errorf("warnings = %v, want 4 (2 degrade + 2 standard)", res.Warnings)
+		}
+		for _, want := range []string{"firewall rules unavailable:", "permission denied", "DHCP leases unavailable:"} {
+			if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, want) }) {
+				t.Errorf("warnings = %v, want one containing %q", res.Warnings, want)
+			}
+		}
+	})
+
+	// Rules 403 only: leases still decode, so the client count survives and
+	// exactly one degrade warning is emitted.
+	t.Run("stable 403 on rules only keeps the lease count", func(t *testing.T) {
+		ts := importStatusServer(t, http.StatusForbidden, http.StatusOK)
+		p := &Provider{}
+		res, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err != nil {
+			t.Fatalf("ImportSpec: %v", err)
+		}
+		if res.ClientCount != 1 {
+			t.Errorf("ClientCount = %d, want 1 (leases readable)", res.ClientCount)
+		}
+		if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "firewall rules unavailable:") }) {
+			t.Errorf("warnings = %v, want the rules degrade warning", res.Warnings)
+		}
+		if slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "DHCP leases unavailable:") }) {
+			t.Errorf("warnings = %v, must not mention leases", res.Warnings)
+		}
+	})
+
+	// 401 stays fatal even on the rules route: an authentication failure
+	// means the key itself is broken — degrading would produce a
+	// zero-policy spec from a gateway we cannot trust to be talking to us.
+	t.Run("401 on rules is fatal", func(t *testing.T) {
+		ts := importStatusServer(t, http.StatusUnauthorized, http.StatusOK)
+		p := &Provider{}
+		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err == nil || !strings.Contains(err.Error(), "fetching firewall rules") || !strings.Contains(err.Error(), "authentication failed") {
+			t.Errorf("error = %v, want fatal fetching firewall rules / authentication failed", err)
+		}
+	})
+}
+
 func TestProviderCheck(t *testing.T) {
 	t.Run("success with empty spec", func(t *testing.T) {
 		// No interfaces with IPs → no networks → no assertions → the audit
