@@ -153,14 +153,10 @@ func TestMcpConfigWriteErrors(t *testing.T) {
 	})
 
 	t.Run("write target is a directory", func(t *testing.T) {
-		dir := t.TempDir()
-		// The target path itself is a directory: MkdirAll on its parent
+		// t.TempDir() is itself a directory: MkdirAll on its parent
 		// succeeds, WriteFile fails.
-		target := filepath.Join(dir, "target")
-		if err := os.MkdirAll(target, 0o700); err != nil {
-			t.Fatalf("creating target dir: %v", err)
-		}
-		_, err := runMcpConfigCmdRaw(t, "--harness", "claude", "--command", "nyx", "--write", target)
+		dir := t.TempDir()
+		_, err := runMcpConfigCmdRaw(t, "--harness", "claude", "--command", "nyx", "--write", dir)
 		if err == nil || !strings.Contains(err.Error(), "writing --write target") {
 			t.Fatalf("expected write error, got: %v", err)
 		}
