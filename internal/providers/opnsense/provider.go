@@ -18,8 +18,16 @@ import (
 const ProviderName = "opnsense"
 
 // Provider implements providers.Provider for OPNsense firewalls.
-// Currently only Info is implemented. ImportSpec and Check return ErrCapabilityUnsupported.
 type Provider struct{}
+
+// newProviderClient builds a client from the shared import options, so the
+// --debug flag reaches every provider surface (info, inventory, import,
+// check, nat_check, plan/apply NAT).
+func newProviderClient(opts providers.ImportOptions) *Client {
+	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	client.Debug = opts.Debug
+	return client
+}
 
 // Name returns the provider identifier "opnsense".
 func (o *Provider) Name() string { return ProviderName }
@@ -37,7 +45,7 @@ func (o *Provider) Info(ctx context.Context, opts providers.ImportOptions) (*pro
 	if opts.Host == "" {
 		return nil, fmt.Errorf("--host is required for opnsense provider")
 	}
-	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	client := newProviderClient(opts)
 	sys, err := client.GetSystemInformation(ctx)
 	if err != nil {
 		return nil, err
@@ -63,7 +71,7 @@ func (o *Provider) Inventory(ctx context.Context, opts providers.ImportOptions) 
 	if opts.ClientID == "" || opts.ClientSecret == "" {
 		return nil, fmt.Errorf("--client-id and --client-secret are required (API key and secret)")
 	}
-	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	client := newProviderClient(opts)
 	snap, err := client.FetchInventory(ctx)
 	if err != nil {
 		return nil, err
@@ -86,7 +94,7 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		return nil, fmt.Errorf("--client-id and --client-secret are required (API key and secret)")
 	}
 
-	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	client := newProviderClient(opts)
 
 	// Get system info for version
 	sys, err := client.GetSystemInformation(ctx)
@@ -265,7 +273,7 @@ func (o *Provider) NatCheck(ctx context.Context, req providers.NatCheckRequest, 
 	result := models.NewCheckResult("opnsense", "nat_check", "opnsense", req.ExpectMode)
 	result.Expected["nat_mode"] = req.ExpectMode
 
-	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	client := newProviderClient(opts)
 	mode, err := client.GetOutboundNatMode(ctx)
 	if err != nil {
 		return natCheckError(result, "reading outbound NAT mode: %v", err), nil
@@ -342,7 +350,7 @@ func (o *Provider) PlanNat(ctx context.Context, req providers.NatApplyRequest, o
 	if err := requireNatHost(opts); err != nil {
 		return nil, err
 	}
-	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	client := newProviderClient(opts)
 
 	guardCtx, cancel := context.WithTimeout(ctx, natGuardTimeout)
 	guard, err := client.natGuard(guardCtx)
@@ -389,7 +397,7 @@ func (o *Provider) ApplyNat(ctx context.Context, req providers.NatApplyRequest, 
 	if err := requireNatHost(opts); err != nil {
 		return nil, err
 	}
-	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	client := newProviderClient(opts)
 
 	guardCtx, cancel := context.WithTimeout(ctx, natGuardTimeout)
 	guard, err := client.natGuard(guardCtx)

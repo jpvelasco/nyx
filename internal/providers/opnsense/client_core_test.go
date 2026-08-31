@@ -1,6 +1,7 @@
 package opnsense
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,23 @@ import (
 	"github.com/jpvelasco/nyx/internal/logger"
 	"github.com/jpvelasco/nyx/internal/testutil"
 )
+
+// captureStderr runs f while redirecting os.Stderr and returns what f wrote.
+func captureStderr(t *testing.T, f func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	f()
+	_ = w.Close()
+	os.Stderr = old
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+	return buf.String()
+}
 
 // fastTestClient is like newTestClient but with a 1ms retry base so retry
 // paths don't sleep; the default retry count (3) is preserved.
@@ -651,4 +669,93 @@ func TestDoRequestBuildFailure(t *testing.T) {
 func TestDrainBodyNil(t *testing.T) {
 	// Must not panic on a nil body.
 	drainBody(nil)
+}
+
+// --debug: raw API responses (method, path, status, body) are printed to
+// stderr for both GET and POST paths, and no credential value ever appears
+// in the printed payload.
+func TestDebugDumpPrintsRawResponse(t *testing.T) {
+	t.Run("GET prints the raw body and leaves it decodable", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"markers":["wire-shape-abc"]}`)
+		}))
+		c.Debug = true
+		out := captureStderr(t, func() {
+			resp, err := c.do(context.Background(), http.MethodGet, "/interfaces/overview/interfaces_info", nil)
+			if err != nil {
+				t.Fatalf("do: %v", err)
+			}
+			defer resp.Body.Close()
+			var got struct{ Markers []string }
+			if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+				t.Fatalf("body no longer decodable after debug dump: %v", err)
+			}
+			if len(got.Markers) != 1 || got.Markers[0] != "wire-shape-abc" {
+				t.Errorf("decoded = %+v, want the body restored for the caller", got)
+			}
+		})
+		for _, want := range []string{
+			"[opnsense debug] GET https://",
+			"/api/interfaces/overview/interfaces_info",
+			"-> 200",
+			`"markers":["wire-shape-abc"]`,
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("stderr missing %q: %s", want, out)
+			}
+		}
+	})
+
+	t.Run("POST prints method and body", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"ok":true}`)
+		}))
+		c.Debug = true
+		out := captureStderr(t, func() {
+			resp, err := c.do(context.Background(), http.MethodPost, "/firewall/filter/add_rule", []byte(`{"label":"x"}`))
+			if err != nil {
+				t.Fatalf("do POST: %v", err)
+			}
+			resp.Body.Close()
+		})
+		for _, want := range []string{
+			"[opnsense debug] POST https://",
+			"/api/firewall/filter/add_rule",
+			`{"ok":true}`,
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("stderr missing %q: %s", want, out)
+			}
+		}
+	})
+
+	t.Run("credentials never appear in the dump", func(t *testing.T) {
+		var sawAuth bool
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// The client's credentials travel in the basic-auth header, not
+			// in the response body — so the dump (method, path, status,
+			// body) cannot carry them. The server confirms the request was
+			// in fact authenticated, so the absence below is meaningful.
+			if k, s, ok := r.BasicAuth(); ok && k == "key" && s == "secret" {
+				sawAuth = true
+			}
+			testutil.WriteBody(w, `{"plain":"body"}`)
+		}))
+		c.Debug = true
+		out := captureStderr(t, func() {
+			resp, err := c.do(context.Background(), http.MethodGet, "/x", nil)
+			if err != nil {
+				t.Fatalf("do: %v", err)
+			}
+			resp.Body.Close()
+		})
+		if !sawAuth {
+			t.Fatal("server did not see the basic-auth credentials")
+		}
+		for _, secret := range []string{"key", "secret", "Basic"} {
+			if strings.Contains(out, secret) {
+				t.Errorf("stderr leaked %q: %s", secret, out)
+			}
+		}
+	})
 }
