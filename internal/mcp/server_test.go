@@ -298,8 +298,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 33 {
-		t.Fatalf("expected 33 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 35 {
+		t.Fatalf("expected 35 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -308,7 +308,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_inventory", "topology"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_inventory", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -356,6 +356,8 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 		"opnsense_list_source_nat_rules":   {"host"},
 		"opnsense_list_aliases":            {"host"},
 		"opnsense_get_nat":                 {"host"},
+		"opnsense_plan_nat":                {"host", "operation"},
+		"opnsense_apply_nat":               {"host", "operation"},
 	}
 	for name, wantReq := range want {
 		tl, ok := byName[name]
@@ -1574,19 +1576,22 @@ func sliceEqInt(a, b []int) bool {
 
 // stubOpnsenseSvc is a hermetic stand-in for the OPNsense observation surface.
 type stubOpnsenseSvc struct {
-	info       *service.OpnsenseInfo
-	interfaces []service.OpnsenseInterface
-	rules      []service.OpnsenseFirewallRule
-	clients    []service.OpnsenseClient
-	portFwd    []service.OpnsenseNatRule
-	oneToOne   []service.OpnsenseNatRule
-	sourceNat  []service.OpnsenseNatRule
-	aliases    []service.OpnsenseAlias
-	natMode    string
-	natSummary *service.OpnsenseNatSummary
-	inventory  *service.OpnsenseInventory
-	err        error
-	lastOpts   service.OpnsenseOptions
+	info         *service.OpnsenseInfo
+	interfaces   []service.OpnsenseInterface
+	rules        []service.OpnsenseFirewallRule
+	clients      []service.OpnsenseClient
+	portFwd      []service.OpnsenseNatRule
+	oneToOne     []service.OpnsenseNatRule
+	sourceNat    []service.OpnsenseNatRule
+	aliases      []service.OpnsenseAlias
+	natMode      string
+	natSummary   *service.OpnsenseNatSummary
+	inventory    *service.OpnsenseInventory
+	planResult   *providers.NatPlan
+	applyResult  *providers.NatApplyResult
+	lastApplyReq service.OpnsenseNatApplyRequest
+	err          error
+	lastOpts     service.OpnsenseOptions
 }
 
 func (s *stubOpnsenseSvc) Info(_ context.Context, opts service.OpnsenseOptions) (*service.OpnsenseInfo, error) {
@@ -1642,6 +1647,17 @@ func (s *stubOpnsenseSvc) GetNAT(_ context.Context, opts service.OpnsenseOptions
 func (s *stubOpnsenseSvc) Inventory(_ context.Context, opts service.OpnsenseOptions) (*service.OpnsenseInventory, error) {
 	s.lastOpts = opts
 	return s.inventory, s.err
+}
+
+func (s *stubOpnsenseSvc) PlanNat(_ context.Context, opts service.OpnsenseOptions, _ service.OpnsenseNatApplyRequest) (*providers.NatPlan, error) {
+	s.lastOpts = opts
+	return s.planResult, s.err
+}
+
+func (s *stubOpnsenseSvc) ApplyNat(_ context.Context, opts service.OpnsenseOptions, req service.OpnsenseNatApplyRequest) (*providers.NatApplyResult, error) {
+	s.lastOpts = opts
+	s.lastApplyReq = req
+	return s.applyResult, s.err
 }
 
 // stubTopoSvc is a hermetic stand-in for the cross-provider topology report.

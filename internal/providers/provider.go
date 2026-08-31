@@ -142,6 +142,73 @@ type Provider interface {
 	CheckACL(ctx context.Context, req ACLCheckRequest, opts ImportOptions) (*models.CheckResult, error)
 }
 
+// NatRuleSpec is the flat desired-state of a NAT rule, valid across all
+// three collections (port forward, one-to-one, source NAT). Fields that a
+// given collection does not model are ignored by the provider.
+type NatRuleSpec struct {
+	Interfaces  []string // interface names, comma-joined on the wire
+	Protocol    string   // "tcp", "udp", ... (empty = any)
+	Source      string   // source network / address
+	Destination string   // destination network / address
+	Port        string   // destination port (port forward / source NAT)
+	LocalPort   string   // local port (port forward) / target port (source NAT)
+	Target      string   // target address (port forward) / external (one-to-one) / target (source NAT)
+	Mode        string   // NAT mode (e.g. one-to-one type passthrough)
+	Type        string   // collection-specific rule type (e.g. binat|nat)
+	Label       string   // rule description / label
+}
+
+// NatApplyRequest describes a single NAT mutation: an action (create,
+// update, delete, or toggle) against one of the three collections.
+// RuleUUID is required for update/delete/toggle; Spec is required for
+// create/update. ToggleDisable is the disable direction for the
+// port-forward toggle (d_nat polarity: 1 = disabled); it is honored only
+// for Operation "port_forward" with Action "toggle".
+type NatApplyRequest struct {
+	Operation      string      // "port_forward" | "one_to_one" | "source_nat"
+	Action         string      // "create" | "update" | "delete" | "toggle" (default "create")
+	RuleUUID       string      // required for update/delete/toggle
+	Spec           NatRuleSpec // required for create/update
+	ToggleDisable  bool        // disable direction for port-forward toggle
+	AllowDoubleNat bool        // opt-in to mutations against a bridge/indeterminate device
+	DryRun         bool        // preview without mutating
+}
+
+// NatApplyResult is the structured outcome of an apply attempt, with
+// before/after evidence. Before and After hold the JSON array of the
+// collection's rules as seen by the controller; they are identical when
+// nothing was mutated. Endpoints lists the exact API paths touched.
+type NatApplyResult struct {
+	Provider  string   `json:"provider"`
+	DryRun    bool     `json:"dry_run"`
+	Outcome   string   `json:"outcome"` // "created" | "updated" | "deleted" | "unchanged" | "refused"
+	RuleUUID  string   `json:"rule_uuid,omitempty"`
+	Endpoints []string `json:"endpoints"`
+	Before    string   `json:"before"`
+	After     string   `json:"after"`
+	Warnings  []string `json:"warnings,omitempty"`
+}
+
+// NatPlan is the preview of a NAT mutation: what would be done, against
+// which endpoints, with the current state as Before evidence.
+type NatPlan struct {
+	Provider  string   `json:"provider"`
+	DryRun    bool     `json:"dry_run"`
+	Outcome   string   `json:"outcome"` // "would_create" | "would_update" | "would_delete" | "unchanged" | "refused"
+	RuleUUID  string   `json:"rule_uuid,omitempty"`
+	Endpoints []string `json:"endpoints"`
+	Before    string   `json:"before"`
+	Warnings  []string `json:"warnings,omitempty"`
+}
+
+// NatMutationProvider is the optional NAT mutation surface a provider may
+// implement. Providers that cannot mutate NAT rules are refused by the
+// service layer with a clear error.
+type NatMutationProvider interface {
+	PlanNat(ctx context.Context, req NatApplyRequest, opts ImportOptions) (*NatPlan, error)
+	ApplyNat(ctx context.Context, req NatApplyRequest, opts ImportOptions) (*NatApplyResult, error)
+}
+
 // ErrCapabilityUnsupported is returned when a provider does not support an operation.
 type ErrCapabilityUnsupported struct {
 	Provider   string

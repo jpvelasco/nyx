@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jpvelasco/nyx/internal/providers"
 	opnsensebackend "github.com/jpvelasco/nyx/internal/providers/opnsense"
 )
 
@@ -113,6 +114,35 @@ type OpnsenseAlias struct {
 	Addresses   []string `json:"addresses"`
 	Description string   `json:"description,omitempty"`
 	Disabled    bool     `json:"disabled"`
+}
+
+// OpnsenseNatRuleSpec is the flat desired-state of a NAT rule for one
+// collection. Collection-specific fields are ignored by the provider.
+type OpnsenseNatRuleSpec struct {
+	Interfaces  []string `json:"interfaces,omitempty"`
+	Protocol    string   `json:"protocol,omitempty"`
+	Source      string   `json:"source,omitempty"`
+	Destination string   `json:"destination,omitempty"`
+	Port        string   `json:"port,omitempty"`
+	LocalPort   string   `json:"local_port,omitempty"`
+	Target      string   `json:"target,omitempty"`
+	Mode        string   `json:"mode,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	Label       string   `json:"label,omitempty"`
+}
+
+// OpnsenseNatApplyRequest is a single NAT mutation against one of the
+// three collections. RuleUUID is required for action update/delete/toggle;
+// Spec is required for create/update. ToggleDisable only applies to the
+// port-forward toggle (d_nat polarity: 1 = disabled).
+type OpnsenseNatApplyRequest struct {
+	Operation      string              `json:"operation"`
+	Action         string              `json:"action,omitempty"` // "create" (default) | "update" | "delete" | "toggle"
+	RuleUUID       string              `json:"rule_uuid,omitempty"`
+	Spec           OpnsenseNatRuleSpec `json:"spec"`
+	ToggleDisable  bool                `json:"toggle_disable,omitempty"`
+	AllowDoubleNat bool                `json:"allow_double_nat,omitempty"`
+	DryRun         bool                `json:"dry_run,omitempty"`
 }
 
 // OpnsenseService exposes the OPNsense observation surface shared by the MCP
@@ -371,4 +401,77 @@ func (s *OpnsenseService) Inventory(ctx context.Context, opts OpnsenseOptions) (
 
 func (s *OpnsenseService) client(opts OpnsenseOptions) *opnsensebackend.Client {
 	return s.NewClient(opts.Host, opts.APIKey, opts.APISecret, opts.SkipTLSVerify, opts.CACertPath)
+}
+
+// PlanNat previews a NAT mutation without mutating: it returns the action's
+// endpoint, the current collection state as Before evidence, and the
+// double-NAT guard verdict. It issues zero POSTs.
+func (s *OpnsenseService) PlanNat(ctx context.Context, opts OpnsenseOptions, req OpnsenseNatApplyRequest) (*providers.NatPlan, error) {
+	mutator, err := s.natMutator()
+	if err != nil {
+		return nil, err
+	}
+	return mutator.PlanNat(ctx, s.natRequest(req), s.natOpts(opts))
+}
+
+// ApplyNat performs a NAT mutation when the double-NAT guard passes and
+// DryRun is false. A dry-run or an idempotent no-op (a create whose 5-tuple
+// already exists with the same spec) issues zero POSTs.
+func (s *OpnsenseService) ApplyNat(ctx context.Context, opts OpnsenseOptions, req OpnsenseNatApplyRequest) (*providers.NatApplyResult, error) {
+	mutator, err := s.natMutator()
+	if err != nil {
+		return nil, err
+	}
+	return mutator.ApplyNat(ctx, s.natRequest(req), s.natOpts(opts))
+}
+
+// newNatMutator resolves the provider's NAT mutation surface (type-assertion
+// safety rail, mirrors the Omada applier).
+func (s *OpnsenseService) natMutator() (providers.NatMutationProvider, error) {
+	p := providers.Get(opnsensebackend.ProviderName)
+	mutator, ok := p.(providers.NatMutationProvider)
+	if !ok {
+		return nil, fmt.Errorf("provider %q does not implement NAT mutation", opnsensebackend.ProviderName)
+	}
+	return mutator, nil
+}
+
+// natOpts maps service options to the provider's import options.
+func (s *OpnsenseService) natOpts(opts OpnsenseOptions) providers.ImportOptions {
+	return providers.ImportOptions{
+		Host:          opts.Host,
+		ClientID:      opts.APIKey,
+		ClientSecret:  opts.APISecret,
+		SkipTLSVerify: opts.SkipTLSVerify,
+		CACertPath:    opts.CACertPath,
+	}
+}
+
+// natRequest maps the service request to the provider's NAT request shape.
+func (s *OpnsenseService) natRequest(req OpnsenseNatApplyRequest) providers.NatApplyRequest {
+	return providers.NatApplyRequest{
+		Operation:      req.Operation,
+		Action:         req.Action,
+		RuleUUID:       req.RuleUUID,
+		Spec:           s.natSpec(req.Spec),
+		ToggleDisable:  req.ToggleDisable,
+		AllowDoubleNat: req.AllowDoubleNat,
+		DryRun:         req.DryRun,
+	}
+}
+
+// natSpec maps the service rule spec to the provider shape.
+func (s *OpnsenseService) natSpec(spec OpnsenseNatRuleSpec) providers.NatRuleSpec {
+	return providers.NatRuleSpec{
+		Interfaces:  spec.Interfaces,
+		Protocol:    spec.Protocol,
+		Source:      spec.Source,
+		Destination: spec.Destination,
+		Port:        spec.Port,
+		LocalPort:   spec.LocalPort,
+		Target:      spec.Target,
+		Mode:        spec.Mode,
+		Type:        spec.Type,
+		Label:       spec.Label,
+	}
 }
