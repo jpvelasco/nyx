@@ -1380,6 +1380,181 @@ func TestDispatchOpnsense_ServiceError(t *testing.T) {
 	}
 }
 
+// TestOpnsenseNatRequestFromArgs — argument validation and mapping for the
+// opnsense_plan_nat / opnsense_apply_nat tools.
+func TestOpnsenseNatRequestFromArgs(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    map[string]interface{}
+		wantErr string
+	}{
+		{"missing operation", map[string]interface{}{"host": "fw.local"}, "operation parameter is required"},
+		{"update missing rule_uuid", map[string]interface{}{"operation": "port_forward", "action": "update"}, "rule_uuid is required"},
+		{"delete missing rule_uuid", map[string]interface{}{"operation": "one_to_one", "action": "delete"}, "rule_uuid is required"},
+		{"toggle missing rule_uuid", map[string]interface{}{"operation": "source_nat", "action": "toggle"}, "rule_uuid is required"},
+		{"default action is create", map[string]interface{}{"operation": "port_forward"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, msg := opnsenseNatRequestFromArgs(tc.args)
+			if tc.wantErr == "" {
+				if msg != "" {
+					t.Fatalf("msg = %q, want none", msg)
+				}
+				return
+			}
+			if !strings.Contains(msg, tc.wantErr) {
+				t.Fatalf("msg = %q, want containing %q", msg, tc.wantErr)
+			}
+			_ = req
+		})
+	}
+
+	// Full argument mapping: every spec field lands on the service request.
+	req, msg := opnsenseNatRequestFromArgs(map[string]interface{}{
+		"operation":        "port_forward",
+		"action":           "update",
+		"rule_uuid":        "u-1",
+		"interfaces":       "lan,wan",
+		"protocol":         "tcp",
+		"source":           "10.0.40.0/24",
+		"destination":      "10.0.40.10",
+		"port":             "443",
+		"local_port":       "8443",
+		"target":           "10.0.40.20",
+		"type":             "binat",
+		"label":            "web",
+		"toggle_disable":   true,
+		"allow_double_nat": true,
+		"dry_run":          false,
+	})
+	if msg != "" {
+		t.Fatalf("msg = %q, want none", msg)
+	}
+	if req.Operation != "port_forward" || req.Action != "update" || req.RuleUUID != "u-1" {
+		t.Errorf("req = %+v", req)
+	}
+	if len(req.Spec.Interfaces) != 2 || req.Spec.Interfaces[0] != "lan" || req.Spec.Interfaces[1] != "wan" {
+		t.Errorf("interfaces = %v, want [lan wan]", req.Spec.Interfaces)
+	}
+	if req.Spec.Protocol != "tcp" || req.Spec.Source != "10.0.40.0/24" || req.Spec.Destination != "10.0.40.10" ||
+		req.Spec.Port != "443" || req.Spec.LocalPort != "8443" || req.Spec.Target != "10.0.40.20" ||
+		req.Spec.Type != "binat" || req.Spec.Label != "web" {
+		t.Errorf("spec = %+v", req.Spec)
+	}
+	if !req.ToggleDisable || !req.AllowDoubleNat || req.DryRun {
+		t.Errorf("flags = %v/%v/%v, want true/true/false", req.ToggleDisable, req.AllowDoubleNat, req.DryRun)
+	}
+
+	// dry_run defaults to true (the MCP-layer dry-run lock).
+	req, _ = opnsenseNatRequestFromArgs(map[string]interface{}{"operation": "port_forward"})
+	if !req.DryRun {
+		t.Error("dry_run must default to true at the MCP layer")
+	}
+}
+
+func TestDispatchOpnsensePlanNat(t *testing.T) {
+	hermeticCreds(t)
+	stub := &stubOpnsenseSvc{
+		planResult: &providers.NatPlan{
+			Provider:  "opnsense",
+			DryRun:    true,
+			Outcome:   "would_create",
+			Endpoints: []string{"/firewall/d_nat/add_rule"},
+			Before:    "[]",
+		},
+	}
+	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_plan_nat", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+		"operation": "port_forward",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, `"outcome": "would_create"`) || !strings.Contains(text, `"dry_run": true`) {
+		t.Errorf("plan JSON = %s", text)
+	}
+	if strings.Contains(text, "secret1") {
+		t.Error("tool output must not echo the API secret")
+	}
+}
+
+func TestDispatchOpnsenseApplyNat(t *testing.T) {
+	hermeticCreds(t)
+	stub := &stubOpnsenseSvc{
+		applyResult: &providers.NatApplyResult{
+			Provider:  "opnsense",
+			Outcome:   "created",
+			RuleUUID:  "new-1",
+			Endpoints: []string{"/firewall/d_nat/add_rule"},
+		},
+	}
+	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_apply_nat", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+		"operation":   "port_forward",
+		"interfaces":  "lan",
+		"destination": "10.0.40.10",
+		"port":        "443",
+		"target":      "10.0.40.20",
+		"dry_run":     false,
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, `"outcome": "created"`) || !strings.Contains(text, `"rule_uuid": "new-1"`) {
+		t.Errorf("apply JSON = %s", text)
+	}
+	// The mapped request carries the spec fields and the explicit dry_run.
+	got := stub.lastApplyReq
+	if got.Spec.Destination != "10.0.40.10" || got.Spec.Port != "443" || got.Spec.Target != "10.0.40.20" {
+		t.Errorf("mapped spec = %+v", got.Spec)
+	}
+	if got.DryRun {
+		t.Error("dry_run = true, want false (explicit false must not be flipped)")
+	}
+	if strings.Contains(text, "secret1") {
+		t.Error("tool output must not echo the API secret")
+	}
+}
+
+func TestDispatchOpnsenseNat_Errors(t *testing.T) {
+	hermeticCreds(t)
+
+	// Argument validation errors surface before any service call.
+	stub := &stubOpnsenseSvc{}
+	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_plan_nat", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+	})
+	if !isErr || !strings.Contains(text, "operation parameter is required") {
+		t.Errorf("plan args: got (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_apply_nat", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+		"operation": "port_forward",
+		"action":    "update",
+	})
+	if !isErr || !strings.Contains(text, "rule_uuid is required for action") {
+		t.Errorf("apply args: got (%q, %v)", text, isErr)
+	}
+
+	// Service errors wrap the tool name, not the credentials.
+	stubErr := &stubOpnsenseSvc{err: errors.New("controller down")}
+	for _, tool := range []string{"opnsense_plan_nat", "opnsense_apply_nat"} {
+		t.Run(tool, func(t *testing.T) {
+			text, isErr := serverWithOpnsenseStub(stubErr).DispatchToolForTest(context.Background(), tool, map[string]interface{}{
+				"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+				"operation": "port_forward",
+			})
+			if !isErr || !strings.Contains(text, "request failed") || !strings.Contains(text, "controller down") {
+				t.Errorf("got (%q, %v), want service error", text, isErr)
+			}
+			if strings.Contains(text, "secret1") {
+				t.Error("error output must not echo the API secret")
+			}
+		})
+	}
+}
+
 func nonEmptyLines(s string) []string {
 	var lines []string
 	for _, l := range strings.Split(s, "\n") {

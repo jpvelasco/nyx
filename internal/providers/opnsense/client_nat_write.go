@@ -8,19 +8,6 @@ import (
 	"strings"
 )
 
-// natWriteEndpoints maps a NAT collection to its API paths.
-type natWriteEndpoints struct {
-	add    string
-	setFmt string // format with %s for uuid
-	delFmt string // format with %s for uuid
-}
-
-var (
-	dNatEndpoints  = natWriteEndpoints{add: "/firewall/d_nat/add_rule", setFmt: "/firewall/d_nat/set_rule/%s", delFmt: "/firewall/d_nat/del_rule/%s"}
-	oneToOneEndpts = natWriteEndpoints{add: "/firewall/one_to_one/add_rule", setFmt: "/firewall/one_to_one/set_rule/%s", delFmt: "/firewall/one_to_one/del_rule/%s"}
-	sourceNatEndpt = natWriteEndpoints{add: "/firewall/source_nat/add_rule", setFmt: "/firewall/source_nat/set_rule/%s", delFmt: "/firewall/source_nat/del_rule/%s"}
-)
-
 // natRuleSpec is the agent-facing flat shape for a NAT rule write.
 // One shared spec type; per-collection field sets are selected by
 // natWirePayload.
@@ -215,30 +202,46 @@ func (c *Client) natSet(ctx context.Context, path string, body []byte) error {
 	return nil
 }
 
-// S3.1 — Create port forward. POST /api/firewall/d_nat/add_rule with the
-// {"rule":{...}} object envelope; success returns {"result":"saved","uuid":...}.
-func (c *Client) CreatePortForwardRule(ctx context.Context, spec natRuleSpec) (string, error) {
-	body, err := natWirePayload("port_forward", spec)
+// The three collections share one write path; natOperations (apply.go) is
+// the single source of truth for the endpoint set per collection.
+func (c *Client) natCreate(ctx context.Context, coll string, spec natRuleSpec) (string, error) {
+	body, err := natWirePayload(coll, spec)
 	if err != nil {
 		return "", err
 	}
-	return c.natAdd(ctx, dNatEndpoints.add, body)
+	return c.natAdd(ctx, natOperations[coll].create, body)
 }
 
-// S3.2 — Update port forward. POST /api/firewall/d_nat/set_rule/<uuid> with
-// the full writable payload (the controller replaces the rule content).
-func (c *Client) SetPortForwardRule(ctx context.Context, uuid string, spec natRuleSpec) error {
-	body, err := natWirePayload("port_forward", spec)
+// natUpdate posts the full writable payload to the collection's set_rule
+// endpoint (the controller replaces the rule content).
+func (c *Client) natUpdate(ctx context.Context, coll, uuid string, spec natRuleSpec) error {
+	body, err := natWirePayload(coll, spec)
 	if err != nil {
 		return err
 	}
-	return c.natSet(ctx, fmt.Sprintf(dNatEndpoints.setFmt, uuid), body)
+	return c.natSet(ctx, fmt.Sprintf(natOperations[coll].set, uuid), body)
 }
 
-// S3.3 — Delete port forward. POST /api/firewall/d_nat/del_rule/<uuid> with
-// an empty JSON body; a missing uuid yields {"result":"not found"}.
+// natDelete posts to the collection's del_rule endpoint with an empty JSON
+// body; a missing uuid yields {"result":"not found"}.
+func (c *Client) natDelete(ctx context.Context, coll, uuid string) error {
+	return c.natSet(ctx, fmt.Sprintf(natOperations[coll].del, uuid), []byte(`{}`))
+}
+
+// S3.1 — Create port forward. POST /api/firewall/d_nat/add_rule with the
+// {"rule":{...}} object envelope; success returns {"result":"saved","uuid":...}.
+func (c *Client) CreatePortForwardRule(ctx context.Context, spec natRuleSpec) (string, error) {
+	return c.natCreate(ctx, "port_forward", spec)
+}
+
+// S3.2 — Update port forward. POST /api/firewall/d_nat/set_rule/<uuid>.
+func (c *Client) SetPortForwardRule(ctx context.Context, uuid string, spec natRuleSpec) error {
+	return c.natUpdate(ctx, "port_forward", uuid, spec)
+}
+
+// S3.3 — Delete port forward. POST /api/firewall/d_nat/del_rule/<uuid>.
 func (c *Client) DeletePortForwardRule(ctx context.Context, uuid string) error {
-	return c.natSet(ctx, fmt.Sprintf(dNatEndpoints.delFmt, uuid), []byte(`{}`))
+	return c.natDelete(ctx, "port_forward", uuid)
 }
 
 // S3.4 — Enable/disable port forward. POST /api/firewall/d_nat/toggle_rule/<uuid>,<0|1>.
@@ -254,46 +257,30 @@ func (c *Client) TogglePortForwardRule(ctx context.Context, uuid string, disable
 
 // S3.5 — Create one-to-one NAT. POST /api/firewall/one_to_one/add_rule.
 func (c *Client) CreateOneToOneRule(ctx context.Context, spec natRuleSpec) (string, error) {
-	body, err := natWirePayload("one_to_one", spec)
-	if err != nil {
-		return "", err
-	}
-	return c.natAdd(ctx, oneToOneEndpts.add, body)
+	return c.natCreate(ctx, "one_to_one", spec)
 }
 
 // S3.5 — Update one-to-one NAT. POST /api/firewall/one_to_one/set_rule/<uuid>.
 func (c *Client) SetOneToOneRule(ctx context.Context, uuid string, spec natRuleSpec) error {
-	body, err := natWirePayload("one_to_one", spec)
-	if err != nil {
-		return err
-	}
-	return c.natSet(ctx, fmt.Sprintf(oneToOneEndpts.setFmt, uuid), body)
+	return c.natUpdate(ctx, "one_to_one", uuid, spec)
 }
 
 // S3.5 — Delete one-to-one NAT. POST /api/firewall/one_to_one/del_rule/<uuid>.
 func (c *Client) DeleteOneToOneRule(ctx context.Context, uuid string) error {
-	return c.natSet(ctx, fmt.Sprintf(oneToOneEndpts.delFmt, uuid), []byte(`{}`))
+	return c.natDelete(ctx, "one_to_one", uuid)
 }
 
 // S3.6 — Create source NAT. POST /api/firewall/source_nat/add_rule.
 func (c *Client) CreateSourceNatRule(ctx context.Context, spec natRuleSpec) (string, error) {
-	body, err := natWirePayload("source_nat", spec)
-	if err != nil {
-		return "", err
-	}
-	return c.natAdd(ctx, sourceNatEndpt.add, body)
+	return c.natCreate(ctx, "source_nat", spec)
 }
 
 // S3.6 — Update source NAT. POST /api/firewall/source_nat/set_rule/<uuid>.
 func (c *Client) SetSourceNatRule(ctx context.Context, uuid string, spec natRuleSpec) error {
-	body, err := natWirePayload("source_nat", spec)
-	if err != nil {
-		return err
-	}
-	return c.natSet(ctx, fmt.Sprintf(sourceNatEndpt.setFmt, uuid), body)
+	return c.natUpdate(ctx, "source_nat", uuid, spec)
 }
 
 // S3.6 — Delete source NAT. POST /api/firewall/source_nat/del_rule/<uuid>.
 func (c *Client) DeleteSourceNatRule(ctx context.Context, uuid string) error {
-	return c.natSet(ctx, fmt.Sprintf(sourceNatEndpt.delFmt, uuid), []byte(`{}`))
+	return c.natDelete(ctx, "source_nat", uuid)
 }

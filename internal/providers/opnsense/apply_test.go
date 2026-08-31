@@ -29,7 +29,20 @@ func natApplyOpts(t *testing.T, ts *httptest.Server) providers.ImportOptions {
 // the canned rule list for the paged-list reads (search_rule with
 // current/rowCount query params) and SNATModeBody's mode drives the
 // outbound-mode read (source_nat/get, no query params).
+// natTestServerOpt is an optional behavior override for natTestServer:
+// failMode 400s the outbound-mode read, and failListNames 400s the named
+// paged rule list reads (in order, so each guard-list error can be
+// exercised individually without a bespoke server).
+type natTestServerOpt struct {
+	failMode      bool
+	failListNames []string
+}
+
 func natTestServer(t *testing.T, mode, rows string, h http.HandlerFunc) (*httptest.Server, *int) {
+	return natTestServerWithOpt(t, mode, rows, h, natTestServerOpt{})
+}
+
+func natTestServerWithOpt(t *testing.T, mode, rows string, h http.HandlerFunc, opt natTestServerOpt) (*httptest.Server, *int) {
 	t.Helper()
 	mux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -39,6 +52,16 @@ func natTestServer(t *testing.T, mode, rows string, h http.HandlerFunc) (*httpte
 			}
 			w.WriteHeader(http.StatusNotFound)
 			return
+		}
+		if opt.failMode && r.URL.Path == "/api/firewall/source_nat/get" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		for _, name := range opt.failListNames {
+			if r.URL.Path == "/api/firewall/"+name+"/search_rule" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
 		}
 		switch r.URL.Path {
 		case "/api/firewall/source_nat/get":
@@ -546,6 +569,251 @@ func TestApplyNat_UnknownOperationError(t *testing.T) {
 	_, err := p.PlanNat(context.Background(), providers.NatApplyRequest{Operation: "bogus"}, natApplyOpts(t, ts))
 	if err == nil || !strings.Contains(err.Error(), "operation must be one of") {
 		t.Fatalf("err = %v, want operation error", err)
+	}
+}
+
+// TestPlanNat_MissingHostError — the host check runs before any client I/O,
+// so an empty host fails fast without dialing.
+func TestPlanNat_MissingHostError(t *testing.T) {
+	p := &Provider{}
+	_, err := p.PlanNat(context.Background(), natCreateReq, providers.ImportOptions{})
+	if err == nil || !strings.Contains(err.Error(), "--host is required") {
+		t.Fatalf("err = %v, want host error", err)
+	}
+}
+
+func TestApplyNat_MissingHostError(t *testing.T) {
+	p := &Provider{}
+	_, err := p.ApplyNat(context.Background(), natCreateReq, providers.ImportOptions{})
+	if err == nil || !strings.Contains(err.Error(), "--host is required") {
+		t.Fatalf("err = %v, want host error", err)
+	}
+}
+
+// TestPlanNat_GuardReadFailures covers every guard read failure: the
+// outbound-mode read (mode=automatic → an empty snat_mode is unknown) and
+// each of the three rule-list reads (mode=disabled → a read failure would
+// otherwise classify as bridge).
+func TestPlanNat_GuardReadFailures(t *testing.T) {
+	p := &Provider{}
+	cases := []struct {
+		name, want, list string
+		mode             string
+		opt              natTestServerOpt
+	}{
+		{"mode read", "reading outbound NAT mode", "", "automatic", natTestServerOpt{failMode: true}},
+		{"port forward list", "reading port forward rules", "d_nat", "disabled", natTestServerOpt{}},
+		{"one-to-one list", "reading one-to-one rules", "one_to_one", "disabled", natTestServerOpt{}},
+		{"source nat list", "reading source NAT rules", "source_nat", "disabled", natTestServerOpt{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opt := tc.opt
+			if tc.list != "" {
+				opt.failListNames = []string{tc.list}
+			}
+			ts, _ := natTestServerWithOpt(t, tc.mode, "", nil, opt)
+			_, err := p.PlanNat(context.Background(), natCreateReq, natApplyOpts(t, ts))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestApplyNat_GuardReadFailures(t *testing.T) {
+	p := &Provider{}
+	cases := []struct {
+		name, want, list string
+		mode             string
+		opt              natTestServerOpt
+	}{
+		{"mode read", "reading outbound NAT mode", "", "automatic", natTestServerOpt{failMode: true}},
+		{"port forward list", "reading port forward rules", "d_nat", "disabled", natTestServerOpt{}},
+		{"one-to-one list", "reading one-to-one rules", "one_to_one", "disabled", natTestServerOpt{}},
+		{"source nat list", "reading source NAT rules", "source_nat", "disabled", natTestServerOpt{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opt := tc.opt
+			if tc.list != "" {
+				opt.failListNames = []string{tc.list}
+			}
+			ts, _ := natTestServerWithOpt(t, tc.mode, "", nil, opt)
+			_, err := p.ApplyNat(context.Background(), natCreateReq, natApplyOpts(t, ts))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// natAfterGuardFailsHandler serves the guard reads (outbound mode + the
+// three list reads) successfully, then 400s the d_nat list read — which in
+// a PlanNat/ApplyNat create is exactly the Before read, fired right after
+// the guard.
+func natAfterGuardFailsHandler(t *testing.T) http.HandlerFunc {
+	t.Helper()
+	var dNatReads int
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody("automatic"))
+		case "/api/firewall/one_to_one/search_rule":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/firewall/source_nat/search_rule":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/firewall/d_nat/search_rule":
+			dNatReads++
+			if dNatReads == 1 {
+				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+				return
+			}
+			w.WriteHeader(http.StatusBadRequest)
+		default:
+			t.Errorf("unexpected GET path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}
+}
+
+// TestPlanNat_ListReadAfterGuard — the guard's list reads succeed but the
+// collection list read right after the guard 400s.
+func TestPlanNat_ListReadAfterGuard(t *testing.T) {
+	p := &Provider{}
+	ts, _ := natFullTestServer(t, natAfterGuardFailsHandler(t))
+	_, err := p.PlanNat(context.Background(), natCreateReq, natApplyOpts(t, ts))
+	if err == nil || !strings.Contains(err.Error(), "reading port_forward rules") {
+		t.Fatalf("err = %v, want list read error", err)
+	}
+}
+
+func TestApplyNat_ListReadAfterGuard(t *testing.T) {
+	p := &Provider{}
+	ts, _ := natFullTestServer(t, natAfterGuardFailsHandler(t))
+	_, err := p.ApplyNat(context.Background(), natCreateReq, natApplyOpts(t, ts))
+	if err == nil || !strings.Contains(err.Error(), "reading port_forward rules") {
+		t.Fatalf("err = %v, want list read error", err)
+	}
+}
+
+// TestApplyNat_ClientWriteErrors drives the failure branches of
+// applyNatMutation: a validation-failed create (no retry), a set/del on a
+// missing uuid for each collection (one request each), and a toggle on a
+// missing uuid.
+func TestApplyNat_ClientWriteErrors(t *testing.T) {
+	p := &Provider{}
+
+	collWrites := []struct {
+		coll string
+		set  string
+		del  string
+	}{
+		{"one_to_one", "/api/firewall/one_to_one/set_rule/u-1", "/api/firewall/one_to_one/del_rule/u-1"},
+		{"source_nat", "/api/firewall/source_nat/set_rule/u-1", "/api/firewall/source_nat/del_rule/u-1"},
+	}
+	for _, tc := range collWrites {
+		t.Run("set_"+tc.coll, func(t *testing.T) {
+			ts, posts := natTestServer(t, "automatic", "", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				testutil.WriteBody(w, `{"result":"not found"}`)
+			}))
+			req := providers.NatApplyRequest{Operation: tc.coll, Action: "update", RuleUUID: "u-1"}
+			_, err := p.ApplyNat(context.Background(), req, natApplyOpts(t, ts))
+			if err == nil || !strings.Contains(err.Error(), "setting "+tc.coll+" rule") {
+				t.Fatalf("err = %v, want set error", err)
+			}
+			if *posts != 1 {
+				t.Fatalf("posts = %d, want 1 (stable 404-style result must not retry)", *posts)
+			}
+		})
+		t.Run("del_"+tc.coll, func(t *testing.T) {
+			ts, posts := natTestServer(t, "automatic", "", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				testutil.WriteBody(w, `{"result":"not found"}`)
+			}))
+			req := providers.NatApplyRequest{Operation: tc.coll, Action: "delete", RuleUUID: "u-1"}
+			_, err := p.ApplyNat(context.Background(), req, natApplyOpts(t, ts))
+			if err == nil || !strings.Contains(err.Error(), "deleting "+tc.coll+" rule") {
+				t.Fatalf("err = %v, want delete error", err)
+			}
+			if *posts != 1 {
+				t.Fatalf("posts = %d, want 1", *posts)
+			}
+		})
+	}
+
+	t.Run("create_port_forward_validation_failed", func(t *testing.T) {
+		var calls int
+		ts, _ := natFullTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost {
+				calls++
+				testutil.WriteBody(w, `{"result":"failed","validations":{"destination":"10.0.40.10 is not in the interface"}}`)
+				return
+			}
+			switch r.URL.Path {
+			case "/api/firewall/source_nat/get":
+				testutil.WriteBody(w, testutil.SNATModeBody("automatic"))
+			default:
+				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			}
+		}))
+		_, err := p.ApplyNat(context.Background(), natCreateReq, natApplyOpts(t, ts))
+		if err == nil || !strings.Contains(err.Error(), "creating port_forward rule") ||
+			!strings.Contains(err.Error(), "validation failed") {
+			t.Fatalf("err = %v, want validation error", err)
+		}
+		if calls != 1 {
+			t.Fatalf("requests = %d, want 1 (no retry on validation failure)", calls)
+		}
+	})
+
+	t.Run("toggle_port_forward_not_found", func(t *testing.T) {
+		ts, posts := natTestServer(t, "automatic", "", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/firewall/d_nat/toggle_rule/u-1,1" {
+				t.Errorf("path = %q", r.URL.Path)
+			}
+			testutil.WriteBody(w, `{"result":"not found"}`)
+		}))
+		req := providers.NatApplyRequest{Operation: "port_forward", Action: "toggle", RuleUUID: "u-1", ToggleDisable: true}
+		_, err := p.ApplyNat(context.Background(), req, natApplyOpts(t, ts))
+		if err == nil || !strings.Contains(err.Error(), `toggling port_forward rule`) {
+			t.Fatalf("err = %v, want toggle error", err)
+		}
+		if *posts != 1 {
+			t.Fatalf("posts = %d, want 1", *posts)
+		}
+	})
+}
+
+// TestApplyNat_RefetchFailure — the mutation succeeds, but the post-mutation
+// refetch 400s. The failure must surface, not be swallowed into After.
+func TestApplyNat_RefetchFailure(t *testing.T) {
+	p := &Provider{}
+	var posted bool
+	ts, _ := natFullTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			posted = true
+			testutil.WriteBody(w, `{"result":"saved","uuid":"u-1"}`)
+			return
+		}
+		if posted {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody("automatic"))
+		case "/api/firewall/d_nat/search_rule":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/firewall/one_to_one/search_rule", "/api/firewall/source_nat/search_rule":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		default:
+			t.Errorf("unexpected GET path %q", r.URL.Path)
+		}
+	}))
+	req := providers.NatApplyRequest{Operation: "port_forward", Action: "update", RuleUUID: "u-1"}
+	_, err := p.ApplyNat(context.Background(), req, natApplyOpts(t, ts))
+	if err == nil || !strings.Contains(err.Error(), "refetching port_forward rules after updated") {
+		t.Fatalf("err = %v, want refetch error", err)
 	}
 }
 
