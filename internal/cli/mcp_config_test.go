@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,8 +12,19 @@ import (
 )
 
 // runMcpConfigCmd executes `mcp config` with the given extra flags and
-// returns its stdout.
+// returns its stdout; it fails the test if the command errors.
 func runMcpConfigCmd(t *testing.T, args ...string) string {
+	t.Helper()
+	out, err := runMcpConfigCmdRaw(t, args...)
+	if err != nil {
+		t.Fatalf("mcp config %v: %v", args, err)
+	}
+	return out
+}
+
+// runMcpConfigCmdRaw executes `mcp config` and returns stdout plus the
+// error; error-path tests assert on the error instead of failing.
+func runMcpConfigCmdRaw(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	// Reset the flag-bound vars: pflag only writes provided flags, so a
 	// value set by a previous test would otherwise leak into this one.
@@ -20,10 +32,8 @@ func runMcpConfigCmd(t *testing.T, args ...string) string {
 	buf := &bytes.Buffer{}
 	rootCmd.SetOut(buf)
 	rootCmd.SetArgs(append([]string{"mcp", "config"}, args...))
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("mcp config %v: %v", args, err)
-	}
-	return buf.String()
+	err := rootCmd.Execute()
+	return buf.String(), err
 }
 
 func TestMcpConfigClaudeSnippet(t *testing.T) {
@@ -126,4 +136,47 @@ func TestMcpConfigDefaultsToExecutablePath(t *testing.T) {
 	if !strings.Contains(out, strconv.Quote(abs)) {
 		t.Fatalf("default snippet should embed the executable path %q:\n%s", abs, out)
 	}
+}
+
+func TestMcpConfigWriteErrors(t *testing.T) {
+	t.Run("unresolvable executable without --command", func(t *testing.T) {
+		old := resolveExecutable
+		resolveExecutable = func() (string, error) {
+			return "", errors.New("no executable")
+		}
+		t.Cleanup(func() { resolveExecutable = old })
+
+		_, err := runMcpConfigCmdRaw(t, "--harness", "claude")
+		if err == nil || !strings.Contains(err.Error(), "pass an explicit --command") {
+			t.Fatalf("expected actionable executable error, got: %v", err)
+		}
+	})
+
+	t.Run("write target is a directory", func(t *testing.T) {
+		dir := t.TempDir()
+		// The target path itself is a directory: MkdirAll on its parent
+		// succeeds, WriteFile fails.
+		target := filepath.Join(dir, "target")
+		if err := os.MkdirAll(target, 0o700); err != nil {
+			t.Fatalf("creating target dir: %v", err)
+		}
+		_, err := runMcpConfigCmdRaw(t, "--harness", "claude", "--command", "nyx", "--write", target)
+		if err == nil || !strings.Contains(err.Error(), "writing --write target") {
+			t.Fatalf("expected write error, got: %v", err)
+		}
+	})
+
+	t.Run("write target parent is a file", func(t *testing.T) {
+		dir := t.TempDir()
+		// The target's parent exists as a regular file, so MkdirAll fails.
+		parent := filepath.Join(dir, "notadir")
+		if err := os.WriteFile(parent, []byte("x"), 0o600); err != nil {
+			t.Fatalf("creating parent file: %v", err)
+		}
+		target := filepath.Join(parent, ".mcp.json")
+		_, err := runMcpConfigCmdRaw(t, "--harness", "claude", "--command", "nyx", "--write", target)
+		if err == nil || !strings.Contains(err.Error(), "creating directory") {
+			t.Fatalf("expected directory-creation error, got: %v", err)
+		}
+	})
 }

@@ -33,7 +33,7 @@ vars in the harness environment, or seed the store once.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		command := mcpConfigCommand
 		if command == "" {
-			abs, err := os.Executable()
+			abs, err := resolveExecutable()
 			if err != nil {
 				return fmt.Errorf("resolving the nyx executable path: %w (pass an explicit --command)", err)
 			}
@@ -96,6 +96,10 @@ args = ["mcp", "serve"]
 		return "", false
 	}
 }
+
+// resolveExecutable defaults to os.Executable; tests override it to
+// exercise the error path.
+var resolveExecutable = os.Executable
 
 // credentialNote documents the credential env vars (names only — never
 // values) and points at the encrypted store. It is appended under the
