@@ -91,7 +91,8 @@ func TestMcpConfigWriteFile(t *testing.T) {
 	if !strings.Contains(out, "wrote "+target) {
 		t.Fatalf("stdout = %q, want wrote confirmation", out)
 	}
-	raw, err := os.ReadFile(target)
+	// Codacy false positive: target is created under t.TempDir(), not from user input.
+	raw, err := os.ReadFile(target) // nosemgrep: go_filesystem_rule-fileread
 	if err != nil {
 		t.Fatalf("reading written file: %v", err)
 	}
@@ -105,7 +106,7 @@ func TestMcpConfigWriteFile(t *testing.T) {
 	// codex --write keeps the file valid TOML by embedding the note as # comments
 	tomlTarget := filepath.Join(dir, "config.toml")
 	runMcpConfigCmd(t, "--harness", "codex", "--command", "nyx", "--write", tomlTarget)
-	raw, err = os.ReadFile(tomlTarget)
+	raw, err = os.ReadFile(tomlTarget) // nosemgrep: go_filesystem_rule-fileread
 	if err != nil {
 		t.Fatalf("reading written toml: %v", err)
 	}
