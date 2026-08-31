@@ -18,6 +18,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/storepath"
 	"github.com/jpvelasco/nyx/internal/version"
@@ -135,6 +136,8 @@ type opnsenseSurface interface {
 	GetOutboundNatMode(ctx context.Context, opts service.OpnsenseOptions) (string, error)
 	GetNAT(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseNatSummary, error)
 	Inventory(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseInventory, error)
+	PlanNat(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseNatApplyRequest) (*providers.NatPlan, error)
+	ApplyNat(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseNatApplyRequest) (*providers.NatApplyResult, error)
 }
 
 // topologySurface is the cross-provider topology assessment exposed to
@@ -553,6 +556,16 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: opnsenseToolSchema(),
 		},
 		{
+			Name:        "opnsense_plan_nat",
+			Description: "Preview an OPNsense NAT mutation (port-forward, one-to-one, or source-NAT create/update/delete/toggle). Dry-run by default: issues zero POSTs. The result states the exact API endpoint(s), the current collection state, the double-NAT guard verdict, and that staged changes are not in the dataplane until the controller applies them.",
+			InputSchema: opnsenseNatToolSchema(),
+		},
+		{
+			Name:        "opnsense_apply_nat",
+			Description: "Apply an OPNsense NAT mutation (port-forward, one-to-one, or source-NAT create/update/delete/toggle). Dry-run by default: set dry_run=false to apply for real. A real apply stages changes to config.xml — they are not in the dataplane until the controller applies them (S3.9, follow-up). The result carries before/after evidence and the exact API endpoint(s) touched.",
+			InputSchema: opnsenseNatToolSchema(),
+		},
+		{
 			Name:        "topology",
 			Description: "Assess the network topology from both providers' NAT posture: per-device NAT role and a site-level double-NAT risk verdict. Configure credentials for omada and/or opnsense (parameters, env vars, or the credential store) to observe that provider; omit a provider's host to skip it.",
 			InputSchema: inputSchema{
@@ -625,6 +638,40 @@ func opnsenseToolSchema() inputSchema {
 		},
 		Required: []string{"host"},
 	}
+}
+
+// opnsenseNatToolSchema returns the OPNsense NAT-mutation tool schema:
+// credential fields plus the mutation request shape. Dry-run defaults true;
+// a real apply stages changes to config.xml (not the dataplane until the
+// controller applies them).
+func opnsenseNatToolSchema() inputSchema {
+	return opnsenseToolSchemaExtra(map[string]propSchema{
+		"operation":        {Type: "string", Description: "NAT collection: port_forward, one_to_one, or source_nat"},
+		"action":           {Type: "string", Description: "create (default), update, delete, or toggle. update/delete/toggle require rule_uuid; toggle is port_forward only."},
+		"rule_uuid":        {Type: "string", Description: "Target rule UUID for update/delete/toggle"},
+		"interfaces":       {Type: "string", Description: "Comma-separated interface names (create/update)"},
+		"protocol":         {Type: "string", Description: "IP protocol, lowercase (e.g. tcp, udp); empty = any"},
+		"source":           {Type: "string", Description: "Source network / address"},
+		"destination":      {Type: "string", Description: "Destination network / address"},
+		"port":             {Type: "string", Description: "Destination port (port_forward) or destination port (source_nat)"},
+		"local_port":       {Type: "string", Description: "Local (forwarded) port (port_forward)"},
+		"target":           {Type: "string", Description: "Target host address (port_forward) or external address (one_to_one)"},
+		"type":             {Type: "string", Description: "One-to-one type: binat or nat (one_to_one only)"},
+		"label":            {Type: "string", Description: "Rule label / description"},
+		"allow_double_nat": {Type: "boolean", Description: "Allow mutations on a bridge/indeterminate device. The flag does NOT override an unknown outbound NAT mode (always refused)."},
+		"dry_run":          {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
+	}, []string{"host", "operation"})
+}
+
+// opnsenseToolSchemaExtra returns an OPNsense credential schema plus extra
+// tool-specific properties and a custom required list.
+func opnsenseToolSchemaExtra(extra map[string]propSchema, required []string) inputSchema {
+	s := opnsenseToolSchema()
+	for k, v := range extra {
+		s.Properties[k] = v
+	}
+	s.Required = required
+	return s
 }
 
 func (s *Server) handleToolCall(ctx context.Context, req *jsonRPCRequest) *jsonRPCResponse {

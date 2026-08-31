@@ -14,12 +14,15 @@ import (
 	"github.com/jpvelasco/nyx/internal/topology"
 )
 
+// ProviderName is the registry key for the OPNsense provider.
+const ProviderName = "opnsense"
+
 // Provider implements providers.Provider for OPNsense firewalls.
 // Currently only Info is implemented. ImportSpec and Check return ErrCapabilityUnsupported.
 type Provider struct{}
 
 // Name returns the provider identifier "opnsense".
-func (o *Provider) Name() string { return "opnsense" }
+func (o *Provider) Name() string { return ProviderName }
 
 // Capabilities lists the supported operations for this provider.
 func (o *Provider) Capabilities() []string {
@@ -327,6 +330,342 @@ func (o *Provider) NatCheck(ctx context.Context, req providers.NatCheckRequest, 
 	return result, nil
 }
 
+// PlanNat previews a NAT mutation (BDD §3 S3.1–S3.6). It validates the
+// request, runs the double-NAT guard, and reads the collection's current
+// rules as Before evidence. It issues zero POSTs — the dry-run = zero
+// POSTs lock.
+func (o *Provider) PlanNat(ctx context.Context, req providers.NatApplyRequest, opts providers.ImportOptions) (*providers.NatPlan, error) {
+	op, err := validateNatRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireNatHost(opts); err != nil {
+		return nil, err
+	}
+	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+
+	guardCtx, cancel := context.WithTimeout(ctx, natGuardTimeout)
+	guard, err := client.natGuard(guardCtx)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+	rules, err := op.list(client, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s rules: %w", req.Operation, err)
+	}
+	before := marshalRules(rules)
+
+	warnings := []string{natStagedWarning}
+	outcome, ruleUUID := planOutcome(req)
+	if w := guard.natGuardWarning(req.AllowDoubleNat); w != "" {
+		outcome = "refused"
+		ruleUUID = ""
+		warnings = append(warnings, w)
+	}
+	endpoint := natPlanEndpoint(op, req)
+	return &providers.NatPlan{
+		Provider:  "opnsense",
+		DryRun:    true,
+		Outcome:   outcome,
+		RuleUUID:  ruleUUID,
+		Endpoints: []string{endpoint},
+		Before:    before,
+		Warnings:  warnings,
+	}, nil
+}
+
+// ApplyNat performs a NAT mutation (BDD §3 S3.1–S3.6) when the guard passes
+// and dry-run is not set. A dry-run or an idempotent no-op (a create whose
+// 5-tuple already exists with the same spec) issues zero POSTs. Before/After
+// evidence is the collection's rule list as JSON; the created rule's UUID is
+// resolved from the add_rule response (preferred) or a unique 5-tuple match
+// (lock 6).
+func (o *Provider) ApplyNat(ctx context.Context, req providers.NatApplyRequest, opts providers.ImportOptions) (*providers.NatApplyResult, error) {
+	op, err := validateNatRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireNatHost(opts); err != nil {
+		return nil, err
+	}
+	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+
+	guardCtx, cancel := context.WithTimeout(ctx, natGuardTimeout)
+	guard, err := client.natGuard(guardCtx)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+	rules, err := op.list(client, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s rules: %w", req.Operation, err)
+	}
+	before := marshalRules(rules)
+
+	warnings := []string{natStagedWarning}
+	if w := guard.natGuardWarning(req.AllowDoubleNat); w != "" {
+		return &providers.NatApplyResult{
+			Provider:  "opnsense",
+			DryRun:    req.DryRun,
+			Outcome:   "refused",
+			Endpoints: []string{op.create},
+			Before:    before,
+			After:     before,
+			Warnings:  append(warnings, w),
+		}, nil
+	}
+
+	spec := natSpecToWire(op.coll, req.Spec)
+	outcome, ruleUUID, posted, refetched, err := o.applyNatMutation(ctx, client, op, req, spec, rules)
+	if err != nil {
+		return nil, err
+	}
+	after := before
+	if refetched {
+		refreshed, err := op.list(client, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("refetching %s rules after %s: %w", req.Operation, outcome, err)
+		}
+		after = marshalRules(refreshed)
+		if outcome == "created" && ruleUUID == "" {
+			ruleUUID = matchPortForward(refreshed, spec)
+		}
+	}
+	endpoints := posted
+	if endpoints == nil {
+		// Dry-run, refusal, and idempotent no-ops post nothing — the
+		// planned endpoint is the evidence of what would have been hit.
+		endpoints = []string{natPlanEndpoint(op, req)}
+	}
+	return &providers.NatApplyResult{
+		Provider:  "opnsense",
+		DryRun:    req.DryRun,
+		Outcome:   outcome,
+		RuleUUID:  ruleUUID,
+		Endpoints: endpoints,
+		Before:    before,
+		After:     after,
+		Warnings:  warnings,
+	}, nil
+}
+
+// applyNatMutation executes the requested mutation against the collection.
+// It returns the outcome, the resolved rule UUID, the exact API paths posted
+// (empty for dry-run and no-ops), and whether the caller must refetch the
+// collection for After evidence.
+func (o *Provider) applyNatMutation(ctx context.Context, client *Client, op natOperation, req providers.NatApplyRequest, spec natRuleSpec, before []NatRule) (outcome, ruleUUID string, posted []string, refetched bool, err error) {
+	ruleUUID = req.RuleUUID
+	action := natAction(req)
+	if req.DryRun {
+		return "unchanged", ruleUUID, nil, false, nil
+	}
+	switch action {
+	case "create":
+		// Port forward is idempotent: a covering rule with the same spec
+		// is unchanged (zero POSTs); otherwise create.
+		if op.coll == "port_forward" {
+			if existing := matchPortForward(before, spec); existing != "" {
+				return "unchanged", existing, nil, false, nil
+			}
+		}
+		switch op.coll {
+		case "port_forward":
+			ruleUUID, err = client.CreatePortForwardRule(ctx, spec)
+		case "one_to_one":
+			ruleUUID, err = client.CreateOneToOneRule(ctx, spec)
+		default:
+			ruleUUID, err = client.CreateSourceNatRule(ctx, spec)
+		}
+		if err != nil {
+			return "", "", nil, false, fmt.Errorf("creating %s rule: %w", req.Operation, err)
+		}
+		return "created", ruleUUID, []string{op.create}, true, nil
+	case "update":
+		var setErr error
+		switch op.coll {
+		case "port_forward":
+			setErr = client.SetPortForwardRule(ctx, req.RuleUUID, spec)
+		case "one_to_one":
+			setErr = client.SetOneToOneRule(ctx, req.RuleUUID, spec)
+		default:
+			setErr = client.SetSourceNatRule(ctx, req.RuleUUID, spec)
+		}
+		if setErr != nil {
+			return "", "", nil, false, fmt.Errorf("setting %s rule: %w", req.Operation, setErr)
+		}
+		return "updated", ruleUUID, []string{fmt.Sprintf(op.set, req.RuleUUID)}, true, nil
+	case "delete":
+		var delErr error
+		switch op.coll {
+		case "port_forward":
+			delErr = client.DeletePortForwardRule(ctx, req.RuleUUID)
+		case "one_to_one":
+			delErr = client.DeleteOneToOneRule(ctx, req.RuleUUID)
+		default:
+			delErr = client.DeleteSourceNatRule(ctx, req.RuleUUID)
+		}
+		if delErr != nil {
+			return "", "", nil, false, fmt.Errorf("deleting %s rule: %w", req.Operation, delErr)
+		}
+		return "deleted", ruleUUID, []string{fmt.Sprintf(op.del, req.RuleUUID)}, true, nil
+	default: // toggle (validated port-forward-only)
+		if err := client.TogglePortForwardRule(ctx, req.RuleUUID, req.ToggleDisable); err != nil {
+			return "", "", nil, false, fmt.Errorf("toggling %s rule: %w", req.Operation, err)
+		}
+		return "updated", ruleUUID, []string{op.toggle}, true, nil
+	}
+}
+
+// requireNatHost fails fast when no controller host was given, so a
+// missing host is a configuration error instead of a dial failure against
+// an empty host after the guard's first GET.
+func requireNatHost(opts providers.ImportOptions) error {
+	if opts.Host == "" {
+		return fmt.Errorf("--host is required for opnsense NAT mutation")
+	}
+	return nil
+}
+
+// validateNatRequest checks the operation and action, returning the
+// collection descriptor on success.
+func validateNatRequest(req providers.NatApplyRequest) (natOperation, error) {
+	op, ok := natOperations[req.Operation]
+	if !ok {
+		return natOperation{}, fmt.Errorf("operation must be one of port_forward, one_to_one, source_nat; got %q", req.Operation)
+	}
+	action := req.Action
+	if action == "" {
+		action = "create"
+	}
+	switch action {
+	case "create", "update", "delete":
+	case "toggle":
+		if op.coll != "port_forward" {
+			return natOperation{}, fmt.Errorf("toggle is only supported for port_forward, not %q", req.Operation)
+		}
+	default:
+		return natOperation{}, fmt.Errorf("action must be one of create, update, delete, toggle; got %q", req.Action)
+	}
+	if action == "update" || action == "delete" || action == "toggle" {
+		if req.RuleUUID == "" {
+			return natOperation{}, fmt.Errorf("rule_uuid is required for action %q", action)
+		}
+	}
+	return op, nil
+}
+
+// natAction normalises an empty action to "create".
+func natAction(req providers.NatApplyRequest) string {
+	if req.Action == "" {
+		return "create"
+	}
+	return req.Action
+}
+
+// planOutcome decides the PlanNat outcome for the requested action.
+func planOutcome(req providers.NatApplyRequest) (string, string) {
+	switch natAction(req) {
+	case "update":
+		return "would_update", req.RuleUUID
+	case "delete":
+		return "would_delete", req.RuleUUID
+	case "toggle":
+		return "would_update", req.RuleUUID
+	default:
+		return "would_create", ""
+	}
+}
+
+// natPlanEndpoint picks the endpoint string for plan/apply evidence.
+// The set/del formatters take the uuid as their single argument; the
+// toggle pattern is emitted verbatim because the polarity flag is not
+// encoded into the evidence.
+func natPlanEndpoint(op natOperation, req providers.NatApplyRequest) string {
+	switch natAction(req) {
+	case "update":
+		return fmt.Sprintf(op.set, req.RuleUUID)
+	case "delete":
+		return fmt.Sprintf(op.del, req.RuleUUID)
+	case "toggle":
+		return op.toggle
+	default:
+		return op.create
+	}
+}
+
+// matchPortForward returns the UUID of the unique port forward rule matching
+// the spec's 5-tuple (label, interface, protocol, destination, port), or ""
+// when none or more than one match (ambiguous — the caller treats that as a
+// miss, never a guess).
+func matchPortForward(rules []NatRule, spec natRuleSpec) string {
+	var match string
+	for _, r := range rules {
+		if !portForwardMatches(r, spec) {
+			continue
+		}
+		if match != "" {
+			return "" // ambiguous
+		}
+		match = r.RuleUUID
+	}
+	return match
+}
+
+// portForwardMatches reports whether a stored port forward rule matches the
+// spec's 5-tuple.
+func portForwardMatches(r NatRule, spec natRuleSpec) bool {
+	if spec.Label != "" && r.Label != spec.Label {
+		return false
+	}
+	if spec.Destination != "" && r.Destination != spec.Destination {
+		return false
+	}
+	if spec.Port != "" && r.Port != spec.Port {
+		return false
+	}
+	if spec.Protocol != "" && r.Protocol != strings.ToUpper(spec.Protocol) {
+		return false
+	}
+	if len(spec.Interfaces) > 0 {
+		if len(r.Interface) != len(spec.Interfaces) {
+			return false
+		}
+		for i := range spec.Interfaces {
+			if spec.Interfaces[i] != r.Interface[i] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// natSpecToWire maps the agent-facing NatRuleSpec to the client's natRuleSpec
+// for the given collection, applying the model defaults (lock 7 field sets).
+func natSpecToWire(coll string, spec providers.NatRuleSpec) natRuleSpec {
+	wire := natRuleSpec{
+		Interfaces:  spec.Interfaces,
+		Protocol:    spec.Protocol,
+		Source:      spec.Source,
+		Destination: spec.Destination,
+		Port:        spec.Port,
+		LocalPort:   spec.LocalPort,
+		Target:      spec.Target,
+		Mode:        spec.Mode,
+		Type:        spec.Type,
+		Label:       spec.Label,
+	}
+	// one_to_one and source_nat carry an enabled flag (default 1); d_nat does not.
+	if coll == "one_to_one" || coll == "source_nat" {
+		wire.Enabled = "1"
+	}
+	// ipprotocol defaults to inet for the collections that model it.
+	if coll == "port_forward" || coll == "source_nat" {
+		wire.IPProtocol = "inet"
+	}
+	return wire
+}
+
 // natCheckError finishes a failed read with a StatusError result.
 func natCheckError(result *models.CheckResult, format string, args ...any) *models.CheckResult {
 	result.Status = models.StatusError
@@ -391,6 +730,7 @@ func ptrInt(i int) *int {
 var _ providers.Provider = (*Provider)(nil)
 var _ providers.NatChecker = (*Provider)(nil)
 var _ providers.InventoryProvider = (*Provider)(nil)
+var _ providers.NatMutationProvider = (*Provider)(nil)
 
 func init() {
 	_ = providers.Register(&Provider{})

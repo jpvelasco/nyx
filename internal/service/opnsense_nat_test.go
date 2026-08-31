@@ -6,8 +6,25 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jpvelasco/nyx/internal/providers"
+	opnsenseprovider "github.com/jpvelasco/nyx/internal/providers/opnsense"
 	"github.com/jpvelasco/nyx/internal/testutil"
 )
+
+// natProviderRegistered pins the OPNsense provider in the registry for the
+// PlanNat/ApplyNat tests, which resolve the mutation surface by provider
+// name (mirrors the Omada mutation rail test).
+func natProviderRegistered(t *testing.T) {
+	t.Helper()
+	providers.Reset()
+	t.Cleanup(func() {
+		providers.Reset()
+		_ = providers.Register(&opnsenseprovider.Provider{})
+	})
+	if err := providers.Register(&opnsenseprovider.Provider{}); err != nil {
+		t.Fatalf("Register opnsense: %v", err)
+	}
+}
 
 // opnsenseNatHandlers serves the NAT-observation endpoints. unexpected
 // records any path outside the known set.
@@ -206,6 +223,96 @@ func TestOpnsenseServiceGetNAT_LaterReadFailures(t *testing.T) {
 				t.Fatalf("GetNAT error = %v, want %q prefix", err, tc.want)
 			}
 		})
+	}
+}
+
+// PlanNat/ApplyNat route through the provider's NAT mutation surface; the
+// httptest fixtures below exercise the service→provider→client seam end to
+// end (guards pass with mode "automatic").
+func TestOpnsenseServicePlanNat(t *testing.T) {
+	natProviderRegistered(t)
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody("automatic"))
+		default:
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		}
+	})
+	plan, err := NewOpnsenseService().PlanNat(context.Background(), opnsenseOptions(ts), OpnsenseNatApplyRequest{
+		Operation: "port_forward",
+		Spec:      OpnsenseNatRuleSpec{Destination: "10.0.40.10", Port: "443", Target: "10.0.40.20", Label: "web"},
+	})
+	if err != nil {
+		t.Fatalf("PlanNat: %v", err)
+	}
+	if plan.Provider != "opnsense" || !plan.DryRun || plan.Outcome != "would_create" {
+		t.Errorf("plan = %+v", plan)
+	}
+	if len(plan.Endpoints) != 1 || plan.Endpoints[0] != "/firewall/d_nat/add_rule" {
+		t.Errorf("endpoints = %v", plan.Endpoints)
+	}
+}
+
+func TestOpnsenseServiceApplyNat(t *testing.T) {
+	natProviderRegistered(t)
+	var posts int
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			posts++
+			testutil.WriteBody(w, `{"result":"saved","uuid":"new-1"}`)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody("automatic"))
+		default:
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		}
+	})
+	res, err := NewOpnsenseService().ApplyNat(context.Background(), opnsenseOptions(ts), OpnsenseNatApplyRequest{
+		Operation: "port_forward",
+		DryRun:    false,
+		Spec:      OpnsenseNatRuleSpec{Destination: "10.0.40.10", Port: "443", Target: "10.0.40.20", Label: "web"},
+	})
+	if err != nil {
+		t.Fatalf("ApplyNat: %v", err)
+	}
+	if posts != 1 {
+		t.Fatalf("posts = %d, want 1", posts)
+	}
+	if res.Provider != "opnsense" || res.Outcome != "created" || res.RuleUUID != "new-1" {
+		t.Errorf("result = %+v", res)
+	}
+}
+
+func TestOpnsenseServiceApplyNat_DryRunZeroPosts(t *testing.T) {
+	natProviderRegistered(t)
+	var posts int
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			posts++
+		}
+		switch r.URL.Path {
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody("automatic"))
+		default:
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		}
+	})
+	res, err := NewOpnsenseService().ApplyNat(context.Background(), opnsenseOptions(ts), OpnsenseNatApplyRequest{
+		Operation: "port_forward",
+		DryRun:    true,
+		Spec:      OpnsenseNatRuleSpec{Destination: "10.0.40.10", Port: "443"},
+	})
+	if err != nil {
+		t.Fatalf("ApplyNat: %v", err)
+	}
+	if posts != 0 {
+		t.Fatalf("posts = %d, want 0 (dry-run lock)", posts)
+	}
+	if res.Outcome != "unchanged" || !res.DryRun {
+		t.Errorf("result = %+v", res)
 	}
 }
 

@@ -52,6 +52,8 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_list_aliases":            (*Server).toolOpnsenseListAliases,
 	"opnsense_get_nat":                 (*Server).toolOpnsenseGetNAT,
 	"opnsense_inventory":               (*Server).toolOpnsenseInventory,
+	"opnsense_plan_nat":                (*Server).toolOpnsensePlanNat,
+	"opnsense_apply_nat":               (*Server).toolOpnsenseApplyNat,
 	"topology":                         (*Server).toolTopology,
 }
 
@@ -546,6 +548,72 @@ func (s *Server) toolOpnsenseInventory(ctx context.Context, args map[string]inte
 		return errResult(fmt.Sprintf("opnsense inventory request failed: %v", err))
 	}
 	return okResult(toJSON(inv))
+}
+
+// opnsenseNatRequestFromArgs assembles the NAT mutation request from tool
+// arguments. The returned message is non-empty when a required parameter is
+// missing or invalid.
+func opnsenseNatRequestFromArgs(args map[string]interface{}) (service.OpnsenseNatApplyRequest, string) {
+	req := service.OpnsenseNatApplyRequest{
+		Operation:      argString(args, "operation"),
+		Action:         argString(args, "action"),
+		RuleUUID:       argString(args, "rule_uuid"),
+		ToggleDisable:  argBoolDefault(args, "toggle_disable", false),
+		AllowDoubleNat: argBoolDefault(args, "allow_double_nat", false),
+		DryRun:         argBoolDefault(args, "dry_run", true),
+	}
+	req.Spec.Interfaces = splitCSV(argString(args, "interfaces"))
+	req.Spec.Protocol = argString(args, "protocol")
+	req.Spec.Source = argString(args, "source")
+	req.Spec.Destination = argString(args, "destination")
+	req.Spec.Port = argString(args, "port")
+	req.Spec.LocalPort = argString(args, "local_port")
+	req.Spec.Target = argString(args, "target")
+	req.Spec.Type = argString(args, "type")
+	req.Spec.Label = argString(args, "label")
+	if req.Operation == "" {
+		return req, "operation parameter is required: port_forward, one_to_one, or source_nat"
+	}
+	action := req.Action
+	if action == "" {
+		action = "create"
+	}
+	if action != "create" && req.RuleUUID == "" {
+		return req, fmt.Sprintf("rule_uuid is required for action %q", action)
+	}
+	return req, ""
+}
+
+func (s *Server) toolOpnsensePlanNat(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req, merr := opnsenseNatRequestFromArgs(args)
+	if merr != "" {
+		return errResult(merr)
+	}
+	plan, err := s.opnsenseSvc.PlanNat(ctx, opts, req)
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense plan request failed: %v", err))
+	}
+	return okResult(toJSON(plan))
+}
+
+func (s *Server) toolOpnsenseApplyNat(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req, merr := opnsenseNatRequestFromArgs(args)
+	if merr != "" {
+		return errResult(merr)
+	}
+	res, err := s.opnsenseSvc.ApplyNat(ctx, opts, req)
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense apply request failed: %v", err))
+	}
+	return okResult(toJSON(res))
 }
 
 // toolTopology reports NAT posture across the configured providers. A

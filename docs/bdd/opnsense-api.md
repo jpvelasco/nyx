@@ -174,11 +174,13 @@ And the controller version/arch come from the product-version entry (never guess
 And `ClientCount` is the DHCP-lease count (0 when the lease fetch failed)
 And the test: `TestProviderInventory` plus `TestOpnsenseServiceInventory` / `TestDispatchOpnsenseInventory`
 
-## §3 Mutations (Planned — PR 2)
+## §3 Mutations (S3.1–S3.6 Implemented — PR 2 slice 1; S3.7–S3.9 Planned)
 
-Reserved endpoints, listed so the PR 2 implementation is a mirror of this
-table. **No mutation may ship until the matching scenario below is marked
+**No mutation may ship until the matching scenario below is marked
 Implemented with its test mirror** (hard lock: no opt-in escape hatch).
+S3.1–S3.6 (NAT CRUD) are Implemented in this slice; S3.7 (alias CRUD),
+S3.8 (filter CRUD), and S3.9 (`filter_base/apply`) are Planned. S3.10
+stays reserved forever.
 
 | Endpoint | Operation | Scenario |
 | -------- | --------- | -------- |
@@ -195,7 +197,57 @@ Implemented with its test mirror** (hard lock: no opt-in escape hatch).
 
 Mutations are dry-run by default: a dry-run issues **zero** POSTs. NAT writes
 against a bridge/indeterminate-classified device are refused without explicit
-`allow_double_nat` (double-NAT protection — see topology phase).
+`allow_double_nat` (double-NAT protection — see topology phase); writes
+against an `unknown` device are refused **always**, even with
+`allow_double_nat` (you cannot consent to a risk that was not measured).
+Every NAT mutation in this slice is **staged**: it saves to the controller
+config but is not in the dataplane until `filter_base/apply` (S3.9) commits
+it — the plan and apply results state this explicitly (guardrail lock
+below).
+
+### S3.1 Create port forward (Implemented)
+Given `POST /api/firewall/d_nat/add_rule` with body `{"rule":{"sequence":"99","interface":"lan","protocol":"tcp","destination":{"network":"10.0.40.10"},"local-port":"443","target":"10.0.40.20","descr":"web"}`
+When `CreatePortForwardRule` is called
+Then the request is a single POST with `Content-Type: application/json` and the exact envelope `{"rule":{...}}` (object, not array)
+And the rule fields use the DNat model names: `sequence`, `interface` (comma-joined multi), `ipprotocol`, `protocol` (lowercase), nested `source`/`destination` (`network`/`port`/`not`), `local-port`, `target`, `descr`, `pass`
+And a success response `{"result":"saved","uuid":"<uuid>"}` yields the new UUID
+And a validation failure returns `{"result":"failed","validations":{...}}` as a stable error (no retry)
+And the test: `TestCreatePortForwardRule`
+
+### S3.2 Update port forward (Implemented)
+Given `POST /api/firewall/d_nat/set_rule/<uuid>` with the same `{"rule":{...}}` envelope
+When `SetPortForwardRule` is called
+Then the full writable payload is posted (the controller replaces the rule content); missing uuids fail with `{"result":"failed"}` (stable 4xx, no retry)
+And `set` is an upsert for unknown-but-valid uuids (controller behaviour, never relied upon)
+And the test: `TestSetPortForwardRule`
+
+### S3.3 Delete port forward (Implemented)
+Given `POST /api/firewall/d_nat/del_rule/<uuid>` with an empty JSON body
+When `DeletePortForwardRule` is called
+Then the delete is issued against the exact uuid path; a missing uuid yields `{"result":"not found"}` as a stable error
+And the test: `TestDeletePortForwardRule`
+
+### S3.4 Enable/disable port forward (Implemented)
+Given `POST /api/firewall/d_nat/toggle_rule/<uuid>,<disabled>` where the path suffix is the **`disabled`** flag (`1` = disabled, `0` = enabled)
+When `TogglePortForwardRule` is called
+Then the POST path embeds `<uuid>,1` to disable and `<uuid>,0` to enable (inverted polarity — `d_nat` uses the `disabled` parameter, unlike `one_to_one`/`source_nat` which use `enabled`)
+And the test: `TestTogglePortForwardRule`
+
+### S3.5 One-to-one NAT CRUD (Implemented)
+Given the `one_to_one` collection with model fields `enabled` (required, default 1), `sequence` (required), `interface` (required, default wan), `type` (required, `binat|nat`), `source_net` (required), `destination_net` (required, default any), `external` (required), `natreflection`, `description`
+When `CreateOneToOneRule` / `SetOneToOneRule` / `DeleteOneToOneRule` are called
+Then the wire envelope is `{"rule":{...}}` (object) against `/api/firewall/one_to_one/add_rule`, `set_rule/<uuid>`, `del_rule/<uuid>`
+And the toggle uses the **`enabled`** polarity: `toggle_rule/<uuid>,1` enables, `toggle_rule/<uuid>,0` disables
+And `add_rule` returns `{"result":"saved","uuid":"<uuid>"}` on success
+And the test: `TestCreateOneToOneRule` / `TestSetOneToOneRule` / `TestDeleteOneToOneRule`
+
+### S3.6 Source NAT CRUD (Implemented)
+Given the `source_nat` collection (model `snatrules.rule`) with fields `enabled` (required, default 1), `sequence` (required), `interface` (required, default lan), `ipprotocol` (required, default inet), `protocol` (required, default any), `source_net` (required, default any), `source_port`, `destination_net` (required, default any), `destination_port`, `target`, `target_port`, `staticnatport`, `description`
+When `CreateSourceNatRule` / `SetSourceNatRule` / `DeleteSourceNatRule` are called
+Then the wire envelope is `{"rule":{...}}` (object) against `/api/firewall/source_nat/add_rule`, `set_rule/<uuid>`, `del_rule/<uuid>`
+And manual outbound rules only take effect with `snat_mode` = `advanced` or `hybrid` (mode drift is reported, never coerced — S4.1)
+And the toggle uses the **`enabled`** polarity: `toggle_rule/<uuid>,1` enables, `toggle_rule/<uuid>,0` disables
+And the test: `TestCreateSourceNatRule` / `TestSetSourceNatRule` / `TestDeleteSourceNatRule`
 
 ### PR 2 guardrail locks (binding)
 
@@ -213,7 +265,15 @@ against a bridge/indeterminate-classified device are refused without explicit
   call.
 - **Outbound NAT mode drift → `unknown`.** An absent or unselected
   `snat_mode` entry is reported as `unknown` and never guessed; mutation
-  plans against an `unknown` device are refused.
+  plans against an `unknown` device are **always** refused, even with
+  `allow_double_nat`. Bridge/indeterminate refusal is overridable with
+  `allow_double_nat`; `unknown` is not.
+- **Wire envelope (S3.1–S3.6).** All NAT writes POST `{"rule":{...}}` —
+  `rule` is an **object** (the DNat/OneToOne/SourceNat controllers read
+  `getPost('rule')`), not the read-path `rows[].rule` array. `add_rule`
+  returns `{"result":"saved","uuid":"<uuid>"}` on success. Toggle
+  polarity: `d_nat` suffix is `disabled` (`1`=disabled); `one_to_one`
+  and `source_nat` suffixes are `enabled` (`1`=enabled).
 
 ## §4 Topology & `nat_check` (Implemented — PR 1)
 
