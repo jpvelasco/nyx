@@ -286,6 +286,11 @@ func (o *Provider) Check(ctx context.Context, opts providers.ImportOptions) (*pr
 		return nil, err
 	}
 	engine := audit.NewEngine(imported.Spec)
+	// Forward the TLS options so audit-engine-backed assertions that talk to
+	// the controller (nat_check, acl_check) honor the same
+	// --skip-tls-verify / --ca-cert the import used.
+	engine.SkipTLSVerify = opts.SkipTLSVerify
+	engine.CACertPath = opts.CACertPath
 	report, err := engine.Run(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("audit failed: %w", err)
