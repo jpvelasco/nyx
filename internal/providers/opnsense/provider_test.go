@@ -590,8 +590,11 @@ func TestProviderInventory(t *testing.T) {
 			t.Fatalf("Inventory: %v", err)
 		}
 		wantEmptyTopologyWarning(t, res.Warnings)
-		if !strings.Contains(res.Human, "Warning: ") {
-			t.Errorf("Human render must surface the warning:\n%s", res.Human)
+		// The renderer must NOT duplicate the warning: the CLI layer prints
+		// warnings to stderr once and the JSON surface keeps them structured
+		// (#60). The human block shows the empty section instead.
+		if strings.Contains(res.Human, emptyTopologyWarning) {
+			t.Errorf("Human render must not duplicate the warning:\n%s", res.Human)
 		}
 		if !strings.Contains(res.Human, "== Networks (0) ==") {
 			t.Errorf("Human render must still show the empty section:\n%s", res.Human)
