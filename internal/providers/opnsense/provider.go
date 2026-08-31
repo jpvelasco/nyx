@@ -3,6 +3,7 @@ package opnsense
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -16,6 +17,18 @@ import (
 
 // ProviderName is the registry key for the OPNsense provider.
 const ProviderName = "opnsense"
+
+// isPermissionDenied reports whether err is the client's stable 403
+// privilege error (an API user without the page privilege for the
+// endpoint). It is distinct from the 401 credential error: a stable
+// privilege 403 is safe to degrade on (the gateway is reachable and the
+// key is valid — the user simply lacks the page privilege), while a 401
+// or a transport failure means the credentials or the link itself are
+// broken and must stay fatal.
+func isPermissionDenied(err error) bool {
+	var se *stableError
+	return errors.As(err, &se) && strings.Contains(err.Error(), "permission denied")
+}
 
 // Provider implements providers.Provider for OPNsense firewalls.
 type Provider struct{}
@@ -108,16 +121,43 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		return nil, fmt.Errorf("fetching interfaces: %w", err)
 	}
 
-	// Get firewall rules for policy detection
-	rules, err := client.GetFirewallRules(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetching firewall rules: %w", err)
+	// Get firewall rules for policy detection. A stable 403 (the API user
+	// lacks the Firewall: Filter page privilege) degrades to a zero-policy
+	// spec with an explicit warning — the gateway is reachable and the
+	// credentials are valid, so a least-privilege user must still get a
+	// usable import. Every other failure (401 credential error, transport,
+	// 5xx) stays fatal: a silent "0 policies" import for a broken key or an
+	// unreachable controller would hide the real problem.
+	var rules []FirewallRule
+	var rulesErr error
+	rules, rulesErr = client.GetFirewallRules(ctx)
+	if rulesErr != nil && !isPermissionDenied(rulesErr) {
+		return nil, fmt.Errorf("fetching firewall rules: %w", rulesErr)
 	}
 
-	// Get DHCP leases for host count estimation
-	leases, err := client.GetDHCPLeases(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetching DHCP leases: %w", err)
+	// Get DHCP leases for host count estimation (best-effort on a stable
+	// 403, mirroring the rules fetch above: no DHCP page privilege means a
+	// zero-client estimate, not a fatal import).
+	leases, leasesErr := client.GetDHCPLeases(ctx)
+	if leasesErr != nil && !isPermissionDenied(leasesErr) {
+		return nil, fmt.Errorf("fetching DHCP leases: %w", leasesErr)
+	}
+
+	// Degrade warnings for the stable-privilege 403s above. They ride the
+	// same structured Warnings channel as the other import warnings, so the
+	// CLI prints them once to stderr and `check` (which imports first)
+	// surfaces them alongside the audit report — a 0-policy import never
+	// reads as a clean pass.
+	var warnings []string
+	if rulesErr != nil {
+		warnings = append(warnings,
+			"firewall rules unavailable: "+rulesErr.Error()+
+				" — the spec has no policies; grant the Firewall: Filter page privilege (System ‣ Access ‣ Users) to the API user to import them")
+	}
+	if leasesErr != nil {
+		warnings = append(warnings,
+			"DHCP leases unavailable: "+leasesErr.Error()+
+				" — client count is estimated as 0; grant the Diagnostics: DHCP page privilege (System ‣ Access ‣ Users) to the API user to count leases")
 	}
 
 	// Build networks from interfaces
@@ -213,7 +253,6 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		Assertions: assertions,
 	}
 
-	var warnings []string
 	if len(networks) == 0 {
 		warnings = append(warnings, emptyTopologyWarning)
 	}

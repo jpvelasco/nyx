@@ -80,7 +80,9 @@ And the retry budget applies (4 total attempts)
 Given a controller that responds HTTP 403
 When any API call is made
 Then the request is attempted exactly once
-And the error contains `unexpected status 403`
+And the error contains `permission denied`, the requested API path, and the actionable hint `lacks the privilege for this endpoint; grant the matching page privilege to the user (System ‣ Access ‣ Users)`
+And other 4xx codes contain `unexpected status <code>` and are never retried
+And the test: `TestDoForbiddenPrivilegeHint` (403 → privilege hint, no retry) and `TestDoClientErrorNoRetry` (403 attempted exactly once)
 
 ### S1.8 Requests are serialised
 Given two concurrent calls on one client
@@ -178,6 +180,22 @@ And `ClientCount` is the DHCP-lease count (0 when the lease fetch failed)
 And a 200 OK that decodes to zero networks (an unparseable or empty interface list) is not a silently empty topology: the snapshot carries an explicit warning (and the import path adds the same warning to its result) pointing at the controller version / `--debug` raw payload
 And each warning is displayed exactly once: the CLI layer prints them to stderr, the JSON surfaces keep them structured, and the human renderer (`RenderInventory`, OPNsense and Omada alike) does not repeat them
 And the test: `TestProviderInventory` plus `TestRenderInventory` and `TestOpnsenseServiceInventory` / `TestDispatchOpnsenseInventory`
+
+### S2.12 Import privilege degradation (least-privilege API user)
+Given a live gateway where the API user lacks the page privileges for the firewall-rules route and the DHCP-lease route (both answer a stable 403, never retried)
+When `ImportSpec` (or the `opnsense_import` MCP tool / `nyx opnsense import`, or `nyx opnsense check`, which imports first) is called
+Then the spec is still returned: networks come from the interfaces endpoint, `Policies` is empty and `ClientCount` is 0
+And an explicit `Warning` is appended for each unavailable read — `firewall rules unavailable: … — the spec has no policies; grant the Firewall: Filter page privilege (System ‣ Access ‣ Users) to the API user to import them` and the DHCP-lease analogue — so a 0-policy import never reads as a clean pass
+And only the stable 403 degrades: a 401 (revoked or wrong credential), a transport failure, or a 5xx on the rules or lease fetches is fatal, because a silent 0-policy spec from a broken key or an unreachable controller would hide the real problem
+And the degrade warnings ride the structured `Warnings` channel and surface in `import`, `check`, and the MCP tool output alike (the CLI prints each to stderr exactly once)
+And the test: `TestImportSpecPrivilegeDegradation` (both routes 403 → zero-policy/zero-client spec with degrade warnings; rules-only 403 → lease count survives and exactly one degrade warning; 401 on rules → fatal)
+
+### S2.13 Minimum page-privilege set
+Given the OPNsense provider's read endpoints
+When an API user is scoped with the smallest page-privilege set that keeps each surface usable
+Then `info` and `inventory` require the **Dashboard** page only (both `system_information` and `interfaces_info` are covered by it; the firmware endpoints need the separate System: Firmware privilege and are never read)
+And a full `import` additionally requires **Firewall: Filter** (rules → policies) and the **Diagnostics: DHCP** page (leases → client estimate); a user missing either still gets a usable, warned import per S2.12 instead of a fatal error
+And the `nat_check` surface requires the **Firewall: NAT** page (outbound mode plus the NAT rule listings) on top of the Dashboard-only set
 
 ## §3 Mutations (S3.1–S3.6 Implemented — PR 2 slice 1; S3.7–S3.9 Planned)
 

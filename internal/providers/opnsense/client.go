@@ -297,9 +297,12 @@ func applyCIDR(iface *Interface, cidr string) {
 }
 
 // GetFirewallRules returns all firewall rules from OPNsense.
-// Rules are served by a single paged endpoint (GET /api/firewall/filter/search_rule);
-// any fetch failure is surfaced to the caller — a silent "0 policies" import
-// would hide real problems like revoked keys or an unreachable controller.
+// Rules are served by a single paged endpoint (GET /api/firewall/filter/search_rule).
+// A fetch failure is returned as-is: the provider's import path degrades
+// only a stable 403 privilege error (the API user lacks the page privilege)
+// to a warned zero-policy spec, and keeps every other failure (401,
+// transport, 5xx) fatal — a silent "0 policies" import for a broken key or
+// an unreachable controller would hide the real problem.
 func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
 	resp, err := c.doRequest(ctx, "/firewall/filter/search_rule")
 	if err != nil {
