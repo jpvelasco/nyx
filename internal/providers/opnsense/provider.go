@@ -213,10 +213,14 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		Assertions: assertions,
 	}
 
-	warnings := []string{
+	var warnings []string
+	if len(networks) == 0 {
+		warnings = append(warnings, emptyTopologyWarning)
+	}
+	warnings = append(warnings,
 		"OPNsense import uses DHCP lease count as host estimate — adjust expect_hosts_max as needed",
 		"Firewall rules are imported as deny policies — review and adjust in your spec",
-	}
+	)
 
 	return &providers.ImportResult{
 		Spec: spec,

@@ -192,9 +192,12 @@ func (c *Client) GetSystemInformation(ctx context.Context) (*SystemInformation, 
 	return &info, nil
 }
 
-// GetInterfaces returns the list of interfaces with IP configuration.
-// OPNsense serves these keyed by interface name with the address as
-// "ip/prefix" under ipv4 (GET /api/interfaces/overview/interfaces_info).
+// GetInterfaces returns the list of interfaces with IP configuration
+// (GET /api/interfaces/overview/interfaces_info). The 26.x generation serves
+// a paged rows shape ({"rows":[...]} keyed by "identifier"); the pre-26.x
+// shape is a name-keyed map ({"interfaces":{"lan":{...}}}). The rows shape is
+// tried first (26.x-first, like the dual-backend lease routes); a body with
+// no rows field falls back to the legacy map.
 func (c *Client) GetInterfaces(ctx context.Context) ([]Interface, error) {
 	resp, err := c.doRequest(ctx, "/interfaces/overview/interfaces_info")
 	if err != nil {
@@ -202,7 +205,61 @@ func (c *Client) GetInterfaces(ctx context.Context) ([]Interface, error) {
 	}
 	defer resp.Body.Close()
 
-	var result struct {
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading interfaces response: %w", err)
+	}
+	ifaces, err := parseInterfaces(raw)
+	if err != nil {
+		return nil, fmt.Errorf("decoding interfaces response: %w", err)
+	}
+	slices.SortFunc(ifaces, func(a, b Interface) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return ifaces, nil
+}
+
+// parseInterfaces decodes both interfaces_info wire shapes (see
+// GetInterfaces). A rows body with an empty identifier names an unassigned
+// interface (enc0, pflog0, ...) — those carry no configuration and are
+// skipped.
+func parseInterfaces(raw []byte) ([]Interface, error) {
+	var paged struct {
+		Rows []struct {
+			Identifier  string `json:"identifier"`
+			Description string `json:"description"`
+			Addr4       string `json:"addr4"`
+			IPV4        []struct {
+				IPAddr string `json:"ipaddr"`
+			} `json:"ipv4"`
+			Gateways []string `json:"gateways"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(raw, &paged); err != nil {
+		return nil, err
+	}
+	if len(paged.Rows) > 0 {
+		var out []Interface
+		for _, row := range paged.Rows {
+			name := strings.TrimSpace(row.Identifier)
+			if name == "" {
+				continue
+			}
+			iface := Interface{Name: name, Description: row.Description}
+			cidr := row.Addr4
+			if cidr == "" && len(row.IPV4) > 0 {
+				cidr = row.IPV4[0].IPAddr
+			}
+			applyCIDR(&iface, cidr)
+			if len(row.Gateways) > 0 {
+				iface.Gateway = row.Gateways[0]
+			}
+			out = append(out, iface)
+		}
+		return out, nil
+	}
+
+	var legacy struct {
 		Interfaces map[string]struct {
 			Description string `json:"description"`
 			DHCP        bool   `json:"dhcp"`
@@ -210,29 +267,33 @@ func (c *Client) GetInterfaces(ctx context.Context) ([]Interface, error) {
 			Gateway     string `json:"ipv4_gateway"`
 		} `json:"interfaces"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding interfaces response: %w", err)
+	if err := json.Unmarshal(raw, &legacy); err != nil {
+		return nil, err
 	}
-
-	var ifaces []Interface
-	for name, raw := range result.Interfaces {
+	var out []Interface
+	for name, entry := range legacy.Interfaces {
 		iface := Interface{
 			Name:        name,
-			Description: raw.Description,
-			DHCP:        raw.DHCP,
-			Gateway:     raw.Gateway,
+			Description: entry.Description,
+			DHCP:        entry.DHCP,
+			Gateway:     entry.Gateway,
 		}
-		if ip, ipnet, err := net.ParseCIDR(raw.IPProto); err == nil {
-			iface.IP = ip.String()
-			ones, _ := ipnet.Mask.Size()
-			iface.Subnet = ones
-		}
-		ifaces = append(ifaces, iface)
+		applyCIDR(&iface, entry.IPProto)
+		out = append(out, iface)
 	}
-	slices.SortFunc(ifaces, func(a, b Interface) int {
-		return strings.Compare(a.Name, b.Name)
-	})
-	return ifaces, nil
+	return out, nil
+}
+
+// applyCIDR splits an "ip/prefix" address into the Interface's IP and
+// Subnet fields; an unparseable value leaves both unset.
+func applyCIDR(iface *Interface, cidr string) {
+	ip, ipnet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return
+	}
+	iface.IP = ip.String()
+	ones, _ := ipnet.Mask.Size()
+	iface.Subnet = ones
 }
 
 // GetFirewallRules returns all firewall rules from OPNsense.

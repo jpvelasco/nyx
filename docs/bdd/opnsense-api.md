@@ -112,9 +112,12 @@ And the FreeBSD and OpenSSL entries are exposed without their prefixes
 And when the product entry carries no known-arch suffix, the version is the whole entry and the arch is empty (never guessed)
 
 ### S2.2 Interfaces
-Given `GET /api/interfaces/overview/interfaces_info` → `{"interfaces":{"lan":{"description":"LAN","ipv4":"10.0.0.1/24",...}}}`
+Given `GET /api/interfaces/overview/interfaces_info` answers in one of two shapes: the pre-26.x name-keyed map `{"interfaces":{"lan":{"description":"LAN","ipv4":"10.0.0.1/24","ipv4_gateway":"10.0.0.254"}}}` or the 26.x paged rows shape `{"total":N,"rows":[{"identifier":"lan","description":"LAN","addr4":"10.0.0.1/24","ipv4":[{"ipaddr":"10.0.0.1/24"}],"gateways":["10.0.0.254"],...}]}`
 When `GetInterfaces` is called
-Then each interface is returned sorted by name with IP split from the `ip/prefix` form and prefix bits as `Subnet`
+Then the rows shape is tried first (26.x-first, like the dual-backend lease routes) and a body with no `rows` field falls back to the legacy map, so both decode to the same interface list
+And each interface is returned sorted by name with the IP split from the `ip/prefix` form, prefix bits as `Subnet`, and the first gateway entry as `Gateway`
+And a rows entry whose `identifier` is empty (an unassigned device such as `enc0`/`pflog0`) carries no configuration and is skipped
+And the legacy `DHCP` flag is read only from the map shape (the rows shape has no equivalent), so a rows-shaped interface reports `DHCP=false`
 
 ### S2.3 Firewall rules
 Given `GET /api/firewall/filter/search_rule` → `{"total":N,"rows":[{...}]}`
@@ -172,6 +175,7 @@ And system info, firewall rules, and DHCP leases are best-effort: each failure i
 And one device entry of type `gateway` is emitted per interface that carries an IPv4 address, named after the interface, with `NetworkGateways` mapping each interface name to its gateway
 And the controller version/arch come from the product-version entry (never guessed); OPNsense exposes no managed-device inventory, so model/firmware/upgrade stay empty and no ACL scopes are reported
 And `ClientCount` is the DHCP-lease count (0 when the lease fetch failed)
+And a 200 OK that decodes to zero networks (an unparseable or empty interface list) is not a silently empty topology: the snapshot carries an explicit warning (and the import path adds the same warning to its result) pointing at the controller version / `--debug` raw payload
 And the test: `TestProviderInventory` plus `TestOpnsenseServiceInventory` / `TestDispatchOpnsenseInventory`
 
 ## §3 Mutations (S3.1–S3.6 Implemented — PR 2 slice 1; S3.7–S3.9 Planned)
