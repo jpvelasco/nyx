@@ -2,21 +2,9 @@ package omadaprovider
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
-	"math/big"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
@@ -68,76 +56,6 @@ func findingByType(t *testing.T, r *models.AuditReport, checkType string) *model
 	return nil
 }
 
-// caSignedServerURL serves the handler over TLS with a leaf certificate
-// signed by a freshly generated CA (IP SAN for 127.0.0.1) and returns the
-// server URL plus the path of the CA PEM. Clients that pin caPath verify
-// the leaf; clients with system-CAs-only verification fail the handshake.
-func caSignedServerURL(t *testing.T, h http.Handler) (string, string) {
-	t.Helper()
-
-	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("generating CA key: %v", err)
-	}
-	caTmpl := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "nyx-test-ca"},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(time.Hour),
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
-	}
-	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
-	if err != nil {
-		t.Fatalf("creating CA cert: %v", err)
-	}
-	caCert, err := x509.ParseCertificate(caDER)
-	if err != nil {
-		t.Fatalf("parsing CA cert: %v", err)
-	}
-
-	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("generating leaf key: %v", err)
-	}
-	leafTmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(2),
-		Subject:      pkix.Name{CommonName: "127.0.0.1"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
-	}
-	leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, caCert, &leafKey.PublicKey, caKey)
-	if err != nil {
-		t.Fatalf("creating leaf cert: %v", err)
-	}
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listening: %v", err)
-	}
-	srv := &http.Server{
-		Handler: h,
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{{
-				Certificate: [][]byte{leafDER, caDER},
-				PrivateKey:  leafKey,
-			}},
-		},
-	}
-	go func() { _ = srv.ServeTLS(ln, "", "") }()
-	t.Cleanup(func() { _ = srv.Close() })
-
-	caPath := filepath.Join(t.TempDir(), "ca.pem")
-	if err := os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), 0o600); err != nil {
-		t.Fatalf("writing CA pem: %v", err)
-	}
-	return "https://" + ln.Addr().String(), caPath
-}
-
 // TestProviderCheck_ForwardsTLSOptions is the regression test for #24:
 // Check() must forward --skip-tls-verify / --ca-cert to the audit engine,
 // because the engine-backed acl_check builds its own controller client from
@@ -180,7 +98,7 @@ func TestProviderCheck_ForwardsTLSOptions(t *testing.T) {
 	})
 
 	t.Run("ca-cert reaches the engine acl_check", func(t *testing.T) {
-		serverURL, caPath := caSignedServerURL(t, aclCheckMockHandler())
+		serverURL, caPath := testutil.CASignedServer(t, aclCheckMockHandler())
 		setEnv(t, serverURL)
 
 		p := &OmadaProvider{}
