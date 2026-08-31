@@ -17,10 +17,9 @@ import (
 	"time"
 )
 
-// WriteCAPem generates a self-signed CA certificate (serial 1, CN
-// "nyx-test-ca") and writes it to a new file inside dir, returning the
-// file path. Single canonical CA block for the TLS config tests.
-func WriteCAPem(t *testing.T, dir string) string {
+// newTestCA generates a self-signed CA (serial 1, CN "nyx-test-ca")
+// returning its private key, parsed certificate, and DER encoding.
+func newTestCA(t *testing.T) (*ecdsa.PrivateKey, *x509.Certificate, []byte) {
 	t.Helper()
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -40,10 +39,22 @@ func WriteCAPem(t *testing.T, dir string) string {
 	if err != nil {
 		t.Fatalf("creating CA certificate: %v", err)
 	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("parsing CA certificate: %v", err)
+	}
+	return key, cert, der
+}
 
+// WriteCAPem generates a self-signed CA certificate (serial 1, CN
+// "nyx-test-ca") and writes it to a new file inside dir, returning the
+// file path. Single canonical CA block for the TLS config tests.
+func WriteCAPem(t *testing.T, dir string) string {
+	t.Helper()
+
+	_, _, der := newTestCA(t)
 	caPath := filepath.Join(dir, "ca.pem")
-	pemData := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	if err := os.WriteFile(caPath, pemData, 0o600); err != nil {
+	if err := os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
 		t.Fatalf("writing CA pem: %v", err)
 	}
 	return caPath
@@ -56,27 +67,7 @@ func WriteCAPem(t *testing.T, dir string) string {
 func CASignedServer(t *testing.T, h http.Handler) (string, string) {
 	t.Helper()
 
-	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("generating CA key: %v", err)
-	}
-	caTmpl := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "nyx-test-ca"},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(time.Hour),
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
-	}
-	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
-	if err != nil {
-		t.Fatalf("creating CA certificate: %v", err)
-	}
-	caCert, err := x509.ParseCertificate(caDER)
-	if err != nil {
-		t.Fatalf("parsing CA certificate: %v", err)
-	}
+	caKey, caCert, caDER := newTestCA(t)
 
 	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

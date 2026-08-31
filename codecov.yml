@@ -54,3 +54,8 @@ comment:
 # Paths excluded from coverage math.
 ignore:
   - "**/*_test.go"
+  # internal/testutil is a test-support package: every importer is a
+  # _test.go file. Its helper files carry t.Fatalf guards that are
+  # untestable without fault injection, which would otherwise sink the
+  # patch gate; exclude them from the math.
+  - "internal/testutil/**"
