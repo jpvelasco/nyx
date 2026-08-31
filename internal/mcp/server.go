@@ -176,8 +176,8 @@ func NewServer() *Server {
 		omadaSvc:        omadaSvc,
 		opnsenseSvc:     service.NewOpnsenseService(),
 		topoSvc:         service.NewTopologyService(),
-		credEnv:         map[string]func(string) string{"OMADA_HOST": os.Getenv, "OMADA_CLIENT_ID": os.Getenv, "OMADA_CLIENT_SECRET": os.Getenv, "OMADA_SITE": os.Getenv},
-		opnsenseCredEnv: map[string]func(string) string{"OPNSENSE_HOST": os.Getenv, "OPNSENSE_API_KEY": os.Getenv, "OPNSENSE_API_SECRET": os.Getenv},
+		credEnv:         credEnvFrom(OmadaCredEnvVars),
+		opnsenseCredEnv: credEnvFrom(OpnsenseCredEnvVars),
 	}
 }
 
