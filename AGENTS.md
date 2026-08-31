@@ -225,6 +225,7 @@ Version 1 intent spec: `networks`, `vpn`, `probes`, `policies`, `assertions`. Ei
 - `nyx check-vpn` supports `--expect split-tunnel|full-tunnel`.
 - `nyx verify-isolation --from zone:<name>|<cidr> --to <zone|cidr>` runs one ad-hoc isolation check (`--spec` optional).
 - `nyx credentials set|list|remove|verify` manage the encrypted store (see Credential Resolution).
+- `nyx mcp config [--harness claude|codex] [--command <path>] [--write <file>]` prints a ready-to-paste agent-harness config block (mcpServers JSON or mcp_servers TOML) for the stdio MCP server. The snippet embeds the nyx executable path (or `--command`) plus the credential env-var names (rendered from the canonical `mcp.OmadaCredEnvVars`/`OpnsenseCredEnvVars` lists so it can't drift from `internal/mcp`'s resolution order); values are never written. `--write` writes the file (0600) and prints only `wrote <path>` to stdout (plus the env note for claude, whose JSON file must stay strict).
 
 ## SeenDB (Virtual Network Acknowledgement)
 

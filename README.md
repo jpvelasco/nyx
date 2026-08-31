@@ -222,9 +222,17 @@ nyx includes a Model Context Protocol server for AI agent integration:
 nyx mcp serve --transport stdio
 ```
 
-### Claude Code Integration
+### Harness Config
 
-Add to your MCP config:
+Generate a ready-to-paste config block for your agent harness:
+
+```bash
+nyx mcp config --harness claude            # mcpServers JSON
+nyx mcp config --harness codex             # [mcp_servers.nyx] TOML
+nyx mcp config --harness claude --write .mcp.json
+```
+
+The snippet points at the current nyx executable (override with `--command`) and lists the credential env vars to export. The equivalent `mcpServers` JSON block looks like:
 
 ```json
 {
@@ -236,6 +244,8 @@ Add to your MCP config:
   }
 }
 ```
+
+Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `OMADA_CLIENT_SECRET` / `OMADA_SITE`, `OPNSENSE_HOST` / `OPNSENSE_API_KEY` / `OPNSENSE_API_SECRET`) or the encrypted store (`nyx credentials set`) — never in the config file.
 
 ### Available MCP Tools
 
