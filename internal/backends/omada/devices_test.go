@@ -326,7 +326,6 @@ func TestRenderInventory(t *testing.T) {
 	for _, want := range []string{
 		"Site: HQ",
 		"Controller: 6.4.5.1 (advanced)",
-		"Warning: clients unavailable: boom",
 		"== Devices (1) ==",
 		"GW-CORE",
 		"2.2.3  [upgrade available]",
@@ -344,6 +343,11 @@ func TestRenderInventory(t *testing.T) {
 	}
 	if strings.Contains(out, "not enforced") {
 		t.Errorf("render output must not claim stored rules are unenforced:\n%s", out)
+	}
+	// Warnings are owned by the CLI layer (stderr) and the JSON surface —
+	// the renderer must not duplicate them (#60).
+	if strings.Contains(out, "clients unavailable") {
+		t.Errorf("render must not print warnings (CLI layer owns them):\n%s", out)
 	}
 }
 
