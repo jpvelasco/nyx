@@ -10,6 +10,12 @@ import (
 	"github.com/jpvelasco/nyx/internal/intent"
 )
 
+// emptyTopologyWarning is reported when interfaces_info answers 200 OK but
+// decodes to zero networks with an IPv4 configuration — the signature of a
+// wire shape (or version) this client cannot read. Both the import and the
+// inventory surfaces report it so an empty topology is never silent.
+const emptyTopologyWarning = "no networks found on the controller — the interfaces response parsed to zero configured interfaces; check the controller version against this client (run with --debug to see the raw interfaces_info payload)"
+
 // InventorySnapshot is a point-in-time observation of the firewall: system
 // metadata, its interfaces with IP configuration, the firewall filter rules,
 // and the active DHCP leases (the only live host inventory OPNsense
@@ -35,6 +41,11 @@ func (c *Client) FetchInventory(ctx context.Context) (*InventorySnapshot, error)
 		return nil, err
 	}
 	snap := &InventorySnapshot{Interfaces: interfaces}
+	if len(invNetworks(snap)) == 0 {
+		// Same guard as the import path: a 200 OK that yields no networks
+		// means the topology is empty, not that the firewall has none.
+		snap.Warnings = append(snap.Warnings, emptyTopologyWarning)
+	}
 
 	sys, err := c.GetSystemInformation(ctx)
 	if err != nil {

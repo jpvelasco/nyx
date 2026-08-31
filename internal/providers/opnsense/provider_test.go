@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -137,6 +138,15 @@ func opnsenseServer(t *testing.T, leases string) *httptest.Server {
 	}))
 	t.Cleanup(ts.Close)
 	return ts
+}
+
+// wantEmptyTopologyWarning fails unless the empty-topology warning (see
+// emptyTopologyWarning) is present in the list.
+func wantEmptyTopologyWarning(t *testing.T, warnings []string) {
+	t.Helper()
+	if !slices.Contains(warnings, emptyTopologyWarning) {
+		t.Errorf("warnings = %v, want the empty-topology warning", warnings)
+	}
 }
 
 func TestProviderImportSpec(t *testing.T) {
@@ -323,6 +333,88 @@ func TestProviderImportSpec(t *testing.T) {
 			t.Errorf("debug output without the flag: %s", out)
 		}
 	})
+
+	// 26.x serves a paged rows shape for interfaces_info; the import must
+	// build networks from it instead of silently producing an empty spec.
+	t.Run("26.x rows shape yields networks", func(t *testing.T) {
+		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/diagnostics/system/system_information":
+				testutil.WriteBody(w, systemInfoJSON)
+			case "/api/interfaces/overview/interfaces_info":
+				testutil.WriteBody(w, `{"total":2,"rowCount":2,"current":1,"rows":[
+					{"identifier":"lan","description":"LAN","addr4":"198.51.100.1/24","ipv4":[{"ipaddr":"198.51.100.1/24"}],"gateways":["198.51.100.254"]},
+					{"identifier":"opt1","description":"OPT1","addr4":"198.51.100.50/24","ipv4":[{"ipaddr":"198.51.100.50/24"}],"gateways":[]},
+					{"identifier":"","description":"Unassigned Interface","addr4":"","ipv4":[]}
+				]}`)
+			case "/api/firewall/filter/search_rule":
+				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/leases/search":
+				testutil.WriteBody(w, `{"leases":[{"mac":"aa","ip":"198.51.100.10","hostname":"laptop"}]}`)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer ts.Close()
+		p := &Provider{}
+		res, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err != nil {
+			t.Fatalf("ImportSpec: %v", err)
+		}
+		if res.NetworkCount != 2 {
+			t.Fatalf("NetworkCount = %d, want 2 (lan + opt1)", res.NetworkCount)
+		}
+		byName := map[string]intent.Network{}
+		for _, n := range res.Spec.Networks {
+			byName[n.Name] = n
+		}
+		lan, ok := byName["lan"]
+		if !ok || lan.CIDR != "198.51.100.1/24" || lan.Gateway != "198.51.100.254" {
+			t.Errorf("lan network = %+v", lan)
+		}
+		opt1, ok := byName["opt1"]
+		if !ok || opt1.CIDR != "198.51.100.50/24" {
+			t.Errorf("opt1 network = %+v", opt1)
+		}
+		// unassigned (empty identifier) rows must not leak into the spec
+		if _, ok := byName[""]; ok {
+			t.Error("unassigned interface leaked into the spec")
+		}
+		// A populated topology must not carry the empty-topology warning.
+		if slices.Contains(res.Warnings, emptyTopologyWarning) {
+			t.Errorf("empty-topology warning on a populated topology: %v", res.Warnings)
+		}
+	})
+
+	// A 200 OK that decodes to zero networks is the silent-empty-topology
+	// failure mode (#57): the import still succeeds (an empty-but-valid spec)
+	// but must warn loudly instead of writing a useless spec silently.
+	t.Run("empty interfaces map degrades to a warning", func(t *testing.T) {
+		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/diagnostics/system/system_information":
+				testutil.WriteBody(w, systemInfoJSON)
+			case "/api/interfaces/overview/interfaces_info":
+				testutil.WriteBody(w, `{"interfaces":{}}`)
+			case "/api/firewall/filter/search_rule":
+				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/leases/search":
+				testutil.WriteBody(w, `{"leases":[]}`)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer ts.Close()
+		p := &Provider{}
+		res, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err != nil {
+			t.Fatalf("ImportSpec: %v", err)
+		}
+		if res.NetworkCount != 0 {
+			t.Errorf("NetworkCount = %d, want 0", res.NetworkCount)
+		}
+		wantEmptyTopologyWarning(t, res.Warnings)
+	})
 }
 
 func TestProviderCheck(t *testing.T) {
@@ -355,8 +447,10 @@ func TestProviderCheck(t *testing.T) {
 		if res.Report == nil {
 			t.Fatal("Report is nil")
 		}
-		if len(res.Warnings) != 2 {
-			t.Errorf("warnings = %v, want 2", res.Warnings)
+		// 3 = the two standing import advisories + the empty-topology
+		// warning (empty interfaces map), which Check forwards verbatim.
+		if len(res.Warnings) != 3 {
+			t.Errorf("warnings = %v, want 3", res.Warnings)
 		}
 	})
 
@@ -469,6 +563,59 @@ func TestProviderInventory(t *testing.T) {
 		if err == nil {
 			t.Error("expected interfaces failure to be fatal")
 		}
+	})
+
+	// A 200 OK that decodes to zero networks must not render as a silently
+	// empty topology (#57): the snapshot carries a warning and the human
+	// render surfaces it.
+	t.Run("empty interfaces map degrades to a warning", func(t *testing.T) {
+		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/diagnostics/system/system_information":
+				testutil.WriteBody(w, systemInfoJSON)
+			case "/api/interfaces/overview/interfaces_info":
+				testutil.WriteBody(w, `{"interfaces":{}}`)
+			case "/api/firewall/filter/search_rule":
+				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/leases/search":
+				testutil.WriteBody(w, `{"leases":[]}`)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer ts.Close()
+		p := &Provider{}
+		res, err := p.Inventory(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err != nil {
+			t.Fatalf("Inventory: %v", err)
+		}
+		wantEmptyTopologyWarning(t, res.Warnings)
+		if !strings.Contains(res.Human, "Warning: ") {
+			t.Errorf("Human render must surface the warning:\n%s", res.Human)
+		}
+		if !strings.Contains(res.Human, "== Networks (0) ==") {
+			t.Errorf("Human render must still show the empty section:\n%s", res.Human)
+		}
+	})
+
+	// Same guard on the client fetch, independent of the provider wrapper.
+	t.Run("FetchInventory empty topology warns", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/interfaces/overview/interfaces_info":
+				testutil.WriteBody(w, `{"total":1,"rowCount":1,"current":1,"rows":[{"identifier":"","description":"Unassigned Interface","addr4":"","ipv4":[]}]}`)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		snap, err := c.FetchInventory(context.Background())
+		if err != nil {
+			t.Fatalf("FetchInventory: %v", err)
+		}
+		if len(snap.Interfaces) != 0 {
+			t.Errorf("Interfaces = %+v, want 0", snap.Interfaces)
+		}
+		wantEmptyTopologyWarning(t, snap.Warnings)
 	})
 }
 
