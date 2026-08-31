@@ -109,6 +109,7 @@ func CASignedServer(t *testing.T, h http.Handler) (string, string) {
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
 		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
 			Certificates: []tls.Certificate{{
 				Certificate: [][]byte{leafDER, caDER},
 				PrivateKey:  leafKey,
