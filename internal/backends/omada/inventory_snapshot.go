@@ -125,9 +125,8 @@ func RenderInventory(snap *InventorySnapshot, siteName string) string {
 		}
 		fmt.Fprintf(&b, "Controller: %s%s\n", snap.ControllerVersion, cat)
 	}
-	for _, w := range snap.Warnings {
-		fmt.Fprintf(&b, "Warning: %s\n", w)
-	}
+	// Warnings are intentionally NOT rendered here: the CLI layer prints
+	// them to stderr once (and the JSON surface keeps them structured).
 
 	fmt.Fprintf(&b, "\n== Devices (%d) ==\n", len(snap.Devices))
 	for _, d := range SortedDevices(snap.Devices) {

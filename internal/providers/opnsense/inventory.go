@@ -126,9 +126,9 @@ func RenderInventory(snap *InventorySnapshot, site string) string {
 		}
 		fmt.Fprintf(&b, "Controller: %s\n", ver)
 	}
-	for _, w := range snap.Warnings {
-		fmt.Fprintf(&b, "Warning: %s\n", w)
-	}
+	// Warnings are intentionally NOT rendered here: the CLI layer prints
+	// them to stderr once (and the JSON surface keeps them structured).
+	// Mirrors the Omada inventory rendering.
 
 	fmt.Fprintf(&b, "\n== Networks (%d) ==\n", len(invNetworks(snap)))
 	for _, n := range invNetworks(snap) {

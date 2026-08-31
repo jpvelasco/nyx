@@ -1687,3 +1687,36 @@ func TestBuildInventoryCmd_JSON(t *testing.T) {
 		t.Errorf("Site = %q, want fake-site", inv.Site)
 	}
 }
+
+// warnProvider reports inventory warnings: the CLI must print each to stderr
+// exactly once and must not repeat them in the human output (#60).
+type warnProvider struct{ fakeProvider }
+
+func (w *warnProvider) Inventory(_ context.Context, opts providers.ImportOptions) (*providers.ProviderInventory, error) {
+	return &providers.ProviderInventory{
+		Site:     "warn-site",
+		Human:    "human block for " + opts.Host,
+		Warnings: []string{"leases unavailable"},
+	}, nil
+}
+
+func TestBuildInventoryCmd_WarningsPrintedOnce(t *testing.T) {
+	t.Helper()
+	saveRestoreGlobals(t)
+	clearProviderEnv(t)
+	cmd := buildInventoryCmd(&warnProvider{fakeProvider{name: "warn"}})
+	providerHost = "10.0.0.6"
+	providerClientID = "admin"
+	providerClientSecret = "pw"
+	var err error
+	out, errOut := captureStreams(func() { err = cmd.RunE(cmd, nil) })
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := strings.Count(errOut, "Warning: leases unavailable\n"); got != 1 {
+		t.Errorf("stderr warnings = %d, want exactly 1:\n%s", got, errOut)
+	}
+	if strings.Contains(out, "Warning:") {
+		t.Errorf("human output must not duplicate warnings:\n%s", out)
+	}
+}

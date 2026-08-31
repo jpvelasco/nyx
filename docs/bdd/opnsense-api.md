@@ -176,7 +176,8 @@ And one device entry of type `gateway` is emitted per interface that carries an 
 And the controller version/arch come from the product-version entry (never guessed); OPNsense exposes no managed-device inventory, so model/firmware/upgrade stay empty and no ACL scopes are reported
 And `ClientCount` is the DHCP-lease count (0 when the lease fetch failed)
 And a 200 OK that decodes to zero networks (an unparseable or empty interface list) is not a silently empty topology: the snapshot carries an explicit warning (and the import path adds the same warning to its result) pointing at the controller version / `--debug` raw payload
-And the test: `TestProviderInventory` plus `TestOpnsenseServiceInventory` / `TestDispatchOpnsenseInventory`
+And each warning is displayed exactly once: the CLI layer prints them to stderr, the JSON surfaces keep them structured, and the human renderer (`RenderInventory`, OPNsense and Omada alike) does not repeat them
+And the test: `TestProviderInventory` plus `TestRenderInventory` and `TestOpnsenseServiceInventory` / `TestDispatchOpnsenseInventory`
 
 ## §3 Mutations (S3.1–S3.6 Implemented — PR 2 slice 1; S3.7–S3.9 Planned)
 

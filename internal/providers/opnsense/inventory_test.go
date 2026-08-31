@@ -19,7 +19,6 @@ func TestRenderInventory(t *testing.T) {
 	for _, want := range []string{
 		"Site: opnsense-firewall",
 		"Controller: 24.1.7_2 (amd64)",
-		"Warning: DHCP leases unavailable: boom",
 		"== Networks (1) ==",
 		"gateway: 10.0.0.254",
 		"== Devices (1) ==",
@@ -31,6 +30,11 @@ func TestRenderInventory(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("render output missing %q:\n%s", want, out)
 		}
+	}
+	// Warnings are owned by the CLI layer (stderr) and the JSON surface —
+	// the renderer must not duplicate them (#60).
+	if strings.Contains(out, "DHCP leases unavailable") {
+		t.Errorf("render must not print warnings (CLI layer owns them):\n%s", out)
 	}
 }
 
