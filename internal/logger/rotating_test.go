@@ -91,8 +91,10 @@ func TestRotatingWriterConcurrentWrites(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 	// Concurrent writers must not corrupt the stream: every line is whole.
-	if !bytes.Equal(data[0:8], []byte("payload")) && strings.Count(string(data), "payload\n") == 0 {
-		t.Errorf("corrupted log content: %q", string(data))
+	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+		if line != "payload" {
+			t.Errorf("corrupted line under concurrency: %q", line)
+		}
 	}
 }
 

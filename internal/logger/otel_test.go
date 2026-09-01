@@ -78,6 +78,30 @@ func TestShutdownFlushesAndIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestCloseSlogUnregistersProvider covers the unbounded-retainer fix: NewSlog
+// registers each pipeline, and CloseSlog must unregister it so a closed
+// pipeline is not held by the process for the lifetime of the process.
+func TestCloseSlogUnregistersProvider(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nyx.log")
+	sl, err := NewSlog(path, 1024*1024, 3, slog.LevelInfo)
+	if err != nil {
+		t.Fatalf("NewSlog: %v", err)
+	}
+	h, ok := sl.Handler().(*bridgeHandler)
+	if !ok {
+		t.Fatalf("Handler() = %T, want *bridgeHandler", sl.Handler())
+	}
+	if _, present := registeredProviders.Load(h.provider); !present {
+		t.Fatal("provider not registered after NewSlog")
+	}
+	CloseSlog(sl)
+	if _, present := registeredProviders.Load(h.provider); present {
+		t.Error("provider still registered after CloseSlog")
+	}
+	// A second close must remain a safe no-op (provider already shut down).
+	CloseSlog(sl)
+}
+
 // TestFileExporterShutdown verifies the sdklog.Exporter contract: after
 // Shutdown, Export reports ErrExporterShutdown and records are dropped.
 func TestFileExporterShutdown(t *testing.T) {

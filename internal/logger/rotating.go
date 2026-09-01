@@ -50,9 +50,12 @@ func (w *rotatingWriter) Write(p []byte) (int, error) {
 			return 0, nil
 		}
 	}
+	// Surface write errors: io.Writer requires n < len(p) to carry an error.
+	// Best-effort behaviour lives at the caller — fileExporter.Export
+	// discards the result so a logging failure never fails a nyx command.
 	n, err := w.file.Write(p)
 	if err != nil {
-		return 0, nil
+		return n, err
 	}
 	w.size += int64(n)
 	return n, nil

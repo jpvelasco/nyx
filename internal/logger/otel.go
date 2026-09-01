@@ -242,12 +242,15 @@ func (h *bridgeHandler) WithGroup(name string) slog.Handler {
 	return &bridgeHandler{inner: h.inner.WithGroup(name), level: h.level, provider: h.provider}
 }
 
-// Close flushes and closes the pipeline. slog.Close calls this on a logger's
-// handler when the logger itself is closed; it is a no-op for a logger whose
-// handler was not created by NewSlog (e.g. tests' text handlers).
+// Close flushes and closes the pipeline and unregisters it from
+// registeredProviders, so a closed pipeline is not retained for the process
+// lifetime (tests create several per package run). slog.Close calls this on a
+// logger's handler when the logger itself is closed; it is a no-op for a
+// logger whose handler was not created by NewSlog (e.g. tests' text handlers).
 func (h *bridgeHandler) Close() error {
 	if h.provider == nil {
 		return nil
 	}
+	registeredProviders.Delete(h.provider)
 	return h.provider.Shutdown(context.Background())
 }
