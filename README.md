@@ -245,7 +245,7 @@ The snippet points at the current nyx executable (override with `--command`) and
 }
 ```
 
-Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `OMADA_CLIENT_SECRET` / `OMADA_SITE`, `OPNSENSE_HOST` / `OPNSENSE_API_KEY` / `OPNSENSE_API_SECRET`) or the encrypted store (`nyx credentials set`) — never in the config file.
+Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `OMADA_CLIENT_SECRET` / `OMADA_SITE`, `OPNSENSE_HOST` / `OPNSENSE_API_KEY` / `OPNSENSE_API_SECRET`), the Windows Credential Manager (Omada only; entry `nyx-omada-<host>`, see `nyx omada info` error hints), or the encrypted store (`nyx credentials set`) — never in the config file.
 
 ### Available MCP Tools
 
@@ -288,7 +288,7 @@ Safety rails:
 
 - `omada_apply_acl` is **dry-run by default**; a real apply requires an explicit `dry_run=false`.
 - Mutation is idempotent and limited to creating rules or enabling disabled matching rules. A conflicting rule with a different policy is rejected, and the agent is pointed at `omada_plan` to reconcile.
-- Credentials come from environment variables (`OMADA_HOST`, `OMADA_CLIENT_ID`, `OMADA_CLIENT_SECRET`, `OMADA_SITE`) — never from spec, flags, or tool arguments — and never appear in tool output.
+- Credentials come from environment variables (`OMADA_HOST`, `OMADA_CLIENT_ID`, `OMADA_CLIENT_SECRET`, `OMADA_SITE`), the Windows Credential Manager entry `nyx-omada-<host>` (Windows), or the encrypted store (`nyx credentials set omada`) — never from the spec itself — and never appear in tool output.
 - A post-apply audit failure is reported but never fatal; the agent decides the next step from the evidence.
 
 ## Providers
@@ -316,7 +316,7 @@ nyx omada import --host 192.168.11.20 --client-id <client-id> --client-secret <c
 nyx omada check --host 192.168.11.20 --client-id <client-id> --client-secret <client-secret> --spec examples/homelab.yaml
 ```
 
-Credentials can be passed via flags or env vars: `OMADA_HOST`, `OMADA_CLIENT_ID`, `OMADA_CLIENT_SECRET`.
+Credentials can be passed via flags, env vars (`OMADA_HOST`, `OMADA_CLIENT_ID`, `OMADA_CLIENT_SECRET`), the Windows Credential Manager (entry `nyx-omada-<host>`, created with `cmdkey /generic:nyx-omada-<host> /user:<client-id> /pass:<client-secret>`), or the encrypted store (`nyx credentials set omada`).
 
 ### OPNsense
 
