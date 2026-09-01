@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -425,11 +426,11 @@ func TestConcurrentRequestsAndSetLogger(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	l, err := logger.New(filepath.Join(dir, "nyx.log"), 5*1024*1024, 3)
+	l, err := logger.NewSlog(filepath.Join(dir, "nyx.log"), 5*1024*1024, 3, slog.LevelDebug)
 	if err != nil {
-		t.Fatalf("logger.New: %v", err)
+		t.Fatalf("logger.NewSlog: %v", err)
 	}
-	defer l.Close()
+	defer logger.CloseSlog(l)
 
 	stop := make(chan struct{})
 	var setter sync.WaitGroup
@@ -505,9 +506,9 @@ func TestOperationLogging(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nyx.log")
-	l, err := logger.New(path, 5*1024*1024, 3)
+	l, err := logger.NewSlog(path, 5*1024*1024, 3, slog.LevelDebug)
 	if err != nil {
-		t.Fatalf("logger.New: %v", err)
+		t.Fatalf("logger.NewSlog: %v", err)
 	}
 	c.SetLogger(l)
 
@@ -525,7 +526,7 @@ func TestOperationLogging(t *testing.T) {
 	if err := c.Logout(context.Background()); err != nil {
 		t.Fatalf("Logout: %v", err)
 	}
-	l.Close()
+	logger.CloseSlog(l)
 
 	// Codacy false positive: path names this test's log inside t.TempDir().
 	data, err := os.ReadFile(path) // nosemgrep: go_filesystem_rule-fileread
@@ -561,5 +562,27 @@ func TestSetLoggerNilSafe(t *testing.T) {
 	}
 	if err := c.get(context.Background(), "sites", nil); err != nil {
 		t.Fatalf("get with nil logger: %v", err)
+	}
+}
+
+// logSafeError reduces errors to a static, host-free description so the log
+// file never carries the controller hostname/IP.
+func TestLogSafeErrorStripsHost(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{&apiError{StatusCode: 500, ErrorCode: -1, Msg: "controller error -1"}, "controller error -1"},
+		{&apiError{StatusCode: 500, ErrorCode: -44112}, "controller error -44112"},
+		{&url.Error{Op: "Get", URL: "https://controller-host:443/openapi/v1/x", Err: context.DeadlineExceeded}, "transport or protocol error"},
+	}
+	for _, c := range cases {
+		got := logSafeError(c.err)
+		if got != c.want {
+			t.Errorf("logSafeError(%v) = %q, want %q", c.err, got, c.want)
+		}
+		if strings.Contains(got, "controller-host") || strings.Contains(got, "443") {
+			t.Errorf("logSafeError(%v) leaked host/port: %q", c.err, got)
+		}
 	}
 }

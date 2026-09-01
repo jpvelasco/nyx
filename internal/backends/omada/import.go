@@ -3,10 +3,10 @@ package omada
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/jpvelasco/nyx/internal/intent"
-	"github.com/jpvelasco/nyx/internal/logger"
 )
 
 // ImportResult holds the generated spec and a summary of what was found.
@@ -23,7 +23,7 @@ type ImportResult struct {
 // ImportSpec connects to the controller, fetches all relevant configuration,
 // and produces an intent.Spec that reflects the observed design. log is an
 // optional structured logger for operation events (may be nil).
-func ImportSpec(ctx context.Context, host, clientID, clientSecret, siteName string, debug bool, skipTLSVerify bool, caCertPath string, log *logger.Logger) (*ImportResult, error) {
+func ImportSpec(ctx context.Context, host, clientID, clientSecret, siteName string, debug bool, skipTLSVerify bool, caCertPath string, log *slog.Logger) (*ImportResult, error) {
 	client, err := NewClient(ctx, host, skipTLSVerify, caCertPath)
 	if err != nil {
 		return nil, err

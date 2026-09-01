@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
 	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/logger"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/service"
@@ -156,6 +158,10 @@ type Server struct {
 	omadaSvc    omadaSurface
 	opnsenseSvc opnsenseSurface
 	topoSvc     topologySurface
+	// logger writes MCP operation records to the shared rotating log file.
+	// The writer is the stdout RPC channel, so nothing is ever logged to
+	// it; a nil logger disables file logging (tests).
+	logger *slog.Logger
 	// credEnv reads the Omada credential env vars (keys OMADA_HOST /
 	// OMADA_CLIENT_ID / OMADA_CLIENT_SECRET / OMADA_SITE) and opnsenseCredEnv
 	// the OPNsense ones (OPNSENSE_HOST / OPNSENSE_API_KEY /
@@ -164,8 +170,17 @@ type Server struct {
 	opnsenseCredEnv map[string]func(string) string
 }
 
-// NewServer creates a new MCP server
+// NewServer creates a new MCP server. slog.Default() is the CLI's shared
+// OTel-backed pipeline (wired in cli init), so MCP tool calls land in the
+// same audit file as CLI commands; when no pipeline is wired (tests) the
+// stderr default keeps records visible.
 func NewServer() *Server {
+	return NewServerWithLogger(slog.Default())
+}
+
+// NewServerWithLogger creates an MCP server that writes operation records
+// through sl.
+func NewServerWithLogger(sl *slog.Logger) *Server {
 	omadaSvc := service.NewOmadaService()
 	omadaSvc.PostAudit = func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
 		return audit.NewEngine(spec).Run(ctx)
@@ -177,6 +192,7 @@ func NewServer() *Server {
 		omadaSvc:        omadaSvc,
 		opnsenseSvc:     service.NewOpnsenseService(),
 		topoSvc:         service.NewTopologyService(),
+		logger:          sl,
 		credEnv:         credEnvFrom(OmadaCredEnvVars),
 		opnsenseCredEnv: credEnvFrom(OpnsenseCredEnvVars),
 	}
@@ -695,6 +711,14 @@ func (s *Server) handleToolCall(ctx context.Context, req *jsonRPCRequest) *jsonR
 	ctx, cancel := context.WithTimeout(ctx, toolCallTimeout)
 	defer cancel()
 
+	// Stamp the call with a trace ID so its log records correlate; records
+	// go to the shared file, never to the stdout RPC channel.
+	traceID := logger.NewTraceID()
+	var logCtx *slog.Logger
+	if s.logger != nil {
+		logCtx = s.logger.With("cmd", "mcp", "tool", params.Name, "trace_id", traceID)
+	}
+
 	done := make(chan toolDispatchResult, 1)
 	go func() {
 		text, isErr := s.dispatchTool(ctx, params.Name, params.Arguments)
@@ -703,6 +727,9 @@ func (s *Server) handleToolCall(ctx context.Context, req *jsonRPCRequest) *jsonR
 
 	select {
 	case result := <-done:
+		if logCtx != nil {
+			logCtx.Info("tool_call", "error", result.isErr)
+		}
 		return &jsonRPCResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
@@ -712,6 +739,9 @@ func (s *Server) handleToolCall(ctx context.Context, req *jsonRPCRequest) *jsonR
 			},
 		}
 	case <-ctx.Done():
+		if logCtx != nil {
+			logCtx.Warn("tool_call_timed_out", "timeout", toolCallTimeout.String())
+		}
 		return &jsonRPCResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,

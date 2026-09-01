@@ -36,7 +36,10 @@ Default transport is stdio.`,
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 
-		server := mcp.NewServer()
+		// slogLog is the shared OTel-backed file logger (nil only when the
+		// pipeline failed to start); the server falls back to the stderr
+		// default in that case.
+		server := mcp.NewServerWithLogger(slogLog)
 		return server.Serve(ctx)
 	},
 }

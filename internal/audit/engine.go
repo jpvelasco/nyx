@@ -65,6 +65,11 @@ func NewEngine(spec *intent.Spec) *Engine {
 // Engine is designed for single-use; Run resets internal state for safety
 // but callers should create a new Engine via NewEngine for each audit.
 func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
+	if e.Logger == nil {
+		// Callers (MCP, tests) may pass a nil logger; keep the stderr
+		// fallback so engine warnings stay visible.
+		e.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
+	}
 	e.runnerCtx = localRunnerContext(e.Spec, e.Interface)
 
 	// Load SeenDB once for the entire run so concurrent subnet_discovery
@@ -486,7 +491,9 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 				result.Summary = fmt.Sprintf("0 hosts discovered in %s (virtual adapter detected — future scans will suppress this warning; use --warn-virtual to always show it)", cidr)
 			}
 			if err := e.seenDB.AckVirtual(cidr); err != nil {
-				e.Logger.Warn("failed to ack virtual network; warning will reappear on next run", slog.String("cidr", cidr), slog.String("error", err.Error()))
+				// Log the spec's network role name, never the CIDR — the
+				// log file is a shareable artifact (docs/naming.md).
+				e.Logger.Warn("failed to ack virtual network; warning will reappear on next run", slog.String("network", net.Name), slog.String("error", err.Error()))
 				result.Evidence = append(result.Evidence, fmt.Sprintf("warning: failed to persist virtual network ack for %s: %v", cidr, err))
 			}
 		} else {

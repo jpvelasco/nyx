@@ -320,7 +320,7 @@ func providerImportOptions(providerName string) providers.ImportOptions {
 		Site:          storepath.FirstNonEmpty(providerSite, os.Getenv(names[3])),
 		SkipTLSVerify: providerSkipTLS,
 		CACertPath:    providerCACertPath,
-		Logger:        log,
+		Logger:        slogLog,
 	}
 	// Windows Credential Manager layer, between env vars and the store
 	// (omada only; no-op off Windows — see credmanager).

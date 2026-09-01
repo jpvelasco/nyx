@@ -39,6 +39,7 @@ type Provider struct{}
 func newProviderClient(opts providers.ImportOptions) *Client {
 	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
 	client.Debug = opts.Debug
+	client.SetLogger(opts.Logger)
 	return client
 }
 
