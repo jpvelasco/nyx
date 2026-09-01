@@ -2,6 +2,7 @@ package logger
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 )
 
@@ -102,3 +104,48 @@ var testErr = errorValue("something failed")
 type errorValue string
 
 func (e errorValue) Error() string { return string(e) }
+
+// TestLevelTextFallback covers the numeric-severity fallback in levelText:
+// the otelslog bridge always sets SeverityText, but a hand-built record that
+// omits it must still yield the lowercased level from the numeric severity.
+func TestLevelTextFallback(t *testing.T) {
+	var r sdklog.Record
+	r.SetSeverity(log.SeverityWarn)
+	if got := levelText(&r); got != "warn" {
+		t.Errorf("levelText without SeverityText = %q, want %q", got, "warn")
+	}
+}
+
+// TestFlattenValueSlice covers the SLICE branch of flattenValue: a slice
+// attribute becomes a flat JSON array of its leaves (never a nested map).
+// attribute.SliceValue produces a true SLICE type (mixed elements); the
+// typed constructors like StringSliceValue are their own STRINGSLICE type
+// and take the scalar default branch.
+func TestFlattenValueSlice(t *testing.T) {
+	out := map[string]any{}
+	flattenValue("tags", attribute.SliceValue(attribute.StringValue("a"), attribute.IntValue(1)), out)
+	got, ok := out["tags"].([]any)
+	if !ok {
+		t.Fatalf("flattenValue slice = %T, want []any", out["tags"])
+	}
+	if len(got) != 2 {
+		t.Fatalf("flattenValue slice len = %d, want 2", len(got))
+	}
+	// Leaf scalars surface as their native Go types (string / int64).
+	if s, ok := got[0].(string); !ok || s != "a" {
+		t.Errorf("leaf 0 = %v (%T), want string \"a\"", got[0], got[0])
+	}
+	if n, ok := got[1].(int64); !ok || n != 1 {
+		t.Errorf("leaf 1 = %v (%T), want int64(1)", got[1], got[1])
+	}
+}
+
+// TestBridgeHandlerCloseNilProvider is a no-op flush for a handler that was
+// not built by NewSlog (e.g. a test's text handler): Close must not panic
+// and must not touch any provider.
+func TestBridgeHandlerCloseNilProvider(t *testing.T) {
+	h := &bridgeHandler{inner: slog.NewTextHandler(io.Discard, nil), level: slog.LevelInfo}
+	if err := h.Close(); err != nil {
+		t.Errorf("Close on nil provider = %v, want nil", err)
+	}
+}

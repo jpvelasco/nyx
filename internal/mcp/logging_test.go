@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jpvelasco/nyx/internal/logger"
 )
@@ -93,6 +94,68 @@ func TestToolCallLogsToLoggerAndKeepsStdoutRPCClean(t *testing.T) {
 		if strings.Contains(out, leak) {
 			t.Errorf("stdout RPC channel must stay clean of log data, found %s in: %q", leak, out)
 		}
+	}
+}
+
+// TestHandleToolCallTimeoutEmitsWarnLog covers the ctx.Done() path in
+// handleToolCall: when a tool dispatch does not finish within toolCallTimeout
+// the server logs tool_call_timed_out (with cmd/tool/trace_id) and returns a
+// -32000 error to the client. A blocking Omada service hangs the dispatch
+// until the (shrunk) timeout fires, so the select deterministically takes
+// ctx.Done() without waiting for the real 5-minute timeout.
+func TestHandleToolCallTimeoutEmitsWarnLog(t *testing.T) {
+	handler, cap := newCapturingLogHandler()
+	server := NewServerWithLogger(slog.New(handler))
+	server.omadaSvc = &blockingOmadaSvc{started: make(chan struct{})}
+	server.initialized = true
+	server.reader = &bytes.Buffer{}
+	server.writer = &bytes.Buffer{}
+
+	saved := toolCallTimeout
+	toolCallTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { toolCallTimeout = saved })
+
+	res := server.handleToolCall(context.Background(), &jsonRPCRequest{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`7`),
+		Params:  json.RawMessage(`{"name":"omada_get_info","arguments":{"host":"omada.local"}}`),
+	})
+	if res.Error == nil || res.Error.Code != -32000 {
+		t.Fatalf("expected -32000 timeout error, got: %+v", res.Error)
+	}
+	found := false
+	for _, line := range *cap {
+		if strings.Contains(line, "tool_call_timed_out") && strings.Contains(line, "trace_id=") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected tool_call_timed_out log record, got: %v", *cap)
+	}
+}
+
+// TestDispatchRunAudit_NoAssertionsReturnsReport covers the run_audit happy
+// path: a spec with a valid site but no assertions produces an empty report
+// (not an error), exercising eng.Run + the JSON render for the success case.
+func TestDispatchRunAudit_NoAssertionsReturnsReport(t *testing.T) {
+	sp, err := os.CreateTemp(t.TempDir(), "spec-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sp.WriteString("version: 1\nsite: test\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sp.Close(); err != nil {
+		t.Fatal(err)
+	}
+	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "run_audit", map[string]interface{}{
+		"spec_file": sp.Name(),
+	})
+	if isErr {
+		t.Fatalf("run_audit unexpected error: %s", text)
+	}
+	if !strings.Contains(text, `"audit": "test"`) {
+		t.Errorf("expected audit report in output, got: %s", text)
 	}
 }
 
