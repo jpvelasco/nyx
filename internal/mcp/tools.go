@@ -147,6 +147,7 @@ func (s *Server) isolationViaSpec(ctx context.Context, specFile, from, to string
 		}},
 	}
 	eng := audit.NewEngine(miniSpec)
+	eng.Logger = s.logger
 	report, err := eng.Run(ctx)
 	if err != nil {
 		return errResult(fmt.Sprintf("isolation check failed: %v", err))
@@ -167,6 +168,7 @@ func (s *Server) toolRunAudit(ctx context.Context, args map[string]interface{}) 
 		return errResult(fmt.Sprintf("failed to load spec: %v", err))
 	}
 	eng := audit.NewEngine(spec)
+	eng.Logger = s.logger
 	report, err := eng.Run(ctx)
 	if err != nil {
 		return errResult(fmt.Sprintf("audit failed: %v", err))

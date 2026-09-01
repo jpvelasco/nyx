@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -36,7 +37,14 @@ Default transport is stdio.`,
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 
-		server := mcp.NewServer()
+		// The shared OTel-backed file logger is nil only when the pipeline
+		// failed to start; fall back to the stderr default so tool-call
+		// records are not dropped silently.
+		serverLog := slogLog
+		if serverLog == nil {
+			serverLog = slog.Default()
+		}
+		server := mcp.NewServerWithLogger(serverLog)
 		return server.Serve(ctx)
 	},
 }

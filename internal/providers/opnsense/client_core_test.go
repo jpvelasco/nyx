@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -357,9 +358,9 @@ func TestDoRetriesAreLogged(t *testing.T) {
 	}))
 
 	dir := t.TempDir()
-	l, err := logger.New(dir+"/nyx.log", 5*1024*1024, 3)
+	l, err := logger.NewSlog(dir+"/nyx.log", 5*1024*1024, 3, slog.LevelDebug)
 	if err != nil {
-		t.Fatalf("logger.New: %v", err)
+		t.Fatalf("logger.NewSlog: %v", err)
 	}
 	c.SetLogger(l)
 
@@ -368,7 +369,7 @@ func TestDoRetriesAreLogged(t *testing.T) {
 		t.Fatalf("do: %v", err)
 	}
 	resp.Body.Close()
-	l.Close()
+	logger.CloseSlog(l)
 
 	raw, err := os.ReadFile(dir + "/nyx.log") // nosemgrep: go_filesystem_rule-fileread — path is a fixed test log name under t.TempDir()
 	if err != nil {

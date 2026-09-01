@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -15,8 +16,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/jpvelasco/nyx/internal/logger"
 )
 
 // SystemInformation is the response of GET /diagnostics/system/system_information.
@@ -137,7 +136,7 @@ type Client struct {
 	apiKey        string
 	apiSecret     string
 	httpClient    *http.Client
-	log           *logger.Logger
+	log           *slog.Logger
 	Debug         bool // when true, raw API responses are printed to stderr
 	maxRetries    int
 	retryBase     time.Duration

@@ -1090,6 +1090,30 @@ func TestRunDiscovery_VirtualSkipSecondRun(t *testing.T) {
 	}
 }
 
+// TestRun_NilLoggerFallsBackToStderr covers the Run() guard for callers
+// (MCP, tests) that pass a nil logger: Run swaps in a stderr text handler so
+// engine warnings stay visible instead of nil-panicking. A zero-assertion spec
+// makes Run return immediately.
+func TestRun_NilLoggerFallsBackToStderr(t *testing.T) {
+	// Zero-value Engine: Logger is nil (NewEngine would wire a stderr handler).
+	// SeenDBPath points at a temp file so Run never reads the real ~/.nyx/seen.json.
+	eng := &Engine{
+		Spec:       &intent.Spec{Version: 1, Site: "test"},
+		SeenDBPath: filepath.Join(t.TempDir(), "seen.json"),
+	}
+	report, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run with nil logger errored: %v", err)
+	}
+	if report == nil || len(report.Findings) != 0 {
+		t.Fatalf("unexpected report: %+v", report)
+	}
+	// The guard replaced the nil logger with a usable one.
+	if eng.Logger == nil {
+		t.Fatal("Run did not install a fallback logger")
+	}
+}
+
 func TestRunDiscovery_VirtualAckFailure(t *testing.T) {
 	spec := &intent.Spec{
 		Version: 1, Site: "test",
