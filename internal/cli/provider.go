@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
+	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/report"
 	"github.com/jpvelasco/nyx/internal/storepath"
@@ -301,9 +302,11 @@ var providerEnvNames = map[string][4]string{
 }
 
 // providerImportOptions builds ImportOptions from flags, then per-provider
-// env vars, then the encrypted credential store. Flags win over env; env
-// wins over the store. Missing host after all three is left empty so the
-// provider surfaces its own connection error.
+// env vars, then the Windows Credential Manager (omada; entry
+// nyx-omada-<host>, no-op off Windows), then the encrypted credential
+// store. Flags win over env; env wins over the Credential Manager; the
+// store wins over nothing. Missing host after all four is left empty so
+// the provider surfaces its own connection error.
 func providerImportOptions(providerName string) providers.ImportOptions {
 	names, ok := providerEnvNames[providerName]
 	// Unknown providers keep the historical omada env names.
@@ -318,6 +321,11 @@ func providerImportOptions(providerName string) providers.ImportOptions {
 		SkipTLSVerify: providerSkipTLS,
 		CACertPath:    providerCACertPath,
 		Logger:        log,
+	}
+	// Windows Credential Manager layer, between env vars and the store
+	// (omada only; no-op off Windows — see credmanager).
+	if providerName == "omada" {
+		opts.ClientID, opts.ClientSecret = credmanager.OverlayOmada(opts.Host, opts.ClientID, opts.ClientSecret)
 	}
 	// Overlay is fill-only: a partial store entry must never clear values
 	// already resolved from flags or env vars.

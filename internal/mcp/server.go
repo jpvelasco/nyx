@@ -16,6 +16,7 @@ import (
 
 	"github.com/jpvelasco/nyx/internal/audit"
 	"github.com/jpvelasco/nyx/internal/credentials"
+	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
@@ -759,10 +760,11 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 const requiredHostMsg = "host parameter is required"
 
 // omadaOptionsFromArgs extracts Omada connection options from tool arguments,
-// falling back to env vars and then the encrypted credential store (entry
-// omada/default) for any value left empty — the same resolution order as the
-// CLI. The returned message is non-empty when a required parameter is
-// missing after all three layers.
+// falling back to env vars, then the Windows Credential Manager (entry
+// nyx-omada-<host>; no-op off Windows), and then the encrypted credential
+// store (entry omada/default) for any value left empty — the same
+// resolution order as the CLI. The returned message is non-empty when a
+// required parameter is missing after all four layers.
 func (s *Server) omadaOptionsFromArgs(args map[string]interface{}, needCredentials bool) (service.OmadaOptions, string) {
 	var opts service.OmadaOptions
 	opts.Host = storepath.FirstNonEmpty(argString(args, "host"), s.env("OMADA_HOST"))
@@ -789,6 +791,9 @@ func (s *Server) omadaOptionsFromArgs(args map[string]interface{}, needCredentia
 		ClientSecret: storepath.FirstNonEmpty(argString(args, "client_secret"), s.env("OMADA_CLIENT_SECRET")),
 		Site:         opts.Site,
 	}
+	// Windows Credential Manager layer, between env vars and the store
+	// (no-op off Windows — see credmanager).
+	fields.ClientID, fields.ClientSecret = credmanager.OverlayOmada(fields.Host, fields.ClientID, fields.ClientSecret)
 	credentials.Overlay(storepath.StoreFile(), "omada", "default", &fields)
 	opts.Host, opts.ClientID, opts.ClientSecret, opts.Site = fields.Host, fields.ClientID, fields.ClientSecret, fields.Site
 	if opts.Host == "" {
@@ -796,7 +801,8 @@ func (s *Server) omadaOptionsFromArgs(args map[string]interface{}, needCredentia
 	}
 	if opts.ClientID == "" || opts.ClientSecret == "" {
 		return opts, "client_id and client_secret parameters are required: " +
-			"set the OMADA_CLIENT_ID / OMADA_CLIENT_SECRET environment variables or run `nyx credentials set omada`"
+			"set the OMADA_CLIENT_ID / OMADA_CLIENT_SECRET environment variables" +
+			credmanager.Hint(opts.Host) + " or run `nyx credentials set omada`"
 	}
 	return opts, ""
 }

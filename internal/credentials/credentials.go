@@ -1,14 +1,16 @@
 // Package credentials implements a minimal credential store under ~/.nyx.
-// Scoped MVP of the nyx credential vault: the OS keyring integration,
-// interactive prompts, and per-provider live verification are tracked
-// follow-ups.
+// Scoped MVP of the nyx credential vault: interactive prompts and
+// per-provider live verification are tracked follow-ups. OS keyring
+// support exists on Windows for Omada: credmanager reads the
+// Windows Credential Manager entry nyx-omada-<host> between the env-var
+// and store layers (see docs/bdd/mcp-credentials.md).
 //
 // Security posture: entries are encrypted with AES-256-GCM before being
 // written to disk, but the key is stored beside the ciphertext
 // (<path>.key). This protects against casual exposure (plaintext grep,
 // accidental dump, sync to a partially-readable backup) — NOT against a
 // local attacker who can read the key file, and it does not protect
-// backups that include the key. The OS keyring (tracked follow-up) is the
+// backups that include the key. The OS keyring (see credmanager) is the
 // hardening path; treat the current store as obfuscated-at-rest.
 //
 // Storage layout:
