@@ -90,6 +90,18 @@ func TestOverlayOmadaPrecedence(t *testing.T) {
 	})
 }
 
+// TestOverlayOmadaDefaultReaderOffWindows covers the default-reader path
+// (platformReader, not an injected fake) on non-Windows legs: the stub
+// reader errors with ErrUnsupported, which the overlay must swallow
+// silently, leaving the inputs untouched.
+func TestOverlayOmadaDefaultReaderOffWindows(t *testing.T) {
+	t.Cleanup(func() { SetReader(nil) })
+	id, secret := OverlayOmada("omada.local", "", "")
+	if id != "" || secret != "" {
+		t.Fatalf("got (%q, %q), want untouched empty inputs", id, secret)
+	}
+}
+
 func TestEntryNameAndHint(t *testing.T) {
 	if got := entryName("10.0.0.1"); got != "nyx-omada-10.0.0.1" {
 		t.Fatalf("entryName = %q", got)

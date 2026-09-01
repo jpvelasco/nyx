@@ -202,6 +202,79 @@ func TestRunNatCheck_VaultEmptyStillErrors(t *testing.T) {
 	}
 }
 
+// The omada provider's missing-credential error must carry the Windows
+// Credential Manager hint clause (and only omada's — other providers
+// keep the plain error, as pinned by TestRunACLCheck_MissingCredentials
+// for acl_check and by the non-omada absence check below).
+func TestRunNatCheck_OmadaMissingCredsHint(t *testing.T) {
+	providers.Reset()
+	t.Cleanup(func() { providers.Reset() })
+
+	// Host present, credentials missing: the WM lookup is a silent miss
+	// (off-Windows) and the hint names the entry after the resolved host.
+	t.Setenv("OMADA_HOST", "omada.local")
+	t.Setenv("OMADA_CLIENT_ID", "")
+	t.Setenv("OMADA_CLIENT_SECRET", "")
+	t.Setenv("OPNSENSE_HOST", "")
+	t.Setenv("OPNSENSE_API_KEY", "")
+	t.Setenv("OPNSENSE_API_SECRET", "")
+
+	rec := &natTestProvider{name: "omada"}
+	if err := providers.Register(rec); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	eng := NewEngine(&intent.Spec{Version: 1, Site: "test"})
+	eng.CredentialsPath = t.TempDir() + "/empty.json"
+	result, err := eng.runNatCheck(context.Background(), intent.Assertion{
+		Type: "nat_check", Provider: "omada", NatMode: "bridge",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.called {
+		t.Fatal("NatCheck must not be called without credentials")
+	}
+	if result.Status != models.StatusError {
+		t.Fatalf("status = %s, want error", result.Status)
+	}
+	if !contains(result.Summary, "Windows Credential Manager entry") {
+		t.Errorf("omada summary should name the WM entry, got: %s", result.Summary)
+	}
+}
+
+// A non-omada provider must keep the plain missing-credential error
+// without the WM clause.
+func TestRunNatCheck_NonOmadaMissingCredsNoHint(t *testing.T) {
+	providers.Reset()
+	t.Cleanup(func() { providers.Reset() })
+
+	t.Setenv("OMADA_HOST", "")
+	t.Setenv("OMADA_CLIENT_ID", "")
+	t.Setenv("OMADA_CLIENT_SECRET", "")
+	t.Setenv("OPNSENSE_HOST", "")
+	t.Setenv("OPNSENSE_API_KEY", "")
+	t.Setenv("OPNSENSE_API_SECRET", "")
+
+	rec := &natTestProvider{name: "fwtest"}
+	if err := providers.Register(rec); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	eng := NewEngine(&intent.Spec{Version: 1, Site: "test"})
+	eng.CredentialsPath = t.TempDir() + "/empty.json"
+	result, err := eng.runNatCheck(context.Background(), intent.Assertion{
+		Type: "nat_check", Provider: "fwtest", NatMode: "bridge",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusError {
+		t.Fatalf("status = %s, want error", result.Status)
+	}
+	if contains(result.Summary, "Windows Credential Manager") {
+		t.Errorf("non-omada summary must not mention the WM, got: %s", result.Summary)
+	}
+}
+
 // runAssertion dispatches nat_check to runNatCheck with a per-assertion
 // deadline, like the other provider-driven types.
 func TestRunAssertionDispatchesNatCheck(t *testing.T) {

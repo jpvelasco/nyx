@@ -682,9 +682,20 @@ func TestRunViaProbe_IsolationSSHFailure_AllowExpect(t *testing.T) {
 
 // --- runACLCheck remaining paths ---
 
-type aclTestProvider struct{}
+// name defaults to "acltest" unless overridden, so tests can register it
+// under a real provider name (e.g. "omada") to exercise the engine's
+// per-provider credential mapping. It deliberately does NOT implement
+// providers.NatChecker (pinned by TestRunNatCheck_ProviderLacksNatChecker).
+type aclTestProvider struct {
+	name string
+}
 
-func (a *aclTestProvider) Name() string           { return "acltest" }
+func (a *aclTestProvider) Name() string {
+	if a.name != "" {
+		return a.name
+	}
+	return "acltest"
+}
 func (a *aclTestProvider) Capabilities() []string { return []string{"info"} }
 func (a *aclTestProvider) Info(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInfo, error) {
 	return nil, nil
@@ -758,6 +769,88 @@ func TestRunACLCheck_MissingCredentials(t *testing.T) {
 	}
 	if !strings.Contains(result.Summary, "requires") {
 		t.Errorf("expected 'requires' in summary, got: %s", result.Summary)
+	}
+}
+
+// The omada provider is the only one that consults the Windows
+// Credential Manager, so its missing-credential error must carry the WM
+// hint clause; every other provider's error must not (off-Windows the
+// overlay is a no-op, but the hint is emitted for omada regardless).
+func TestRunACLCheck_MissingCredentials_OmadaHint(t *testing.T) {
+	providers.Reset()
+	t.Cleanup(func() { providers.Reset() })
+	providers.Register(&aclTestProvider{name: "omada"})
+
+	// Host present, credentials missing: the WM lookup is a silent miss
+	// (off-Windows) and the hint names the entry after the resolved host.
+	t.Setenv("OMADA_HOST", "omada.local")
+	t.Setenv("OMADA_CLIENT_ID", "")
+	t.Setenv("OMADA_CLIENT_SECRET", "")
+	t.Setenv("OMADA_SITE", "")
+
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Policies: []intent.Policy{
+			{Name: "policy1", From: "zone1", To: "zone2", Action: "deny"},
+		},
+	}
+	eng := NewEngine(spec)
+	eng.Backend = &backends.MockBackend{}
+	eng.CredentialsPath = filepath.Join(t.TempDir(), "empty.json")
+	a := intent.Assertion{
+		Type:     "acl_check",
+		Provider: "omada",
+		Policy:   "policy1",
+		Expect:   "enforced",
+	}
+	result, err := eng.runACLCheck(context.Background(), a)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusError {
+		t.Fatalf("expected error for missing credentials, got %s: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "Windows Credential Manager entry nyx-omada-omada.local") {
+		t.Errorf("omada summary should name the WM entry, got: %s", result.Summary)
+	}
+}
+
+// A non-omada provider (opnsense or any third party) must keep the plain
+// error without the WM clause.
+func TestRunACLCheck_MissingCredentials_NoHintForOtherProviders(t *testing.T) {
+	providers.Reset()
+	t.Cleanup(func() { providers.Reset() })
+	providers.Register(&aclTestProvider{name: "opnsense"})
+
+	t.Setenv("OMADA_HOST", "")
+	t.Setenv("OMADA_CLIENT_ID", "")
+	t.Setenv("OMADA_CLIENT_SECRET", "")
+	t.Setenv("OMADA_SITE", "")
+
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Policies: []intent.Policy{
+			{Name: "policy1", From: "zone1", To: "zone2", Action: "deny"},
+		},
+	}
+	eng := NewEngine(spec)
+	eng.Backend = &backends.MockBackend{}
+	eng.CredentialsPath = filepath.Join(t.TempDir(), "empty.json")
+	a := intent.Assertion{
+		Type:     "acl_check",
+		Provider: "opnsense",
+		Policy:   "policy1",
+		Expect:   "enforced",
+	}
+	result, err := eng.runACLCheck(context.Background(), a)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusError {
+		t.Fatalf("expected error for missing credentials, got %s: %s", result.Status, result.Summary)
+	}
+	if strings.Contains(result.Summary, "Windows Credential Manager") {
+		t.Errorf("non-omada summary must not mention the WM, got: %s", result.Summary)
 	}
 }
 
