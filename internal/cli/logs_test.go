@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +21,7 @@ func writeLogRotation(t *testing.T, dir string, gens map[int]string) string {
 			}
 			continue
 		}
-		if err := os.WriteFile(path+string(rune('0'+i)), []byte(content), 0600); err != nil {
+		if err := os.WriteFile(fmt.Sprintf("%s.%d", path, i), []byte(content), 0600); err != nil {
 			t.Fatalf("writing log.%d: %v", i, err)
 		}
 	}

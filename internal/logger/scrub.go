@@ -38,8 +38,10 @@ var (
 	// hostRe is case-insensitive: DNS/PTR and controller client lists return
 	// mixed-case names (DESKTOP-ABC.lan, NAS.Home.internal) that would
 	// otherwise leak. scrubHost lowercases before the allowlist check, so
-	// this does not widen the keep-list.
-	hostRe = regexp.MustCompile(`(?i)\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+\.[a-z]{2,24}\b`)
+	// this does not widen the keep-list. The minimum is two labels
+	// (label.tld), so common homelab names like nas.local and router.lan
+	// redact rather than pass through verbatim.
+	hostRe = regexp.MustCompile(`(?i)\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,24}\b`)
 	// tokenRunRe matches a run of at least 32 token-alphabet characters
 	// (alphanumerics, '=', '+'). Hyphen is deliberately excluded:
 	// hyphenated strings in nyx logs are labels and identifiers

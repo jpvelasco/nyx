@@ -68,12 +68,12 @@ type ExportFilters struct {
 	Last  int           // > 0: keep only the last N entries after filtering
 }
 
-// ExportOptions drives WriteArtifact.
+// ExportOptions drives WriteArtifact. Filtering is applied to the entry
+// slice before the call (FilterEntries), not inside WriteArtifact.
 type ExportOptions struct {
-	Filters ExportFilters
-	Format  string // "json" (default) | "text"
-	Scrub   bool
-	Out     string // "-" or empty = stdout; otherwise a file path
+	Format string // "json" (default) | "text"
+	Scrub  bool
+	Out    string // "-" or empty = stdout; otherwise a file path
 }
 
 // rawArtifactWarning is printed to stderr whenever an artifact is written
@@ -215,9 +215,9 @@ func WriteArtifact(entries []LogEntry, srcPath string, opts ExportOptions) (n in
 	if opts.Out == "" || opts.Out == "-" {
 		w = os.Stdout
 	} else {
-		f, err := os.OpenFile(opts.Out, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		if err != nil {
-			return 0, fmt.Errorf("opening output file %q: %w", opts.Out, err)
+		f, ferr := os.OpenFile(opts.Out, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+		if ferr != nil {
+			return 0, fmt.Errorf("opening output file %q: %w", opts.Out, ferr)
 		}
 		w = f
 		// Only close the descriptor this call opened; the stdout path must

@@ -204,6 +204,16 @@ func TestScrubLine_HostnamesAndMACs(t *testing.T) {
 			`{"msg":"peer [host]"}`,
 		},
 		{
+			"two-label local name redacted",
+			`{"msg":"leased nas.local from dhcp"}`,
+			`{"msg":"leased [host] from dhcp"}`,
+		},
+		{
+			"two-label lan name redacted (mixed case)",
+			`{"msg":"peer Router.lan refused"}`,
+			`{"msg":"peer [host] refused"}`,
+		},
+		{
 			"mac redacted",
 			`{"msg":"lease aa:bb:cc:dd:ee:01"}`,
 			`{"msg":"lease [mac]"}`,

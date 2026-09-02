@@ -67,6 +67,27 @@ func TestReadRotationEmptyOnMissingFiles(t *testing.T) {
 	}
 }
 
+// TestReadRotationGenerationNaming pins the rotation file naming:
+// generation i lives at <path>.i (dot separator), so test helpers that
+// build the names cannot drift from readLogFiles.
+func TestReadRotationGenerationNaming(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nyx.log")
+	writeFile(t, path+".1", exportLineA+"\n")
+	writeFile(t, path, exportLineC+"\n")
+
+	entries, err := ReadRotation(path)
+	if err != nil {
+		t.Fatalf("ReadRotation: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want 2 (generation .1 must be picked up)", len(entries))
+	}
+	if got := entries[0].Msg; got != "audit" {
+		t.Errorf("entry[0].msg = %q, want audit (from .1)", got)
+	}
+}
+
 // TestReadRotationKeepsUnparseableLines: non-JSON lines (appended notes)
 // must survive as debug-level text entries, never dropped.
 func TestReadRotationKeepsUnparseableLines(t *testing.T) {
