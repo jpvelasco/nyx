@@ -71,6 +71,7 @@ func init() {
 	rootCmd.AddCommand(providerCmd)
 	rootCmd.AddCommand(credentialsCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(logsParentCmd)
 
 	// Single structured-logging pipeline (OTel bridge → rotating file),
 	// honoring NYX_LOG_LEVEL / NYX_LOG_FILE. Best-effort: if it fails, we

@@ -90,6 +90,18 @@ Use role-based labels:
 - **Evidence & logs:** nyx never writes credentials to logs; the same
   discipline extends to hostnames and subnets in commit messages, PR bodies,
   and issue text.
+- **Log exports:** `nyx logs export` produces a PII-scrubbed artifact by
+  default. The scrubber keeps a **finite allowlist** — documentation blocks
+  (RFC 5737 TEST-NET, loopback, `0.0.0.0`), the exact literals committed in
+  `examples/`/`testdata/` (enforced by `TestAllowlistMatchesFixtures`), and
+  `*.example` names — and replaces everything else with naming placeholders
+  (`[ip]`, `[cidr]`, `[mac]`, `[host]`, `[redacted]`). When asking for logs,
+  expect placeholders, not addresses: a log line saying "target `[ip]`
+  unreachable" carries the diagnostic (event, subsystem, timing, error
+  category) without the subnet identity. Diagnostic fields survive by
+  design; if a line is missing context you need, ask for the raw, unshared
+  detail by a channel the sender controls (e.g. an on-screen readout), never
+  a `--no-scrub` artifact.
 - **Examples:** when writing a new example or fixture, start from
   `examples/homelab.yaml`; if a new role is genuinely needed, add it to the
   table above in the same change so the vocabulary stays canonical.
