@@ -16,12 +16,12 @@ func writeLogRotation(t *testing.T, dir string, gens map[int]string) string {
 	path := filepath.Join(dir, "nyx.log")
 	for i, content := range gens {
 		if i == 0 {
-			if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			if err := os.WriteFile(path, []byte(content), 0600); err != nil { // nosemgrep: go_filesystem_rule-fileread — path built under t.TempDir()
 				t.Fatalf("writing live log: %v", err)
 			}
 			continue
 		}
-		if err := os.WriteFile(fmt.Sprintf("%s.%d", path, i), []byte(content), 0600); err != nil {
+		if err := os.WriteFile(fmt.Sprintf("%s.%d", path, i), []byte(content), 0600); err != nil { // nosemgrep: go_filesystem_rule-fileread — path built under t.TempDir()
 			t.Fatalf("writing log.%d: %v", i, err)
 		}
 	}

@@ -18,7 +18,7 @@ const (
 
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil { // nosemgrep: go_filesystem_rule-fileread — path built under t.TempDir()
 		t.Fatalf("writing %s: %v", path, err)
 	}
 }
