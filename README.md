@@ -89,6 +89,7 @@ For the full story of what this feels like on a real multi-VLAN homelab (includi
 | `opnsense` | OPNsense vendor commands (`info`, `import`, `check`) | opnsense backend |
 | `snapshot` | Manage audit history (`baseline`, `list`, `delete`, `clear-baseline`) | — |
 | `drift` | Detect drift in audit results (`status`, `compare`) | — |
+| `logs export` | Export the log rotation set as a PII-scrubbed artifact for bug reports (`--no-scrub` for raw) | — |
 | `mcp serve` | Start MCP server for AI agent integration | all |
 | `version` | Print version | — |
 
@@ -355,7 +356,7 @@ nyx/
     report/             # Output renderers
     recommendations/    # Failure analysis and remediation hints
     snapshot/           # Audit history and drift detection
-    logger/             # JSON-lines rotating logger (~/.nyx/nyx.log)
+    logger/             # JSON-lines rotating logger + PII-scrubbed export (~/.nyx/nyx.log)
     version/            # Single-source version constant
   examples/             # Example YAML specs
   testdata/             # Test fixtures
