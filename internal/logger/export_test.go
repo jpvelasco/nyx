@@ -463,8 +463,10 @@ func TestWriteArtifactStdout(t *testing.T) {
 	}
 	os.Stdout = w
 	var buf bytes.Buffer
+	done := make(chan struct{})
 	go func() {
 		_, _ = io.Copy(&buf, r)
+		done <- struct{}{}
 	}()
 
 	src := filepath.Join(t.TempDir(), "nyx.log")
@@ -474,6 +476,7 @@ func TestWriteArtifactStdout(t *testing.T) {
 	}
 	_ = w.Close()
 	os.Stdout = old
+	<-done // wait for the copy to finish before reading buf (race)
 
 	s := buf.String()
 	if !strings.Contains(s, "msg") || !strings.Contains(s, "# lines=1") {
