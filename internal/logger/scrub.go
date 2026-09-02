@@ -35,7 +35,11 @@ var (
 	ipCIDRRe   = regexp.MustCompile(`\b(\d{1,3}\.){3}\d{1,3}(?:/(3[0-2]|2[0-9]|1[0-9]|[0-9]))?\b`)
 	ipv6CandRe = regexp.MustCompile(`(?i)\b[0-9a-f]*:(?::?[0-9a-f]*){1,8}\b`)
 	macRe      = regexp.MustCompile(`\b(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\b`)
-	hostRe     = regexp.MustCompile(`\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+\.[a-z]{2,24}\b`)
+	// hostRe is case-insensitive: DNS/PTR and controller client lists return
+	// mixed-case names (DESKTOP-ABC.lan, NAS.Home.internal) that would
+	// otherwise leak. scrubHost lowercases before the allowlist check, so
+	// this does not widen the keep-list.
+	hostRe = regexp.MustCompile(`(?i)\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+\.[a-z]{2,24}\b`)
 	// tokenRunRe matches a run of at least 32 token-alphabet characters
 	// (alphanumerics, '=', '+'). Hyphen is deliberately excluded:
 	// hyphenated strings in nyx logs are labels and identifiers
@@ -208,16 +212,11 @@ func (r *scrubReplacer) scrubCIDR(c string) string {
 	// network: its mask is at least as tight as the block's and its
 	// network address is inside the block (a /29 inside 192.0.2.0/24 is a
 	// subset of the TEST-NET keep-block; 192.168.0.0/24 is not inside any
-	// keep-block).
-	parts := strings.SplitN(c, "/", 2)
-	if len(parts) != 2 {
-		return redactCIDR
-	}
-	maskBits, err := strconv.Atoi(parts[1])
-	if err != nil || maskBits < 0 || maskBits > 32 {
-		return redactCIDR
-	}
-	ip := normalizeIPv4(parts[0])
+	// keep-block). ipCIDRRe only hands us a 0-32 mask, so the only real
+	// guard left is a base whose quads exceed 255 (e.g. 999.1.1.1).
+	base, maskStr, _ := strings.Cut(c, "/")
+	maskBits, _ := strconv.Atoi(maskStr)
+	ip := normalizeIPv4(base)
 	if ip == nil {
 		return redactCIDR
 	}

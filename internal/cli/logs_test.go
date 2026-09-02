@@ -42,7 +42,11 @@ func TestLogsExportEndToEnd(t *testing.T) {
 	setLogEnv(t, writeLogRotation(t, dir, map[int]string{0: live}))
 
 	// Default file output (out flag empty): artifact lands in CWD with the
-	// scrubbed JSON-lines + footer.
+	// scrubbed JSON-lines + footer. Redirect CWD to a temp dir so the
+	// default-name artifact is written in isolation — a leftover or
+	// concurrent artifact must not be picked up, and a panic must not
+	// pollute the package source dir.
+	t.Chdir(t.TempDir())
 	logsOut = ""
 	if err := logsExportCmd.RunE(logsExportCmd, []string{}); err != nil {
 		t.Fatalf("logs export: %v", err)
@@ -170,6 +174,86 @@ func TestLogsExportBadFlags(t *testing.T) {
 	logsLevel = "debug"
 	if err == nil || !strings.Contains(err.Error(), "--level") {
 		t.Errorf("bad --level must error, got %v", err)
+	}
+
+	logsFormat = "yaml"
+	err = logsExportCmd.RunE(logsExportCmd, []string{})
+	logsFormat = "json"
+	if err == nil || !strings.Contains(err.Error(), "--format") {
+		t.Errorf("bad --format must error, got %v", err)
+	}
+}
+
+// TestLogsExportOutFile verifies an explicit -o path writes the artifact
+// there (not stdout) and confirms it on stdout.
+func TestLogsExportOutFile(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().Format("2006-01-02T15:04:05.000Z")
+	live := `{"ts":"` + now + `","level":"info","msg":"audit","cmd":"nyx"}` + "\n"
+	setLogEnv(t, writeLogRotation(t, dir, map[int]string{0: live}))
+
+	outPath := filepath.Join(dir, "artifact.log")
+	logsOut = outPath
+	out, _ := captureStreams(func() {
+		if err := logsExportCmd.RunE(logsExportCmd, []string{}); err != nil {
+			t.Fatalf("logs export -o: %v", err)
+		}
+	})
+	logsOut = ""
+	if !strings.Contains(out, "wrote log artifact to") {
+		t.Errorf("file export must confirm the path on stdout, got %q", out)
+	}
+	if strings.Contains(out, `"msg":"audit"`) {
+		t.Errorf("file export must not write lines to stdout, got %q", out)
+	}
+	b, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("reading artifact %s: %v", outPath, err)
+	}
+	if !strings.Contains(string(b), `"msg":"audit"`) || !strings.Contains(string(b), "scrub=scrubbed") {
+		t.Errorf("artifact missing entries or footer:\n%s", b)
+	}
+}
+
+// TestLogsExportReadError: a log path that exists but cannot be scanned
+// (a directory at the live-log path) surfaces the ReadRotation error,
+// not a silent empty export.
+func TestLogsExportReadError(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "nyx.log")
+	if err := os.Mkdir(live, 0700); err != nil {
+		t.Fatalf("making directory at log path: %v", err)
+	}
+	setLogEnv(t, live)
+	logsOut = "-"
+	err := logsExportCmd.RunE(logsExportCmd, []string{})
+	logsOut = ""
+	if err == nil || !strings.Contains(err.Error(), "reading logs from") {
+		t.Errorf("unscannable log must error, got %v", err)
+	}
+}
+
+// TestLogsExportWriteError: an explicit -o path that cannot be created
+// surfaces the WriteArtifact open error.
+func TestLogsExportWriteError(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().Format("2006-01-02T15:04:05.000Z")
+	live := `{"ts":"` + now + `","level":"info","msg":"audit","cmd":"nyx"}` + "\n"
+	setLogEnv(t, writeLogRotation(t, dir, map[int]string{0: live}))
+
+	logsOut = filepath.Join(dir, "no-such-dir", "artifact.log")
+	out, _ := captureStreams(func() {
+		err := logsExportCmd.RunE(logsExportCmd, []string{})
+		if err == nil {
+			t.Fatalf("bad -o path must error")
+		}
+		if !strings.Contains(err.Error(), "opening output file") {
+			t.Errorf("expected an open-output error, got %v", err)
+		}
+	})
+	logsOut = ""
+	if strings.Contains(out, "wrote log artifact to") {
+		t.Errorf("failed export must not confirm a write, got %q", out)
 	}
 }
 

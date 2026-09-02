@@ -210,7 +210,7 @@ func passFilter(e *LogEntry, f ExportFilters, cutoff time.Time) bool {
 // the source path actually read. With scrub disabled it passes the raw
 // lines through byte-identical (plus footer) and prints the PII warning
 // to stderr.
-func WriteArtifact(entries []LogEntry, srcPath string, opts ExportOptions) (int, error) {
+func WriteArtifact(entries []LogEntry, srcPath string, opts ExportOptions) (n int, err error) {
 	var w *os.File
 	if opts.Out == "" || opts.Out == "-" {
 		w = os.Stdout
@@ -220,8 +220,16 @@ func WriteArtifact(entries []LogEntry, srcPath string, opts ExportOptions) (int,
 			return 0, fmt.Errorf("opening output file %q: %w", opts.Out, err)
 		}
 		w = f
+		// Only close the descriptor this call opened; the stdout path must
+		// leave fd 1 intact for the rest of the process. A close failure is
+		// only surfaced when no earlier error already won (a failed write
+		// is the more informative of the two).
+		defer func() {
+			if cerr := f.Close(); cerr != nil && err == nil {
+				err = fmt.Errorf("closing output file %q: %w", opts.Out, cerr)
+			}
+		}()
 	}
-	defer w.Close()
 
 	if !opts.Scrub {
 		fmt.Fprintln(os.Stderr, rawArtifactWarning)

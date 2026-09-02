@@ -194,6 +194,16 @@ func TestScrubLine_HostnamesAndMACs(t *testing.T) {
 			`{"msg":"loopback localhost"}`,
 		},
 		{
+			"mixed-case fqdn redacted",
+			`{"msg":"resolved DESKTOP-ABC.home.lan"}`,
+			`{"msg":"resolved [host]"}`,
+		},
+		{
+			"mixed-case fqdn redacted (internal tld)",
+			`{"msg":"peer NAS.Home.internal"}`,
+			`{"msg":"peer [host]"}`,
+		},
+		{
 			"mac redacted",
 			`{"msg":"lease aa:bb:cc:dd:ee:01"}`,
 			`{"msg":"lease [mac]"}`,
@@ -239,6 +249,69 @@ func TestScrubLine_SecretKeysAndTokens(t *testing.T) {
 	got3 := strings.TrimRight(string(ScrubLine([]byte(in3))), "\n")
 	if !strings.Contains(got3, path) {
 		t.Errorf("path must survive scrubbing, got %s", got3)
+	}
+}
+
+// TestScrubLine_CIDREdgeCases pins the CIDR pass boundaries. ipCIDRRe
+// only hands scrubCIDR a 0-32 mask (a wider suffix makes the regex
+// backtrack to the bare dotted quad, which is redacted on its own while
+// the suffix stays visible), so the only scrubCIDR guard a line can hit
+// is a base whose quads exceed 255.
+func TestScrubLine_CIDREdgeCases(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"quad over 255 redacts the whole cidr", `{"msg":"x 999.1.1.1/24"}`, `{"msg":"x [cidr]"}`},
+		{"mask over 32 falls back to ip redaction", `{"msg":"x 1.2.3.4/40"}`, `{"msg":"x [ip]/40"}`},
+		{"bad mask falls back to ip redaction", `{"msg":"x 1.2.3.4/bad"}`, `{"msg":"x [ip]/bad"}`},
+		{"mask exactly 32 kept in docnet", `{"msg":"x 192.0.2.7/32"}`, `{"msg":"x 192.0.2.7/32"}`},
+		{"tighter docnet subset kept", `{"msg":"x 203.0.113.16/29"}`, `{"msg":"x 203.0.113.16/29"}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := strings.TrimRight(string(ScrubLine([]byte(c.in))), "\n")
+			if got != c.want {
+				t.Errorf("got %s want %s", got, c.want)
+			}
+		})
+	}
+}
+
+// TestScrubLine_TokenRunEdgeCases: a bare hex digest of exactly the 32-char
+// floor is redacted; a 31-char run is below the floor and survives.
+func TestScrubLine_TokenRunEdgeCases(t *testing.T) {
+	// Exactly the 32-char floor is redacted.
+	in := `{"msg":"h ` + strings.Repeat("a", 32) + ` k"}`
+	got := string(ScrubLine([]byte(in)))
+	if !strings.Contains(got, "[redacted]") {
+		t.Errorf("32-char hex run must be redacted, got %s", got)
+	}
+	// A 31-char run is below the floor and survives verbatim.
+	run31 := strings.Repeat("b", 31)
+	in2 := `{"msg":"h ` + run31 + ` k"}`
+	got2 := string(ScrubLine([]byte(in2)))
+	if strings.Contains(got2, "[redacted]") {
+		t.Errorf("31-char run must not be redacted, got %s", got2)
+	}
+	if !strings.Contains(got2, run31) {
+		t.Errorf("31-char run must survive, got %s", got2)
+	}
+}
+
+// TestNormalizeIPv4_BadQuads: non-4-part, >255, non-digit, long-part, and
+// empty-part inputs all parse to nil; a valid quad with leading zeros
+// (which net.ParseIP rejects) parses fine.
+func TestNormalizeIPv4_BadQuads(t *testing.T) {
+	for _, s := range []string{
+		"1.2.3", "1.2.3.4.5", "1.2.3.0999", "1.2.3.x", "300.1.1.1", "1..2.3",
+	} {
+		if ip := normalizeIPv4(s); ip != nil {
+			t.Errorf("normalizeIPv4(%q) = %v, want nil", s, ip)
+		}
+	}
+	// Leading zeros are accepted by the custom parser (not net.ParseIP).
+	if ip := normalizeIPv4("127.0.0.01"); ip == nil {
+		t.Errorf("normalizeIPv4(\"127.0.0.01\") = nil, want 4-byte loopback")
+	} else if !IsAllowlistedIP("127.0.0.01") {
+		t.Errorf("127.0.0.01 (leading zero) should be allowlisted via loopback docnet")
 	}
 }
 
@@ -303,6 +376,28 @@ func TestScrubLine_NestedStructures(t *testing.T) {
 	out := string(ScrubLine([]byte(in)))
 	if strings.Contains(out, "192.168.9.") || strings.Contains(out, "aa:bb:cc:dd:ee:02") {
 		t.Errorf("nested values must be redacted, got %s", out)
+	}
+
+	// A sensitive key nested inside an object (not at the top level) is
+	// also replaced wholesale by the map walker.
+	in2 := `{"msg":"outer","data":{"client_secret":"x1","note":"keep"}}`
+	out2 := strings.TrimRight(string(ScrubLine([]byte(in2))), "\n")
+	if !strings.Contains(out2, `"client_secret":"[redacted]"`) || !strings.Contains(out2, `"note":"keep"`) {
+		t.Errorf("nested sensitive key must be redacted, non-sensitive kept, got %s", out2)
+	}
+}
+
+// TestScrubHost_Direct exercises both arms of the hostname classifier:
+// allowlisted names are kept, anything else is redacted.
+func TestScrubHost_Direct(t *testing.T) {
+	if got := defaultReplacer.scrubHost("NAS.Home.Example"); got != "NAS.Home.Example" {
+		t.Errorf("scrubHost(allowlisted) = %q, want kept", got)
+	}
+	if got := defaultReplacer.scrubHost("sub.domain.example"); got != "sub.domain.example" {
+		t.Errorf("scrubHost(.example suffix) = %q, want kept", got)
+	}
+	if got := defaultReplacer.scrubHost("router.mylan.local"); got != redactHost {
+		t.Errorf("scrubHost(real fqdn) = %q, want %s", got, redactHost)
 	}
 }
 

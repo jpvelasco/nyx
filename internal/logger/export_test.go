@@ -1,6 +1,8 @@
 package logger
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -243,4 +245,238 @@ func mustParseTime(t *testing.T, s string) time.Time {
 		t.Fatalf("parsing %q: %v", s, err)
 	}
 	return ts
+}
+
+// TestParseLevelTextAndText round-trips every level through both the
+// parser (including the "warning" alias and the default) and the Text
+// renderer (including the default case).
+func TestParseLevelTextAndText(t *testing.T) {
+	parses := map[string]Level{"debug": LevelDebug, "info": LevelInfo, "warn": LevelWarn, "warning": LevelWarn, "error": LevelError, "chatty": LevelInfo}
+	for in, want := range parses {
+		if got := parseLevelText(in); got != want {
+			t.Errorf("parseLevelText(%q) = %s, want %s", in, got.Text(), want.Text())
+		}
+	}
+	texts := map[Level]string{LevelDebug: "debug", LevelInfo: "info", LevelWarn: "warn", LevelError: "error", Level(99): "info"}
+	for lvl, want := range texts {
+		if got := lvl.Text(); got != want {
+			t.Errorf("Level(%d).Text() = %q, want %q", int(lvl), got, want)
+		}
+	}
+}
+
+// TestReadRotationUnreadableFile: a path that exists but cannot be read as
+// a file is an error (silently dropping it would under-report the
+// artifact). On every platform, placing a directory at the log path makes
+// os.Open succeed but the scanner fail with "is a directory", exercising
+// the readLines sc.Err() and ReadRotation error-wrap paths portably.
+func TestReadRotationUnreadableFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nyx.log")
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatalf("making directory at log path: %v", err)
+	}
+
+	if _, err := ReadRotation(path); err == nil {
+		t.Fatal("expected an error for an unreadable log file, got nil")
+	}
+}
+
+// TestReadRotationSkipsBlankLines: blank and whitespace-only lines are
+// dropped, real lines are kept.
+func TestReadRotationSkipsBlankLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nyx.log")
+	writeFile(t, path, "\n   \n"+exportLineA+"\n\n")
+	entries, err := ReadRotation(path)
+	if err != nil {
+		t.Fatalf("ReadRotation: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1 (blank lines dropped)", len(entries))
+	}
+}
+
+// TestParseLineVariants: a JSON line with a bad ts and a non-string value
+// still parses (ts stays zero, the value is stringified).
+func TestParseLineVariants(t *testing.T) {
+	e := parseLine([]byte(`{"ts":"not-a-time","level":"warn","msg":"m","cmd":"nyx","count":42,"flag":true}`))
+	if !e.TS.IsZero() {
+		t.Errorf("bad ts must stay zero, got %v", e.TS)
+	}
+	if e.Level != LevelWarn || e.Msg != "m" || e.Cmd != "nyx" {
+		t.Errorf("parsed = level %s msg %q cmd %q", e.Level.Text(), e.Msg, e.Cmd)
+	}
+	if e.fields["count"] != "42" || e.fields["flag"] != "true" {
+		t.Errorf("non-string values must be stringified, got %q %q", e.fields["count"], e.fields["flag"])
+	}
+	// A JSON line with no ts at all also parses with a zero TS.
+	e2 := parseLine([]byte(`{"level":"info"}`))
+	if !e2.TS.IsZero() || e2.Level != LevelInfo {
+		t.Errorf("no-ts line = ts %v level %s, want zero/info", e2.TS, e2.Level.Text())
+	}
+}
+
+// TestParseLevelFlag verifies the --level flag mapping: the four valid
+// values and the default-case error (unparseable values are errors, never
+// silent fallbacks).
+func TestParseLevelFlag(t *testing.T) {
+	cases := []struct {
+		in   string
+		want Level
+		err  bool
+	}{
+		{"debug", LevelDebug, false},
+		{"info", LevelInfo, false},
+		{"warn", LevelWarn, false},
+		{"error", LevelError, false},
+		{"WARN", LevelWarn, false}, // case-insensitive
+		{"chatty", LevelDebug, true},
+		{"", LevelDebug, true},
+	}
+	for _, c := range cases {
+		got, err := ParseLevelFlag(c.in)
+		if c.err {
+			if err == nil {
+				t.Errorf("ParseLevelFlag(%q) = %v, want error", c.in, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("ParseLevelFlag(%q) error: %v", c.in, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("ParseLevelFlag(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+// TestWriteArtifactOpenError: an output path that cannot be created
+// surfaces the open error, not a silent success.
+func TestWriteArtifactOpenError(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "no-such-dir", "artifact.log")
+	entries := []LogEntry{{Raw: []byte(exportLineA)}}
+	if _, err := WriteArtifact(entries, filepath.Join(dir, "nyx.log"), ExportOptions{Out: out}); err == nil {
+		t.Fatal("expected an open error for a bad output path, got nil")
+	}
+}
+
+// TestWriteArtifactFooterVariants covers the footer branches the main test
+// does not: range=none (no timestamped entries) and the zero-TS entries
+// case.
+func TestWriteArtifactFooterVariants(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "nyx.log")
+	out := filepath.Join(dir, "artifact.log")
+
+	// No timestamped entries at all (raw text line): range=none.
+	entries := []LogEntry{{Raw: []byte("operator note")}}
+	if _, err := WriteArtifact(entries, src, ExportOptions{Scrub: true, Out: out}); err != nil {
+		t.Fatalf("WriteArtifact: %v", err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("reading artifact: %v", err)
+	}
+	if !strings.Contains(string(b), "# lines=1 sources=0/4 scrub=scrubbed range=none") {
+		t.Errorf("footer missing range=none:\n%s", b)
+	}
+}
+
+// TestWriteArtifactTextNoFields: an entry with nil fields renders the text
+// line without a fields loop (the scrubEntry nil-fields guard).
+func TestWriteArtifactTextNoFields(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "nyx.log")
+	out := filepath.Join(dir, "text.log")
+	entries := []LogEntry{
+		{Raw: []byte("note"), Level: LevelInfo, Msg: "bare note", Cmd: "nyx"},
+	}
+	if _, err := WriteArtifact(entries, src, ExportOptions{Format: "text", Scrub: true, Out: out}); err != nil {
+		t.Fatalf("WriteArtifact text: %v", err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("reading artifact: %v", err)
+	}
+	if !strings.Contains(string(b), "INFO [nyx] bare note") {
+		t.Errorf("text artifact missing entry:\n%s", b)
+	}
+}
+
+// TestWriteArtifactTextScrubSensitiveKey: a field under a sensitive key
+// (matched by scrubKeyRe) is replaced wholesale even in the text format,
+// and its value never leaks into the rendered line.
+func TestWriteArtifactTextScrubSensitiveKey(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "nyx.log")
+	out := filepath.Join(dir, "text.log")
+	in := `{"ts":"2026-09-01T09:00:00.000Z","level":"info","msg":"omada","cmd":"nyx","api_key":"abc","note":"ok"}`
+	e := parseLine([]byte(in))
+	if _, err := WriteArtifact([]LogEntry{e}, src, ExportOptions{Format: "text", Scrub: true, Out: out}); err != nil {
+		t.Fatalf("WriteArtifact text: %v", err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("reading artifact: %v", err)
+	}
+	s := string(b)
+	if strings.Contains(s, "abc") || !strings.Contains(s, "api_key=[redacted]") || !strings.Contains(s, "note=ok") {
+		t.Errorf("sensitive key must be redacted in text artifact, got:\n%s", s)
+	}
+}
+
+// TestWriteArtifactFooterSourcesPresent: when the source log actually
+// exists on disk, the footer's sources=N/4 reflects the count of present
+// rotation files.
+func TestWriteArtifactFooterSourcesPresent(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "nyx.log")
+	writeFile(t, src, exportLineA+"\n")
+	out := filepath.Join(dir, "artifact.log")
+	entries, err := ReadRotation(src)
+	if err != nil {
+		t.Fatalf("ReadRotation: %v", err)
+	}
+	if _, err := WriteArtifact(entries, src, ExportOptions{Scrub: true, Out: out}); err != nil {
+		t.Fatalf("WriteArtifact: %v", err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("reading artifact: %v", err)
+	}
+	if !strings.Contains(string(b), "# lines=1 sources=1/4 scrub=scrubbed") {
+		t.Errorf("footer must report the live file present, got:\n%s", b)
+	}
+}
+
+// TestWriteArtifactStdout: Out "-" writes to the real stdout; capture it
+// to prove the stdout branch (and the raw stderr warning) work.
+func TestWriteArtifactStdout(t *testing.T) {
+	old := os.Stdout
+	defer func() { os.Stdout = old }()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	var buf bytes.Buffer
+	go func() {
+		_, _ = io.Copy(&buf, r)
+	}()
+
+	src := filepath.Join(t.TempDir(), "nyx.log")
+	entries := []LogEntry{{Raw: []byte(exportLineA)}}
+	if _, err := WriteArtifact(entries, src, ExportOptions{}); err != nil {
+		t.Fatalf("WriteArtifact stdout: %v", err)
+	}
+	_ = w.Close()
+	os.Stdout = old
+
+	s := buf.String()
+	if !strings.Contains(s, "msg") || !strings.Contains(s, "# lines=1") {
+		t.Errorf("stdout artifact incomplete:\n%s", s)
+	}
 }

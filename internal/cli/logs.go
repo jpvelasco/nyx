@@ -61,6 +61,11 @@ credentials.json, its key file, or seen.json.`,
 		if err != nil {
 			return err
 		}
+		switch logsFormat {
+		case "json", "text":
+		default:
+			return fmt.Errorf("invalid --format %q: expected json or text", logsFormat)
+		}
 		var sinceDur time.Duration
 		if logsSince != "" { // empty = no time filter
 			sinceDur, err = time.ParseDuration(logsSince)
