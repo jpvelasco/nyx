@@ -197,9 +197,10 @@ func passFilter(e *LogEntry, f ExportFilters, cutoff time.Time) bool {
 	}
 	// Subsystem identity: every line carries cmd="nyx" (the OTel scope),
 	// while the subsystem ("audit", "omada", ...) lives in msg. Match
-	// either so `--cmd omada` keeps omada lines; unattributed lines
-	// (e.g. appended notes) always pass the cmd filter.
-	if f.Cmd != "" && e.Cmd != f.Cmd && e.Msg != f.Cmd {
+	// either so `--cmd omada` keeps omada lines; unattributed lines —
+	// e.g. appended operator notes, which carry no cmd field — always
+	// pass the cmd filter.
+	if f.Cmd != "" && e.Cmd != "" && e.Cmd != f.Cmd && e.Msg != f.Cmd {
 		return false
 	}
 	return true
@@ -237,10 +238,11 @@ func WriteArtifact(entries []LogEntry, srcPath string, opts ExportOptions) (n in
 
 	if opts.Format == "text" {
 		for i := range entries {
+			e := entries[i] // local copy: the caller's slice is never mutated
 			if opts.Scrub {
-				entries[i] = scrubEntry(entries[i])
+				e = scrubEntry(e)
 			}
-			if _, err := w.WriteString(formatTextLine(&entries[i])); err != nil {
+			if _, err := w.WriteString(formatTextLine(&e)); err != nil {
 				return 0, err
 			}
 		}

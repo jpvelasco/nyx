@@ -36,6 +36,9 @@ func setLogEnv(t *testing.T, path string) {
 // TestLogsExportEndToEnd exercises the command through cobra: reads the
 // rotation set from NYX_LOG_FILE, filters, scrubs, and writes the artifact.
 func TestLogsExportEndToEnd(t *testing.T) {
+	// Restore the package flag globals unconditionally so a later test in
+	// the package (or an early Fatalf here) cannot see leaked values.
+	t.Cleanup(func() { logsOut, logsLast, logsLevel = "", 0, "debug" })
 	dir := t.TempDir()
 	now := time.Now().Format("2006-01-02T15:04:05.000Z")
 	live := `{"ts":"` + now + `","level":"info","msg":"audit","cmd":"nyx","version":"v0.4.0"}` + "\n" +
@@ -88,8 +91,6 @@ func TestLogsExportEndToEnd(t *testing.T) {
 			t.Fatalf("logs export stdout: %v", err)
 		}
 	})
-	logsLast = 0
-	logsLevel = "debug"
 	if strings.Contains(out, `"msg":"audit"`) {
 		t.Errorf("--last 1 --level warn kept an audit/info line:\n%s", out)
 	}

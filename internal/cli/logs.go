@@ -90,7 +90,7 @@ credentials.json, its key file, or seen.json.`,
 		}); err != nil {
 			return err
 		}
-		if out != "" && out != "-" {
+		if out != "-" {
 			fmt.Printf("wrote log artifact to %s\n", out)
 		}
 		return nil

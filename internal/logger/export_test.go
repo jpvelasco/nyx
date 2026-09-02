@@ -152,6 +152,39 @@ func TestFilterEntries(t *testing.T) {
 	}
 }
 
+// TestFilterEntriesCmdKeepsUnattributedLines pins the documented behavior:
+// unparseable lines (appended operator notes) carry no cmd field and must
+// survive the cmd filter — ReadRotation keeps them, and a --cmd export
+// must not silently drop the notes it is asked to export.
+func TestFilterEntriesCmdKeepsUnattributedLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nyx.log")
+	writeFile(t, path, "operator note: manual entry\n"+exportLineA+"\n"+exportLineB+"\n")
+	entries, err := ReadRotation(path)
+	if err != nil {
+		t.Fatalf("ReadRotation: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3 (note + 2 attributed)", len(entries))
+	}
+	got := FilterEntries(entries, ExportFilters{Cmd: "omada"})
+	var msgs []string
+	for i := range got {
+		msgs = append(msgs, got[i].Msg)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("cmd=omada got %v, want the note plus the omada line", msgs)
+	}
+	for i := range msgs {
+		if msgs[i] == "omada" {
+			continue
+		}
+		if !strings.Contains(msgs[i], "operator note") {
+			t.Fatalf("cmd=omada kept %v, want the unattributed note to pass", msgs)
+		}
+	}
+}
+
 // TestFilterEntriesSince verifies the time filter keeps recent entries and
 // drops old ones; the cutoff is wall-clock relative, so use fixed ages.
 func TestFilterEntriesSince(t *testing.T) {
@@ -470,6 +503,31 @@ func TestWriteArtifactFooterSourcesPresent(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "# lines=1 sources=1/4 scrub=scrubbed") {
 		t.Errorf("footer must report the live file present, got:\n%s", b)
+	}
+}
+
+// TestWriteArtifactDoesNotMutateEntries: the scrubbed text path must not
+// write back into the caller's slice — a second export (e.g. a JSON
+// artifact from the same slice) must still see the original, unscrubbed
+// values.
+func TestWriteArtifactDoesNotMutateEntries(t *testing.T) {
+	in := `{"ts":"2026-09-01T09:00:00.000Z","level":"info","msg":"audit","cmd":"nyx","target":"192.168.5.4"}`
+	entries := []LogEntry{{Raw: []byte(in), TS: mustParseTime(t, "2026-09-01T09:00:00Z"), Level: LevelInfo, Msg: "audit", Cmd: "nyx"}}
+	src := filepath.Join(t.TempDir(), "nyx.log")
+	outText := filepath.Join(t.TempDir(), "text.log")
+	if _, err := WriteArtifact(entries, src, ExportOptions{Format: "text", Scrub: true, Out: outText}); err != nil {
+		t.Fatalf("WriteArtifact text: %v", err)
+	}
+	if !strings.Contains(string(entries[0].Raw), "192.168.5.4") {
+		t.Fatalf("caller's slice was mutated by the text path:\n%v", entries)
+	}
+	outJSON := filepath.Join(t.TempDir(), "json.log")
+	if _, err := WriteArtifact(entries, src, ExportOptions{Format: "json", Scrub: true, Out: outJSON}); err != nil {
+		t.Fatalf("WriteArtifact json: %v", err)
+	}
+	jb, _ := os.ReadFile(outJSON) // nosemgrep: go_filesystem_rule-fileread — artifact path built under t.TempDir()
+	if !strings.Contains(string(jb), "[ip]") {
+		t.Errorf("second export must still scrub (original value present), got:\n%s", jb)
 	}
 }
 
