@@ -461,7 +461,7 @@ func TestWriteArtifactTextNoFields(t *testing.T) {
 	if _, err := WriteArtifact(entries, src, ExportOptions{Format: "text", Scrub: true, Out: out}); err != nil {
 		t.Fatalf("WriteArtifact text: %v", err)
 	}
-	b, err := os.ReadFile(out)
+	b, err := os.ReadFile(out) // nosemgrep: go_filesystem_rule-fileread — artifact path built under t.TempDir()
 	if err != nil {
 		t.Fatalf("reading artifact: %v", err)
 	}
@@ -482,7 +482,7 @@ func TestWriteArtifactTextScrubSensitiveKey(t *testing.T) {
 	if _, err := WriteArtifact([]LogEntry{e}, src, ExportOptions{Format: "text", Scrub: true, Out: out}); err != nil {
 		t.Fatalf("WriteArtifact text: %v", err)
 	}
-	b, err := os.ReadFile(out)
+	b, err := os.ReadFile(out) // nosemgrep: go_filesystem_rule-fileread — artifact path built under t.TempDir()
 	if err != nil {
 		t.Fatalf("reading artifact: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestWriteArtifactFooterSourcesPresent(t *testing.T) {
 	if _, err := WriteArtifact(entries, src, ExportOptions{Scrub: true, Out: out}); err != nil {
 		t.Fatalf("WriteArtifact: %v", err)
 	}
-	b, err := os.ReadFile(out)
+	b, err := os.ReadFile(out) // nosemgrep: go_filesystem_rule-fileread — artifact path built under t.TempDir()
 	if err != nil {
 		t.Fatalf("reading artifact: %v", err)
 	}
