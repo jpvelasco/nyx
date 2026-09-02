@@ -440,7 +440,7 @@ func TestWriteArtifactFooterVariants(t *testing.T) {
 	if _, err := WriteArtifact(entries, src, ExportOptions{Scrub: true, Out: out}); err != nil {
 		t.Fatalf("WriteArtifact: %v", err)
 	}
-	b, err := os.ReadFile(out)
+	b, err := os.ReadFile(out) // nosemgrep: go_filesystem_rule-fileread — artifact path built under t.TempDir()
 	if err != nil {
 		t.Fatalf("reading artifact: %v", err)
 	}
