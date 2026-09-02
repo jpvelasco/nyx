@@ -67,7 +67,7 @@ func TestLogsExportEndToEnd(t *testing.T) {
 		t.Fatalf("no nyx-logs-*.log artifact written to cwd")
 	}
 	defer os.Remove(artifact)
-	b, err := os.ReadFile(artifact)
+	b, err := os.ReadFile(artifact) // nosemgrep: go_filesystem_rule-fileread — artifact path built under t.TempDir()
 	if err != nil {
 		t.Fatalf("reading artifact %s: %v", artifact, err)
 	}
@@ -207,7 +207,7 @@ func TestLogsExportOutFile(t *testing.T) {
 	if strings.Contains(out, `"msg":"audit"`) {
 		t.Errorf("file export must not write lines to stdout, got %q", out)
 	}
-	b, err := os.ReadFile(outPath)
+	b, err := os.ReadFile(outPath) // nosemgrep: go_filesystem_rule-fileread — artifact path built under t.TempDir()
 	if err != nil {
 		t.Fatalf("reading artifact %s: %v", outPath, err)
 	}
@@ -222,7 +222,7 @@ func TestLogsExportOutFile(t *testing.T) {
 func TestLogsExportReadError(t *testing.T) {
 	dir := t.TempDir()
 	live := filepath.Join(dir, "nyx.log")
-	if err := os.Mkdir(live, 0700); err != nil {
+	if err := os.Mkdir(live, 0700); err != nil { // nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission — dir needs execute to be a directory
 		t.Fatalf("making directory at log path: %v", err)
 	}
 	setLogEnv(t, live)

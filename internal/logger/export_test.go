@@ -190,7 +190,7 @@ func TestWriteArtifact(t *testing.T) {
 	if n != 2 {
 		t.Errorf("WriteArtifact returned %d, want 2", n)
 	}
-	b, err := os.ReadFile(out)
+	b, err := os.ReadFile(out) // nosemgrep: go_filesystem_rule-fileread — artifact path built under t.TempDir()
 	if err != nil {
 		t.Fatalf("reading artifact: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestWriteArtifact(t *testing.T) {
 	if _, err := WriteArtifact(entries, src, ExportOptions{Format: "json", Scrub: false, Out: outRaw}); err != nil {
 		t.Fatalf("WriteArtifact raw: %v", err)
 	}
-	rb, err := os.ReadFile(outRaw)
+	rb, err := os.ReadFile(outRaw) // nosemgrep: go_filesystem_rule-fileread — raw artifact path built under t.TempDir()
 	if err != nil {
 		t.Fatalf("reading raw artifact: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestWriteArtifact(t *testing.T) {
 	if _, err := WriteArtifact(entries, src, ExportOptions{Format: "text", Scrub: true, Out: outText}); err != nil {
 		t.Fatalf("WriteArtifact text: %v", err)
 	}
-	tb, err := os.ReadFile(outText)
+	tb, err := os.ReadFile(outText) // nosemgrep: go_filesystem_rule-fileread — text artifact path built under t.TempDir()
 	if err != nil {
 		t.Fatalf("reading text artifact: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestWriteArtifactScrubRedactsPII(t *testing.T) {
 	if _, err := WriteArtifact(entries, filepath.Join(t.TempDir(), "nyx.log"), ExportOptions{Scrub: true, Out: out}); err != nil {
 		t.Fatalf("WriteArtifact: %v", err)
 	}
-	b, _ := os.ReadFile(out)
+	b, _ := os.ReadFile(out) // nosemgrep: go_filesystem_rule-fileread — artifact path built under t.TempDir()
 	s := string(b)
 	if strings.Contains(s, "192.168.5.4") {
 		t.Errorf("PII IP must be redacted, got:\n%s", s)
@@ -294,7 +294,7 @@ func TestParseLevelTextAndText(t *testing.T) {
 func TestReadRotationUnreadableFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nyx.log")
-	if err := os.Mkdir(path, 0700); err != nil {
+	if err := os.Mkdir(path, 0700); err != nil { // nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission — dir needs execute to be a directory
 		t.Fatalf("making directory at log path: %v", err)
 	}
 
