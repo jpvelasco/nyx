@@ -260,6 +260,7 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 			defer cancel()
 
 			opts := providerImportOptions(p.Name())
+			opts.Debug = providerDebug
 			if err := requireProviderHost(opts, p.Name()); err != nil {
 				return err
 			}
@@ -281,6 +282,7 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 	}
 	addProviderFlags(cmd)
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name (defaults to first site)")
+	cmd.Flags().BoolVar(&providerDebug, "debug", false, "Print raw API responses to stderr")
 	return cmd
 }
 

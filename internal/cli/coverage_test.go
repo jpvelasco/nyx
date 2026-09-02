@@ -1700,6 +1700,41 @@ func (w *warnProvider) Inventory(_ context.Context, opts providers.ImportOptions
 	}, nil
 }
 
+// debugSpyProvider records the ImportOptions it received, so a test can
+// prove a flag reached the provider layer.
+type debugSpyProvider struct {
+	fakeProvider
+	got *providers.ImportOptions
+}
+
+func (d *debugSpyProvider) Inventory(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInventory, error) {
+	if d.got != nil {
+		*d.got = opts
+	}
+	return d.fakeProvider.Inventory(ctx, opts)
+}
+
+func TestBuildInventoryCmd_DebugFlag(t *testing.T) {
+	t.Helper()
+	saveRestoreGlobals(t)
+	clearProviderEnv(t)
+	var got providers.ImportOptions
+	cmd := buildInventoryCmd(&debugSpyProvider{fakeProvider: fakeProvider{name: "fake"}, got: &got})
+	if cmd.Flags().Lookup("debug") == nil {
+		t.Fatal("inventory command must declare the --debug flag (raw API responses)")
+	}
+	providerHost = "10.0.0.6"
+	providerClientID = "admin"
+	providerClientSecret = "pw"
+	providerDebug = true
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("inventory with --debug: %v", err)
+	}
+	if !got.Debug {
+		t.Error("providerDebug must reach the provider's ImportOptions.Debug")
+	}
+}
+
 func TestBuildInventoryCmd_WarningsPrintedOnce(t *testing.T) {
 	t.Helper()
 	saveRestoreGlobals(t)

@@ -183,7 +183,12 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		})
 	}
 
-	// Build assertions: subnet_discovery + network_health per network
+	// Build assertions: subnet_discovery per network, plus one
+	// network_health assertion per distinct gateway. A network without a
+	// gateway contributes no health assertion — a health check with an empty
+	// target fails spec validation and would make the generated spec
+	// unusable.
+	seenGateway := map[string]bool{}
 	var assertions []intent.Assertion
 	for _, n := range networks {
 		assertions = append(assertions, intent.Assertion{
@@ -194,12 +199,14 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 			// modes trigger SYN-flood alarms on SDN controllers.
 			ScanMode: "polite",
 		})
-
+		if n.Gateway == "" || seenGateway[n.Gateway] {
+			continue
+		}
+		seenGateway[n.Gateway] = true
 		assertions = append(assertions, intent.Assertion{
 			Type:            "network_health",
 			Target:          n.Gateway,
 			ExpectLatencyMs: 20,
-			ExpectLossPct:   0,
 		})
 	}
 
