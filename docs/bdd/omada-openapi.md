@@ -152,6 +152,28 @@ uniformly across every layer.
   the display string ("VLAN"/"interface"); the string form ("interface") must
   keep decoding so fixtures and older controllers stay supported
 
+### S3.3a Gateway binding resolution
+
+- **Given** a snapshot's LAN networks and device inventory
+- **When** a network's gateway device is resolved (inventory render,
+  `network_gateways`, per-device network lists)
+- **And** the network carries a `deviceMac` matching a managed gateway's MAC
+- **Then** that gateway is the bound device (highest precedence)
+- **Given** a network whose `deviceMac` does not match any gateway's MAC
+- **When** the network's gateway IP (from `gatewaySubnet`) equals a managed
+  gateway's device IP
+- **Then** that gateway is the bound device
+- **Given** a network with no binding signal at all
+- **When** the site has exactly one managed gateway
+- **Then** that gateway is the bound device (single-managed-gateway
+  fallback — Omada 6.2.x serves `lan-networks` rows without `deviceMac`,
+  and a managed gateway exposes only its management IP, never its per-VLAN
+  routed addresses)
+- **And** multi-gateway sites with no binding signal leave the network
+  unbound rather than guessing
+- **And** a `deviceMac` binding still wins over the IP and single-gateway
+  fallbacks
+
 ### S3.4 Clients (thin rows)
 
 - **When** the client lists connected clients for a site

@@ -77,31 +77,95 @@ func TestGetDevicesErrors(t *testing.T) {
 	}
 }
 
-func TestNetworkBindingsAndGatewayForNetwork(t *testing.T) {
+func TestGatewayForNetworkByMAC(t *testing.T) {
 	nets := []Network{
 		{ID: "n1", Name: "Trusted", DeviceMac: "aa:bb:cc:dd:ee:00"},
 		{ID: "n2", Name: "IoT", DeviceMac: "aa:bb:cc:dd:ee:00"},
 		{ID: "n3", Name: "Orphan"},
 	}
-	bindings := BuildNetworkBindings(nets)
-	if len(bindings) != 2 || bindings["n1"] != "aa:bb:cc:dd:ee:00" {
-		t.Errorf("bindings = %v", bindings)
-	}
 	devices := []Device{
-		{Name: "GW-CORE", Type: "gateway", MAC: "aa-bb-cc-dd-ee-00"},
-		{Name: "SW-2428P", Type: "switch", MAC: "aa:bb:cc:dd:ee:01"},
+		{Name: "GW-CORE", Type: "gateway", MAC: "aa-bb-cc-dd-ee-00", IP: "10.0.0.254"},
+		{Name: "SW-2428P", Type: "switch", MAC: "aa:bb:cc:dd:ee:01", IP: "10.0.0.253"},
 	}
-	gw := GatewayForNetwork(devices, "n1", bindings)
+	gw := GatewayForNetwork(devices, nets, "n1")
 	if gw == nil || gw.Name != "GW-CORE" {
 		t.Errorf("GatewayForNetwork(n1) = %+v, want GW-CORE", gw)
 	}
-	if gw := GatewayForNetwork(devices, "n3", bindings); gw != nil {
-		t.Errorf("GatewayForNetwork(n3) = %+v, want nil (unbound)", gw)
+	// n3 has no deviceMac but the site has exactly one managed gateway, so
+	// the single-gateway fallback binds it (see TestGatewayForNetworkSingleGatewayFallback).
+	if gw := GatewayForNetwork(devices, nets, "n3"); gw == nil || gw.Name != "GW-CORE" {
+		t.Errorf("GatewayForNetwork(n3) = %+v, want GW-CORE (single managed gateway)", gw)
 	}
 
-	gwMap := NetworkGatewayMap(devices, nets, bindings)
-	if gwMap["Trusted"] != "GW-CORE" || gwMap["IoT"] != "GW-CORE" || gwMap["Orphan"] != "" {
+	gwMap := NetworkGatewayMap(devices, nets)
+	if gwMap["Trusted"] != "GW-CORE" || gwMap["IoT"] != "GW-CORE" || gwMap["Orphan"] != "GW-CORE" {
 		t.Errorf("NetworkGatewayMap = %v", gwMap)
+	}
+}
+
+func TestGatewayForNetworkByIPFallback(t *testing.T) {
+	// Omada 6.2.x serves lan-networks rows without deviceMac; the gateway
+	// IP must then resolve the binding.
+	nets := []Network{
+		{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24"},
+		{ID: "n2", Name: "IoT", GatewaySubnet: "10.0.1.1/24"},
+		{ID: "n3", Name: "Orphan", GatewaySubnet: "10.0.2.1/24"},
+	}
+	devices := []Device{
+		{Name: "GW-CORE", Type: "gateway", MAC: "aa:bb:cc:dd:ee:00", IP: "10.0.0.1"},
+		{Name: "GW-EDGE", Type: "gateway", MAC: "aa:bb:cc:dd:ee:03", IP: "10.0.1.1"},
+		{Name: "SW-2428P", Type: "switch", MAC: "aa:bb:cc:dd:ee:01", IP: "10.0.0.253"},
+	}
+	if gw := GatewayForNetwork(devices, nets, "n1"); gw == nil || gw.Name != "GW-CORE" {
+		t.Errorf("GatewayForNetwork(n1) = %+v, want GW-CORE via gateway IP", gw)
+	}
+	if gw := GatewayForNetwork(devices, nets, "n2"); gw == nil || gw.Name != "GW-EDGE" {
+		t.Errorf("GatewayForNetwork(n2) = %+v, want GW-EDGE via gateway IP", gw)
+	}
+	// No binding and no gateway owns 10.0.2.1 — multi-gateway sites must
+	// stay unbound rather than guessed.
+	if gw := GatewayForNetwork(devices, nets, "n3"); gw != nil {
+		t.Errorf("GatewayForNetwork(n3) = %+v, want nil (multi-gateway, no binding)", gw)
+	}
+	gwMap := NetworkGatewayMap(devices, nets)
+	if gwMap["Trusted"] != "GW-CORE" || gwMap["IoT"] != "GW-EDGE" || gwMap["Orphan"] != "" {
+		t.Errorf("NetworkGatewayMap = %v", gwMap)
+	}
+}
+
+func TestGatewayForNetworkSingleGatewayFallback(t *testing.T) {
+	// 6.2.x single-gateway site: lan-networks carry no deviceMac and a
+	// managed gateway exposes only its management IP, never the per-VLAN
+	// routed addresses. Every unbound LAN must resolve to the one managed
+	// gateway — it is the only device inter-VLAN traffic can transit.
+	nets := []Network{
+		{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24"},
+		{ID: "n2", Name: "IoT", GatewaySubnet: "10.0.1.1/24"},
+		{ID: "n3", Name: "Orphan"},
+	}
+	devices := []Device{
+		{Name: "GW-CORE", Type: "gateway", MAC: "aa:bb:cc:dd:ee:00", IP: "10.0.0.254"},
+		{Name: "SW-2428P", Type: "switch", MAC: "aa:bb:cc:dd:ee:01", IP: "10.0.0.253"},
+	}
+	for _, id := range []string{"n1", "n2", "n3"} {
+		if gw := GatewayForNetwork(devices, nets, id); gw == nil || gw.Name != "GW-CORE" {
+			t.Errorf("GatewayForNetwork(%s) = %+v, want GW-CORE (single managed gateway)", id, gw)
+		}
+	}
+}
+
+func TestGatewayForNetworkMACPreferredOverIP(t *testing.T) {
+	// When both signals are present they must agree; a conflicting gateway
+	// IP must not shadow the explicit deviceMac binding.
+	nets := []Network{
+		{ID: "n1", Name: "Trusted", DeviceMac: "aa:bb:cc:dd:ee:00", GatewaySubnet: "10.0.1.1/24"},
+	}
+	devices := []Device{
+		{Name: "GW-CORE", Type: "gateway", MAC: "aa:bb:cc:dd:ee:00", IP: "10.0.0.254"},
+		{Name: "GW-EDGE", Type: "gateway", MAC: "aa:bb:cc:dd:ee:03", IP: "10.0.1.1"},
+	}
+	if gw := GatewayForNetwork(devices, nets, "n1"); gw == nil || gw.Name != "GW-CORE" {
+		t.Errorf("GatewayForNetwork(n1) = %+v, want GW-CORE (MAC beats IP)", gw)
 	}
 }
 
@@ -263,7 +327,6 @@ func TestBuildSpecInventory(t *testing.T) {
 		ControllerCategory: "advanced",
 		Devices:            []Device{{Name: "GW-CORE", Model: "GW-CORE", Type: "gateway", MAC: "aa:bb:cc:dd:ee:00", IP: "10.0.0.254", FirmwareVersion: "2.2.3", NeedUpgrade: true}},
 		Networks:           []Network{{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24", VLANID: 10, DeviceMac: "aa:bb:cc:dd:ee:00"}},
-		Bindings:           NetworkBindings{"n1": "aa:bb:cc:dd:ee:00"},
 		GatewayACLs:        ACLList{Rules: []ACLRule{{}, {}}},
 		GatewayACLsOK:      true,
 		SwitchACLs:         ACLList{},
@@ -299,6 +362,26 @@ func TestBuildSpecInventory(t *testing.T) {
 	}
 }
 
+func TestBuildSpecInventoryGatewayIPFallback(t *testing.T) {
+	// 6.2.x wire shape: lan-networks rows carry no deviceMac; the gateway
+	// IP is the only binding evidence.
+	snap := &InventorySnapshot{
+		Devices:  []Device{{Name: "GW-CORE", Model: "GW-CORE", Type: "gateway", MAC: "aa:bb:cc:dd:ee:00", IP: "10.0.0.1", FirmwareVersion: "2.2.3"}},
+		Networks: []Network{{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24", VLANID: 10}},
+	}
+	inv := BuildSpecInventory(snap)
+	if inv.NetworkGateways["trusted"] != "GW-CORE" {
+		t.Errorf("NetworkGateways = %v, want trusted → GW-CORE via gateway IP", inv.NetworkGateways)
+	}
+	if len(inv.Devices[0].Networks) != 1 || inv.Devices[0].Networks[0] != "trusted" {
+		t.Errorf("device networks = %v, want [trusted] via gateway IP", inv.Devices[0].Networks)
+	}
+	out := RenderInventory(snap, "HQ")
+	if !strings.Contains(out, "gateway: GW-CORE") {
+		t.Errorf("render must show the gateway device on the network row:\n%s", out)
+	}
+}
+
 func TestBuildSpecInventoryOmitsFailedScopes(t *testing.T) {
 	inv := BuildSpecInventory(&InventorySnapshot{
 		Devices: []Device{},
@@ -314,7 +397,6 @@ func TestRenderInventory(t *testing.T) {
 		ControllerCategory: "advanced",
 		Devices:            []Device{{Name: "GW-CORE", Model: "GW-CORE", Type: "gateway", MAC: "aa:bb:cc:dd:ee:00", IP: "10.0.0.254", FirmwareVersion: "2.2.3", NeedUpgrade: true}},
 		Networks:           []Network{{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24", VLANID: 10, DeviceMac: "aa:bb:cc:dd:ee:00"}},
-		Bindings:           NetworkBindings{"n1": "aa:bb:cc:dd:ee:00"},
 		GatewayACLs:        ACLList{Rules: []ACLRule{{}}},
 		GatewayACLsOK:      true,
 		SwitchACLs:         ACLList{},
@@ -355,7 +437,6 @@ func TestRenderInventoryNoCategory(t *testing.T) {
 	snap := &InventorySnapshot{
 		ControllerVersion: "6.4.5.1",
 		Networks:          []Network{{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24"}},
-		Bindings:          NetworkBindings{},
 	}
 	out := RenderInventory(snap, "HQ")
 	if !strings.Contains(out, "Controller: 6.4.5.1\n") {
@@ -369,7 +450,6 @@ func TestRenderInventoryNoCategory(t *testing.T) {
 func TestRenderInventoryUnknownScopes(t *testing.T) {
 	snap := &InventorySnapshot{
 		Networks: []Network{{ID: "n1", Name: "Trusted", GatewaySubnet: "10.0.0.1/24"}},
-		Bindings: NetworkBindings{},
 	}
 	out := RenderInventory(snap, "HQ")
 	if !strings.Contains(out, "gateway: unknown (fetch failed)") || !strings.Contains(out, "switch:  unknown (fetch failed)") {
