@@ -149,6 +149,16 @@ func wantEmptyTopologyWarning(t *testing.T, warnings []string) {
 	}
 }
 
+// assertionsValid fails unless the imported spec passes the same validation
+// a user would hit in `nyx doctor --spec` — a generated spec must never be
+// rejected by the engine (e.g. a network_health assertion without a target).
+func assertionsValid(t *testing.T, spec *intent.Spec) {
+	t.Helper()
+	if err := intent.ValidateSpec(spec); err != nil {
+		t.Errorf("imported spec fails validation: %v", err)
+	}
+}
+
 func TestProviderImportSpec(t *testing.T) {
 	t.Run("missing host", func(t *testing.T) {
 		p := &Provider{}
@@ -207,6 +217,17 @@ func TestProviderImportSpec(t *testing.T) {
 				t.Errorf("subnet_discovery %q scan_mode = %q, want %q (SYN-flood safe default)", a.Network, a.ScanMode, "polite")
 			}
 		}
+		// One health assertion per distinct gateway (lan + wan).
+		var health int
+		for _, a := range spec.Assertions {
+			if a.Type == "network_health" && a.Target != "" {
+				health++
+			}
+		}
+		if health != 2 {
+			t.Errorf("network_health assertions = %d, want 2 (one per distinct gateway): %+v", health, spec.Assertions)
+		}
+		assertionsValid(t, spec)
 		if len(res.Warnings) != 2 {
 			t.Errorf("warnings = %v, want 2", res.Warnings)
 		}
@@ -384,6 +405,53 @@ func TestProviderImportSpec(t *testing.T) {
 		if slices.Contains(res.Warnings, emptyTopologyWarning) {
 			t.Errorf("empty-topology warning on a populated topology: %v", res.Warnings)
 		}
+		assertionsValid(t, res.Spec)
+	})
+
+	// Live 26.x road test: most interfaces carry no gateway (LAN-side
+	// bridges, loopback). The import must emit a network_health assertion
+	// only for the distinct gateways that exist — a health assertion with an
+	// empty target fails spec validation and would make the import unusable.
+	// Two networks sharing one gateway must yield a single health assertion.
+	t.Run("health assertions track distinct gateways only", func(t *testing.T) {
+		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/diagnostics/system/system_information":
+				testutil.WriteBody(w, systemInfoJSON)
+			case "/api/interfaces/overview/interfaces_info":
+				testutil.WriteBody(w, `{"total":4,"rowCount":4,"current":1,"rows":[
+					{"identifier":"opt1","description":"OPT1","addr4":"198.51.100.50/24","ipv4":[{"ipaddr":"198.51.100.50/24"}],"gateways":[]},
+					{"identifier":"lo0","description":"Loopback","addr4":"127.0.0.1/8","ipv4":[{"ipaddr":"127.0.0.1/8"}],"gateways":[]},
+					{"identifier":"wan","description":"WAN","addr4":"198.51.100.100/24","ipv4":[{"ipaddr":"198.51.100.100/24"}],"gateways":["198.51.100.254"]},
+					{"identifier":"wan1","description":"WAN1","addr4":"198.51.100.101/24","ipv4":[{"ipaddr":"198.51.100.101/24"}],"gateways":["198.51.100.254"]}
+				]}`)
+			case "/api/firewall/filter/search_rule":
+				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/leases/search":
+				testutil.WriteBody(w, `{"leases":[]}`)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer ts.Close()
+		p := &Provider{}
+		res, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err != nil {
+			t.Fatalf("ImportSpec: %v", err)
+		}
+		if res.NetworkCount != 4 {
+			t.Fatalf("NetworkCount = %d, want 4", res.NetworkCount)
+		}
+		var health []string
+		for _, a := range res.Spec.Assertions {
+			if a.Type == "network_health" {
+				health = append(health, a.Target)
+			}
+		}
+		if len(health) != 1 || health[0] != "198.51.100.254" {
+			t.Errorf("network_health targets = %v, want [198.51.100.254]", health)
+		}
+		assertionsValid(t, res.Spec)
 	})
 
 	// A 200 OK that decodes to zero networks is the silent-empty-topology
@@ -706,6 +774,30 @@ func TestProviderInventory(t *testing.T) {
 		}
 		if !strings.Contains(res.Human, "== Networks (0) ==") {
 			t.Errorf("Human render must still show the empty section:\n%s", res.Human)
+		}
+	})
+
+	// #59: the CLI's --debug flag must reach the client on the inventory
+	// surface too — Inventory is the only read that operator may need to
+	// inspect (e.g. the raw interfaces_info payload).
+	t.Run("debug flag is threaded to the client", func(t *testing.T) {
+		ts := opnsenseServer(t, `{"leases":[]}`)
+		p := &Provider{}
+		out := captureStderr(t, func() {
+			if _, err := p.Inventory(context.Background(), providers.ImportOptions{
+				Host:          ts.URL,
+				ClientID:      "key",
+				ClientSecret:  "secret",
+				SkipTLSVerify: true,
+				Debug:         true,
+			}); err != nil {
+				t.Fatalf("Inventory: %v", err)
+			}
+		})
+		for _, want := range []string{"[opnsense debug] GET https://", "/api/interfaces/overview/interfaces_info"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("stderr missing %q (Debug not threaded): %s", want, out)
+			}
 		}
 	})
 
