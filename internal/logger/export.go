@@ -2,7 +2,6 @@ package logger
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -144,8 +143,8 @@ func readLines(f string) ([][]byte, error) {
 func parseLine(raw []byte) LogEntry {
 	e := LogEntry{Raw: raw, Level: LevelInfo, fields: map[string]string{}}
 	trimmed := strings.TrimRight(string(raw), "\r\n")
-	var obj map[string]any
-	if err := json.Unmarshal([]byte(trimmed), &obj); err != nil {
+	obj, err := decodeJSONObject(trimmed)
+	if err != nil {
 		e.Level = LevelDebug
 		e.Msg = trimmed
 		return e

@@ -40,7 +40,10 @@ var (
 	// otherwise leak. scrubHost lowercases before the allowlist check, so
 	// this does not widen the keep-list. The minimum is two labels
 	// (label.tld), so common homelab names like nas.local and router.lan
-	// redact rather than pass through verbatim.
+	// redact rather than pass through verbatim. A label shaped like a
+	// file extension (nyx.log, seen.json) is not a hostname; scrubHost
+	// keeps those via fileExtSet — the documented contract is that paths
+	// and file names pass through unchanged.
 	hostRe = regexp.MustCompile(`(?i)\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,24}\b`)
 	// tokenRunRe matches a run of at least 32 token-alphabet characters
 	// (alphanumerics, '=', '+'). Hyphen is deliberately excluded:
@@ -48,7 +51,8 @@ var (
 	// ("bearer-<token>", "site-abc", file names) whose readable parts
 	// must survive; the token proper is the long unbroken run. Whole
 	// hex digests and base64-style tokens are 32+ unbroken runs and are
-	// caught; short runs (trace ids, words, path segments) are not.
+	// caught; short runs (words, path segments, the 8-char trace ids from
+	// NewTraceID — see TestScrubLine_TraceIDSurvivesTokenFloor) are not.
 	tokenRunRe = regexp.MustCompile(`[A-Za-z0-9+=]{32,}`)
 )
 
@@ -92,18 +96,30 @@ var allowlistNames = []string{
 	"nas.home.example",
 }
 
+// keepFileExts are file extensions that hostRe's final label may match
+// while still being a file name, not a hostname (nyx.log, seen.json,
+// homelab.yaml). Paths and file names are diagnostic signal the export
+// must preserve, so a host-shaped literal ending in one of these is kept
+// (checked in scrubHost).
+var keepFileExts = []string{
+	"log", "json", "yaml", "yml", "toml", "md", "txt",
+	"ini", "conf", "cfg", "csv", "html", "xml",
+}
+
 // scrubReplacer is the PII classifier shared by all lines.
 type scrubReplacer struct {
-	ipSet   map[string]struct{}
-	cidrSet map[string]struct{}
-	nameSet map[string]struct{}
+	ipSet      map[string]struct{}
+	cidrSet    map[string]struct{}
+	nameSet    map[string]struct{}
+	fileExtSet map[string]struct{}
 }
 
 func newScrubReplacer() *scrubReplacer {
 	r := &scrubReplacer{
-		ipSet:   make(map[string]struct{}, len(allowlistIPs)),
-		cidrSet: make(map[string]struct{}, len(allowlistCIDRs)),
-		nameSet: make(map[string]struct{}, len(allowlistNames)),
+		ipSet:      make(map[string]struct{}, len(allowlistIPs)),
+		cidrSet:    make(map[string]struct{}, len(allowlistCIDRs)),
+		nameSet:    make(map[string]struct{}, len(allowlistNames)),
+		fileExtSet: make(map[string]struct{}, len(keepFileExts)),
 	}
 	for _, ip := range allowlistIPs {
 		r.ipSet[ip] = struct{}{}
@@ -113,6 +129,9 @@ func newScrubReplacer() *scrubReplacer {
 	}
 	for _, n := range allowlistNames {
 		r.nameSet[n] = struct{}{}
+	}
+	for _, e := range keepFileExts {
+		r.fileExtSet[e] = struct{}{}
 	}
 	return r
 }
@@ -239,6 +258,13 @@ func (r *scrubReplacer) scrubHost(h string) string {
 	if strings.HasSuffix(hl, ".example") {
 		return h
 	}
+	// A final label that is a known file extension makes this a file name
+	// (nyx.log, seen.json), not a hostname.
+	if dot := strings.LastIndexByte(hl, '.'); dot >= 0 {
+		if _, isExt := r.fileExtSet[hl[dot+1:]]; isExt {
+			return h
+		}
+	}
 	return redactHost
 }
 
@@ -251,6 +277,21 @@ func (r *scrubReplacer) scrubTokens(s string) string {
 	return tokenRunRe.ReplaceAllString(s, redactValue)
 }
 
+// decodeJSONObject parses one log line as a flat JSON object, decoding
+// numbers as json.Number so large integer fields (nanosecond timestamps,
+// byte counters) re-emit exactly instead of as float64 scientific
+// notation. It returns an error for non-JSON lines, which callers treat
+// as raw text.
+func decodeJSONObject(trimmed string) (map[string]any, error) {
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	dec.UseNumber()
+	var obj map[string]any
+	if err := dec.Decode(&obj); err != nil {
+		return nil, err
+	}
+	return obj, nil
+}
+
 // ScrubLine redacts PII from one serialized log line — a flat JSON object
 // (the normal case) or raw text for hand-edited/truncated lines, which
 // still get the regex pass so nothing slips through. PII is redacted in
@@ -260,8 +301,8 @@ func (r *scrubReplacer) scrubTokens(s string) string {
 // unchanged.
 func ScrubLine(line []byte) []byte {
 	trimmed := strings.TrimRight(string(line), "\r\n")
-	var obj map[string]any
-	if json.Unmarshal([]byte(trimmed), &obj) != nil {
+	obj, err := decodeJSONObject(trimmed)
+	if err != nil {
 		return []byte(defaultReplacer.scrubText(trimmed) + "\n")
 	}
 	for k, v := range obj {

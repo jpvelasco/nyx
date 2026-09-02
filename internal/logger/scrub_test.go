@@ -214,6 +214,31 @@ func TestScrubLine_HostnamesAndMACs(t *testing.T) {
 			`{"msg":"peer [host] refused"}`,
 		},
 		{
+			"file name with log extension kept",
+			`{"msg":"wrote artifact nyx.log"}`,
+			`{"msg":"wrote artifact nyx.log"}`,
+		},
+		{
+			"file name with json extension kept",
+			`{"msg":"loaded seen.json"}`,
+			`{"msg":"loaded seen.json"}`,
+		},
+		{
+			"file name with yaml extension kept",
+			`{"msg":"spec homelab.yaml ok"}`,
+			`{"msg":"spec homelab.yaml ok"}`,
+		},
+		{
+			"path file name with json extension kept",
+			`{"msg":"snapshot saved path=baseline.json"}`,
+			`{"msg":"snapshot saved path=baseline.json"}`,
+		},
+		{
+			"mixed-case file extension kept",
+			`{"msg":"wrote NYX.LOG"}`,
+			`{"msg":"wrote NYX.LOG"}`,
+		},
+		{
 			"mac redacted",
 			`{"msg":"lease aa:bb:cc:dd:ee:01"}`,
 			`{"msg":"lease [mac]"}`,
@@ -348,6 +373,37 @@ func TestScrubLine_DiagnosticFieldsSurvive(t *testing.T) {
 		if !strings.Contains(out, field) {
 			t.Errorf("diagnostic field missing from output:\n%s\nexpected %q in it", out, field)
 		}
+	}
+}
+
+// TestScrubLine_TraceIDSurvivesTokenFloor pins the correlation-identity
+// assumption: NewTraceID emits an 8-hex-char id (TestNewTraceID), far
+// below the 32-char token floor, so per-run trace ids survive scrubbing
+// and a scrubbed artifact stays correlatable.
+func TestScrubLine_TraceIDSurvivesTokenFloor(t *testing.T) {
+	in := `{"level":"info","msg":"run","trace_id":"` + NewTraceID() + `"}`
+	out := string(ScrubLine([]byte(in)))
+	if strings.Contains(out, "[redacted]") {
+		t.Errorf("8-char trace id must not be redacted, got %s", out)
+	}
+	// A real 16-byte OTel trace id (32 hex chars) is still redacted —
+	// that shape is indistinguishable from a token run.
+	long := `{"trace_id":"` + strings.Repeat("a", 32) + `"}`
+	if !strings.Contains(string(ScrubLine([]byte(long))), "[redacted]") {
+		t.Errorf("32-hex id must be redacted, got %s", long)
+	}
+}
+
+// TestScrubLine_LargeIntegerSurvives pins that large integer fields are
+// re-emitted exactly (json.Number), not as float64 scientific notation.
+func TestScrubLine_LargeIntegerSurvives(t *testing.T) {
+	in := `{"level":"info","msg":"counter","count_ns":1735689600000000000,"attempt":2}`
+	out := string(ScrubLine([]byte(in)))
+	if !strings.Contains(out, `"count_ns":1735689600000000000`) {
+		t.Errorf("large integer must round-trip exactly, got %s", out)
+	}
+	if strings.Contains(out, "e+18") || strings.Contains(out, "e+19") {
+		t.Errorf("large integer must not use scientific notation, got %s", out)
 	}
 }
 

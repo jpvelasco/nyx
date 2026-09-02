@@ -371,6 +371,16 @@ func TestParseLineVariants(t *testing.T) {
 	}
 }
 
+// TestParseLineLargeInteger pins the text-format path: a large integer
+// field is stringified exactly (json.Number), not as float64 scientific
+// notation.
+func TestParseLineLargeInteger(t *testing.T) {
+	e := parseLine([]byte(`{"level":"info","msg":"m","count_ns":1735689600000000000}`))
+	if e.fields["count_ns"] != "1735689600000000000" {
+		t.Errorf("large integer = %q, want exact value", e.fields["count_ns"])
+	}
+}
+
 // TestParseLevelFlag verifies the --level flag mapping: the four valid
 // values and the default-case error (unparseable values are errors, never
 // silent fallbacks).
