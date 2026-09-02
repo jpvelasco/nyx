@@ -142,7 +142,6 @@ func ImportSpec(ctx context.Context, host, clientID, clientSecret, siteName stri
 		ControllerCategory: client.Info().Category,
 		Devices:            devices,
 		Networks:           omadaNets,
-		Bindings:           BuildNetworkBindings(omadaNets),
 		GatewayACLs:        gwList,
 		GatewayACLsOK:      gwListOK,
 		SwitchACLs:         aclList,
