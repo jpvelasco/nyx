@@ -413,11 +413,11 @@ type OmadaPortPlan struct {
 // untagged set is derived from it. Names are LAN network names; the native
 // network must not also appear in the tagged list (controller rule).
 type OmadaPortProfileRequest struct {
-	SwitchMAC   string
-	Port        int
-	Native      string // network name (required)
-	Tagged      []string
-	ProfileName string // optional; derived when empty
+	SwitchMAC   string   `json:"switch_mac"`
+	Port        int      `json:"port"`
+	Native      string   `json:"native"` // network name (required)
+	Tagged      []string `json:"tagged,omitempty"`
+	ProfileName string   `json:"profile_name,omitempty"` // optional; derived when empty
 }
 
 // OmadaPortProfileApplyResult is the structured outcome of a port-profile
@@ -425,7 +425,7 @@ type OmadaPortProfileRequest struct {
 // LAN profile).
 type OmadaPortProfileApplyResult struct {
 	DryRun        bool   `json:"dry_run"`
-	Outcome       string `json:"outcome"` // "unchanged" | "bound" | "created_and_bound"
+	Outcome       string `json:"outcome"` // "unchanged" | "bound" | "created_and_bound" (a dry run previews the real-apply outcome)
 	SwitchMAC     string `json:"switch_mac"`
 	Port          int    `json:"port"`
 	ProfileID     string `json:"profile_id,omitempty"`
@@ -526,7 +526,11 @@ func (s *OmadaService) PlanPort(ctx context.Context, opts OmadaOptions, req Omad
 	}
 	defer client.Logout(ctx) //nolint:errcheck
 
-	plan, _, _, err := s.planPortWithSession(ctx, client, site.EffectiveID(), req)
+	ports, profiles, nets, err := fetchPortMembership(ctx, client, site.EffectiveID())
+	if err != nil {
+		return nil, err
+	}
+	plan, _, _, err := planPortFromState(req, ports, profiles, nets)
 	if err != nil {
 		return nil, err
 	}
@@ -547,11 +551,17 @@ func (s *OmadaService) ApplyPortProfile(ctx context.Context, opts OmadaOptions, 
 	defer client.Logout(ctx) //nolint:errcheck
 
 	siteID := site.EffectiveID()
-	before, err := s.observedPortEvidence(ctx, client, siteID, req.SwitchMAC, req.Port)
+	ports, profiles, nets, err := fetchPortMembership(ctx, client, siteID)
 	if err != nil {
 		return nil, err
 	}
-	plan, prof, create, err := s.planPortWithSession(ctx, client, siteID, req)
+	plan, prof, create, err := planPortFromState(req, ports, profiles, nets)
+	if err != nil {
+		return nil, err
+	}
+	// The plan read the still-unmutated state, so its port row is the
+	// before evidence — no second fetch round trip.
+	before, err := portEvidenceJSON(ports, profiles, nets, req.SwitchMAC, req.Port)
 	if err != nil {
 		return nil, err
 	}
@@ -566,10 +576,20 @@ func (s *OmadaService) ApplyPortProfile(ctx context.Context, opts OmadaOptions, 
 		Before:        before,
 		After:         before,
 	}
-	if dryRun || plan.Outcome == "unchanged" {
-		// No write (and no re-read): a dry run previews, and an unchanged
-		// port already has the desired membership — the after evidence is
-		// the before read.
+	if dryRun {
+		// No write, no re-read. Report the outcome a real apply would
+		// produce (unchanged stays unchanged).
+		switch plan.Outcome {
+		case "create":
+			res.Outcome = "created_and_bound"
+		case "rebind":
+			res.Outcome = "bound"
+		}
+		return res, nil
+	}
+	if plan.Outcome == "unchanged" {
+		// The port already has the desired membership — no write, no
+		// re-read; the after evidence is the before read.
 		return res, nil
 	}
 
@@ -589,11 +609,14 @@ func (s *OmadaService) ApplyPortProfile(ctx context.Context, opts OmadaOptions, 
 	} else {
 		res.Outcome = "bound"
 	}
-	after, err := s.observedPortEvidence(ctx, client, siteID, req.SwitchMAC, req.Port)
+	afterPorts, afterProfiles, afterNets, err := fetchPortMembership(ctx, client, siteID)
 	if err != nil {
 		return nil, fmt.Errorf("re-reading port state after apply: %w", err)
 	}
-	res.After = after
+	res.After, err = portEvidenceJSON(afterPorts, afterProfiles, afterNets, req.SwitchMAC, req.Port)
+	if err != nil {
+		return nil, err
+	}
 	return res, nil
 }
 
@@ -616,17 +639,11 @@ func fetchPortMembership(ctx context.Context, client *omadabackend.Client, siteI
 	return ports, profiles, nets, nil
 }
 
-// planPortWithSession resolves the desired membership against the site's
-// networks and profiles and decides the outcome. It takes the client and
-// site id from the caller's session and returns the plan, the profile to
-// bind (a fresh one when a create is needed), and whether a create is
-// required.
-func (s *OmadaService) planPortWithSession(ctx context.Context, client *omadabackend.Client, siteID string, req OmadaPortProfileRequest) (*OmadaPortPlan, *omadabackend.LanProfile, bool, error) {
-	ports, profiles, nets, err := fetchPortMembership(ctx, client, siteID)
-	if err != nil {
-		return nil, nil, false, err
-	}
-
+// planPortFromState resolves the desired membership against an already-
+// fetched port overview, LAN profiles, and site networks and decides the
+// outcome. It returns the plan, the profile to bind (a fresh one when a
+// create is needed), and whether a create is required.
+func planPortFromState(req OmadaPortProfileRequest, ports []omadabackend.SwitchPort, profiles []omadabackend.LanProfile, nets []omadabackend.Network) (*OmadaPortPlan, *omadabackend.LanProfile, bool, error) {
 	var cur *omadabackend.SwitchPort
 	wantMAC := omadabackend.NormalizeMAC(req.SwitchMAC)
 	for i := range ports {
@@ -658,11 +675,9 @@ func (s *OmadaService) planPortWithSession(ctx context.Context, client *omadabac
 		Port:      req.Port,
 		Desired:   req,
 	}
-	if cur != nil {
-		plan.Current = portObservation(*cur, profiles, netName)
-		if p := findProfileByID(profiles, cur.ProfileID); p != nil {
-			plan.CurrentProfile = serviceLanProfile(*p, netName)
-		}
+	plan.Current = portObservation(*cur, profiles, netName)
+	if p := findProfileByID(profiles, cur.ProfileID); p != nil {
+		plan.CurrentProfile = serviceLanProfile(*p, netName)
 	}
 	// Idempotent first: if the port's currently-bound profile already has
 	// the desired membership, nothing needs to happen.
@@ -702,14 +717,11 @@ func (s *OmadaService) planPortWithSession(ctx context.Context, client *omadabac
 	return plan, profile, true, nil
 }
 
-// observedPortEvidence renders one port row joined to its referenced LAN
+// portEvidenceJSON renders one port row joined to its referenced LAN
 // profile as a JSON string — the before/after evidence for port-profile
-// applies.
-func (s *OmadaService) observedPortEvidence(ctx context.Context, client *omadabackend.Client, siteID, switchMAC string, port int) (string, error) {
-	ports, profiles, nets, err := fetchPortMembership(ctx, client, siteID)
-	if err != nil {
-		return "", err
-	}
+// applies. It works on an already-fetched collection set so an apply can
+// reuse its plan read for the before evidence instead of re-fetching.
+func portEvidenceJSON(ports []omadabackend.SwitchPort, profiles []omadabackend.LanProfile, nets []omadabackend.Network, switchMAC string, port int) (string, error) {
 	netName := networkNameByID(nets)
 	wantMAC := omadabackend.NormalizeMAC(switchMAC)
 	for i := range ports {
@@ -762,7 +774,8 @@ func derivePortProfileName(req OmadaPortProfileRequest) string {
 }
 
 // resolveNetworkID resolves one network name (or a raw network ID) to its
-// ID, refusing unknown names (duplicate names: first match wins).
+// ID, refusing unknown and ambiguous names (a name that two declared
+// networks share is an error, not a coin flip).
 func resolveNetworkID(nets []omadabackend.Network, name string) (string, error) {
 	ids, err := resolveNetworkIDList(nets, []string{name})
 	if err != nil {
@@ -772,14 +785,19 @@ func resolveNetworkID(nets []omadabackend.Network, name string) (string, error) 
 }
 
 // resolveNetworkIDList resolves a network name list to IDs (names
-// case-insensitive; raw IDs pass through). Every member must resolve.
+// case-insensitive; raw IDs pass through). Every member must resolve;
+// duplicate names fail closed — binding a port to the "first" of several
+// same-name networks would be a silent wrong-VLAN membership.
 func resolveNetworkIDList(nets []omadabackend.Network, names []string) ([]string, error) {
 	byName := make(map[string]string, len(nets))
+	ambiguous := make(map[string][]string, len(nets))
 	knownIDs := make(map[string]bool, len(nets))
 	for _, n := range nets {
 		knownIDs[n.ID] = true
 		key := strings.ToLower(strings.TrimSpace(n.Name))
-		if _, dup := byName[key]; !dup {
+		if prev, dup := byName[key]; dup {
+			ambiguous[key] = append(ambiguous[key], prev, n.ID)
+		} else {
 			byName[key] = n.ID
 		}
 	}
@@ -790,7 +808,13 @@ func resolveNetworkIDList(nets []omadabackend.Network, names []string) ([]string
 			out = append(out, trimmed)
 			continue
 		}
-		id, ok := byName[strings.ToLower(trimmed)]
+		key := strings.ToLower(trimmed)
+		if ids, ok := ambiguous[key]; ok {
+			candidates := append([]string(nil), ids...)
+			sort.Strings(candidates)
+			return nil, fmt.Errorf("network name %q is ambiguous — %d declared networks share it (ids %s); address the network by its id", name, len(candidates), strings.Join(candidates, ", "))
+		}
+		id, ok := byName[key]
 		if !ok {
 			return nil, fmt.Errorf("network %q is not a declared LAN network on the site", name)
 		}

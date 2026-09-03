@@ -1618,7 +1618,8 @@ func TestOmadaServiceApplyPortProfile_DryRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dry run: %v", err)
 	}
-	if !res.DryRun || res.Outcome != "create" || !res.ProfileCreate || res.ProfileID != "" || res.ProfileName != "Personal+trunk(1)" {
+	// A dry run previews the real-apply outcome vocabulary.
+	if !res.DryRun || res.Outcome != "created_and_bound" || !res.ProfileCreate || res.ProfileID != "" || res.ProfileName != "Personal+trunk(1)" {
 		t.Errorf("dry run = %+v", res)
 	}
 	if len(st.Profiles) != 3 || st.PortProfiles[8] != "P1" {
@@ -1668,6 +1669,63 @@ func TestOmadaServiceApplyPortProfile_Errors(t *testing.T) {
 	}, false)
 	if err == nil {
 		t.Error("expected fetch failure to propagate from apply")
+	}
+}
+
+func TestResolveNetworkIDList(t *testing.T) {
+	nets := []omadabackend.Network{
+		{ID: "n1", Name: "trusted"},
+		{ID: "n2", Name: "Guest"},
+		{ID: "n3", Name: "guest"},
+	}
+
+	if id, err := resolveNetworkIDList(nets, []string{"TRUSTED"}); err != nil || len(id) != 1 || id[0] != "n1" {
+		t.Errorf("case-insensitive resolve = %v, %v", id, err)
+	}
+	if id, err := resolveNetworkIDList(nets, []string{"n2"}); err != nil || len(id) != 1 || id[0] != "n2" {
+		t.Errorf("raw id passthrough = %v, %v", id, err)
+	}
+
+	// A shared display name fails closed with the candidate IDs, never a
+	// first-match coin flip.
+	_, err := resolveNetworkIDList(nets, []string{"guest"})
+	if err == nil || !strings.Contains(err.Error(), `network name "guest" is ambiguous`) ||
+		!strings.Contains(err.Error(), "n2") || !strings.Contains(err.Error(), "n3") {
+		t.Errorf("duplicate name: err = %v", err)
+	}
+
+	// A raw ID is never ambiguous, even when its network shares a name.
+	if id, err := resolveNetworkIDList(nets, []string{"n3"}); err != nil || id[0] != "n3" {
+		t.Errorf("raw id of ambiguous-named network = %v, %v", id, err)
+	}
+}
+
+func TestPlanPort_AmbiguousNativeName(t *testing.T) {
+	st := omadaPortStateFresh()
+	// Two declared networks share the display name "guest".
+	nets := strings.Replace(omadaPortNets, `"name":"Personal"`, `"name":"guest"`, 1)
+	nets = strings.Replace(nets, `"name":"trusted"`, `"name":"guest"`, 1)
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/openapi/v1/abc123/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
+			writeOmadaEnvelope(w, 0, `{"totalRows":4,"data":`+nets+`}`)
+		case "/openapi/v1/abc123/sites/s1/switches/ports/overview":
+			writePortOverview(w, st)
+		case "/openapi/v1/abc123/sites/s1/lan-profiles":
+			writeOmadaEnvelope(w, 0, `{"totalRows":`+strconv.Itoa(len(st.Profiles))+`,"data":`+string(mustMarshalJSON(st.Profiles))+`}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	_, err := NewOmadaService().PlanPort(context.Background(), omadaPortOpts(ts.URL),
+		OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "guest"})
+	if err == nil || !strings.Contains(err.Error(), `network name "guest" is ambiguous`) {
+		t.Errorf("plan with duplicate native name: err = %v", err)
 	}
 }
 
