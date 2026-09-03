@@ -76,8 +76,8 @@ Use role-based labels:
 - **Access point:** `ap`.
 - **Management host (the box running nyx):** `mgmt-host`, `vantage`.
 - **Probe hosts:** `<role>-probe` (e.g. `iot-probe`).
-- **Example endpoints:** `nas.home.example`, `10.0.50.5` (media services),
-  `10.0.60.15` (probe).
+- **Example endpoints:** `nas.home.example`, `10.0.11.20` (controller),
+  `10.0.50.5` (media services), `10.0.60.15` (probe).
 
 ## Applying the rules in practice
 

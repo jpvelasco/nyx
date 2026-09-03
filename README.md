@@ -312,19 +312,19 @@ nyx provider list
 Omada provider supports Omada SDN controller 6.x. Pass your controller address (usually on your management VLAN):
 
 ```bash
-# Example using a typical management IP
-nyx omada info --host 192.168.11.20
+# Example using the canonical management network (see docs/naming.md)
+nyx omada info --host 10.0.11.20
 
 # Generate spec from controller
-nyx omada import --host 192.168.11.20 --client-id <client-id> --client-secret <client-secret>
+nyx omada import --host 10.0.11.20 --client-id <client-id> --client-secret <client-secret>
 
 # Import and audit in one step
-nyx omada check --host 192.168.11.20 --client-id <client-id> --client-secret <client-secret> --spec examples/homelab.yaml
+nyx omada check --host 10.0.11.20 --client-id <client-id> --client-secret <client-secret> --spec examples/homelab.yaml
 
 # Per-port observation: which port a device is on, port VLAN membership, LAN profiles
-nyx omada uplink-info --host 192.168.11.20 --client-id <client-id> --client-secret <client-secret> --mac <device-mac>
-nyx omada switch-ports --host 192.168.11.20 --client-id <client-id> --client-secret <client-secret> --switch-mac <switch-mac>
-nyx omada lan-profiles --host 192.168.11.20 --client-id <client-id> --client-secret <client-secret>
+nyx omada uplink-info --host 10.0.11.20 --client-id <client-id> --client-secret <client-secret> --mac <device-mac>
+nyx omada switch-ports --host 10.0.11.20 --client-id <client-id> --client-secret <client-secret> --switch-mac <switch-mac>
+nyx omada lan-profiles --host 10.0.11.20 --client-id <client-id> --client-secret <client-secret>
 ```
 
 Port profile **writes** (plan + apply, dry-run by default) are available as MCP tools `omada_plan_port` / `omada_apply_port_profile` only — the CLI exposes the read surfaces above.
@@ -336,14 +336,14 @@ Credentials can be passed via flags, env vars (`OMADA_HOST`, `OMADA_CLIENT_ID`, 
 OPNsense provider supports info, import, and check. Use your OPNsense address (typically the LAN or a management IP):
 
 ```bash
-# Example using a typical management IP
-nyx opnsense info --host 192.168.11.1 --api-key <key> --api-secret <secret>
+# Example using the canonical management gateway (see docs/naming.md)
+nyx opnsense info --host 10.0.11.1 --api-key <key> --api-secret <secret>
 
 # Generate spec from OPNsense
-nyx opnsense import --host 192.168.11.1 --api-key <key> --api-secret <secret>
+nyx opnsense import --host 10.0.11.1 --api-key <key> --api-secret <secret>
 
 # Import and audit in one step
-nyx opnsense check --host 192.168.11.1 --api-key <key> --api-secret <secret> --spec examples/homelab.yaml
+nyx opnsense check --host 10.0.11.1 --api-key <key> --api-secret <secret> --spec examples/homelab.yaml
 ```
 
 ## Project Structure
