@@ -602,6 +602,11 @@ func (s *OmadaService) ApplyPortProfile(ctx context.Context, opts OmadaOptions, 
 	}
 	res.ProfileID = prof.ID // the plan's id is empty until the create runs
 	if err := client.SetPortProfile(ctx, siteID, req.SwitchMAC, req.Port, prof.ID); err != nil {
+		if create {
+			// The controller now has a new LAN profile the retry will
+			// reuse — name it so the failure is reconcilable.
+			return nil, fmt.Errorf("LAN profile %q (id %s) was created but binding it failed: %w", prof.Name, prof.ID, err)
+		}
 		return nil, err
 	}
 	if plan.Outcome == "create" {
@@ -796,7 +801,10 @@ func resolveNetworkIDList(nets []omadabackend.Network, names []string) ([]string
 		knownIDs[n.ID] = true
 		key := strings.ToLower(strings.TrimSpace(n.Name))
 		if prev, dup := byName[key]; dup {
-			ambiguous[key] = append(ambiguous[key], prev, n.ID)
+			if len(ambiguous[key]) == 0 {
+				ambiguous[key] = append(ambiguous[key], prev)
+			}
+			ambiguous[key] = append(ambiguous[key], n.ID)
 		} else {
 			byName[key] = n.ID
 		}

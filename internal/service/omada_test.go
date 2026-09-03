@@ -1198,6 +1198,7 @@ type omadaPortState struct {
 	Profiles     []omadabackend.LanProfile
 	PortProfiles map[int]string
 	NextID       int
+	FailBind     bool // fail the per-port profile PUT (bind)
 }
 
 // omadaPortOpts is the standard (synthetic) OmadaOptions for port-profile
@@ -1293,6 +1294,10 @@ func handleProfilePut(t *testing.T, w http.ResponseWriter, r *http.Request, st *
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		t.Errorf("profile PUT decode: %v", err)
+	}
+	if st.FailBind {
+		writeOmadaEnvelope(w, -32000, `null`)
+		return
 	}
 	parts := strings.Split(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, swBase), "/"), "/")
 	if len(parts) != 4 || parts[1] != "ports" || parts[3] != "profile" {
@@ -1672,6 +1677,26 @@ func TestOmadaServiceApplyPortProfile_Errors(t *testing.T) {
 	}
 }
 
+// TestOmadaServiceApplyPortProfile_BindFailureAfterCreate covers the
+// create-then-bind path where the create succeeds and the bind fails: the
+// error must name the created profile so the (reusable) site state change
+// is visible to the caller.
+func TestOmadaServiceApplyPortProfile_BindFailureAfterCreate(t *testing.T) {
+	st := omadaPortStateFresh()
+	st.FailBind = true
+	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+	_, err := NewOmadaService().ApplyPortProfile(context.Background(), omadaPortOpts(ts.URL),
+		OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "Personal", Tagged: []string{"gaming"}}, false)
+	// The derived name for one tagged member is "Personal+trunk(1)".
+	if err == nil || !strings.Contains(err.Error(), `LAN profile "Personal+trunk(1)" (id P101) was created but binding it failed`) {
+		t.Fatalf("bind failure after create: err = %v", err)
+	}
+	// The orphan profile exists in the site state; a retry reuses it.
+	if len(st.Profiles) != 4 || st.Profiles[3].ID != "P101" {
+		t.Errorf("profile not created: %+v", st.Profiles)
+	}
+}
+
 func TestResolveNetworkIDList(t *testing.T) {
 	nets := []omadabackend.Network{
 		{ID: "n1", Name: "trusted"},
@@ -1697,6 +1722,23 @@ func TestResolveNetworkIDList(t *testing.T) {
 	// A raw ID is never ambiguous, even when its network shares a name.
 	if id, err := resolveNetworkIDList(nets, []string{"n3"}); err != nil || id[0] != "n3" {
 		t.Errorf("raw id of ambiguous-named network = %v, %v", id, err)
+	}
+
+	// Three same-name networks: the candidate list must contain each ID
+	// exactly once (no double-count of the first match).
+	three := append([]omadabackend.Network{}, nets...)
+	three = append(three, omadabackend.Network{ID: "n4", Name: "GUEST"})
+	_, err = resolveNetworkIDList(three, []string{"guest"})
+	if err == nil {
+		t.Fatalf("three same-name networks: expected an error, got nil")
+	}
+	for _, id := range []string{"n2", "n3", "n4"} {
+		if !strings.Contains(err.Error(), id) {
+			t.Errorf("three same-name networks: error %q missing candidate %s", err, id)
+		}
+	}
+	if strings.Count(err.Error(), "(ids ") != 1 || !strings.Contains(err.Error(), "3 declared networks share it") {
+		t.Errorf("three same-name networks: error = %v", err)
 	}
 }
 
