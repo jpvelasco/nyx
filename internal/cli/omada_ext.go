@@ -60,8 +60,9 @@ func buildOmadaUplinkInfoCmd() *cobra.Command {
 			}
 			if len(rows) == 0 {
 				if jsonOutput {
-					fmt.Println(`{"mac":"` + omadaUplinkMAC + `","note":"no uplink observed"}`)
-					return nil
+					enc := json.NewEncoder(os.Stdout)
+					enc.SetIndent("", "  ")
+					return enc.Encode(map[string]string{"mac": omadaUplinkMAC, "note": "no uplink observed"})
 				}
 				fmt.Printf("No uplink observed for %s\n", omadaUplinkMAC)
 				return nil

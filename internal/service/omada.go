@@ -762,7 +762,7 @@ func derivePortProfileName(req OmadaPortProfileRequest) string {
 }
 
 // resolveNetworkID resolves one network name (or a raw network ID) to its
-// ID, refusing unknown and ambiguous names.
+// ID, refusing unknown names (duplicate names: first match wins).
 func resolveNetworkID(nets []omadabackend.Network, name string) (string, error) {
 	ids, err := resolveNetworkIDList(nets, []string{name})
 	if err != nil {
