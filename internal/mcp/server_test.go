@@ -1974,12 +1974,16 @@ func TestDispatchOmadaNatReads_ServiceError(t *testing.T) {
 }
 
 func TestDispatchOmadaPortReads(t *testing.T) {
+	// Redirect the credential store away from the real one so the inline
+	// test credentials below are the only source of truth (hermetic on any
+	// runner, even one with an existing omada/default entry).
+	t.Setenv("NYX_CREDENTIALS_FILE", t.TempDir()+"/credentials.json")
 	// One stub per assertion so a single stub can't leak state across cases.
 	uplinkStub := &stubOmadaSvc{
 		uplink: []service.OmadaUplinkInfo{{MAC: "aa:bb:cc:dd:ee:01", UplinkDeviceMAC: "aa:bb:cc:dd:ee:00", UplinkDevicePort: "8"}},
 	}
 	if text, isErr := serverWithOmadaStub(uplinkStub).DispatchToolForTest(context.Background(), "omada_get_uplink_info",
-		map[string]interface{}{"host": "omada.local", "device_mac": "aa:bb:cc:dd:ee:01"}); isErr {
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "device_mac": "aa:bb:cc:dd:ee:01"}); isErr {
 		t.Fatalf("uplink: unexpected error: %s", text)
 	} else if !strings.Contains(text, `"uplink_device_port": "8"`) {
 		t.Errorf("uplink JSON = %s", text)
@@ -1989,7 +1993,7 @@ func TestDispatchOmadaPortReads(t *testing.T) {
 
 	// No observed uplink → explicit note, not a bare empty array.
 	if text, isErr := serverWithOmadaStub(&stubOmadaSvc{}).DispatchToolForTest(context.Background(), "omada_get_uplink_info",
-		map[string]interface{}{"host": "omada.local", "device_mac": "no:such:mac"}); isErr {
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "device_mac": "no:such:mac"}); isErr {
 		t.Fatalf("uplink empty: unexpected error: %s", text)
 	} else if !strings.Contains(text, "no uplink observed") {
 		t.Errorf("uplink empty note = %s", text)
@@ -1997,14 +2001,14 @@ func TestDispatchOmadaPortReads(t *testing.T) {
 
 	// Missing device_mac.
 	if text, isErr := serverWithOmadaStub(&stubOmadaSvc{}).DispatchToolForTest(context.Background(), "omada_get_uplink_info",
-		map[string]interface{}{"host": "omada.local"}); !isErr || !strings.Contains(text, "device_mac parameter is required") {
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw"}); !isErr || !strings.Contains(text, "device_mac parameter is required") {
 		t.Errorf("uplink missing mac: got (%q, %v)", text, isErr)
 	}
 
 	if text, isErr := serverWithOmadaStub(&stubOmadaSvc{
 		switchPorts: []service.OmadaSwitchPort{{Port: 8, SwitchMAC: "aa:bb:cc:dd:ee:00", NativeNetwork: "trusted", Tagged: []string{"gaming", "media"}}},
 	}).DispatchToolForTest(context.Background(), "omada_list_switch_ports",
-		map[string]interface{}{"host": "omada.local", "switch_mac": "aa:bb:cc:dd:ee:00"}); isErr {
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "switch_mac": "aa:bb:cc:dd:ee:00"}); isErr {
 		t.Fatalf("switch ports: unexpected error: %s", text)
 	} else if !strings.Contains(text, `"native_network": "trusted"`) || !strings.Contains(text, `"gaming"`) {
 		t.Errorf("switch ports JSON = %s", text)
@@ -2013,13 +2017,13 @@ func TestDispatchOmadaPortReads(t *testing.T) {
 	if text, isErr := serverWithOmadaStub(&stubOmadaSvc{
 		profiles: []service.OmadaLanProfile{{ID: "lp1", Name: "trunk", NativeNetwork: "trusted", TaggedNetworks: []string{"gaming", "media"}}},
 	}).DispatchToolForTest(context.Background(), "omada_list_lan_profiles",
-		map[string]interface{}{"host": "omada.local"}); isErr {
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw"}); isErr {
 		t.Fatalf("lan profiles: unexpected error: %s", text)
 	} else if !strings.Contains(text, `"name": "trunk"`) {
 		t.Errorf("lan profiles JSON = %s", text)
 	}
 
-	planArgs := map[string]interface{}{"host": "omada.local", "switch_mac": "aa:bb:cc:dd:ee:00", "port": float64(8), "native": "trusted", "tagged": "gaming,media"}
+	planArgs := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "switch_mac": "aa:bb:cc:dd:ee:00", "port": float64(8), "native": "trusted", "tagged": "gaming,media"}
 	planStub := &stubOmadaSvc{portPlan: &service.OmadaPortPlan{SwitchMAC: "aa:bb:cc:dd:ee:00", Port: 8, Outcome: "rebind", ProfileID: "lp1"}}
 	if text, isErr := serverWithOmadaStub(planStub).DispatchToolForTest(context.Background(), "omada_plan_port", planArgs); isErr {
 		t.Fatalf("plan port: unexpected error: %s", text)
@@ -2044,7 +2048,7 @@ func TestDispatchOmadaPortReads(t *testing.T) {
 
 	// An explicit dry_run=false reaches the service and is echoed back.
 	applyStub2 := &stubOmadaSvc{portApply: &service.OmadaPortProfileApplyResult{Outcome: "created_and_bound", ProfileID: "lp2"}}
-	realArgs := map[string]interface{}{"host": "omada.local", "switch_mac": "aa:bb:cc:dd:ee:00", "port": float64(8), "native": "trusted", "dry_run": false}
+	realArgs := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "switch_mac": "aa:bb:cc:dd:ee:00", "port": float64(8), "native": "trusted", "dry_run": false}
 	if text, isErr := serverWithOmadaStub(applyStub2).DispatchToolForTest(context.Background(), "omada_apply_port_profile", realArgs); isErr {
 		t.Fatalf("apply port real: unexpected error: %s", text)
 	} else if !strings.Contains(text, `"dry_run": false`) || !strings.Contains(text, `"outcome": "created_and_bound"`) {
@@ -2054,19 +2058,20 @@ func TestDispatchOmadaPortReads(t *testing.T) {
 	}
 
 	if text, isErr := serverWithOmadaStub(&stubOmadaSvc{}).DispatchToolForTest(context.Background(), "omada_plan_port",
-		map[string]interface{}{"host": "omada.local", "switch_mac": "aa:bb:cc:dd:ee:00", "native": "trusted"}); !isErr || !strings.Contains(text, "port parameter is required") {
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "switch_mac": "aa:bb:cc:dd:ee:00", "native": "trusted"}); !isErr || !strings.Contains(text, "port parameter is required") {
 		t.Errorf("plan port missing port: got (%q, %v)", text, isErr)
 	}
 
 	if text, isErr := serverWithOmadaStub(&stubOmadaSvc{}).DispatchToolForTest(context.Background(), "omada_plan_port",
-		map[string]interface{}{"host": "omada.local", "port": float64(8), "native": "trusted"}); !isErr || !strings.Contains(text, "switch_mac parameter is required") {
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "port": float64(8), "native": "trusted"}); !isErr || !strings.Contains(text, "switch_mac parameter is required") {
 		t.Errorf("plan port missing mac: got (%q, %v)", text, isErr)
 	}
 }
 
 func TestDispatchOmadaPortReads_ServiceError(t *testing.T) {
+	t.Setenv("NYX_CREDENTIALS_FILE", t.TempDir()+"/credentials.json")
 	server := serverWithOmadaStub(&stubOmadaSvc{err: errors.New("site not found")})
-	args := map[string]interface{}{"host": "omada.local", "switch_mac": "aa:bb:cc:dd:ee:00", "port": float64(8), "native": "trusted"}
+	args := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "switch_mac": "aa:bb:cc:dd:ee:00", "port": float64(8), "native": "trusted"}
 	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan_port", args); !isErr || !strings.Contains(text, "omada port plan request failed") {
 		t.Errorf("plan: got (%q, %v)", text, isErr)
 	}
