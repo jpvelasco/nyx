@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -33,8 +34,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/jpvelasco/nyx/internal/logger"
 )
 
 const (
@@ -169,7 +168,7 @@ type Client struct {
 	clientSecret string // retained in memory for automatic token refresh; cleared on Logout
 	httpClient   *http.Client
 	info         *ControllerInfo
-	log          *logger.Logger
+	log          *slog.Logger
 	Debug        bool // when true, raw API responses are printed to stderr
 
 	maxRetries int
@@ -270,7 +269,7 @@ func (c *Client) Logout(_ context.Context) error {
 // SetLogger attaches an optional structured logger for operation events
 // (token mint, re-mint, token expiry, retries). A nil logger disables
 // logging. Credentials are never written to the log.
-func (c *Client) SetLogger(l *logger.Logger) {
+func (c *Client) SetLogger(l *slog.Logger) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.log = l
@@ -282,11 +281,14 @@ func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	if c.log == nil {
 		return
 	}
-	entry := map[string]interface{}{"event": event}
+	// The JSON line is key-sorted by the exporter, so map iteration order
+	// does not affect the output.
+	attrs := make([]any, 0, 1+len(fields))
+	attrs = append(attrs, "event", event)
 	for k, v := range fields {
-		entry[k] = v
+		attrs = append(attrs, k, v)
 	}
-	c.log.Info("omada", entry)
+	c.log.Info("omada", attrs...)
 }
 
 // logSafeError reduces an error to a static description safe for the log

@@ -1687,3 +1687,71 @@ func TestBuildInventoryCmd_JSON(t *testing.T) {
 		t.Errorf("Site = %q, want fake-site", inv.Site)
 	}
 }
+
+// warnProvider reports inventory warnings: the CLI must print each to stderr
+// exactly once and must not repeat them in the human output (#60).
+type warnProvider struct{ fakeProvider }
+
+func (w *warnProvider) Inventory(_ context.Context, opts providers.ImportOptions) (*providers.ProviderInventory, error) {
+	return &providers.ProviderInventory{
+		Site:     "warn-site",
+		Human:    "human block for " + opts.Host,
+		Warnings: []string{"leases unavailable"},
+	}, nil
+}
+
+// debugSpyProvider records the ImportOptions it received, so a test can
+// prove a flag reached the provider layer.
+type debugSpyProvider struct {
+	fakeProvider
+	got *providers.ImportOptions
+}
+
+func (d *debugSpyProvider) Inventory(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInventory, error) {
+	if d.got != nil {
+		*d.got = opts
+	}
+	return d.fakeProvider.Inventory(ctx, opts)
+}
+
+func TestBuildInventoryCmd_DebugFlag(t *testing.T) {
+	t.Helper()
+	saveRestoreGlobals(t)
+	clearProviderEnv(t)
+	var got providers.ImportOptions
+	cmd := buildInventoryCmd(&debugSpyProvider{fakeProvider: fakeProvider{name: "fake"}, got: &got})
+	if cmd.Flags().Lookup("debug") == nil {
+		t.Fatal("inventory command must declare the --debug flag (raw API responses)")
+	}
+	providerHost = "10.0.0.6"
+	providerClientID = "admin"
+	providerClientSecret = "pw"
+	providerDebug = true
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("inventory with --debug: %v", err)
+	}
+	if !got.Debug {
+		t.Error("providerDebug must reach the provider's ImportOptions.Debug")
+	}
+}
+
+func TestBuildInventoryCmd_WarningsPrintedOnce(t *testing.T) {
+	t.Helper()
+	saveRestoreGlobals(t)
+	clearProviderEnv(t)
+	cmd := buildInventoryCmd(&warnProvider{fakeProvider{name: "warn"}})
+	providerHost = "10.0.0.6"
+	providerClientID = "admin"
+	providerClientSecret = "pw"
+	var err error
+	out, errOut := captureStreams(func() { err = cmd.RunE(cmd, nil) })
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := strings.Count(errOut, "Warning: leases unavailable\n"); got != 1 {
+		t.Errorf("stderr warnings = %d, want exactly 1:\n%s", got, errOut)
+	}
+	if strings.Contains(out, "Warning:") {
+		t.Errorf("human output must not duplicate warnings:\n%s", out)
+	}
+}

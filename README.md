@@ -89,6 +89,7 @@ For the full story of what this feels like on a real multi-VLAN homelab (includi
 | `opnsense` | OPNsense vendor commands (`info`, `import`, `check`) | opnsense backend |
 | `snapshot` | Manage audit history (`baseline`, `list`, `delete`, `clear-baseline`) | — |
 | `drift` | Detect drift in audit results (`status`, `compare`) | — |
+| `logs export` | Export the log rotation set as a PII-scrubbed artifact for bug reports (`--no-scrub` for raw) | — |
 | `mcp serve` | Start MCP server for AI agent integration | all |
 | `version` | Print version | — |
 
@@ -222,9 +223,17 @@ nyx includes a Model Context Protocol server for AI agent integration:
 nyx mcp serve --transport stdio
 ```
 
-### Claude Code Integration
+### Harness Config
 
-Add to your MCP config:
+Generate a ready-to-paste config block for your agent harness:
+
+```bash
+nyx mcp config --harness claude            # mcpServers JSON
+nyx mcp config --harness codex             # [mcp_servers.nyx] TOML
+nyx mcp config --harness claude --write .mcp.json
+```
+
+The snippet points at the current nyx executable (override with `--command`) and lists the credential env vars to export. The equivalent `mcpServers` JSON block looks like:
 
 ```json
 {
@@ -236,6 +245,8 @@ Add to your MCP config:
   }
 }
 ```
+
+Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `OMADA_CLIENT_SECRET` / `OMADA_SITE`, `OPNSENSE_HOST` / `OPNSENSE_API_KEY` / `OPNSENSE_API_SECRET`), the Windows Credential Manager (Omada only; entry `nyx-omada-<host>`, see `nyx omada info` error hints), or the encrypted store (`nyx credentials set`) — never in the config file.
 
 ### Available MCP Tools
 
@@ -258,6 +269,11 @@ Add to your MCP config:
 | `omada_import` | Import Omada state into an intent spec (networks, policies, assertions) |
 | `omada_plan` | Preview ACL rule differences between the controller and a proposed spec (read-only) |
 | `omada_apply_acl` | Apply an ACL policy change: create a rule or enable a disabled matching rule. Dry-run is the default; a real apply is followed by a targeted isolation audit |
+| `omada_get_uplink_info` | Look up which port/uplink a device is connected to by MAC (port mapping) |
+| `omada_list_switch_ports` | List switch ports with connection status, mode, and the VLAN membership of their bound LAN profile |
+| `omada_list_lan_profiles` | List a site's LAN profiles — the VLAN membership sets (native + tagged) ports bind to |
+| `omada_plan_port` | Preview bringing one switch port to a desired VLAN membership: current vs. desired state and whether an existing profile can be rebound or a new one must be created (read-only) |
+| `omada_apply_port_profile` | Bind a switch port to a LAN profile with the desired VLAN membership (find-or-create the matching profile, then bind). Idempotent (`unchanged`/`bound`/`created_and_bound`); dry-run is the default |
 | `opnsense_get_info` | Fetch OPNsense system metadata (version, product, arch) |
 | `opnsense_list_interfaces` | List OPNsense interfaces with IP configuration |
 | `opnsense_list_firewall_rules` | List OPNsense firewall filter rules |
@@ -278,7 +294,7 @@ Safety rails:
 
 - `omada_apply_acl` is **dry-run by default**; a real apply requires an explicit `dry_run=false`.
 - Mutation is idempotent and limited to creating rules or enabling disabled matching rules. A conflicting rule with a different policy is rejected, and the agent is pointed at `omada_plan` to reconcile.
-- Credentials come from environment variables (`OMADA_HOST`, `OMADA_CLIENT_ID`, `OMADA_CLIENT_SECRET`, `OMADA_SITE`) — never from spec, flags, or tool arguments — and never appear in tool output.
+- Credentials come from environment variables (`OMADA_HOST`, `OMADA_CLIENT_ID`, `OMADA_CLIENT_SECRET`, `OMADA_SITE`), the Windows Credential Manager entry `nyx-omada-<host>` (Windows), or the encrypted store (`nyx credentials set omada`) — never from the spec itself — and never appear in tool output.
 - A post-apply audit failure is reported but never fatal; the agent decides the next step from the evidence.
 
 ## Providers
@@ -296,31 +312,38 @@ nyx provider list
 Omada provider supports Omada SDN controller 6.x. Pass your controller address (usually on your management VLAN):
 
 ```bash
-# Example using a typical management IP
-nyx omada info --host 192.168.11.20
+# Example using the canonical management network (see docs/naming.md)
+nyx omada info --host 10.0.11.20
 
 # Generate spec from controller
-nyx omada import --host 192.168.11.20 --client-id <client-id> --client-secret <client-secret>
+nyx omada import --host 10.0.11.20 --client-id <client-id> --client-secret <client-secret>
 
 # Import and audit in one step
-nyx omada check --host 192.168.11.20 --client-id <client-id> --client-secret <client-secret> --spec examples/homelab.yaml
+nyx omada check --host 10.0.11.20 --client-id <client-id> --client-secret <client-secret> --spec examples/homelab.yaml
+
+# Per-port observation: which port a device is on, port VLAN membership, LAN profiles
+nyx omada uplink-info --host 10.0.11.20 --client-id <client-id> --client-secret <client-secret> --mac <device-mac>
+nyx omada switch-ports --host 10.0.11.20 --client-id <client-id> --client-secret <client-secret> --switch-mac <switch-mac>
+nyx omada lan-profiles --host 10.0.11.20 --client-id <client-id> --client-secret <client-secret>
 ```
 
-Credentials can be passed via flags or env vars: `OMADA_HOST`, `OMADA_CLIENT_ID`, `OMADA_CLIENT_SECRET`.
+Port profile **writes** (plan + apply, dry-run by default) are available as MCP tools `omada_plan_port` / `omada_apply_port_profile` only — the CLI exposes the read surfaces above.
+
+Credentials can be passed via flags, env vars (`OMADA_HOST`, `OMADA_CLIENT_ID`, `OMADA_CLIENT_SECRET`), the Windows Credential Manager (entry `nyx-omada-<host>`, created with `cmdkey /generic:nyx-omada-<host> /user:<client-id> /pass:<client-secret>`), or the encrypted store (`nyx credentials set omada`).
 
 ### OPNsense
 
 OPNsense provider supports info, import, and check. Use your OPNsense address (typically the LAN or a management IP):
 
 ```bash
-# Example using a typical management IP
-nyx opnsense info --host 192.168.11.1 --api-key <key> --api-secret <secret>
+# Example using the canonical management gateway (see docs/naming.md)
+nyx opnsense info --host 10.0.11.1 --api-key <key> --api-secret <secret>
 
 # Generate spec from OPNsense
-nyx opnsense import --host 192.168.11.1 --api-key <key> --api-secret <secret>
+nyx opnsense import --host 10.0.11.1 --api-key <key> --api-secret <secret>
 
 # Import and audit in one step
-nyx opnsense check --host 192.168.11.1 --api-key <key> --api-secret <secret> --spec examples/homelab.yaml
+nyx opnsense check --host 10.0.11.1 --api-key <key> --api-secret <secret> --spec examples/homelab.yaml
 ```
 
 ## Project Structure
@@ -345,7 +368,7 @@ nyx/
     report/             # Output renderers
     recommendations/    # Failure analysis and remediation hints
     snapshot/           # Audit history and drift detection
-    logger/             # JSON-lines rotating logger (~/.nyx/nyx.log)
+    logger/             # JSON-lines rotating logger + PII-scrubbed export (~/.nyx/nyx.log)
     version/            # Single-source version constant
   examples/             # Example YAML specs
   testdata/             # Test fixtures

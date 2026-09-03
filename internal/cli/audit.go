@@ -68,22 +68,20 @@ var auditCmd = &cobra.Command{
 
 		// Save snapshot
 		if snapPath, snapErr := snapshot.Save(specFile, auditReport); snapErr == nil {
-			if log != nil {
-				log.Info("snapshot", map[string]interface{}{
-					"path": snapPath,
-				})
+			if slogLog != nil {
+				slogLog.Info("snapshot saved", "path", snapPath)
 			}
 		}
 
-		if log != nil {
-			log.Info("audit", map[string]interface{}{
-				"status":          string(auditReport.Status),
-				"assertion_count": len(auditReport.Findings),
-				"pass":            auditReport.Summary.Pass,
-				"fail":            auditReport.Summary.Fail,
-				"warn":            auditReport.Summary.Warn,
-				"error":           auditReport.Summary.Error,
-			})
+		if slogLog != nil {
+			slogLog.Info("audit",
+				"status", string(auditReport.Status),
+				"assertion_count", len(auditReport.Findings),
+				"pass", auditReport.Summary.Pass,
+				"fail", auditReport.Summary.Fail,
+				"warn", auditReport.Summary.Warn,
+				"error", auditReport.Summary.Error,
+			)
 		}
 
 		w, err := getWriter()

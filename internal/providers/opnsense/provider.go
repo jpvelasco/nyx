@@ -3,6 +3,7 @@ package opnsense
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -17,9 +18,30 @@ import (
 // ProviderName is the registry key for the OPNsense provider.
 const ProviderName = "opnsense"
 
+// isPermissionDenied reports whether err is the client's stable 403
+// privilege error (an API user without the page privilege for the
+// endpoint). It is distinct from the 401 credential error: a stable
+// privilege 403 is safe to degrade on (the gateway is reachable and the
+// key is valid — the user simply lacks the page privilege), while a 401
+// or a transport failure means the credentials or the link itself are
+// broken and must stay fatal.
+func isPermissionDenied(err error) bool {
+	var se *stableError
+	return errors.As(err, &se) && strings.Contains(err.Error(), "permission denied")
+}
+
 // Provider implements providers.Provider for OPNsense firewalls.
-// Currently only Info is implemented. ImportSpec and Check return ErrCapabilityUnsupported.
 type Provider struct{}
+
+// newProviderClient builds a client from the shared import options, so the
+// --debug flag reaches every provider surface (info, inventory, import,
+// check, nat_check, plan/apply NAT).
+func newProviderClient(opts providers.ImportOptions) *Client {
+	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	client.Debug = opts.Debug
+	client.SetLogger(opts.Logger)
+	return client
+}
 
 // Name returns the provider identifier "opnsense".
 func (o *Provider) Name() string { return ProviderName }
@@ -37,7 +59,7 @@ func (o *Provider) Info(ctx context.Context, opts providers.ImportOptions) (*pro
 	if opts.Host == "" {
 		return nil, fmt.Errorf("--host is required for opnsense provider")
 	}
-	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	client := newProviderClient(opts)
 	sys, err := client.GetSystemInformation(ctx)
 	if err != nil {
 		return nil, err
@@ -63,7 +85,7 @@ func (o *Provider) Inventory(ctx context.Context, opts providers.ImportOptions) 
 	if opts.ClientID == "" || opts.ClientSecret == "" {
 		return nil, fmt.Errorf("--client-id and --client-secret are required (API key and secret)")
 	}
-	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	client := newProviderClient(opts)
 	snap, err := client.FetchInventory(ctx)
 	if err != nil {
 		return nil, err
@@ -86,7 +108,7 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		return nil, fmt.Errorf("--client-id and --client-secret are required (API key and secret)")
 	}
 
-	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	client := newProviderClient(opts)
 
 	// Get system info for version
 	sys, err := client.GetSystemInformation(ctx)
@@ -100,16 +122,43 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		return nil, fmt.Errorf("fetching interfaces: %w", err)
 	}
 
-	// Get firewall rules for policy detection
-	rules, err := client.GetFirewallRules(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetching firewall rules: %w", err)
+	// Get firewall rules for policy detection. A stable 403 (the API user
+	// lacks the Firewall: Filter page privilege) degrades to a zero-policy
+	// spec with an explicit warning — the gateway is reachable and the
+	// credentials are valid, so a least-privilege user must still get a
+	// usable import. Every other failure (401 credential error, transport,
+	// 5xx) stays fatal: a silent "0 policies" import for a broken key or an
+	// unreachable controller would hide the real problem.
+	var rules []FirewallRule
+	var rulesErr error
+	rules, rulesErr = client.GetFirewallRules(ctx)
+	if rulesErr != nil && !isPermissionDenied(rulesErr) {
+		return nil, fmt.Errorf("fetching firewall rules: %w", rulesErr)
 	}
 
-	// Get DHCP leases for host count estimation
-	leases, err := client.GetDHCPLeases(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetching DHCP leases: %w", err)
+	// Get DHCP leases for host count estimation (best-effort on a stable
+	// 403, mirroring the rules fetch above: no DHCP page privilege means a
+	// zero-client estimate, not a fatal import).
+	leases, leasesErr := client.GetDHCPLeases(ctx)
+	if leasesErr != nil && !isPermissionDenied(leasesErr) {
+		return nil, fmt.Errorf("fetching DHCP leases: %w", leasesErr)
+	}
+
+	// Degrade warnings for the stable-privilege 403s above. They ride the
+	// same structured Warnings channel as the other import warnings, so the
+	// CLI prints them once to stderr and `check` (which imports first)
+	// surfaces them alongside the audit report — a 0-policy import never
+	// reads as a clean pass.
+	var warnings []string
+	if rulesErr != nil {
+		warnings = append(warnings,
+			"firewall rules unavailable: "+rulesErr.Error()+
+				" — the spec has no policies; grant the Firewall: Filter page privilege (System ‣ Access ‣ Users) to the API user to import them")
+	}
+	if leasesErr != nil {
+		warnings = append(warnings,
+			"DHCP leases unavailable: "+leasesErr.Error()+
+				" — client count is estimated as 0; grant the Diagnostics: DHCP page privilege (System ‣ Access ‣ Users) to the API user to count leases")
 	}
 
 	// Build networks from interfaces
@@ -134,7 +183,12 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		})
 	}
 
-	// Build assertions: subnet_discovery + network_health per network
+	// Build assertions: subnet_discovery per network, plus one
+	// network_health assertion per distinct gateway. A network without a
+	// gateway contributes no health assertion — a health check with an empty
+	// target fails spec validation and would make the generated spec
+	// unusable.
+	seenGateway := map[string]bool{}
 	var assertions []intent.Assertion
 	for _, n := range networks {
 		assertions = append(assertions, intent.Assertion{
@@ -145,12 +199,14 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 			// modes trigger SYN-flood alarms on SDN controllers.
 			ScanMode: "polite",
 		})
-
+		if n.Gateway == "" || seenGateway[n.Gateway] {
+			continue
+		}
+		seenGateway[n.Gateway] = true
 		assertions = append(assertions, intent.Assertion{
 			Type:            "network_health",
 			Target:          n.Gateway,
 			ExpectLatencyMs: 20,
-			ExpectLossPct:   0,
 		})
 	}
 
@@ -205,10 +261,13 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		Assertions: assertions,
 	}
 
-	warnings := []string{
+	if len(networks) == 0 {
+		warnings = append(warnings, emptyTopologyWarning)
+	}
+	warnings = append(warnings,
 		"OPNsense import uses DHCP lease count as host estimate — adjust expect_hosts_max as needed",
 		"Firewall rules are imported as deny policies — review and adjust in your spec",
-	}
+	)
 
 	return &providers.ImportResult{
 		Spec: spec,
@@ -235,6 +294,11 @@ func (o *Provider) Check(ctx context.Context, opts providers.ImportOptions) (*pr
 		return nil, err
 	}
 	engine := audit.NewEngine(imported.Spec)
+	// Forward the TLS options so audit-engine-backed assertions that talk to
+	// the controller (nat_check, acl_check) honor the same
+	// --skip-tls-verify / --ca-cert the import used.
+	engine.SkipTLSVerify = opts.SkipTLSVerify
+	engine.CACertPath = opts.CACertPath
 	report, err := engine.Run(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("audit failed: %w", err)
@@ -265,7 +329,7 @@ func (o *Provider) NatCheck(ctx context.Context, req providers.NatCheckRequest, 
 	result := models.NewCheckResult("opnsense", "nat_check", "opnsense", req.ExpectMode)
 	result.Expected["nat_mode"] = req.ExpectMode
 
-	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	client := newProviderClient(opts)
 	mode, err := client.GetOutboundNatMode(ctx)
 	if err != nil {
 		return natCheckError(result, "reading outbound NAT mode: %v", err), nil
@@ -342,7 +406,7 @@ func (o *Provider) PlanNat(ctx context.Context, req providers.NatApplyRequest, o
 	if err := requireNatHost(opts); err != nil {
 		return nil, err
 	}
-	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	client := newProviderClient(opts)
 
 	guardCtx, cancel := context.WithTimeout(ctx, natGuardTimeout)
 	guard, err := client.natGuard(guardCtx)
@@ -389,7 +453,7 @@ func (o *Provider) ApplyNat(ctx context.Context, req providers.NatApplyRequest, 
 	if err := requireNatHost(opts); err != nil {
 		return nil, err
 	}
-	client := NewClient(opts.Host, opts.ClientID, opts.ClientSecret, opts.SkipTLSVerify, opts.CACertPath)
+	client := newProviderClient(opts)
 
 	guardCtx, cancel := context.WithTimeout(ctx, natGuardTimeout)
 	guard, err := client.natGuard(guardCtx)

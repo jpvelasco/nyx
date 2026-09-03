@@ -1,10 +1,13 @@
 # MCP Provider Credentials — Behavioral Specification
 
 BDD acceptance contract for credential fallback in the MCP server's Omada and
-OPNsense tools (issue #44). The MCP server resolves provider credentials with
-the **same order the CLI uses** — explicit `tools/call` arguments →
-environment variables → encrypted credential store — so an agent session with
-verified store credentials never has to paste secrets into tool calls.
+OPNsense tools (issue #44). The MCP server resolves Omada provider credentials
+with the **same order the CLI uses** — explicit `tools/call` arguments →
+environment variables → Windows Credential Manager (entry
+`nyx-omada-<host>`, Windows only, no-op elsewhere) → encrypted credential
+store — so an agent session with verified store credentials never has to paste
+secrets into tool calls. OPNsense keeps the three-layer order (arguments → env
+→ store; the Credential Manager fallback is Omada-only, tracked follow-up).
 Scenarios marked **Implemented** are mirrored 1:1 by tests in `internal/mcp`
 and `internal/cli`; each test name is listed under its scenario.
 
@@ -13,8 +16,11 @@ and `internal/cli`; each test name is listed under its scenario.
 - Only credential **resolution** changes, inside `tools/call` handling. Tool
   names, argument names, and result shapes are unchanged.
 - The `tools/list` input schemas for the Omada and OPNsense tools relax their
-  `Required` lists to the truly mandatory arguments (`host`, plus `spec` for
-  `omada_plan`). Credential arguments remain in `Properties` as optional
+  `Required` lists to the truly mandatory arguments — `host` plus each tool's
+  non-credential required inputs (`spec` for `omada_plan`; `device_mac` for
+  `omada_get_uplink_info`; `switch_mac`/`port`/`native` for
+  `omada_plan_port`/`omada_apply_port_profile`) — never the credential
+  arguments. Credential arguments remain in `Properties` as optional
   overrides.
 - `omada_get_info` is unauthenticated and keeps stripping credentials from
   its output (existing test coverage is retained).
@@ -23,19 +29,27 @@ and `internal/cli`; each test name is listed under its scenario.
 
 ### Resolution order (all providers)
 
-| Field | 1. explicit arg | 2. env var | 3. store entry `<provider>/default` |
-| --- | --- | --- | --- |
-| Omada host | `host` | `OMADA_HOST` | `host` |
-| Omada client ID | `client_id` | `OMADA_CLIENT_ID` | `client_id` |
-| Omada client secret | `client_secret` | `OMADA_CLIENT_SECRET` | `client_secret` |
-| Omada site | `site` | `OMADA_SITE` | `site` |
-| OPNsense host | `host` | `OPNSENSE_HOST` | `host` |
-| OPNsense API key | `api_key` | `OPNSENSE_API_KEY` | `api_key` |
-| OPNsense API secret | `api_secret` | `OPNSENSE_API_SECRET` | `api_secret` |
+| Field | 1. explicit arg | 2. env var | 3. Credential Manager (Windows only) | 4. store entry `<provider>/default` |
+| --- | --- | --- | --- | --- |
+| Omada host | `host` | `OMADA_HOST` | — (host never comes from WM) | `host` |
+| Omada client ID | `client_id` | `OMADA_CLIENT_ID` | `nyx-omada-<host>` user name | `client_id` |
+| Omada client secret | `client_secret` | `OMADA_CLIENT_SECRET` | `nyx-omada-<host>` password/blob | `client_secret` |
+| Omada site | `site` | `OMADA_SITE` | — | `site` |
+| OPNsense host | `host` | `OPNSENSE_HOST` | — | `host` |
+| OPNsense API key | `api_key` | `OPNSENSE_API_KEY` | — | `api_key` |
+| OPNsense API secret | `api_secret` | `OPNSENSE_API_SECRET` | — | `api_secret` |
 
 An explicitly supplied value at any level always wins over every lower level.
 Store read failures are silently ignored (the same posture as
 `credentials.Overlay`), falling through to the missing-credentials error.
+Credential Manager reads follow the same posture: missing entries (and
+non-Windows platforms, which report
+"windows credential manager is not supported on this platform") fall through
+to the store layer. The entry is named after the **resolved** host, so a WM
+entry can supply credentials but never the host itself. Entry creation is an
+operator action via `cmdkey /generic:nyx-omada-<host> /user:<client-id>
+/pass:<client-secret>`; the secret is never logged, written to evidence, or
+returned in tool output.
 
 ## 1. Omada credential resolution
 
@@ -73,8 +87,11 @@ Store read failures are silently ignored (the same posture as
 - **When** the agent calls a credential tool with only `host`
 - **Then** the tool errors with
   `client_id and client_secret parameters are required: set the
-  OMADA_CLIENT_ID / OMADA_CLIENT_SECRET environment variables or run
-  `nyx credentials set omada``
+  OMADA_CLIENT_ID / OMADA_CLIENT_SECRET environment variables or use a
+  Windows Credential Manager entry nyx-omada-<host> (cmdkey
+  /generic:nyx-omada-<host> /user:<client-id> /pass:<client-secret>) or
+  run `nyx credentials set omada`` (the WM clause names the entry for the
+  resolved host; the pinned substrings above are still contained)
 - **And** the tests: `TestMCPToolCallsOmadaCredentialsMissingEverywhere`
   plus the updated `TestDispatchOmada*` / `TestDispatchOpnsense*` missing-
   credential cases
@@ -115,8 +132,12 @@ Store read failures are silently ignored (the same posture as
 ### S3.1 Input schemas mark credentials optional — **Implemented**
 
 - **When** the client reads `tools/list`
-- **Then** every Omada tool requires only `host` (plus `spec` for
-  `omada_plan`) and every OPNsense tool requires only `host` in `Required`
+- **Then** every Omada tool requires `host` plus its non-credential required
+  arguments (`spec` for `omada_plan`, `device_mac` for
+  `omada_get_uplink_info`, `switch_mac`/`port`/`native` for
+  `omada_plan_port`/`omada_apply_port_profile`) and every OPNsense tool
+  requires `host` plus its operation inputs — and no tool requires a
+  credential argument in `Required`
 - **And** the test: `TestHandleToolsList_SchemaCredentialsOptional`
 
 ### S3.2 Store path honors `NYX_CREDENTIALS_FILE` — **Implemented**

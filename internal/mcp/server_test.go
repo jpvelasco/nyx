@@ -298,8 +298,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 35 {
-		t.Fatalf("expected 35 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 40 {
+		t.Fatalf("expected 40 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -308,7 +308,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_inventory", "topology"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_plan_port", "omada_apply_port_profile", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_inventory", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -347,6 +347,11 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 		"omada_list_one_to_one_nat":        {"host"},
 		"omada_get_nat_settings":           {"host"},
 		"omada_nat_facts":                  {"host"},
+		"omada_get_uplink_info":            {"host", "device_mac"},
+		"omada_list_switch_ports":          {"host"},
+		"omada_list_lan_profiles":          {"host"},
+		"omada_plan_port":                  {"host", "switch_mac", "port", "native"},
+		"omada_apply_port_profile":         {"host", "switch_mac", "port", "native"},
 		"opnsense_get_info":                {"host"},
 		"opnsense_list_interfaces":         {"host"},
 		"opnsense_list_firewall_rules":     {"host"},
@@ -1640,9 +1645,17 @@ type stubOmadaSvc struct {
 	alg          *service.OmadaALGSettings
 	firewall     *service.OmadaFirewallSettings
 	natFacts     *service.OmadaNatFacts
+	uplink       []service.OmadaUplinkInfo
+	switchPorts  []service.OmadaSwitchPort
+	profiles     []service.OmadaLanProfile
+	portPlan     *service.OmadaPortPlan
+	portApply    *service.OmadaPortProfileApplyResult
 	err          error
 	lastOpts     service.OmadaOptions
 	lastApplyReq service.OmadaACLApplyRequest
+	lastMACs     []string
+	lastPortReq  service.OmadaPortProfileRequest
+	lastDryRun   bool
 	calls        int
 }
 
@@ -1723,6 +1736,45 @@ func (s *stubOmadaSvc) NatFacts(_ context.Context, opts service.OmadaOptions) (*
 	s.calls++
 	s.lastOpts = opts
 	return s.natFacts, s.err
+}
+
+func (s *stubOmadaSvc) GetUplinkInfo(_ context.Context, opts service.OmadaOptions, macs []string) ([]service.OmadaUplinkInfo, error) {
+	s.calls++
+	s.lastOpts = opts
+	s.lastMACs = macs
+	return s.uplink, s.err
+}
+
+func (s *stubOmadaSvc) ListSwitchPorts(_ context.Context, opts service.OmadaOptions, _ string) ([]service.OmadaSwitchPort, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.switchPorts, s.err
+}
+
+func (s *stubOmadaSvc) ListLanProfiles(_ context.Context, opts service.OmadaOptions) ([]service.OmadaLanProfile, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.profiles, s.err
+}
+
+func (s *stubOmadaSvc) PlanPort(_ context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest) (*service.OmadaPortPlan, error) {
+	s.calls++
+	s.lastOpts = opts
+	s.lastPortReq = req
+	return s.portPlan, s.err
+}
+
+func (s *stubOmadaSvc) ApplyPortProfile(_ context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest, dryRun bool) (*service.OmadaPortProfileApplyResult, error) {
+	s.calls++
+	s.lastOpts = opts
+	s.lastPortReq = req
+	s.lastDryRun = dryRun
+	if s.portApply == nil {
+		return nil, s.err // error path: the result is never built
+	}
+	res := *s.portApply
+	res.DryRun = dryRun // mirror the arg so handlers can be asserted on the wire
+	return &res, s.err
 }
 
 func sliceEq(a, b []string) bool {
@@ -1921,6 +1973,118 @@ func TestDispatchOmadaNatReads_ServiceError(t *testing.T) {
 	}
 }
 
+func TestDispatchOmadaPortReads(t *testing.T) {
+	// Redirect the credential store away from the real one so the inline
+	// test credentials below are the only source of truth (hermetic on any
+	// runner, even one with an existing omada/default entry).
+	t.Setenv("NYX_CREDENTIALS_FILE", t.TempDir()+"/credentials.json")
+	// One stub per assertion so a single stub can't leak state across cases.
+	uplinkStub := &stubOmadaSvc{
+		uplink: []service.OmadaUplinkInfo{{MAC: "aa:bb:cc:dd:ee:01", UplinkDeviceMAC: "aa:bb:cc:dd:ee:00", UplinkDevicePort: "8"}},
+	}
+	if text, isErr := serverWithOmadaStub(uplinkStub).DispatchToolForTest(context.Background(), "omada_get_uplink_info",
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "device_mac": "aa:bb:cc:dd:ee:01"}); isErr {
+		t.Fatalf("uplink: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"uplink_device_port": "8"`) {
+		t.Errorf("uplink JSON = %s", text)
+	} else if len(uplinkStub.lastMACs) != 1 || uplinkStub.lastMACs[0] != "aa:bb:cc:dd:ee:01" {
+		t.Errorf("uplink macs = %v, want [aa:bb:cc:dd:ee:01]", uplinkStub.lastMACs)
+	}
+
+	// No observed uplink → explicit note, not a bare empty array.
+	if text, isErr := serverWithOmadaStub(&stubOmadaSvc{}).DispatchToolForTest(context.Background(), "omada_get_uplink_info",
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "device_mac": "no:such:mac"}); isErr {
+		t.Fatalf("uplink empty: unexpected error: %s", text)
+	} else if !strings.Contains(text, "no uplink observed") {
+		t.Errorf("uplink empty note = %s", text)
+	}
+
+	// Missing device_mac.
+	if text, isErr := serverWithOmadaStub(&stubOmadaSvc{}).DispatchToolForTest(context.Background(), "omada_get_uplink_info",
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw"}); !isErr || !strings.Contains(text, "device_mac parameter is required") {
+		t.Errorf("uplink missing mac: got (%q, %v)", text, isErr)
+	}
+
+	if text, isErr := serverWithOmadaStub(&stubOmadaSvc{
+		switchPorts: []service.OmadaSwitchPort{{Port: 8, SwitchMAC: "aa:bb:cc:dd:ee:00", NativeNetwork: "trusted", Tagged: []string{"gaming", "media"}}},
+	}).DispatchToolForTest(context.Background(), "omada_list_switch_ports",
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "switch_mac": "aa:bb:cc:dd:ee:00"}); isErr {
+		t.Fatalf("switch ports: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"native_network": "trusted"`) || !strings.Contains(text, `"gaming"`) {
+		t.Errorf("switch ports JSON = %s", text)
+	}
+
+	if text, isErr := serverWithOmadaStub(&stubOmadaSvc{
+		profiles: []service.OmadaLanProfile{{ID: "lp1", Name: "trunk", NativeNetwork: "trusted", TaggedNetworks: []string{"gaming", "media"}}},
+	}).DispatchToolForTest(context.Background(), "omada_list_lan_profiles",
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw"}); isErr {
+		t.Fatalf("lan profiles: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"name": "trunk"`) {
+		t.Errorf("lan profiles JSON = %s", text)
+	}
+
+	planArgs := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "switch_mac": "aa:bb:cc:dd:ee:00", "port": float64(8), "native": "trusted", "tagged": "gaming,media"}
+	planStub := &stubOmadaSvc{portPlan: &service.OmadaPortPlan{SwitchMAC: "aa:bb:cc:dd:ee:00", Port: 8, Outcome: "rebind", ProfileID: "lp1"}}
+	if text, isErr := serverWithOmadaStub(planStub).DispatchToolForTest(context.Background(), "omada_plan_port", planArgs); isErr {
+		t.Fatalf("plan port: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"outcome": "rebind"`) {
+		t.Errorf("plan port JSON = %s", text)
+	}
+	// The request arguments reach the service verbatim.
+	if planStub.lastPortReq.SwitchMAC != "aa:bb:cc:dd:ee:00" || planStub.lastPortReq.Port != 8 ||
+		planStub.lastPortReq.Native != "trusted" || len(planStub.lastPortReq.Tagged) != 2 {
+		t.Errorf("request = %+v", planStub.lastPortReq)
+	}
+
+	// Dry-run is the default: an omitted dry_run applies the true default.
+	applyStub := &stubOmadaSvc{portApply: &service.OmadaPortProfileApplyResult{Outcome: "rebind", ProfileID: "lp1", Before: "{}", After: "{}"}}
+	if text, isErr := serverWithOmadaStub(applyStub).DispatchToolForTest(context.Background(), "omada_apply_port_profile", planArgs); isErr {
+		t.Fatalf("apply port: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"dry_run": true`) {
+		t.Errorf("apply port JSON = %s", text)
+	} else if !applyStub.lastDryRun {
+		t.Error("apply port: dry_run default should reach the service as true")
+	}
+
+	// An explicit dry_run=false reaches the service and is echoed back.
+	applyStub2 := &stubOmadaSvc{portApply: &service.OmadaPortProfileApplyResult{Outcome: "created_and_bound", ProfileID: "lp2"}}
+	realArgs := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "switch_mac": "aa:bb:cc:dd:ee:00", "port": float64(8), "native": "trusted", "dry_run": false}
+	if text, isErr := serverWithOmadaStub(applyStub2).DispatchToolForTest(context.Background(), "omada_apply_port_profile", realArgs); isErr {
+		t.Fatalf("apply port real: unexpected error: %s", text)
+	} else if !strings.Contains(text, `"dry_run": false`) || !strings.Contains(text, `"outcome": "created_and_bound"`) {
+		t.Errorf("apply port real JSON = %s", text)
+	} else if applyStub2.lastDryRun {
+		t.Error("apply port: dry_run=false should reach the service as false")
+	}
+
+	if text, isErr := serverWithOmadaStub(&stubOmadaSvc{}).DispatchToolForTest(context.Background(), "omada_plan_port",
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "switch_mac": "aa:bb:cc:dd:ee:00", "native": "trusted"}); !isErr || !strings.Contains(text, "port parameter is required") {
+		t.Errorf("plan port missing port: got (%q, %v)", text, isErr)
+	}
+
+	if text, isErr := serverWithOmadaStub(&stubOmadaSvc{}).DispatchToolForTest(context.Background(), "omada_plan_port",
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "port": float64(8), "native": "trusted"}); !isErr || !strings.Contains(text, "switch_mac parameter is required") {
+		t.Errorf("plan port missing mac: got (%q, %v)", text, isErr)
+	}
+
+	if text, isErr := serverWithOmadaStub(&stubOmadaSvc{}).DispatchToolForTest(context.Background(), "omada_apply_port_profile",
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "switch_mac": "aa:bb:cc:dd:ee:00", "port": float64(8)}); !isErr || !strings.Contains(text, "native parameter is required") {
+		t.Errorf("apply port missing native: got (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchOmadaPortReads_ServiceError(t *testing.T) {
+	t.Setenv("NYX_CREDENTIALS_FILE", t.TempDir()+"/credentials.json")
+	server := serverWithOmadaStub(&stubOmadaSvc{err: errors.New("site not found")})
+	args := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "switch_mac": "aa:bb:cc:dd:ee:00", "port": float64(8), "native": "trusted"}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan_port", args); !isErr || !strings.Contains(text, "omada port plan request failed") {
+		t.Errorf("plan: got (%q, %v)", text, isErr)
+	}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_apply_port_profile", args); !isErr || !strings.Contains(text, "omada port profile apply failed") {
+		t.Errorf("apply: got (%q, %v)", text, isErr)
+	}
+}
+
 func TestDispatchOpnsenseNatReads(t *testing.T) {
 	stub := &stubOpnsenseSvc{
 		portFwd:   []service.OpnsenseNatRule{{UUID: "n1", Protocol: "tcp", Source: "any", Destination: "10.0.40.0/24"}},
@@ -2076,10 +2240,17 @@ func TestDispatchOmadaNatReads_Errors(t *testing.T) {
 		{"omada_list_port_forwardings", "omada port forwardings request failed"},
 		{"omada_list_one_to_one_nat", "omada one-to-one NAT request failed"},
 		{"omada_nat_facts", "omada nat facts request failed"},
+		{"omada_list_switch_ports", "omada switch ports request failed"},
+		{"omada_list_lan_profiles", "omada lan profiles request failed"},
+		{"omada_get_uplink_info", "omada uplink info request failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.tool, func(t *testing.T) {
 			server := serverWithOmadaStub(&stubOmadaSvc{err: errors.New("controller down")})
+			args := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw"}
+			if tc.tool == "omada_get_uplink_info" {
+				args["device_mac"] = "aa:bb:cc:dd:ee:00"
+			}
 			text, isErr := server.DispatchToolForTest(context.Background(), tc.tool, args)
 			if !isErr || !strings.Contains(text, tc.want) || !strings.Contains(text, "controller down") {
 				t.Errorf("got (%q, %v), want %q", text, isErr, tc.want)
@@ -2170,6 +2341,11 @@ func TestDispatchNatReads_MissingHost(t *testing.T) {
 		"omada_list_one_to_one_nat",
 		"omada_get_nat_settings",
 		"omada_nat_facts",
+		"omada_get_uplink_info",
+		"omada_list_switch_ports",
+		"omada_list_lan_profiles",
+		"omada_plan_port",
+		"omada_apply_port_profile",
 	}
 	for _, tool := range omadaTools {
 		t.Run(tool, func(t *testing.T) {

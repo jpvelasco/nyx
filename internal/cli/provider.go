@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
+	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/report"
 	"github.com/jpvelasco/nyx/internal/storepath"
@@ -99,6 +100,15 @@ func BuildProviderSubcommands(root *cobra.Command) {
 		}
 		if caps["inventory"] {
 			vendorCmd.AddCommand(buildInventoryCmd(p))
+		}
+
+		// Omada-only observation subcommands (uplink-info / switch-ports /
+		// lan-profiles) are not capabilities: they are extra surface, wired
+		// here for the omada provider only.
+		if p.Name() == "omada" {
+			for _, extra := range buildOmadaExtraCommands() {
+				vendorCmd.AddCommand(extra)
+			}
 		}
 
 		root.AddCommand(vendorCmd)
@@ -259,6 +269,7 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 			defer cancel()
 
 			opts := providerImportOptions(p.Name())
+			opts.Debug = providerDebug
 			if err := requireProviderHost(opts, p.Name()); err != nil {
 				return err
 			}
@@ -280,6 +291,7 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 	}
 	addProviderFlags(cmd)
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name (defaults to first site)")
+	cmd.Flags().BoolVar(&providerDebug, "debug", false, "Print raw API responses to stderr")
 	return cmd
 }
 
@@ -301,9 +313,11 @@ var providerEnvNames = map[string][4]string{
 }
 
 // providerImportOptions builds ImportOptions from flags, then per-provider
-// env vars, then the encrypted credential store. Flags win over env; env
-// wins over the store. Missing host after all three is left empty so the
-// provider surfaces its own connection error.
+// env vars, then the Windows Credential Manager (omada; entry
+// nyx-omada-<host>, no-op off Windows), then the encrypted credential
+// store. Flags win over env; env wins over the Credential Manager; the
+// store wins over nothing. Missing host after all four is left empty so
+// the provider surfaces its own connection error.
 func providerImportOptions(providerName string) providers.ImportOptions {
 	names, ok := providerEnvNames[providerName]
 	// Unknown providers keep the historical omada env names.
@@ -317,7 +331,12 @@ func providerImportOptions(providerName string) providers.ImportOptions {
 		Site:          storepath.FirstNonEmpty(providerSite, os.Getenv(names[3])),
 		SkipTLSVerify: providerSkipTLS,
 		CACertPath:    providerCACertPath,
-		Logger:        log,
+		Logger:        slogLog,
+	}
+	// Windows Credential Manager layer, between env vars and the store
+	// (omada only; no-op off Windows — see credmanager).
+	if providerName == "omada" {
+		opts.ClientID, opts.ClientSecret = credmanager.OverlayOmada(opts.Host, opts.ClientID, opts.ClientSecret)
 	}
 	// Overlay is fill-only: a partial store entry must never clear values
 	// already resolved from flags or env vars.
