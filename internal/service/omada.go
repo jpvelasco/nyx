@@ -424,15 +424,16 @@ type OmadaPortProfileRequest struct {
 // apply with before/after evidence (the port row joined to its referenced
 // LAN profile).
 type OmadaPortProfileApplyResult struct {
-	DryRun        bool   `json:"dry_run"`
-	Outcome       string `json:"outcome"` // "unchanged" | "bound" | "created_and_bound" (a dry run previews the real-apply outcome)
-	SwitchMAC     string `json:"switch_mac"`
-	Port          int    `json:"port"`
-	ProfileID     string `json:"profile_id,omitempty"`
-	ProfileName   string `json:"profile_name,omitempty"`
-	ProfileCreate bool   `json:"profile_create,omitempty"`
-	Before        string `json:"before"`
-	After         string `json:"after"`
+	DryRun        bool     `json:"dry_run"`
+	Outcome       string   `json:"outcome"` // "unchanged" | "bound" | "created_and_bound" (a dry run previews the real-apply outcome)
+	SwitchMAC     string   `json:"switch_mac"`
+	Port          int      `json:"port"`
+	ProfileID     string   `json:"profile_id,omitempty"`
+	ProfileName   string   `json:"profile_name,omitempty"`
+	ProfileCreate bool     `json:"profile_create,omitempty"`
+	Before        string   `json:"before"`
+	After         string   `json:"after"`
+	Warnings      []string `json:"warnings,omitempty"`
 }
 
 // GetUplinkInfo returns the uplink device (and port) for each queried MAC.
@@ -575,6 +576,7 @@ func (s *OmadaService) ApplyPortProfile(ctx context.Context, opts OmadaOptions, 
 		ProfileCreate: plan.ProfileCreate,
 		Before:        before,
 		After:         before,
+		Warnings:      plan.Warnings,
 	}
 	if dryRun {
 		// No write, no re-read. Report the outcome a real apply would
@@ -683,6 +685,13 @@ func planPortFromState(req OmadaPortProfileRequest, ports []omadabackend.SwitchP
 	plan.Current = portObservation(*cur, profiles, netName)
 	if p := findProfileByID(profiles, cur.ProfileID); p != nil {
 		plan.CurrentProfile = serviceLanProfile(*p, netName)
+	}
+	if cur.ProfileOverride {
+		// The effective membership can differ from the bound profile, so
+		// every outcome decision below is advisory until the port is
+		// re-verified after the (non-)write.
+		plan.Warnings = append(plan.Warnings,
+			"port has a profile override enabled: its effective VLAN membership may differ from the bound profile")
 	}
 	// Idempotent first: if the port's currently-bound profile already has
 	// the desired membership, nothing needs to happen.

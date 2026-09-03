@@ -1195,10 +1195,11 @@ func TestOmadaServiceApplyACL_ProviderLacksMutation(t *testing.T) {
 // omadaPortState is the mutable controller state for port-profile tests:
 // the site's LAN profiles plus each port's bound profileId.
 type omadaPortState struct {
-	Profiles     []omadabackend.LanProfile
-	PortProfiles map[int]string
-	NextID       int
-	FailBind     bool // fail the per-port profile PUT (bind)
+	Profiles      []omadabackend.LanProfile
+	PortProfiles  map[int]string
+	NextID        int
+	FailBind      bool // fail the per-port profile PUT (bind)
+	Port8Override bool // report port 8 with profileOverrideEnable
 }
 
 // omadaPortOpts is the standard (synthetic) OmadaOptions for port-profile
@@ -1277,7 +1278,7 @@ func omadaPortBaseHandler(t *testing.T, st *omadaPortState) http.HandlerFunc {
 func writePortOverview(w io.Writer, st *omadaPortState) {
 	rows := []map[string]any{
 		{"port": 1, "portName": "GE1", "switchMac": "aa:bb:cc:dd:ee:01", "switchName": "SW-A", "connectedStatus": 0, "disable": false, "networkMode": 1, "nativeNetworkId": "n1", "nativeBridgeVlan": 0, "networkTagsSetting": 0, "profileId": st.PortProfiles[1], "profileName": "Access-trusted", "profileOverrideEnable": false},
-		{"port": 8, "portName": "GE8", "switchMac": "bb:11:22:33:44:55", "switchName": "SW-CORE", "connectedStatus": 0, "disable": false, "networkMode": 0, "nativeNetworkId": "n1", "nativeBridgeVlan": 0, "networkTagsSetting": 0, "profileId": st.PortProfiles[8], "profileName": "Access-trusted", "profileOverrideEnable": false},
+		{"port": 8, "portName": "GE8", "switchMac": "bb:11:22:33:44:55", "switchName": "SW-CORE", "connectedStatus": 0, "disable": false, "networkMode": 0, "nativeNetworkId": "n1", "nativeBridgeVlan": 0, "networkTagsSetting": 0, "profileId": st.PortProfiles[8], "profileName": "Access-trusted", "profileOverrideEnable": st.Port8Override},
 		{"port": 9, "portName": "GE9", "switchMac": "aa:bb:cc:dd:ee:01", "switchName": "SW-A", "connectedStatus": 1, "disable": false, "networkMode": 0, "nativeNetworkId": "", "nativeBridgeVlan": 0, "networkTagsSetting": 0, "profileId": st.PortProfiles[9], "profileName": "media+gaming", "profileOverrideEnable": false},
 		{"port": 10, "portName": "GE10", "switchMac": "aa:bb:cc:dd:ee:01", "switchName": "SW-A", "connectedStatus": 0, "disable": false, "networkMode": 1, "nativeNetworkId": "n1", "nativeBridgeVlan": 0, "networkTagsSetting": 0, "profileId": st.PortProfiles[10], "profileName": "Access-trusted", "profileOverrideEnable": false},
 	}
@@ -1768,6 +1769,45 @@ func TestPlanPort_AmbiguousNativeName(t *testing.T) {
 		OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "guest"})
 	if err == nil || !strings.Contains(err.Error(), `network name "guest" is ambiguous`) {
 		t.Errorf("plan with duplicate native name: err = %v", err)
+	}
+}
+
+// TestPlanPort_ProfileOverrideWarning covers a port whose effective
+// membership may differ from the bound profile: the plan still reports the
+// bound-profile outcome, but it must carry the override warning so the
+// agent knows the port needs re-verification.
+func TestPlanPort_ProfileOverrideWarning(t *testing.T) {
+	st := omadaPortStateFresh()
+	st.Port8Override = true
+	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+	plan, err := NewOmadaService().PlanPort(context.Background(), omadaPortOpts(ts.URL),
+		OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "trusted"})
+	if err != nil {
+		t.Fatalf("PlanPort: %v", err)
+	}
+	if plan.Outcome != "unchanged" {
+		t.Fatalf("plan outcome = %q, want unchanged", plan.Outcome)
+	}
+	if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], "profile override") {
+		t.Errorf("plan warnings = %v, want the profile-override warning", plan.Warnings)
+	}
+	if plan.Current == nil || !plan.Current.ProfileOverride {
+		t.Errorf("plan current = %+v, want ProfileOverride true", plan.Current)
+	}
+
+	// The warning must travel into the apply result: an "unchanged"
+	// short-circuit on an overridden port is only valid after the port is
+	// re-verified.
+	res, err := NewOmadaService().ApplyPortProfile(context.Background(), omadaPortOpts(ts.URL),
+		OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "trusted"}, true)
+	if err != nil {
+		t.Fatalf("ApplyPortProfile: %v", err)
+	}
+	if res.Outcome != "unchanged" {
+		t.Fatalf("apply outcome = %q, want unchanged", res.Outcome)
+	}
+	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "profile override") {
+		t.Errorf("apply warnings = %v, want the profile-override warning", res.Warnings)
 	}
 }
 
