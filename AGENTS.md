@@ -18,7 +18,7 @@ go test ./internal/intent/...
 go test -run TestParseSpec ./internal/intent/...
 ```
 
-Go toolchain: `go.mod` declares `go 1.25.13` — the `go` directive is authoritative over any README minimum-version claim.
+Go toolchain: `go.mod` declares `go 1.26.0` — the `go` directive is authoritative over any README minimum-version claim.
 
 Local (Windows) gotchas:
 - Parallel `go test ./...` can hit localhost port-binding flakiness on this machine — prefer `go test -p 1 ./...` for reliable runs.
