@@ -16,8 +16,11 @@ and `internal/cli`; each test name is listed under its scenario.
 - Only credential **resolution** changes, inside `tools/call` handling. Tool
   names, argument names, and result shapes are unchanged.
 - The `tools/list` input schemas for the Omada and OPNsense tools relax their
-  `Required` lists to the truly mandatory arguments (`host`, plus `spec` for
-  `omada_plan`). Credential arguments remain in `Properties` as optional
+  `Required` lists to the truly mandatory arguments — `host` plus each tool's
+  non-credential required inputs (`spec` for `omada_plan`; `device_mac` for
+  `omada_get_uplink_info`; `switch_mac`/`port`/`native` for
+  `omada_plan_port`/`omada_apply_port_profile`) — never the credential
+  arguments. Credential arguments remain in `Properties` as optional
   overrides.
 - `omada_get_info` is unauthenticated and keeps stripping credentials from
   its output (existing test coverage is retained).
@@ -129,8 +132,12 @@ returned in tool output.
 ### S3.1 Input schemas mark credentials optional — **Implemented**
 
 - **When** the client reads `tools/list`
-- **Then** every Omada tool requires only `host` (plus `spec` for
-  `omada_plan`) and every OPNsense tool requires only `host` in `Required`
+- **Then** every Omada tool requires `host` plus its non-credential required
+  arguments (`spec` for `omada_plan`, `device_mac` for
+  `omada_get_uplink_info`, `switch_mac`/`port`/`native` for
+  `omada_plan_port`/`omada_apply_port_profile`) and every OPNsense tool
+  requires `host` plus its operation inputs — and no tool requires a
+  credential argument in `Required`
 - **And** the test: `TestHandleToolsList_SchemaCredentialsOptional`
 
 ### S3.2 Store path honors `NYX_CREDENTIALS_FILE` — **Implemented**

@@ -124,6 +124,11 @@ type omadaSurface interface {
 	GetALGSettings(ctx context.Context, opts service.OmadaOptions) (*service.OmadaALGSettings, error)
 	GetFirewallSettings(ctx context.Context, opts service.OmadaOptions) (*service.OmadaFirewallSettings, error)
 	NatFacts(ctx context.Context, opts service.OmadaOptions) (*service.OmadaNatFacts, error)
+	GetUplinkInfo(ctx context.Context, opts service.OmadaOptions, macs []string) ([]service.OmadaUplinkInfo, error)
+	ListSwitchPorts(ctx context.Context, opts service.OmadaOptions, switchMAC string) ([]service.OmadaSwitchPort, error)
+	ListLanProfiles(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaLanProfile, error)
+	PlanPort(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest) (*service.OmadaPortPlan, error)
+	ApplyPortProfile(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest, dryRun bool) (*service.OmadaPortProfileApplyResult, error)
 }
 
 // opnsenseSurface is the OPNsense observation surface exposed to agents.
@@ -523,6 +528,48 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: omadaToolSchema(),
 		},
 		{
+			Name:        "omada_get_uplink_info",
+			Description: "Look up which managed device (and which port) a device MAC is cabled into, from the controller's uplink observation. Use to find where a standalone switch's uplink lands before changing port profiles. Read-only.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"device_mac": {Type: "string", Description: "MAC address of the device to look up (e.g. the standalone switch's MAC)"},
+			}, []string{"host", "device_mac"}),
+		},
+		{
+			Name:        "omada_list_switch_ports",
+			Description: "List switch ports with their live VLAN membership: the bound profile plus the resolved native (untagged) network and tagged set. Read-only.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"switch_mac": {Type: "string", Description: "Optional switch MAC to filter ports; empty lists every switch in the site"},
+			}, []string{"host"}),
+		},
+		{
+			Name:        "omada_list_lan_profiles",
+			Description: "List the site's LAN profiles — the VLAN membership sets ports can be bound to: the native (untagged) network plus the tagged set per profile. Read-only.",
+			InputSchema: omadaToolSchema(),
+		},
+		{
+			Name:        "omada_plan_port",
+			Description: "Preview bringing one switch port to a desired VLAN membership (native network plus tagged set): the port's current membership and profile, and whether an existing LAN profile can be rebound or a new one must be created. Read-only: nothing is applied.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"switch_mac":   {Type: "string", Description: "Switch MAC hosting the port"},
+				"port":         {Type: "integer", Description: "Port number (1-based)"},
+				"native":       {Type: "string", Description: "Native (untagged) LAN network name"},
+				"tagged":       {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
+				"profile_name": {Type: "string", Description: "Optional name for a new profile; derived when empty"},
+			}, []string{"host", "switch_mac", "port", "native"}),
+		},
+		{
+			Name:        "omada_apply_port_profile",
+			Description: "Bind a switch port to a LAN profile with the desired VLAN membership (native network plus tagged set): find an existing profile whose membership matches, create one when none does, then bind it to the port. Idempotent (unchanged / bound / created_and_bound). Dry-run is the default: set dry_run=false to apply for real. The result carries before/after evidence (the port row joined to its referenced profile).",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"switch_mac":   {Type: "string", Description: "Switch MAC hosting the port"},
+				"port":         {Type: "integer", Description: "Port number (1-based)"},
+				"native":       {Type: "string", Description: "Native (untagged) LAN network name"},
+				"tagged":       {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
+				"profile_name": {Type: "string", Description: "Optional name for a new profile; derived when empty"},
+				"dry_run":      {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
+			}, []string{"host", "switch_mac", "port", "native"}),
+		},
+		{
 			Name:        "opnsense_get_info",
 			Description: "Fetch system metadata (version, product, arch) from an OPNsense firewall. Reads the Dashboard-privileged system-information endpoint (no System: Firmware privilege required).",
 			InputSchema: opnsenseToolSchema(),
@@ -904,6 +951,37 @@ func argBoolDefault(args map[string]interface{}, key string, def bool) bool {
 		return def
 	}
 	return v
+}
+
+// argIntDefault returns an integer tool argument (JSON numbers decode as
+// float64), or the default when absent or non-numeric.
+func argIntDefault(args map[string]interface{}, key string, def int) int {
+	if v, ok := args[key].(float64); ok {
+		return int(v)
+	}
+	return def
+}
+
+// portProfileRequestFromArgs parses the plan/apply port-profile request
+// arguments, shared by omada_plan_port and omada_apply_port_profile.
+func portProfileRequestFromArgs(args map[string]interface{}) (service.OmadaPortProfileRequest, string) {
+	req := service.OmadaPortProfileRequest{
+		SwitchMAC:   argString(args, "switch_mac"),
+		Port:        argIntDefault(args, "port", 0),
+		Native:      argString(args, "native"),
+		Tagged:      splitCSV(argString(args, "tagged")),
+		ProfileName: argString(args, "profile_name"),
+	}
+	if req.SwitchMAC == "" {
+		return req, "switch_mac parameter is required"
+	}
+	if req.Port <= 0 {
+		return req, "port parameter is required (1-based port number)"
+	}
+	if req.Native == "" {
+		return req, "native parameter is required"
+	}
+	return req, ""
 }
 
 // opnsenseOptionsFromArgs extracts OPNsense connection options from tool

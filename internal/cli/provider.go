@@ -102,6 +102,15 @@ func BuildProviderSubcommands(root *cobra.Command) {
 			vendorCmd.AddCommand(buildInventoryCmd(p))
 		}
 
+		// Omada-only observation subcommands (uplink-info / switch-ports /
+		// lan-profiles) are not capabilities: they are extra surface, wired
+		// here for the omada provider only.
+		if p.Name() == "omada" {
+			for _, extra := range buildOmadaExtraCommands() {
+				vendorCmd.AddCommand(extra)
+			}
+		}
+
 		root.AddCommand(vendorCmd)
 	}
 }

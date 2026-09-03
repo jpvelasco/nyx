@@ -62,7 +62,7 @@ func boundGatewayDevice(devices []Device, n Network) *Device {
 	}
 	if n.DeviceMac != "" {
 		for i := range gws {
-			if gws[i].MAC != "" && normalizeMAC(gws[i].MAC) == normalizeMAC(n.DeviceMac) {
+			if gws[i].MAC != "" && NormalizeMAC(gws[i].MAC) == NormalizeMAC(n.DeviceMac) {
 				return &gws[i]
 			}
 		}
@@ -106,10 +106,10 @@ func NetworkGatewayMap(devices []Device, networks []Network) map[string]string {
 	return out
 }
 
-// normalizeMAC lowercases and strips all separators (colons, dashes,
+// NormalizeMAC lowercases and strips all separators (colons, dashes,
 // spaces) so 00:11:22:33:44:55, 00-11-22-33-44-55, and space-separated
 // forms all compare equal.
-func normalizeMAC(mac string) string {
+func NormalizeMAC(mac string) string {
 	mac = strings.ToLower(mac)
 	mac = strings.ReplaceAll(mac, ":", "")
 	mac = strings.ReplaceAll(mac, "-", "")

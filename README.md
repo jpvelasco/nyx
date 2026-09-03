@@ -269,6 +269,11 @@ Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `O
 | `omada_import` | Import Omada state into an intent spec (networks, policies, assertions) |
 | `omada_plan` | Preview ACL rule differences between the controller and a proposed spec (read-only) |
 | `omada_apply_acl` | Apply an ACL policy change: create a rule or enable a disabled matching rule. Dry-run is the default; a real apply is followed by a targeted isolation audit |
+| `omada_get_uplink_info` | Look up which port/uplink a device is connected to by MAC (port mapping) |
+| `omada_list_switch_ports` | List switch ports with connection status, mode, and the VLAN membership of their bound LAN profile |
+| `omada_list_lan_profiles` | List a site's LAN profiles — the VLAN membership sets (native + tagged) ports bind to |
+| `omada_plan_port` | Preview bringing one switch port to a desired VLAN membership: current vs. desired state and whether an existing profile can be rebound or a new one must be created (read-only) |
+| `omada_apply_port_profile` | Bind a switch port to a LAN profile with the desired VLAN membership (find-or-create the matching profile, then bind). Idempotent (`unchanged`/`bound`/`created_and_bound`); dry-run is the default |
 | `opnsense_get_info` | Fetch OPNsense system metadata (version, product, arch) |
 | `opnsense_list_interfaces` | List OPNsense interfaces with IP configuration |
 | `opnsense_list_firewall_rules` | List OPNsense firewall filter rules |
@@ -315,7 +320,14 @@ nyx omada import --host 192.168.11.20 --client-id <client-id> --client-secret <c
 
 # Import and audit in one step
 nyx omada check --host 192.168.11.20 --client-id <client-id> --client-secret <client-secret> --spec examples/homelab.yaml
+
+# Per-port observation: which port a device is on, port VLAN membership, LAN profiles
+nyx omada uplink-info --host 192.168.11.20 --client-id <client-id> --client-secret <client-secret> --mac <device-mac>
+nyx omada switch-ports --host 192.168.11.20 --client-id <client-id> --client-secret <client-secret> --switch-mac <switch-mac>
+nyx omada lan-profiles --host 192.168.11.20 --client-id <client-id> --client-secret <client-secret>
 ```
+
+Port profile **writes** (plan + apply, dry-run by default) are available as MCP tools `omada_plan_port` / `omada_apply_port_profile` only — the CLI exposes the read surfaces above.
 
 Credentials can be passed via flags, env vars (`OMADA_HOST`, `OMADA_CLIENT_ID`, `OMADA_CLIENT_SECRET`), the Windows Credential Manager (entry `nyx-omada-<host>`, created with `cmdkey /generic:nyx-omada-<host> /user:<client-id> /pass:<client-secret>`), or the encrypted store (`nyx credentials set omada`).
 
