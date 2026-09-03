@@ -14,14 +14,14 @@ import (
 func omadaExtFakeController(t *testing.T, uplinkEmpty bool) *httptest.Server {
 	t.Helper()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/info":
+		switch r.URL.Path {
+		case "/api/info":
 			w.Write([]byte(`{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true,"omadacCategory":"advanced"}}`))
-		case r.URL.Path == "/openapi/authorize/token":
+		case "/openapi/authorize/token":
 			w.Write([]byte(`{"errorCode":0,"msg":"","result":{"accessToken":"tok"}}`))
-		case r.URL.Path == "/openapi/v1/abc123/sites":
+		case "/openapi/v1/abc123/sites":
 			w.Write([]byte(`{"errorCode":0,"msg":"","result":{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}}`))
-		case r.URL.Path == "/openapi/v1/abc123/sites/s1/devices/uplink-info":
+		case "/openapi/v1/abc123/sites/s1/devices/uplink-info":
 			if uplinkEmpty {
 				w.Write([]byte(`{"errorCode":0,"msg":"","result":[]}`))
 			} else {
