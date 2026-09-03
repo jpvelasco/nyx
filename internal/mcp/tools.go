@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jpvelasco/nyx/internal/audit"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
@@ -42,6 +43,11 @@ var toolHandlers = map[string]toolHandler{
 	"omada_list_one_to_one_nat":        (*Server).toolOmadaListOneToOneNAT,
 	"omada_get_nat_settings":           (*Server).toolOmadaGetNatSettings,
 	"omada_nat_facts":                  (*Server).toolOmadaNatFacts,
+	"omada_get_uplink_info":            (*Server).toolOmadaGetUplinkInfo,
+	"omada_list_switch_ports":          (*Server).toolOmadaListSwitchPorts,
+	"omada_list_lan_profiles":          (*Server).toolOmadaListLanProfiles,
+	"omada_plan_port":                  (*Server).toolOmadaPlanPort,
+	"omada_apply_port_profile":         (*Server).toolOmadaApplyPortProfile,
 	"opnsense_get_info":                (*Server).toolOpnsenseGetInfo,
 	"opnsense_list_interfaces":         (*Server).toolOpnsenseListInterfaces,
 	"opnsense_list_firewall_rules":     (*Server).toolOpnsenseListFirewallRules,
@@ -147,6 +153,7 @@ func (s *Server) isolationViaSpec(ctx context.Context, specFile, from, to string
 		}},
 	}
 	eng := audit.NewEngine(miniSpec)
+	eng.Logger = s.logger
 	report, err := eng.Run(ctx)
 	if err != nil {
 		return errResult(fmt.Sprintf("isolation check failed: %v", err))
@@ -167,6 +174,7 @@ func (s *Server) toolRunAudit(ctx context.Context, args map[string]interface{}) 
 		return errResult(fmt.Sprintf("failed to load spec: %v", err))
 	}
 	eng := audit.NewEngine(spec)
+	eng.Logger = s.logger
 	report, err := eng.Run(ctx)
 	if err != nil {
 		return errResult(fmt.Sprintf("audit failed: %v", err))
@@ -428,6 +436,83 @@ func (s *Server) toolOmadaNatFacts(ctx context.Context, args map[string]interfac
 		return errResult(fmt.Sprintf("omada nat facts request failed: %v", err))
 	}
 	return okResult(toJSON(facts))
+}
+
+func (s *Server) toolOmadaGetUplinkInfo(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	mac := strings.TrimSpace(argString(args, "device_mac"))
+	if mac == "" {
+		return errResult("device_mac parameter is required")
+	}
+	rows, err := s.omadaSvc.GetUplinkInfo(ctx, opts, []string{mac})
+	if err != nil {
+		return errResult(fmt.Sprintf("omada uplink info request failed: %v", err))
+	}
+	// The controller omits rows for MACs with no observed uplink; say so
+	// explicitly instead of returning a bare empty array.
+	if len(rows) == 0 {
+		return okResult(toJSON(map[string]string{"mac": mac, "note": "no uplink observed for this MAC"}))
+	}
+	return okResult(toJSON(rows[0]))
+}
+
+func (s *Server) toolOmadaListSwitchPorts(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	ports, err := s.omadaSvc.ListSwitchPorts(ctx, opts, argString(args, "switch_mac"))
+	if err != nil {
+		return errResult(fmt.Sprintf("omada switch ports request failed: %v", err))
+	}
+	return okResult(toJSON(ports))
+}
+
+func (s *Server) toolOmadaListLanProfiles(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	profiles, err := s.omadaSvc.ListLanProfiles(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("omada lan profiles request failed: %v", err))
+	}
+	return okResult(toJSON(profiles))
+}
+
+func (s *Server) toolOmadaPlanPort(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req, rmsg := portProfileRequestFromArgs(args)
+	if rmsg != "" {
+		return errResult(rmsg)
+	}
+	plan, err := s.omadaSvc.PlanPort(ctx, opts, req)
+	if err != nil {
+		return errResult(fmt.Sprintf("omada port plan request failed: %v", err))
+	}
+	return okResult(toJSON(plan))
+}
+
+func (s *Server) toolOmadaApplyPortProfile(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req, rmsg := portProfileRequestFromArgs(args)
+	if rmsg != "" {
+		return errResult(rmsg)
+	}
+	res, err := s.omadaSvc.ApplyPortProfile(ctx, opts, req, argBoolDefault(args, "dry_run", true))
+	if err != nil {
+		return errResult(fmt.Sprintf("omada port profile apply failed: %v", err))
+	}
+	return okResult(toJSON(res))
 }
 
 func (s *Server) toolOpnsenseGetInfo(ctx context.Context, args map[string]interface{}) toolDispatchResult {

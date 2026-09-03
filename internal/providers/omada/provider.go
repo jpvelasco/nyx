@@ -17,6 +17,19 @@ import (
 // ProviderName is the registry identifier for the Omada provider.
 const ProviderName = "omada"
 
+// newProviderClient builds the backend client from the shared import
+// options, so --debug and the operation logger reach every provider
+// surface (info, inventory, check, acl_check, nat_check, apply).
+func newProviderClient(ctx context.Context, opts providers.ImportOptions) (*omadabackend.Client, error) {
+	client, err := omadabackend.NewClient(ctx, opts.Host, opts.SkipTLSVerify, opts.CACertPath)
+	if err != nil {
+		return nil, err
+	}
+	client.Debug = opts.Debug
+	client.SetLogger(opts.Logger)
+	return client, nil
+}
+
 // OmadaProvider implements providers.Provider for TP-Link Omada SDN controllers.
 type OmadaProvider struct{}
 
@@ -30,11 +43,10 @@ func (o *OmadaProvider) Capabilities() []string {
 
 // Info returns basic controller information without requiring authentication.
 func (o *OmadaProvider) Info(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInfo, error) {
-	client, err := omadabackend.NewClient(ctx, opts.Host, opts.SkipTLSVerify, opts.CACertPath)
+	client, err := newProviderClient(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to omada controller: %w", err)
 	}
-	client.SetLogger(opts.Logger)
 	info := client.Info()
 	return &providers.ProviderInfo{
 		Provider: "omada",
@@ -74,6 +86,13 @@ func (o *OmadaProvider) Check(ctx context.Context, opts providers.ImportOptions)
 		return nil, err
 	}
 	engine := audit.NewEngine(imported.Spec)
+	// Forward the TLS options so the audit-engine-backed assertions that talk
+	// to the controller (acl_check, nat_check) honor the same
+	// --skip-tls-verify / --ca-cert the import used. The import path and the
+	// direct provider calls already respect them; the engine-backed path
+	// builds its own client from the engine's fields.
+	engine.SkipTLSVerify = opts.SkipTLSVerify
+	engine.CACertPath = opts.CACertPath
 	report, err := engine.Run(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("audit failed: %w", err)
@@ -88,11 +107,10 @@ func (o *OmadaProvider) Check(ctx context.Context, opts providers.ImportOptions)
 // LAN networks with their gateway bindings, both ACL scopes and their rule
 // counts, and the active client count. It is read-only and never mutates.
 func (o *OmadaProvider) Inventory(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInventory, error) {
-	client, err := omadabackend.NewClient(ctx, opts.Host, opts.SkipTLSVerify, opts.CACertPath)
+	client, err := newProviderClient(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to omada controller: %w", err)
 	}
-	client.SetLogger(opts.Logger)
 	if err := client.Login(ctx, opts.ClientID, opts.ClientSecret); err != nil {
 		return nil, err
 	}
@@ -124,14 +142,13 @@ func (o *OmadaProvider) Inventory(ctx context.Context, opts providers.ImportOpti
 func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequest, opts providers.ImportOptions) (*models.CheckResult, error) {
 	result := models.NewCheckResult("omada", "acl_check", "omada", req.PolicyName)
 
-	client, err := omadabackend.NewClient(ctx, opts.Host, opts.SkipTLSVerify, opts.CACertPath)
+	client, err := newProviderClient(ctx, opts)
 	if err != nil {
 		result.Status = models.StatusError
 		result.Summary = fmt.Sprintf("failed to connect to Omada: %v", err)
 		result.Finish()
 		return result, nil
 	}
-	client.SetLogger(opts.Logger)
 	if err := client.Login(ctx, opts.ClientID, opts.ClientSecret); err != nil {
 		result.Status = models.StatusError
 		result.Summary = fmt.Sprintf("Omada token mint failed: %v", err)
@@ -233,11 +250,10 @@ func (o *OmadaProvider) NatCheck(ctx context.Context, req providers.NatCheckRequ
 	result := models.NewCheckResult("omada", "nat_check", "omada", req.ExpectMode)
 	result.Expected["nat_mode"] = req.ExpectMode
 
-	client, err := omadabackend.NewClient(ctx, opts.Host, opts.SkipTLSVerify, opts.CACertPath)
+	client, err := newProviderClient(ctx, opts)
 	if err != nil {
 		return natCheckResult(result, "failed to connect to Omada: %v", err), nil
 	}
-	client.SetLogger(opts.Logger)
 	if err := client.Login(ctx, opts.ClientID, opts.ClientSecret); err != nil {
 		return natCheckResult(result, "Omada token mint failed: %v", err), nil
 	}
@@ -374,11 +390,10 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 		return nil, fmt.Errorf("apply ACL: scope %q is not supported; use 'switch' or 'gateway'", req.Scope)
 	}
 
-	client, err := omadabackend.NewClient(ctx, opts.Host, opts.SkipTLSVerify, opts.CACertPath)
+	client, err := newProviderClient(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to omada controller: %w", err)
 	}
-	client.SetLogger(opts.Logger)
 	if err := client.Login(ctx, opts.ClientID, opts.ClientSecret); err != nil {
 		return nil, err
 	}

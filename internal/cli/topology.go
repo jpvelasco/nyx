@@ -3,12 +3,14 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
+	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/storepath"
 	"github.com/spf13/cobra"
@@ -89,10 +91,11 @@ hard error — a partial picture would produce a confidently wrong verdict.`,
 	},
 }
 
-// resolveOmadaTopologyOpts returns the Omada options for the topology report,
-// or nil when the host cannot be resolved after the flags -> env -> store
-// chain (meaning: skip Omada). It returns a non-nil error when a host is
-// present but the credentials are incomplete after all three layers.
+// resolveOmadaTopologyOpts returns the Omada options for the topology
+// report, or nil when the host cannot be resolved after the flags ->
+// env -> Credential Manager (omada only, Windows) -> store chain
+// (meaning: skip Omada). It returns a non-nil error when a host is
+// present but the credentials are incomplete after all four layers.
 func resolveOmadaTopologyOpts() (*service.OmadaOptions, error) {
 	opts := service.OmadaOptions{
 		Host:          storepath.FirstNonEmpty(topoOmadaHost, os.Getenv("OMADA_HOST")),
@@ -102,6 +105,9 @@ func resolveOmadaTopologyOpts() (*service.OmadaOptions, error) {
 		SkipTLSVerify: topoSkipTLSVerify,
 		CACertPath:    topoCACertPath,
 	}
+	// Windows Credential Manager layer, between env vars and the store
+	// (no-op off Windows — see credmanager).
+	opts.ClientID, opts.ClientSecret = credmanager.OverlayOmada(opts.Host, opts.ClientID, opts.ClientSecret)
 	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
 		fields := credentials.Fields{
 			Host:         opts.Host,
@@ -116,8 +122,9 @@ func resolveOmadaTopologyOpts() (*service.OmadaOptions, error) {
 		return nil, nil
 	}
 	if opts.ClientID == "" || opts.ClientSecret == "" {
-		return nil, fmt.Errorf("omada credentials incomplete: set --omada-client-id/--omada-client-secret, " +
-			"OMADA_CLIENT_ID / OMADA_CLIENT_SECRET, or run `nyx credentials set omada`")
+		return nil, errors.New("omada credentials incomplete: set --omada-client-id/--omada-client-secret, " +
+			"OMADA_CLIENT_ID / OMADA_CLIENT_SECRET" + credmanager.Hint(opts.Host) +
+			", or run `nyx credentials set omada`")
 	}
 	return &opts, nil
 }

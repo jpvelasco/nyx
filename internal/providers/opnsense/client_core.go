@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"os"
 	"time"
-
-	"github.com/jpvelasco/nyx/internal/logger"
 )
 
 const (
@@ -27,7 +27,7 @@ const (
 // SetLogger attaches an optional structured logger for operation events
 // (retries). A nil logger disables logging. Credentials are never written
 // to the log.
-func (c *Client) SetLogger(l *logger.Logger) {
+func (c *Client) SetLogger(l *slog.Logger) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.log = l
@@ -39,11 +39,14 @@ func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	if c.log == nil {
 		return
 	}
-	entry := map[string]interface{}{"event": event}
+	// The JSON line is key-sorted by the exporter, so map iteration order
+	// does not affect the output.
+	attrs := make([]any, 0, 1+len(fields))
+	attrs = append(attrs, "event", event)
 	for k, v := range fields {
-		entry[k] = v
+		attrs = append(attrs, k, v)
 	}
-	c.log.Info("opnsense", entry)
+	c.log.Info("opnsense", attrs...)
 }
 
 // do performs an authenticated request to the OPNsense API and returns the
@@ -82,6 +85,9 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) (*htt
 			}
 			lastErr = fmt.Errorf("connecting to OPNsense at %s: %w", c.host, err)
 		} else {
+			if c.Debug {
+				c.debugDump(resp, method, path)
+			}
 			lastErr = c.classifyStatus(resp, path)
 			if lastErr == nil {
 				return resp, nil
@@ -193,4 +199,20 @@ func drainBody(body io.ReadCloser) {
 	}
 	_, _ = io.Copy(io.Discard, body)
 	_ = body.Close()
+}
+
+// debugDump prints the raw API response to stderr for the --debug flag
+// (method, path, status, body). It runs before the body is decoded, so on
+// success it reads the body and restores it for the caller. The payload
+// travels only in the response body and headers (basic auth), so no
+// credentials are printed; the host in the path is the operator's own
+// controller, the same exposure as the --host flag.
+func (c *Client) debugDump(resp *http.Response, method, path string) {
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[opnsense debug] %s %s -> %d (reading body: %v)\n", method, path, resp.StatusCode, err)
+		return
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(raw))
+	fmt.Fprintf(os.Stderr, "[opnsense debug] %s %s/api%s -> %d\n%s\n", method, "https://"+c.host, path, resp.StatusCode, string(raw))
 }

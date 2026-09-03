@@ -37,34 +37,56 @@ func (c *Client) GetDevices(ctx context.Context, siteID string) ([]Device, error
 	return devices, nil
 }
 
-// NetworkBindings maps network IDs to the MAC of the device each LAN is
-// bound to (the "deviceMac" of its LAN entry). It is the evidence that
-// inter-VLAN traffic transits the managed gateway.
-type NetworkBindings map[string]string // network ID -> device MAC
-
-// BuildNetworkBindings indexes the LAN networks by their bound gateway MAC.
-func BuildNetworkBindings(networks []Network) NetworkBindings {
-	bindings := make(NetworkBindings, len(networks))
-	for _, n := range networks {
-		if n.DeviceMac != "" {
-			bindings[n.ID] = n.DeviceMac
+// boundGatewayDevice resolves the managed gateway a network's LAN is bound
+// to. Precedence:
+//
+//  1. MAC — the network's "deviceMac" against a gateway's MAC (authoritative
+//     when the field is present).
+//  2. IP — the network's gateway address (from "gatewaySubnet") against a
+//     gateway's device IP (the management LAN, or a gateway exposed per-VLAN).
+//  3. Single-gateway fallback — when the LAN carries no explicit binding and
+//     the site has exactly one managed gateway, that device is the only one
+//     inter-VLAN traffic can transit.
+//
+// Omada 6.2.x serves lan-networks rows without deviceMac, and a managed
+// gateway's per-VLAN routed addresses do not appear in the device inventory
+// (only its management IP does), so on a one-gateway site the fallback is
+// the only evidence left that the LAN transits the managed gateway.
+// Multi-gateway sites are left unbound rather than guessed.
+func boundGatewayDevice(devices []Device, n Network) *Device {
+	var gws []Device
+	for i := range devices {
+		if devices[i].IsGateway() {
+			gws = append(gws, devices[i])
 		}
 	}
-	return bindings
+	if n.DeviceMac != "" {
+		for i := range gws {
+			if gws[i].MAC != "" && NormalizeMAC(gws[i].MAC) == NormalizeMAC(n.DeviceMac) {
+				return &gws[i]
+			}
+		}
+	}
+	if gw := n.Gateway(); gw != "" {
+		for i := range gws {
+			if gws[i].IP == gw {
+				return &gws[i]
+			}
+		}
+	}
+	if n.DeviceMac == "" && len(gws) == 1 {
+		return &gws[0]
+	}
+	return nil
 }
 
 // GatewayForNetwork returns the managed gateway bound to the given network,
 // or nil when the inventory has no gateway or the network is not bound to
 // one (e.g. third-party gateway setups).
-func GatewayForNetwork(devices []Device, networkID string, bindings NetworkBindings) *Device {
-	mac, ok := bindings[networkID]
-	if !ok {
-		return nil
-	}
-	for i := range devices {
-		if devices[i].IsGateway() && devices[i].MAC != "" &&
-			normalizeMAC(devices[i].MAC) == normalizeMAC(mac) {
-			return &devices[i]
+func GatewayForNetwork(devices []Device, networks []Network, networkID string) *Device {
+	for i := range networks {
+		if networks[i].ID == networkID {
+			return boundGatewayDevice(devices, networks[i])
 		}
 	}
 	return nil
@@ -72,28 +94,22 @@ func GatewayForNetwork(devices []Device, networkID string, bindings NetworkBindi
 
 // NetworkGatewayMap maps raw network names to the name of the device their
 // LAN is bound to. Networks not bound to any inventoried device map to "".
-func NetworkGatewayMap(devices []Device, networks []Network, bindings NetworkBindings) map[string]string {
-	byMAC := make(map[string]string, len(devices))
-	for _, d := range devices {
-		if d.MAC != "" {
-			byMAC[normalizeMAC(d.MAC)] = d.Name
-		}
-	}
+func NetworkGatewayMap(devices []Device, networks []Network) map[string]string {
 	out := make(map[string]string, len(networks))
 	for _, n := range networks {
 		name := ""
-		if mac, ok := bindings[n.ID]; ok {
-			name = byMAC[normalizeMAC(mac)]
+		if d := boundGatewayDevice(devices, n); d != nil {
+			name = d.Name
 		}
 		out[n.Name] = name
 	}
 	return out
 }
 
-// normalizeMAC lowercases and strips all separators (colons, dashes,
+// NormalizeMAC lowercases and strips all separators (colons, dashes,
 // spaces) so 00:11:22:33:44:55, 00-11-22-33-44-55, and space-separated
 // forms all compare equal.
-func normalizeMAC(mac string) string {
+func NormalizeMAC(mac string) string {
 	mac = strings.ToLower(mac)
 	mac = strings.ReplaceAll(mac, ":", "")
 	mac = strings.ReplaceAll(mac, "-", "")

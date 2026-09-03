@@ -18,7 +18,6 @@ type InventorySnapshot struct {
 	ControllerCategory string
 	Devices            []Device
 	Networks           []Network
-	Bindings           NetworkBindings
 	GatewayACLs        ACLList
 	SwitchACLs         ACLList
 	GatewayACLsOK      bool
@@ -38,7 +37,6 @@ func (c *Client) FetchInventory(ctx context.Context, siteID string) (*InventoryS
 		ControllerVersion:  c.Info().ControllerVer,
 		ControllerCategory: c.Info().Category,
 		Networks:           nets,
-		Bindings:           BuildNetworkBindings(nets),
 	}
 
 	devices, err := c.GetDevices(ctx, siteID)
@@ -84,9 +82,18 @@ func BuildSpecInventory(snap *InventorySnapshot) *intent.Inventory {
 		ControllerCategory: snap.ControllerCategory,
 		NetworkGateways:    make(map[string]string),
 	}
-	gwMap := NetworkGatewayMap(snap.Devices, snap.Networks, snap.Bindings)
+	gwMap := NetworkGatewayMap(snap.Devices, snap.Networks)
 	for _, n := range snap.Networks {
 		inv.NetworkGateways[sanitizeName(n.Name)] = gwMap[n.Name]
+	}
+	// Per-device network lists share the same binding resolution (deviceMac
+	// primary, gateway-IP fallback) so a 6.2.x snapshot without deviceMac
+	// still attributes the LANs to the managed gateway.
+	bound := make(map[string]string, len(snap.Networks)) // network ID -> gateway name
+	for _, n := range snap.Networks {
+		if d := boundGatewayDevice(snap.Devices, n); d != nil {
+			bound[n.ID] = d.Name
+		}
 	}
 	for _, d := range SortedDevices(snap.Devices) {
 		dev := intent.InventoryDevice{
@@ -98,7 +105,7 @@ func BuildSpecInventory(snap *InventorySnapshot) *intent.Inventory {
 			Upgrade:  d.NeedUpgrade,
 		}
 		for _, n := range snap.Networks {
-			if n.DeviceMac != "" && d.MAC != "" && normalizeMAC(n.DeviceMac) == normalizeMAC(d.MAC) {
+			if bound[n.ID] == d.Name {
 				dev.Networks = append(dev.Networks, sanitizeName(n.Name))
 			}
 		}
@@ -125,9 +132,8 @@ func RenderInventory(snap *InventorySnapshot, siteName string) string {
 		}
 		fmt.Fprintf(&b, "Controller: %s%s\n", snap.ControllerVersion, cat)
 	}
-	for _, w := range snap.Warnings {
-		fmt.Fprintf(&b, "Warning: %s\n", w)
-	}
+	// Warnings are intentionally NOT rendered here: the CLI layer prints
+	// them to stderr once (and the JSON surface keeps them structured).
 
 	fmt.Fprintf(&b, "\n== Devices (%d) ==\n", len(snap.Devices))
 	for _, d := range SortedDevices(snap.Devices) {
@@ -172,7 +178,7 @@ func renderScope(b *strings.Builder, scope string, list ACLList) {
 
 // GatewayForNetwork is a snapshot-level convenience over the binding lookup.
 func (snap *InventorySnapshot) GatewayForNetwork(networkID string) (string, bool) {
-	d := GatewayForNetwork(snap.Devices, networkID, snap.Bindings)
+	d := GatewayForNetwork(snap.Devices, snap.Networks, networkID)
 	if d == nil {
 		return "", false
 	}

@@ -34,8 +34,8 @@ var credentialsSetFlag []string
 var credentialsSetCmd = &cobra.Command{
 	Use:   "set <provider> [name]",
 	Short: "Store a credential entry",
-	Example: `  nyx credentials set omada --set host=192.168.1.1 --set client_id=... --set client_secret=...
-  nyx credentials set probe home --set host=10.0.0.5 --set username=ubuntu --set key=~/.ssh/id_ed25519`,
+	Example: `  nyx credentials set omada --set host=10.0.11.20 --set client_id=... --set client_secret=...
+  nyx credentials set probe iot-probe --set host=10.0.60.15 --set username=ubuntu --set key=~/.ssh/id_ed25519`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(_ *cobra.Command, args []string) error {
 		provider, name := args[0], "default"

@@ -18,6 +18,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/credentials"
+	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/probe"
@@ -64,6 +65,11 @@ func NewEngine(spec *intent.Spec) *Engine {
 // Engine is designed for single-use; Run resets internal state for safety
 // but callers should create a new Engine via NewEngine for each audit.
 func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
+	if e.Logger == nil {
+		// Callers (MCP, tests) may pass a nil logger; keep the stderr
+		// fallback so engine warnings stay visible.
+		e.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
+	}
 	e.runnerCtx = localRunnerContext(e.Spec, e.Interface)
 
 	// Load SeenDB once for the entire run so concurrent subnet_discovery
@@ -383,11 +389,16 @@ func (e *Engine) runNatCheck(ctx context.Context, a intent.Assertion) (*models.C
 		opts.Site = ""
 	}
 	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
-		opts = fillFromCredentialStore(opts, providerName, e.CredentialsPath)
+		opts = fillFromCredentialStores(opts, providerName, e.CredentialsPath)
 	}
 	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
+		hint := ""
+		if providerName == "omada" {
+			hint = credmanager.Hint(opts.Host)
+		}
 		return natCheckErrorResult(providerName,
-			"nat_check requires provider credentials: environment variables (OMADA_* / OPNSENSE_*) or stored credentials (see `nyx credentials set <provider>`)"), nil
+			"nat_check requires provider credentials: environment variables (OMADA_* / OPNSENSE_*)"+
+				hint+" or stored credentials (see `nyx credentials set <provider>`)"), nil
 	}
 
 	return checker.NatCheck(ctx, providers.NatCheckRequest{ExpectMode: a.NatMode}, opts)
@@ -480,7 +491,9 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 				result.Summary = fmt.Sprintf("0 hosts discovered in %s (virtual adapter detected — future scans will suppress this warning; use --warn-virtual to always show it)", cidr)
 			}
 			if err := e.seenDB.AckVirtual(cidr); err != nil {
-				e.Logger.Warn("failed to ack virtual network; warning will reappear on next run", slog.String("cidr", cidr), slog.String("error", err.Error()))
+				// Log the spec's network role name, never the CIDR — the
+				// log file is a shareable artifact (docs/naming.md).
+				e.Logger.Warn("failed to ack virtual network; warning will reappear on next run", slog.String("network", net.Name), slog.String("error", err.Error()))
 				result.Evidence = append(result.Evidence, fmt.Sprintf("warning: failed to persist virtual network ack for %s: %v", cidr, err))
 			}
 		} else {
@@ -843,11 +856,17 @@ func aclCheckErrorResult(provider, policy string, summary string) *models.CheckR
 	return result
 }
 
-// fillFromCredentialStore completes missing import options from the
-// encrypted credential store (entry <provider>/default). Store failures are
-// silently ignored — env vars remain the primary source and the caller
-// still reports missing credentials.
-func fillFromCredentialStore(opts providers.ImportOptions, provider, path string) providers.ImportOptions {
+// fillFromCredentialStores completes missing import options from the
+// Windows Credential Manager (omada only; no-op off Windows — the entry
+// nyx-omada-<host> is keyed on the resolved host, which this step can
+// never supply) and then the encrypted credential store (entry
+// <provider>/default). Store failures are silently ignored — env vars
+// remain the primary source and the caller still reports missing
+// credentials.
+func fillFromCredentialStores(opts providers.ImportOptions, provider, path string) providers.ImportOptions {
+	if provider == "omada" {
+		opts.ClientID, opts.ClientSecret = credmanager.OverlayOmada(opts.Host, opts.ClientID, opts.ClientSecret)
+	}
 	fields := credentials.Fields{
 		Host:         opts.Host,
 		ClientID:     opts.ClientID,
@@ -898,11 +917,16 @@ func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.C
 		CACertPath:    e.CACertPath,
 	}
 	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
-		opts = fillFromCredentialStore(opts, providerName, e.CredentialsPath)
+		opts = fillFromCredentialStores(opts, providerName, e.CredentialsPath)
 	}
 	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
+		hint := ""
+		if providerName == "omada" {
+			hint = credmanager.Hint(opts.Host)
+		}
 		return aclCheckErrorResult(providerName, a.Policy,
-			"acl_check requires OMADA_HOST, OMADA_CLIENT_ID, OMADA_CLIENT_SECRET environment variables, or stored credentials (see `nyx credentials set omada`)"), nil
+			"acl_check requires OMADA_HOST, OMADA_CLIENT_ID, OMADA_CLIENT_SECRET environment variables"+
+				hint+", or stored credentials (see `nyx credentials set omada`)"), nil
 	}
 
 	expect := a.Expect // "enforced" or "not_enforced"
