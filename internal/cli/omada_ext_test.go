@@ -121,3 +121,18 @@ func TestOmadaUplinkInfoCmd_Text(t *testing.T) {
 		}
 	}
 }
+
+func TestShortMAC(t *testing.T) {
+	cases := map[string]string{
+		"aa:bb:cc:dd:ee:01": "...ee01",
+		"aa-bb-cc-dd-ee-01": "...ee01",
+		"AA BB CC DD EE 01": "...EE01",
+		"ab:0":              "ab:0", // fewer than 4 hex digits: unchanged
+		"":                  "",
+	}
+	for in, want := range cases {
+		if got := shortMAC(in); got != want {
+			t.Errorf("shortMAC(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

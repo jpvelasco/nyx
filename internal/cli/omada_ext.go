@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	providers "github.com/jpvelasco/nyx/internal/providers"
@@ -182,10 +183,11 @@ func toOmadaOptions(opts providers.ImportOptions) service.OmadaOptions {
 
 // shortMAC renders a MAC for narrow tables: last 4 hex digits.
 func shortMAC(mac string) string {
-	if len(mac) < 4 {
+	hex := strings.NewReplacer(":", "", "-", "", " ", "").Replace(mac)
+	if len(hex) < 4 {
 		return mac
 	}
-	return "..." + mac[len(mac)-4:]
+	return "..." + hex[len(hex)-4:]
 }
 
 // joinOrDash joins list members with "+", or returns "-" for an empty set.
