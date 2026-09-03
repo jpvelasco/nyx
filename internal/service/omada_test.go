@@ -298,6 +298,46 @@ func TestOmadaService_SessionFailures(t *testing.T) {
 			_, err := NewOmadaService().Plan(context.Background(), opts, omadaPlanProposal)
 			return err
 		}},
+		{"uplink/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().GetUplinkInfo(context.Background(), opts, []string{"aa:bb:cc:dd:ee:01"})
+			return err
+		}},
+		{"uplink/connect-fail", connectOpts, "fetching controller info", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().GetUplinkInfo(context.Background(), opts, []string{"aa:bb:cc:dd:ee:01"})
+			return err
+		}},
+		{"switch-ports/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().ListSwitchPorts(context.Background(), opts, "")
+			return err
+		}},
+		{"switch-ports/connect-fail", connectOpts, "fetching controller info", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().ListSwitchPorts(context.Background(), opts, "")
+			return err
+		}},
+		{"lan-profiles/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().ListLanProfiles(context.Background(), opts)
+			return err
+		}},
+		{"lan-profiles/connect-fail", connectOpts, "fetching controller info", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().ListLanProfiles(context.Background(), opts)
+			return err
+		}},
+		{"plan-port/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().PlanPort(context.Background(), opts, OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "trusted"})
+			return err
+		}},
+		{"plan-port/connect-fail", connectOpts, "fetching controller info", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().PlanPort(context.Background(), opts, OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "trusted"})
+			return err
+		}},
+		{"apply-port/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().ApplyPortProfile(context.Background(), opts, OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "trusted"}, false)
+			return err
+		}},
+		{"apply-port/connect-fail", connectOpts, "fetching controller info", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().ApplyPortProfile(context.Background(), opts, OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "trusted"}, false)
+			return err
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1193,13 +1233,22 @@ func TestOmadaServiceApplyACL_ProviderLacksMutation(t *testing.T) {
 // --- port-profile (uplink / switch ports / lan profiles / plan / apply) ---
 
 // omadaPortState is the mutable controller state for port-profile tests:
-// the site's LAN profiles plus each port's bound profileId.
+// the site's LAN profiles plus each port's bound profileId. The Fail*
+// flags inject controller errors for specific write/read phases so the
+// service's error returns are exercised without a live controller.
 type omadaPortState struct {
-	Profiles      []omadabackend.LanProfile
-	PortProfiles  map[int]string
-	NextID        int
-	FailBind      bool // fail the per-port profile PUT (bind)
-	Port8Override bool // report port 8 with profileOverrideEnable
+	Profiles          []omadabackend.LanProfile
+	PortProfiles      map[int]string
+	NextID            int
+	FailBind          bool // fail the per-port profile PUT (bind)
+	FailCreateProfile bool // fail the LAN-profile create POST
+	OverviewFailAfter int  // fail ports-overview GETs once seen >= this many times (0 = off)
+	overviewSeen      int
+	Port8Override     bool // report port 8 with profileOverrideEnable
+	ProfilesFailAfter int  // fail lan-profiles GETs once seen >= this many times (0 = off)
+	profilesSeen      int
+	NetworksFailAfter int // fail lan-networks GETs once seen >= this many times (0 = off)
+	networksSeen      int
 }
 
 // omadaPortOpts is the standard (synthetic) OmadaOptions for port-profile
@@ -1234,6 +1283,11 @@ func omadaPortBaseHandler(t *testing.T, st *omadaPortState) http.HandlerFunc {
 		case path == "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		case path == "/openapi/v1/abc123/sites/s1/lan-networks":
+			st.networksSeen++
+			if st.NetworksFailAfter > 0 && st.networksSeen >= st.NetworksFailAfter {
+				writeOmadaEnvelope(w, -33004, `{"detail":"site busy"}`)
+				return
+			}
 			writeOmadaEnvelope(w, 0, `{"totalRows":4,"data":`+omadaPortNets+`}`)
 		case path == "/openapi/v1/abc123/sites/s1/devices/uplink-info" && r.Method == http.MethodPost:
 			var body struct {
@@ -1249,12 +1303,26 @@ func omadaPortBaseHandler(t *testing.T, st *omadaPortState) http.HandlerFunc {
 			}
 			writeOmadaEnvelope(w, 0, `[{"mac":"aa:bb:cc:dd:ee:01","uplinkDeviceMac":"bb:11:22:33:44:55","uplinkDeviceName":"SW-CORE","uplinkDevicePort":"8","linkSpeed":3,"duplex":2}]`)
 		case path == "/openapi/v1/abc123/sites/s1/switches/ports/overview":
+			st.overviewSeen++
+			if st.OverviewFailAfter > 0 && st.overviewSeen >= st.OverviewFailAfter {
+				writeOmadaEnvelope(w, -33004, `{"detail":"site busy"}`)
+				return
+			}
 			writePortOverview(w, st)
 		case path == "/openapi/v1/abc123/sites/s1/lan-profiles":
 			switch r.Method {
 			case http.MethodGet:
+				st.profilesSeen++
+				if st.ProfilesFailAfter > 0 && st.profilesSeen >= st.ProfilesFailAfter {
+					writeOmadaEnvelope(w, -33004, `{"detail":"site busy"}`)
+					return
+				}
 				writeOmadaEnvelope(w, 0, `{"totalRows":`+strconv.Itoa(len(st.Profiles))+`,"data":`+string(mustMarshalJSON(st.Profiles))+`}`)
 			case http.MethodPost:
+				if st.FailCreateProfile {
+					writeOmadaEnvelope(w, -1001, `{"detail":"invalid params"}`)
+					return
+				}
 				var p omadabackend.LanProfile
 				if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 					t.Errorf("lan-profiles create decode: %v", err)
@@ -1422,6 +1490,45 @@ func TestOmadaServiceListSwitchPorts_FetchFails(t *testing.T) {
 	_, err := NewOmadaService().ListSwitchPorts(context.Background(), omadaPortOpts(ts.URL), "")
 	if err == nil {
 		t.Fatal("expected ports-overview fetch failure to propagate")
+	}
+}
+
+// TestOmadaServiceListSwitchPorts_SecondAndThirdFetchFail: a partial
+// collection set must not be tolerated — a failure on the lan-profiles or
+// the networks read is as fatal as one on the ports overview.
+func TestOmadaServiceListSwitchPorts_SecondAndThirdFetchFail(t *testing.T) {
+	for _, failPath := range []string{
+		"/openapi/v1/abc123/sites/s1/lan-profiles",
+		"/openapi/v1/abc123/sites/s1/lan-networks",
+	} {
+		t.Run(failPath[strings.LastIndex(failPath, "/")+1:], func(t *testing.T) {
+			ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/openapi/authorize/token":
+					writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+				case "/openapi/v1/abc123/sites":
+					writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+				case failPath:
+					writeOmadaEnvelope(w, -33004, `{"detail":"site busy"}`)
+				case "/openapi/v1/abc123/sites/s1/switches/ports/overview":
+					writePortOverview(w, omadaPortStateFresh())
+				case "/openapi/v1/abc123/sites/s1/lan-profiles":
+					writeOmadaEnvelope(w, 0, `{"totalRows":3,"data":[
+						{"id":"P1","name":"Access-trusted","nativeNetworkId":"n1","tagNetworkIds":[],"untagNetworkIds":["n1"]},
+						{"id":"P2","name":"media","nativeNetworkId":"n3","tagNetworkIds":[],"untagNetworkIds":["n3"]},
+						{"id":"P3","name":"media+gaming","nativeNetworkId":"n3","tagNetworkIds":["n1","n2"],"untagNetworkIds":["n3"]}]}`)
+				case "/openapi/v1/abc123/sites/s1/lan-networks":
+					writeOmadaEnvelope(w, 0, `{"totalRows":4,"data":`+omadaPortNets+`}`)
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			})
+			_, err := NewOmadaService().ListSwitchPorts(context.Background(), omadaPortOpts(ts.URL), "")
+			if err == nil {
+				t.Fatal("expected fetch failure to propagate")
+			}
+		})
 	}
 }
 
@@ -1698,6 +1805,39 @@ func TestOmadaServiceApplyPortProfile_BindFailureAfterCreate(t *testing.T) {
 	}
 }
 
+// TestOmadaServiceApplyPortProfile_MidApplyFailures exercises the two
+// failure branches after a successful plan: a failed profile create and a
+// failed ports-overview re-read after the bind.
+func TestOmadaServiceApplyPortProfile_MidApplyFailures(t *testing.T) {
+	// Create fails: the controller rejects the new profile before any bind.
+	stCreate := omadaPortStateFresh()
+	stCreate.FailCreateProfile = true
+	ts := omadaTestServer(t, omadaPortBaseHandler(t, stCreate))
+	_, err := NewOmadaService().ApplyPortProfile(context.Background(), omadaPortOpts(ts.URL),
+		OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "Personal", Tagged: []string{"media"}}, false)
+	if err == nil || !strings.Contains(err.Error(), "creating LAN profile") {
+		t.Fatalf("create failure: err = %v, want create error", err)
+	}
+	if len(stCreate.Profiles) != 3 || stCreate.PortProfiles[8] != "P1" {
+		t.Errorf("state after failed create: profiles=%d port8=%q, want unchanged", len(stCreate.Profiles), stCreate.PortProfiles[8])
+	}
+
+	// Re-read fails: the bind succeeds but the after-evidence fetch errors.
+	// The plan read is the only overview GET before the apply's re-read, so
+	// the second overview GET is the post-apply one.
+	stReread := omadaPortStateFresh()
+	stReread.OverviewFailAfter = 2
+	ts2 := omadaTestServer(t, omadaPortBaseHandler(t, stReread))
+	res, err := NewOmadaService().ApplyPortProfile(context.Background(), omadaPortOpts(ts2.URL),
+		OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "Personal", Tagged: []string{"media"}}, false)
+	if err == nil || !strings.Contains(err.Error(), "re-reading port state after apply") {
+		t.Fatalf("re-read failure: res = %+v, err = %v, want re-read error", res, err)
+	}
+	if stReread.PortProfiles[8] == "P1" {
+		t.Error("bind did not run: port 8 still bound to P1")
+	}
+}
+
 func TestResolveNetworkIDList(t *testing.T) {
 	nets := []omadabackend.Network{
 		{ID: "n1", Name: "trusted"},
@@ -1808,6 +1948,129 @@ func TestPlanPort_ProfileOverrideWarning(t *testing.T) {
 	}
 	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "profile override") {
 		t.Errorf("apply warnings = %v, want the profile-override warning", res.Warnings)
+	}
+}
+
+func TestOmadaServiceListLanProfiles_NetworksFetchFails(t *testing.T) {
+	st := omadaPortStateFresh()
+	// The profiles read succeeds; the networks read that resolves their
+	// names fails, so a partial picture must surface as an error.
+	st.NetworksFailAfter = 1
+	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+	if _, err := NewOmadaService().ListLanProfiles(context.Background(), omadaPortOpts(ts.URL)); err == nil {
+		t.Fatal("expected lan-networks fetch failure to propagate")
+	}
+}
+
+// TestOmadaServicePlanPort_MembershipFetchFails: a failure on the second
+// or third collection read inside fetchPortMembership must fail the plan,
+// matching the behavior asserted for ListSwitchPorts.
+func TestOmadaServicePlanPort_MembershipFetchFails(t *testing.T) {
+	for name, mutate := range map[string]func(*omadaPortState){
+		"lan-profiles": func(st *omadaPortState) { st.ProfilesFailAfter = 1 },
+		"lan-networks": func(st *omadaPortState) { st.NetworksFailAfter = 1 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := omadaPortStateFresh()
+			mutate(st)
+			ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+			_, err := NewOmadaService().PlanPort(context.Background(), omadaPortOpts(ts.URL),
+				OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "trusted"})
+			if err == nil {
+				t.Fatal("expected membership fetch failure to propagate")
+			}
+		})
+	}
+}
+
+// TestOmadaServiceApplyPortProfile_DryRunRebind: a dry run must preview the
+// real-apply outcome vocabulary for a rebind — the port would end up
+// bound to the existing matching profile without a create.
+func TestOmadaServiceApplyPortProfile_DryRunRebind(t *testing.T) {
+	st := omadaPortStateFresh()
+	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+	res, err := NewOmadaService().ApplyPortProfile(context.Background(), omadaPortOpts(ts.URL),
+		OmadaPortProfileRequest{
+			SwitchMAC: "AA:BB:CC:DD:EE:01", Port: 10, Native: "media", Tagged: []string{"trusted", "gaming"},
+		}, true)
+	if err != nil {
+		t.Fatalf("dry run rebind: %v", err)
+	}
+	if !res.DryRun || res.Outcome != "bound" || res.ProfileID != "P3" || res.ProfileCreate {
+		t.Errorf("dry run = %+v, want outcome bound / profile P3 / no create", res)
+	}
+	if st.PortProfiles[10] != "P1" || len(st.Profiles) != 3 {
+		t.Errorf("dry run mutated state: port10=%q profiles=%d", st.PortProfiles[10], len(st.Profiles))
+	}
+}
+
+// TestOmadaServiceApplyPortProfile_BindFailureWithoutCreate: a bind
+// failure on a rebind (no profile create) must surface the raw bind error.
+func TestOmadaServiceApplyPortProfile_BindFailureWithoutCreate(t *testing.T) {
+	st := omadaPortStateFresh()
+	st.FailBind = true
+	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+	_, err := NewOmadaService().ApplyPortProfile(context.Background(), omadaPortOpts(ts.URL),
+		OmadaPortProfileRequest{
+			SwitchMAC: "AA:BB:CC:DD:EE:01", Port: 10, Native: "media", Tagged: []string{"trusted", "gaming"},
+		}, false)
+	if err == nil {
+		t.Fatal("expected bind failure to propagate")
+	}
+	if strings.Contains(err.Error(), "was created but binding") {
+		t.Errorf("error = %v, want the raw bind error, not the create-then-bind wrapper", err)
+	}
+	if st.PortProfiles[10] != "P1" || len(st.Profiles) != 3 {
+		t.Errorf("state = port10 %q / %d profiles, want unchanged", st.PortProfiles[10], len(st.Profiles))
+	}
+}
+
+// TestOmadaServicePlanPort_UnknownTaggedName: an unknown network name in
+// the tagged list must fail closed, like an unknown native name does.
+func TestOmadaServicePlanPort_UnknownTaggedName(t *testing.T) {
+	st := omadaPortStateFresh()
+	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+	_, err := NewOmadaService().PlanPort(context.Background(), omadaPortOpts(ts.URL),
+		OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "trusted", Tagged: []string{"Nope"}})
+	if err == nil || !strings.Contains(err.Error(), `network "Nope" is not a declared LAN network`) {
+		t.Errorf("unknown tagged: err = %v", err)
+	}
+}
+
+func TestDerivePortProfileName(t *testing.T) {
+	if got := derivePortProfileName(OmadaPortProfileRequest{Native: "media"}); got != "media" {
+		t.Errorf("zero tagged = %q, want the native name", got)
+	}
+	if got := derivePortProfileName(OmadaPortProfileRequest{Native: "media", Tagged: []string{"trusted", "gaming"}}); got != "media+trunk(2)" {
+		t.Errorf("two tagged = %q, want media+trunk(2)", got)
+	}
+}
+
+// TestPortEvidenceJSON_NotFound: a port that is no longer in the overview
+// (e.g. between plan and re-read) yields empty JSON evidence rather than
+// an error.
+func TestPortEvidenceJSON_NotFound(t *testing.T) {
+	ports := []omadabackend.SwitchPort{{Port: 1, SwitchMAC: "aa:bb:cc:dd:ee:01"}}
+	out, err := portEvidenceJSON(ports, nil, nil, "bb:11:22:33:44:55", 8)
+	if err != nil || out != "{}" {
+		t.Errorf("portEvidenceJSON = %q, %v, want {} / nil", out, err)
+	}
+}
+
+func TestResolveNetworkIDs_Fallback(t *testing.T) {
+	netName := networkNameByID([]omadabackend.Network{{ID: "n1", Name: "trusted"}})
+	if got := resolveNetworkIDs([]string{"n1", "nX"}, netName); len(got) != 2 || got[0] != "trusted" || got[1] != "nX" {
+		t.Errorf("resolveNetworkIDs = %v, want [trusted nX]", got)
+	}
+}
+
+func TestFindProfileByID(t *testing.T) {
+	profiles := []omadabackend.LanProfile{{ID: "P1", Name: "a"}, {ID: "P2", Name: "b"}}
+	if p := findProfileByID(profiles, "P2"); p == nil || p.Name != "b" {
+		t.Errorf("findProfileByID = %+v, want P2", p)
+	}
+	if p := findProfileByID(profiles, "P9"); p != nil {
+		t.Errorf("findProfileByID miss = %+v, want nil", p)
 	}
 }
 

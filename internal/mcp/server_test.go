@@ -2066,6 +2066,11 @@ func TestDispatchOmadaPortReads(t *testing.T) {
 		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "port": float64(8), "native": "trusted"}); !isErr || !strings.Contains(text, "switch_mac parameter is required") {
 		t.Errorf("plan port missing mac: got (%q, %v)", text, isErr)
 	}
+
+	if text, isErr := serverWithOmadaStub(&stubOmadaSvc{}).DispatchToolForTest(context.Background(), "omada_apply_port_profile",
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "switch_mac": "aa:bb:cc:dd:ee:00", "port": float64(8)}); !isErr || !strings.Contains(text, "native parameter is required") {
+		t.Errorf("apply port missing native: got (%q, %v)", text, isErr)
+	}
 }
 
 func TestDispatchOmadaPortReads_ServiceError(t *testing.T) {
@@ -2237,10 +2242,15 @@ func TestDispatchOmadaNatReads_Errors(t *testing.T) {
 		{"omada_nat_facts", "omada nat facts request failed"},
 		{"omada_list_switch_ports", "omada switch ports request failed"},
 		{"omada_list_lan_profiles", "omada lan profiles request failed"},
+		{"omada_get_uplink_info", "omada uplink info request failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.tool, func(t *testing.T) {
 			server := serverWithOmadaStub(&stubOmadaSvc{err: errors.New("controller down")})
+			args := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw"}
+			if tc.tool == "omada_get_uplink_info" {
+				args["device_mac"] = "aa:bb:cc:dd:ee:00"
+			}
 			text, isErr := server.DispatchToolForTest(context.Background(), tc.tool, args)
 			if !isErr || !strings.Contains(text, tc.want) || !strings.Contains(text, "controller down") {
 				t.Errorf("got (%q, %v), want %q", text, isErr, tc.want)
