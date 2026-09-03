@@ -347,8 +347,8 @@ func (c *Client) GetDHCPLeases(ctx context.Context) ([]DHCPLease, error) {
 			}
 			return nil, err
 		}
+		defer resp.Body.Close()
 		leases, derr := decodeDHCPLeases(resp.Body)
-		resp.Body.Close()
 		if derr != nil {
 			return nil, derr
 		}
