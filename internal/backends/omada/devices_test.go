@@ -179,8 +179,8 @@ func TestNormalizeMAC(t *testing.T) {
 		"":                  "",
 	}
 	for in, want := range cases {
-		if got := normalizeMAC(in); got != want {
-			t.Errorf("normalizeMAC(%q) = %q, want %q", in, got, want)
+		if got := NormalizeMAC(in); got != want {
+			t.Errorf("NormalizeMAC(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
