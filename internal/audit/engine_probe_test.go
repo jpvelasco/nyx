@@ -1059,7 +1059,7 @@ func TestRunDiscovery_VirtualSkipSecondRun(t *testing.T) {
 	}
 
 	vmResult := mockDiscoverResult(0, "10.0.0.0/24")
-	vmResult.Evidence = []string{"MAC Address: 00:50:56:EE:69:AB (VMware)"}
+	vmResult.Evidence = []string{"MAC Address: 00:50:56:00:00:01 (VMware)"}
 	vmResult.Observed = map[string]interface{}{"total": 0}
 
 	mock := &backends.MockBackend{DiscoverResult: vmResult}
@@ -1126,7 +1126,7 @@ func TestRunDiscovery_VirtualAckFailure(t *testing.T) {
 	}
 
 	vmResult := mockDiscoverResult(0, "10.0.0.0/24")
-	vmResult.Evidence = []string{"MAC Address: 00:50:56:EE:69:AB (VMware)"}
+	vmResult.Evidence = []string{"MAC Address: 00:50:56:00:00:01 (VMware)"}
 
 	mock := &backends.MockBackend{DiscoverResult: vmResult}
 
@@ -1171,7 +1171,7 @@ func TestRunDiscovery_WarnVirtualAlwaysWarns(t *testing.T) {
 	}
 
 	vmResult := mockDiscoverResult(0, "10.0.0.0/24")
-	vmResult.Evidence = []string{"MAC Address: 00:50:56:EE:69:AB (VMware)"}
+	vmResult.Evidence = []string{"MAC Address: 00:50:56:00:00:01 (VMware)"}
 
 	mock := &backends.MockBackend{DiscoverResult: vmResult}
 

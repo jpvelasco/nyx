@@ -346,7 +346,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]propSchema{
-					"subnet":        {Type: "string", Description: "CIDR notation subnet to scan, e.g. 192.168.1.0/24"},
+					"subnet":        {Type: "string", Description: "CIDR notation subnet to scan, e.g. 10.0.10.0/24"},
 					"scan_timing":   {Type: "number", Description: "nmap -T timing template (0-5, default 4)"},
 					"scan_min_rate": {Type: "number", Description: "nmap --min-rate packets/sec (default 500)"},
 				},

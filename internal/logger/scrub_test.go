@@ -170,7 +170,7 @@ func TestScrubLine_HostnamesAndMACs(t *testing.T) {
 	}{
 		{
 			"real fqdn redacted",
-			`{"msg":"resolved router.home.example-dsl.jpvelasco.net"}`,
+			`{"msg":"resolved router.home.example-dsl.invalid"}`,
 			`{"msg":"resolved [host]"}`,
 		},
 		{
