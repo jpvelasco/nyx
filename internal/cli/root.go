@@ -23,7 +23,6 @@ var (
 	skipHostKeyVerify bool
 	skipTLSVerify     bool
 	caCertPath        string
-	log               *logger.Logger
 	slogLog           *slog.Logger
 
 	// lastAuditReport caches the most recent audit result so that
@@ -72,22 +71,22 @@ func init() {
 	rootCmd.AddCommand(providerCmd)
 	rootCmd.AddCommand(credentialsCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(logsParentCmd)
 
-	// Logger is best-effort — if it fails, we continue without logging.
-	if l, err := logger.New(logger.DefaultPath(), 5*1024*1024, 3); err == nil {
-		log = l
-	}
-
-	// Structured logger (slog) writes to the same rotating file, honoring
-	// NYX_LOG_LEVEL / NYX_LOG_FILE. Best-effort like the legacy logger.
-	if sl, err := logger.NewSlog(logger.EnvLogFile(), 5*1024*1024, 3, logger.EnvLevel()); err == nil {
+	// Single structured-logging pipeline (OTel bridge → rotating file),
+	// honoring NYX_LOG_LEVEL / NYX_LOG_FILE. Best-effort: if it fails, we
+	// continue without logging.
+	if sl, err := logger.NewSlog(logger.EnvLogFile(), logger.DefaultMaxSize, logger.DefaultMaxFiles, logger.EnvLevel()); err == nil {
 		slogLog = sl
 		slog.SetDefault(sl)
 	}
 }
 
-// Execute sets up provider subcommands and runs the root Cobra command. Returns error for os.Exit(2).
+// Execute sets up provider subcommands and runs the root Cobra command.
+// Returns error for os.Exit(2). The deferred Shutdown flushes and closes the
+// log pipeline once, covering both the CLI and the MCP process exits.
 func Execute() error {
+	defer logger.Shutdown()
 	BuildProviderSubcommands(rootCmd)
 	return rootCmd.Execute()
 }

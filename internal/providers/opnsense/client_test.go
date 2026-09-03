@@ -180,6 +180,71 @@ func TestGetInterfaces(t *testing.T) {
 			t.Errorf("error = %v, want decoding interfaces response", err)
 		}
 	})
+
+	t.Run("26.x rows shape", func(t *testing.T) {
+		// Captured field-for-field from a live 26.x interfaces_info response
+		// (sanitized to the RFC5737 test range per docs/naming.md): rows carry
+		// identifier + addr4 + gateways; unassigned devices (enc0, pflog0,
+		// zen0) have an empty identifier and are skipped.
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{
+				"total":4,"rowCount":4,"current":1,
+				"rows":[
+					{"identifier":"wan","description":"WAN","enabled":true,"addr4":"203.0.113.1/24","addr6":"","ipv4":[{"ipaddr":"203.0.113.1/24"}],"ipv6":[],"gateways":["203.0.113.254"],"config":{"if":"igb1","descr":"WAN","enable":"1","identifier":"wan"}},
+					{"identifier":"lan","description":"LAN","enabled":true,"addr4":"","addr6":"","ipv4":[{"ipaddr":"198.51.100.1/24"}],"ipv6":[],"gateways":[],"config":{"if":"igb0","descr":"LAN","enable":"1","identifier":"lan"}},
+					{"identifier":"opt1","description":"OPT1","enabled":true,"addr4":"198.51.100.50/24","addr6":"","ipv4":[{"ipaddr":"198.51.100.50/24"}],"ipv6":[],"gateways":[],"config":{"if":"bridge0","descr":"OPT1","enable":"1","identifier":"opt1"}},
+					{"identifier":"","description":"Unassigned Interface","enabled":false,"addr4":"","addr6":"","ipv4":[],"ipv6":[],"gateways":[]}
+				]
+			}`)
+		}))
+		ifaces, err := c.GetInterfaces(context.Background())
+		if err != nil {
+			t.Fatalf("GetInterfaces: %v", err)
+		}
+		// sorted by name: lan, opt1, wan — the unassigned row is skipped
+		if len(ifaces) != 3 {
+			t.Fatalf("interfaces = %+v, want 3", ifaces)
+		}
+		if ifaces[0].Name != "lan" || ifaces[0].IP != "198.51.100.1" || ifaces[0].Subnet != 24 || ifaces[0].Gateway != "" {
+			t.Errorf("lan = %+v", ifaces[0])
+		}
+		if ifaces[1].Name != "opt1" || ifaces[1].IP != "198.51.100.50" || ifaces[1].Description != "OPT1" {
+			t.Errorf("opt1 = %+v", ifaces[1])
+		}
+		if ifaces[2].Name != "wan" || ifaces[2].IP != "203.0.113.1" || ifaces[2].Gateway != "203.0.113.254" {
+			t.Errorf("wan = %+v", ifaces[2])
+		}
+	})
+
+	t.Run("26.x rows shape takes precedence over a legacy map", func(t *testing.T) {
+		// A body carrying both shapes must decode via the rows path.
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{
+				"rows":[{"identifier":"lan","description":"LAN","addr4":"198.51.100.1/24","ipv4":[],"gateways":[]}],
+				"interfaces":{"wan":{"ipv4":"203.0.113.9/24"}}
+			}`)
+		}))
+		ifaces, err := c.GetInterfaces(context.Background())
+		if err != nil {
+			t.Fatalf("GetInterfaces: %v", err)
+		}
+		if len(ifaces) != 1 || ifaces[0].Name != "lan" {
+			t.Errorf("interfaces = %+v, want only the rows-shape lan", ifaces)
+		}
+	})
+
+	t.Run("200 ok with empty interfaces map decodes to zero", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"interfaces":{}}`)
+		}))
+		ifaces, err := c.GetInterfaces(context.Background())
+		if err != nil {
+			t.Fatalf("GetInterfaces: %v", err)
+		}
+		if len(ifaces) != 0 {
+			t.Errorf("interfaces = %+v, want 0 (the caller warns on empty)", ifaces)
+		}
+	})
 }
 
 func TestGetFirewallRules(t *testing.T) {

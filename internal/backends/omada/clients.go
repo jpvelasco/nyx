@@ -58,7 +58,7 @@ func (c *Client) EnrichFromDHCP(ctx context.Context, siteID string, clients []Co
 
 	byMAC := make(map[string]dhcpUserRow, len(rows))
 	for _, row := range rows {
-		key := normalizeMAC(row.MACAddress)
+		key := NormalizeMAC(row.MACAddress)
 		if key == "" {
 			continue
 		}
@@ -69,7 +69,7 @@ func (c *Client) EnrichFromDHCP(ctx context.Context, siteID string, clients []Co
 
 	for i := range clients {
 		cl := &clients[i]
-		row, ok := byMAC[normalizeMAC(cl.MAC)]
+		row, ok := byMAC[NormalizeMAC(cl.MAC)]
 		if !ok {
 			continue
 		}

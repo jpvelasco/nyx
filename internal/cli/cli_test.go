@@ -51,6 +51,23 @@ func captureStdout(f func()) string {
 	return buf.String()
 }
 
+// captureStreams runs f with os.Stdout and os.Stderr redirected to separate
+// pipes, returning both what was written to stdout and to stderr.
+func captureStreams(f func()) (stdout, stderr string) {
+	oldOut, oldErr := os.Stdout, os.Stderr
+	outR, outW, _ := os.Pipe()
+	errR, errW, _ := os.Pipe()
+	os.Stdout, os.Stderr = outW, errW
+	f()
+	_ = outW.Close()
+	_ = errW.Close()
+	os.Stdout, os.Stderr = oldOut, oldErr
+	var outBuf, errBuf bytes.Buffer
+	_, _ = outBuf.ReadFrom(outR)
+	_, _ = errBuf.ReadFrom(errR)
+	return outBuf.String(), errBuf.String()
+}
+
 func TestRootHelpContainsCommands(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rootCmd.SetOut(buf)

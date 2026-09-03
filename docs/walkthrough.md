@@ -29,11 +29,11 @@ version: 1
 site: home-lab
 
 networks:
-  - name: main
+  - name: trusted
     cidr: 10.0.10.0/24
     gateway: 10.0.10.1
     zone: trusted
-    vlan: 1
+    vlan: 10
   # ... six more VLANs ...
 
 policies:
@@ -47,7 +47,7 @@ policies:
 assertions:
   # Make sure VLANs actually have devices on them
   - type: subnet_discovery
-    network: main
+    network: trusted
     expect_hosts_min: 10
     expect_hosts_max: 30
 
@@ -85,11 +85,11 @@ The output looks like:
 ```
 Site: home-lab
 Status: PASS
-Running from: 10.0.10.42 (inside: trusted)
+Running from: 10.0.10.1 (inside: trusted)
 
 --- 14 assertions, evaluated from this vantage point ---
 
-[PASS] subnet_discovery: 18 hosts found on main (expected 10-30)
+[PASS] subnet_discovery: 18 hosts found on trusted (expected 10-30)
 [PASS] isolation: iot -> management is denied as expected
 [PASS] vpn_route: traffic to 10.0.20.50 uses wg0 as expected
 [PASS] route_check: route to 10.0.10.1 exists via 10.0.10.1
@@ -99,8 +99,8 @@ Running from: 10.0.10.42 (inside: trusted)
 [PASS] port_check: 10.0.50.5 ports 8096,8920 are open
 [PASS] isolation: trusted -> iot is denied as expected
 [PASS] isolation: trusted -> management is denied as expected
-[PASS] isolation: iot -> management is denied (from iot-laptop probe)
-[PASS] subnet_discovery: 5 hosts found on mobile (expected 1-10)
+[PASS] isolation: iot -> management is denied (from iot-probe)
+[PASS] subnet_discovery: 5 hosts found on personal (expected 1-10)
 [PASS] subnet_discovery: 3 hosts found on servers (expected 1-10)
 [PASS] subnet_discovery: 4 hosts found on media (expected 1-10)
 

@@ -3,9 +3,9 @@ package providers
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/jpvelasco/nyx/internal/intent"
-	"github.com/jpvelasco/nyx/internal/logger"
 	"github.com/jpvelasco/nyx/internal/models"
 )
 
@@ -22,7 +22,7 @@ type ImportOptions struct {
 	CACertPath    string
 	// Logger receives structured operation events (token mint, retries,
 	// refresh) from provider clients. Never contains credentials.
-	Logger *logger.Logger
+	Logger *slog.Logger
 }
 
 // ProviderInfo holds version and connection metadata returned by Info.

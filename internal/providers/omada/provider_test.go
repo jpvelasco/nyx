@@ -1,11 +1,13 @@
 package omadaprovider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -14,6 +16,23 @@ import (
 	providers "github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/testutil"
 )
+
+// captureStderr runs f with os.Stderr redirected and returns what f wrote.
+func captureStderr(t *testing.T, f func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	f()
+	_ = w.Close()
+	os.Stderr = old
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+	return buf.String()
+}
 
 const infoJSON = `{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true,"omadacCategory":"advanced"}}`
 
@@ -684,6 +703,86 @@ func TestProviderInventory(t *testing.T) {
 	if len(res.Warnings) != 0 {
 		t.Errorf("warnings = %v, want none", res.Warnings)
 	}
+
+	t.Run("debug flag is threaded to the client", func(t *testing.T) {
+		// Every authenticated read of the inventory goes through the
+		// client; without the --debug threading (pre-#75) the surface was
+		// a silent no-op.
+		out := captureStderr(t, func() {
+			if _, err := p.Inventory(context.Background(), providers.ImportOptions{
+				Host: ts.URL, ClientID: "admin", ClientSecret: "pw", Site: "hq", SkipTLSVerify: true, Debug: true,
+			}); err != nil {
+				t.Fatalf("Inventory: %v", err)
+			}
+		})
+		for _, want := range []string{
+			"[omada debug] POST https://",
+			"/openapi/authorize/token?grant_type=client_credentials",
+			"[omada debug] GET https://",
+			"/openapi/v1/abc123/sites?",
+			"/openapi/v1/abc123/sites/s1/lan-networks?",
+			"/openapi/v1/abc123/sites/s1/networks/devices?",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("stderr missing %q (Debug not threaded): %s", want, out)
+			}
+		}
+	})
+
+	t.Run("no debug output without the flag", func(t *testing.T) {
+		out := captureStderr(t, func() {
+			if _, err := p.Inventory(context.Background(), providers.ImportOptions{
+				Host: ts.URL, ClientID: "admin", ClientSecret: "pw", Site: "hq", SkipTLSVerify: true,
+			}); err != nil {
+				t.Fatalf("Inventory: %v", err)
+			}
+		})
+		if strings.Contains(out, "[omada debug]") {
+			t.Errorf("debug output without the flag: %s", out)
+		}
+	})
+
+	// 6.2.x serves lan-networks rows without deviceMac: the gateway device
+	// column must fall back to the network's gateway IP.
+	t.Run("gateway binding via IP when deviceMac is absent", func(t *testing.T) {
+		ts62 := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/openapi/authorize/token":
+				writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+			case "/openapi/v1/abc123/sites":
+				writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+			case "/openapi/v1/abc123/sites/s1/lan-networks":
+				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+					{"id":"n1","name":"Trusted","vlan":10,"purpose":"interface","gatewaySubnet":"10.0.0.1/24","dhcpSettingsVO":{"enable":true}},
+					{"id":"n2","name":"IoT","vlan":20,"purpose":"interface","gatewaySubnet":"10.0.1.1/24","dhcpSettingsVO":{"enable":false}}
+				]}`)
+			case "/openapi/v1/abc123/sites/s1/networks/devices":
+				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
+					{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.1","firmwareVersion":"2.2.3"},
+					{"id":"d2","name":"SW-2428P","model":"SW-2428P","type":"switch","mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.253"}
+				]}`)
+			case "/openapi/v1/abc123/sites/s1/networks/client":
+				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		res, err := p.Inventory(context.Background(), providers.ImportOptions{
+			Host: ts62.URL, ClientID: "admin", ClientSecret: "pw", Site: "hq", SkipTLSVerify: true,
+		})
+		if err != nil {
+			t.Fatalf("Inventory: %v", err)
+		}
+		if res.Inventory.NetworkGateways["trusted"] != "GW-CORE" || res.Inventory.NetworkGateways["iot"] != "GW-CORE" {
+			t.Errorf("NetworkGateways = %v, want both → GW-CORE via gateway IP", res.Inventory.NetworkGateways)
+		}
+		if len(res.Inventory.Devices[0].Networks) != 2 {
+			t.Errorf("gateway networks = %v, want both LANs via gateway IP", res.Inventory.Devices[0].Networks)
+		}
+		if !strings.Contains(res.Human, "gateway: GW-CORE") {
+			t.Errorf("human output must resolve the gateway device:\n%s", res.Human)
+		}
+	})
 
 	t.Run("token mint failure propagates", func(t *testing.T) {
 		bad := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

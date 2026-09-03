@@ -141,16 +141,16 @@ func TestSlogWithGroup(t *testing.T) {
 	}
 	defer CloseSlog(sl)
 
-	// Groups are flattened into the JSON entry.
-	sl.WithGroup("ignored").Info("grouped", slog.String("k", "v"))
+	// Groups are flattened into the JSON entry with dotted keys.
+	sl.WithGroup("grp").Info("grouped", slog.String("k", "v"))
 
 	content, err := os.ReadFile(path) // nosemgrep: go_filesystem_rule-fileread
 	if err != nil {
 		t.Fatalf("ReadFile failed: %v", err)
 	}
 	line := strings.TrimSpace(string(content))
-	if !strings.Contains(line, `"k":"v"`) {
-		t.Errorf("expected group attrs flattened into output, got: %s", line)
+	if !strings.Contains(line, `"grp.k":"v"`) {
+		t.Errorf("expected group attrs flattened with dotted keys, got: %s", line)
 	}
 }
 

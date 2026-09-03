@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -16,7 +17,9 @@ import (
 
 	"github.com/jpvelasco/nyx/internal/audit"
 	"github.com/jpvelasco/nyx/internal/credentials"
+	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
 	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/logger"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/service"
@@ -121,6 +124,11 @@ type omadaSurface interface {
 	GetALGSettings(ctx context.Context, opts service.OmadaOptions) (*service.OmadaALGSettings, error)
 	GetFirewallSettings(ctx context.Context, opts service.OmadaOptions) (*service.OmadaFirewallSettings, error)
 	NatFacts(ctx context.Context, opts service.OmadaOptions) (*service.OmadaNatFacts, error)
+	GetUplinkInfo(ctx context.Context, opts service.OmadaOptions, macs []string) ([]service.OmadaUplinkInfo, error)
+	ListSwitchPorts(ctx context.Context, opts service.OmadaOptions, switchMAC string) ([]service.OmadaSwitchPort, error)
+	ListLanProfiles(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaLanProfile, error)
+	PlanPort(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest) (*service.OmadaPortPlan, error)
+	ApplyPortProfile(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest, dryRun bool) (*service.OmadaPortProfileApplyResult, error)
 }
 
 // opnsenseSurface is the OPNsense observation surface exposed to agents.
@@ -155,6 +163,10 @@ type Server struct {
 	omadaSvc    omadaSurface
 	opnsenseSvc opnsenseSurface
 	topoSvc     topologySurface
+	// logger writes MCP operation records to the shared rotating log file.
+	// The writer is the stdout RPC channel, so nothing is ever logged to
+	// it; a nil logger disables file logging (tests).
+	logger *slog.Logger
 	// credEnv reads the Omada credential env vars (keys OMADA_HOST /
 	// OMADA_CLIENT_ID / OMADA_CLIENT_SECRET / OMADA_SITE) and opnsenseCredEnv
 	// the OPNsense ones (OPNSENSE_HOST / OPNSENSE_API_KEY /
@@ -163,8 +175,17 @@ type Server struct {
 	opnsenseCredEnv map[string]func(string) string
 }
 
-// NewServer creates a new MCP server
+// NewServer creates a new MCP server. slog.Default() is the CLI's shared
+// OTel-backed pipeline (wired in cli init), so MCP tool calls land in the
+// same audit file as CLI commands; when no pipeline is wired (tests) the
+// stderr default keeps records visible.
 func NewServer() *Server {
+	return NewServerWithLogger(slog.Default())
+}
+
+// NewServerWithLogger creates an MCP server that writes operation records
+// through sl.
+func NewServerWithLogger(sl *slog.Logger) *Server {
 	omadaSvc := service.NewOmadaService()
 	omadaSvc.PostAudit = func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
 		return audit.NewEngine(spec).Run(ctx)
@@ -176,8 +197,9 @@ func NewServer() *Server {
 		omadaSvc:        omadaSvc,
 		opnsenseSvc:     service.NewOpnsenseService(),
 		topoSvc:         service.NewTopologyService(),
-		credEnv:         map[string]func(string) string{"OMADA_HOST": os.Getenv, "OMADA_CLIENT_ID": os.Getenv, "OMADA_CLIENT_SECRET": os.Getenv, "OMADA_SITE": os.Getenv},
-		opnsenseCredEnv: map[string]func(string) string{"OPNSENSE_HOST": os.Getenv, "OPNSENSE_API_KEY": os.Getenv, "OPNSENSE_API_SECRET": os.Getenv},
+		logger:          sl,
+		credEnv:         credEnvFrom(OmadaCredEnvVars),
+		opnsenseCredEnv: credEnvFrom(OpnsenseCredEnvVars),
 	}
 }
 
@@ -324,7 +346,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]propSchema{
-					"subnet":        {Type: "string", Description: "CIDR notation subnet to scan, e.g. 192.168.1.0/24"},
+					"subnet":        {Type: "string", Description: "CIDR notation subnet to scan, e.g. 10.0.10.0/24"},
 					"scan_timing":   {Type: "number", Description: "nmap -T timing template (0-5, default 4)"},
 					"scan_min_rate": {Type: "number", Description: "nmap --min-rate packets/sec (default 500)"},
 				},
@@ -504,6 +526,48 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			Name:        "omada_nat_facts",
 			Description: "Observe the Omada site's NAT posture in one call: port-forward and one-to-one rule counts, ALG and firewall settings, and whether a managed gateway is present. Read-only input to the topology report.",
 			InputSchema: omadaToolSchema(),
+		},
+		{
+			Name:        "omada_get_uplink_info",
+			Description: "Look up which managed device (and which port) a device MAC is cabled into, from the controller's uplink observation. Use to find where a standalone switch's uplink lands before changing port profiles. Read-only.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"device_mac": {Type: "string", Description: "MAC address of the device to look up (e.g. the standalone switch's MAC)"},
+			}, []string{"host", "device_mac"}),
+		},
+		{
+			Name:        "omada_list_switch_ports",
+			Description: "List switch ports with their live VLAN membership: the bound profile plus the resolved native (untagged) network and tagged set. Read-only.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"switch_mac": {Type: "string", Description: "Optional switch MAC to filter ports; empty lists every switch in the site"},
+			}, []string{"host"}),
+		},
+		{
+			Name:        "omada_list_lan_profiles",
+			Description: "List the site's LAN profiles — the VLAN membership sets ports can be bound to: the native (untagged) network plus the tagged set per profile. Read-only.",
+			InputSchema: omadaToolSchema(),
+		},
+		{
+			Name:        "omada_plan_port",
+			Description: "Preview bringing one switch port to a desired VLAN membership (native network plus tagged set): the port's current membership and profile, and whether an existing LAN profile can be rebound or a new one must be created. Read-only: nothing is applied.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"switch_mac":   {Type: "string", Description: "Switch MAC hosting the port"},
+				"port":         {Type: "integer", Description: "Port number (1-based)"},
+				"native":       {Type: "string", Description: "Native (untagged) LAN network name"},
+				"tagged":       {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
+				"profile_name": {Type: "string", Description: "Optional name for a new profile; derived when empty"},
+			}, []string{"host", "switch_mac", "port", "native"}),
+		},
+		{
+			Name:        "omada_apply_port_profile",
+			Description: "Bind a switch port to a LAN profile with the desired VLAN membership (native network plus tagged set): find an existing profile whose membership matches, create one when none does, then bind it to the port. Idempotent (unchanged / bound / created_and_bound). Dry-run is the default: set dry_run=false to apply for real. The result carries before/after evidence (the port row joined to its referenced profile).",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"switch_mac":   {Type: "string", Description: "Switch MAC hosting the port"},
+				"port":         {Type: "integer", Description: "Port number (1-based)"},
+				"native":       {Type: "string", Description: "Native (untagged) LAN network name"},
+				"tagged":       {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
+				"profile_name": {Type: "string", Description: "Optional name for a new profile; derived when empty"},
+				"dry_run":      {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
+			}, []string{"host", "switch_mac", "port", "native"}),
 		},
 		{
 			Name:        "opnsense_get_info",
@@ -694,6 +758,14 @@ func (s *Server) handleToolCall(ctx context.Context, req *jsonRPCRequest) *jsonR
 	ctx, cancel := context.WithTimeout(ctx, toolCallTimeout)
 	defer cancel()
 
+	// Stamp the call with a trace ID so its log records correlate; records
+	// go to the shared file, never to the stdout RPC channel.
+	traceID := logger.NewTraceID()
+	var logCtx *slog.Logger
+	if s.logger != nil {
+		logCtx = s.logger.With("cmd", "mcp", "tool", params.Name, "trace_id", traceID)
+	}
+
 	done := make(chan toolDispatchResult, 1)
 	go func() {
 		text, isErr := s.dispatchTool(ctx, params.Name, params.Arguments)
@@ -702,6 +774,9 @@ func (s *Server) handleToolCall(ctx context.Context, req *jsonRPCRequest) *jsonR
 
 	select {
 	case result := <-done:
+		if logCtx != nil {
+			logCtx.Info("tool_call", "error", result.isErr)
+		}
 		return &jsonRPCResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
@@ -711,6 +786,9 @@ func (s *Server) handleToolCall(ctx context.Context, req *jsonRPCRequest) *jsonR
 			},
 		}
 	case <-ctx.Done():
+		if logCtx != nil {
+			logCtx.Warn("tool_call_timed_out", "timeout", toolCallTimeout.String())
+		}
 		return &jsonRPCResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
@@ -759,10 +837,11 @@ func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]
 const requiredHostMsg = "host parameter is required"
 
 // omadaOptionsFromArgs extracts Omada connection options from tool arguments,
-// falling back to env vars and then the encrypted credential store (entry
-// omada/default) for any value left empty — the same resolution order as the
-// CLI. The returned message is non-empty when a required parameter is
-// missing after all three layers.
+// falling back to env vars, then the Windows Credential Manager (entry
+// nyx-omada-<host>; no-op off Windows), and then the encrypted credential
+// store (entry omada/default) for any value left empty — the same
+// resolution order as the CLI. The returned message is non-empty when a
+// required parameter is missing after all four layers.
 func (s *Server) omadaOptionsFromArgs(args map[string]interface{}, needCredentials bool) (service.OmadaOptions, string) {
 	var opts service.OmadaOptions
 	opts.Host = storepath.FirstNonEmpty(argString(args, "host"), s.env("OMADA_HOST"))
@@ -789,6 +868,9 @@ func (s *Server) omadaOptionsFromArgs(args map[string]interface{}, needCredentia
 		ClientSecret: storepath.FirstNonEmpty(argString(args, "client_secret"), s.env("OMADA_CLIENT_SECRET")),
 		Site:         opts.Site,
 	}
+	// Windows Credential Manager layer, between env vars and the store
+	// (no-op off Windows — see credmanager).
+	fields.ClientID, fields.ClientSecret = credmanager.OverlayOmada(fields.Host, fields.ClientID, fields.ClientSecret)
 	credentials.Overlay(storepath.StoreFile(), "omada", "default", &fields)
 	opts.Host, opts.ClientID, opts.ClientSecret, opts.Site = fields.Host, fields.ClientID, fields.ClientSecret, fields.Site
 	if opts.Host == "" {
@@ -796,7 +878,8 @@ func (s *Server) omadaOptionsFromArgs(args map[string]interface{}, needCredentia
 	}
 	if opts.ClientID == "" || opts.ClientSecret == "" {
 		return opts, "client_id and client_secret parameters are required: " +
-			"set the OMADA_CLIENT_ID / OMADA_CLIENT_SECRET environment variables or run `nyx credentials set omada`"
+			"set the OMADA_CLIENT_ID / OMADA_CLIENT_SECRET environment variables" +
+			credmanager.Hint(opts.Host) + " or run `nyx credentials set omada`"
 	}
 	return opts, ""
 }
@@ -868,6 +951,37 @@ func argBoolDefault(args map[string]interface{}, key string, def bool) bool {
 		return def
 	}
 	return v
+}
+
+// argIntDefault returns an integer tool argument (JSON numbers decode as
+// float64), or the default when absent or non-numeric.
+func argIntDefault(args map[string]interface{}, key string, def int) int {
+	if v, ok := args[key].(float64); ok {
+		return int(v)
+	}
+	return def
+}
+
+// portProfileRequestFromArgs parses the plan/apply port-profile request
+// arguments, shared by omada_plan_port and omada_apply_port_profile.
+func portProfileRequestFromArgs(args map[string]interface{}) (service.OmadaPortProfileRequest, string) {
+	req := service.OmadaPortProfileRequest{
+		SwitchMAC:   argString(args, "switch_mac"),
+		Port:        argIntDefault(args, "port", 0),
+		Native:      argString(args, "native"),
+		Tagged:      splitCSV(argString(args, "tagged")),
+		ProfileName: argString(args, "profile_name"),
+	}
+	if req.SwitchMAC == "" {
+		return req, "switch_mac parameter is required"
+	}
+	if req.Port <= 0 {
+		return req, "port parameter is required (1-based port number)"
+	}
+	if req.Native == "" {
+		return req, "native parameter is required"
+	}
+	return req, ""
 }
 
 // opnsenseOptionsFromArgs extracts OPNsense connection options from tool
