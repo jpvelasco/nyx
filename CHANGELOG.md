@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-03
+
+**Feature release.** Omada moves fully to the official Open API with per-port / VLAN-profile plan+apply; OPNsense gains read-only inventory plus a NAT mutation pair; structured logging moves to an OpenTelemetry substrate with a PII-scrubbed `logs export`.
+
+### New Features
+
+- **Omada per-port observation + VLAN profile plan/apply.** Five new MCP tools (`omada_get_uplink_info`, `omada_list_switch_ports`, `omada_list_lan_profiles`, `omada_plan_port`, `omada_apply_port_profile`) cover per-port VLAN membership — uplink cable lookups by MAC, per-port connection/mode/profile binding, site LAN profiles, and an idempotent find-or-create-then-bind mutation (dry-run by default, before/after port evidence). CLI exposes the read surfaces as `nyx omada uplink-info --mac`, `switch-ports --switch-mac`, and `lan-profiles`; plan/apply stay MCP-only, like the ACL pair.
+- **OPNsense inventory + NAT mutations.** Read-only inventory tools (info, interfaces, firewall rules, DHCP clients, port-forward / one-to-one / source-NAT rules, aliases, NAT facts) with a dual-backend DHCP lease route, plus the `opnsense_plan_nat` / `opnsense_apply_nat` mutation pair (read-only preview / apply).
+- **Omada moves to the official Open API.** Client-credentials token mint replaces the internal v2 cookie session — the internal v2 API is fully cut — with reads and per-scope ACL writes on the `/openapi/v1` wire and automatic re-login on session expiry.
+- **Topology + double-NAT detection foundation.** Read-only detection groundwork for topology and double-NAT scenarios.
+- **MCP provider credentials via env vars + store.** Provider MCP tools resolve credentials as tool args → env vars → (Omada) Windows Credential Manager → encrypted store, matching the CLI resolution order.
+- **Windows Credential Manager fallback (Omada, CLI).** Omada credential resolution now checks the Windows Credential Manager (`nyx-omada-<host>`) before the encrypted store.
+- **`nyx mcp config`.** Prints a ready-to-paste agent-harness config block (mcpServers JSON or mcp_servers TOML) for the stdio MCP server, with `--harness`, `--command`, and `--write` (0600); credential env-var names render from canonical lists so the snippet can't drift from the resolution order.
+- **`nyx logs export`.** Exports the rotated log set as a self-describing artifact (JSON-lines or text) for bug reports, with `--since` / `--level` / `--cmd` / `--last` filters and PII scrubbing by default (`--no-scrub` opts out with a warning).
+- **OTel-based structured logging.** The slog substrate is rebuilt on the OpenTelemetry `otelslog` bridge with an SDK log provider; per-run trace IDs correlate lines across CLI and MCP, and both entry points flush on exit.
+
+### Changed
+
+- **CLI/MCP surface split is now explicit and guarded.** A parity test asserts every advertised provider capability is reachable on both surfaces; wiring a capability to only one fails CI.
+- **Refactors.** MCP `tools/call` routes through a handler table; `ValidateSpec` split into section validators.
+
+### Fixed
+
+- **Omada 6.2.x inventory gateway resolution**, with `--debug` threaded on every provider surface.
+- **OPNsense road-test defects.** Inventory `--debug` and import health assertions; 26.x `interfaces_info` rows shape decoded; system info read from the Dashboard-privileged endpoint; outbound NAT read endpoint; import degrades gracefully on a stable privilege 403.
+- **TLS options forwarded into the audit engine** for `check` on both providers.
+- **Inventory warnings rendered once** — CLI stderr owns them.
+- **Omada wire-shape fixes.** Official `/openapi/v1/{omadacId}` base path order, integer `purpose` shape on lan-networks, `bindingType` on switch-scope ACL creates.
+
+### Documentation
+
+- CLI/MCP surface split documented and guarded; Omada Open API cutover contract, research notes, and migrated docs synced into AGENTS.md.
+
+### Other
+
+- Public-facing RFC1918 examples replaced with the canonical 10.0.11.x vocabulary.
+- Codacy analysis CLI configuration adopted; test fixtures cleared of Codacy security findings.
+- Dependency bumps: `github/codeql-action` 4.37.6 → 4.37.9 (init/autobuild/analyze), `actions/checkout` 7.0.0 → 7.0.1.
+
 ## [0.3.2] - 2026-08-18
 
 **Patch release.** No user-facing behavior changes.
@@ -216,7 +255,9 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.4.0
+[0.3.2]: https://github.com/jpvelasco/nyx/releases/tag/v0.3.2
 [0.3.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.3.1
 [0.3.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.3.0
 [0.2.8]: https://github.com/jpvelasco/nyx/releases/tag/v0.2.8
