@@ -23,6 +23,31 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Refuse to re-cut an already-published version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Query the registry directly: `npm show` exit codes do not reliably
+          # distinguish "version absent" from "registry unreachable". A
+          # destructive re-cut (GoReleaser --clean swapping the hosted binaries
+          # out from under an already-published npm package's immutable
+          # checksums) is worse than a failed run, so anything that is not a
+          # definitive 404 fails closed.
+          STATUS="$(curl -s -o /dev/null -w '%{http_code}' \
+            "https://registry.npmjs.org/nyx-audit-cli/${VERSION}")"
+          case "$STATUS" in
+            404)
+              echo "version ${VERSION} not present on npm — safe to proceed"
+              ;;
+            200)
+              echo "::error::nyx-audit-cli@${VERSION} is already published — re-cutting ${GITHUB_REF_NAME} is not supported. Cut a new patch version, or (only if within 72h and nothing depends on it) npm unpublish the version and re-push the tag."
+              exit 1
+              ;;
+            *)
+              echo "::error::registry check for nyx-audit-cli@${VERSION} returned HTTP ${STATUS} — refusing to proceed (cannot prove the version is unpublished)."
+              exit 1
+              ;;
+          esac
+
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
@@ -38,7 +63,12 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true # pre-existing assets (422 already_exists) must not strand the npm publish
+        # The guard below (first step after checkout) fails fast when the npm
+        # version is already published, so a 422 on pre-existing assets can now
+        # only mean "this run's npm publish never happened" — the first run's
+        # assets and its published checksums.txt are still a coherent set, so
+        # falling through to the npm publish is safe.
+        continue-on-error: true
 
       - name: Verify release assets
         env:
@@ -60,19 +90,13 @@ jobs:
             exit 1
           fi
           echo "all 7 expected assets present"
-          # Embed from the published asset, not the local rebuild: on a re-run
-          # GoReleaser rebuilds archives with different bytes (mtime-embedded)
-          # while the release keeps the first run's assets, so dist/ drifts.
+          # Embed from the published asset, not the local rebuild: GoReleaser
+          # rebuilds archives with different bytes (mtime-embedded), so dist/
+          # would drift from the hosted binaries.
           URL="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
             --jq '.assets[] | select(.name=="checksums.txt") | .browser_download_url')"
           curl -fsSL "$URL" -o dist/checksums.txt
           echo "embedded checksums synced to published asset"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
 
       - name: Embed binary checksums into npm package
         run: node scripts/embed-checksums.js dist/checksums.txt npm/package.json
