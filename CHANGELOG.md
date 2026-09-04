@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-04
+
+**Patch release.** No user-facing behavior changes from 0.4.0.
+
+### Fixed
+
+- **npm install reliability.** The v0.4.0 cut left the `nyx-audit-cli` npm package embedding checksums for the first build's binaries while the GitHub release hosted a later rebuild's bytes, so `npm install -g nyx-audit-cli` failed its postinstall checksum verification. This release republishes the npm package against the binaries actually hosted at the v0.4.1 tag.
+
 ## [0.4.0] - 2026-09-03
 
 **Feature release.** Omada moves fully to the official Open API with per-port / VLAN-profile plan+apply; OPNsense gains read-only inventory plus a NAT mutation pair; structured logging moves to an OpenTelemetry substrate with a PII-scrubbed `logs export`.
@@ -255,7 +263,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.4.1
 [0.4.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.4.0
 [0.3.2]: https://github.com/jpvelasco/nyx/releases/tag/v0.3.2
 [0.3.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.3.1
