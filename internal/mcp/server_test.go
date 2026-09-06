@@ -977,6 +977,18 @@ func TestDispatchOmadaDHCPExtras(t *testing.T) {
 	if isErr || !strings.Contains(text, "ssdp") {
 		t.Fatalf("multicasts = (%q, %v)", text, isErr)
 	}
+	text, isErr = serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_get_dhcp_server_info", args)
+	if !isErr || !strings.Contains(text, "network_id parameter is required") {
+		t.Errorf("missing network_id = (%q, %v)", text, isErr)
+	}
+	errStub := &stubOmadaSvc{err: errors.New("controller down")}
+	for _, tool := range []string{"omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts"} {
+		in := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "network_id": "n1"}
+		text, isErr = serverWithOmadaStub(errStub).DispatchToolForTest(context.Background(), tool, in)
+		if !isErr || !strings.Contains(text, "request failed") {
+			t.Errorf("%s err = (%q, %v)", tool, text, isErr)
+		}
+	}
 }
 
 func TestDispatchOmadaDHCPPath(t *testing.T) {

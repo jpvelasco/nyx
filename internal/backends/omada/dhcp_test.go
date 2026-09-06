@@ -44,6 +44,24 @@ func TestGetDHCPSnoopStatusAndRules(t *testing.T) {
 	}
 }
 
+func TestDHCPReads_Errors(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, -1, "boom", "null")
+	}))
+	if _, err := c.GetDHCPServerInfo(context.Background(), "s1", "n1"); err == nil {
+		t.Fatal("expected server-info error")
+	}
+	if _, err := c.GetDHCPSnoopStatus(context.Background(), "s1"); err == nil {
+		t.Fatal("expected snoop-status error")
+	}
+	if _, err := c.GetDHCPSnoops(context.Background(), "s1"); err == nil {
+		t.Fatal("expected snoop-rules error")
+	}
+	if _, err := c.GetLANMulticasts(context.Background(), "s1"); err == nil {
+		t.Fatal("expected multicast error")
+	}
+}
+
 func TestGetLANMulticasts(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/openapi/v1/abc123/sites/s1/lan-multicasts" {

@@ -271,6 +271,32 @@ func TestOmadaServiceDHCPExtras(t *testing.T) {
 	}
 }
 
+func TestOmadaServiceDHCPExtras_Errors(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/openapi/v1/abc123/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		default:
+			writeOmadaEnvelope(w, -1, "null")
+		}
+	})
+	opts := OmadaOptions{Host: ts.URL, ClientID: "a", ClientSecret: "b", SkipTLSVerify: true}
+	if _, err := NewOmadaService().GetDHCPServerInfo(context.Background(), opts, "n1"); err == nil {
+		t.Fatal("expected server-info fetch error")
+	}
+	if _, err := NewOmadaService().GetDHCPSnoopStatus(context.Background(), opts); err == nil {
+		t.Fatal("expected snoop-status fetch error")
+	}
+	if _, err := NewOmadaService().ListDHCPSnoops(context.Background(), opts); err == nil {
+		t.Fatal("expected snoop-rules fetch error")
+	}
+	if _, err := NewOmadaService().ListLANMulticasts(context.Background(), opts); err == nil {
+		t.Fatal("expected multicast fetch error")
+	}
+}
+
 func TestOmadaServiceGetClientTopology(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
