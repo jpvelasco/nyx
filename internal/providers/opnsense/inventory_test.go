@@ -26,6 +26,8 @@ func TestRenderInventory(t *testing.T) {
 		"3 rules",
 		"== Clients ==",
 		"2 active clients",
+		"== Services ==",
+		"== Gateways ==",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render output missing %q:\n%s", want, out)

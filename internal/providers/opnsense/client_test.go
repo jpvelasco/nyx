@@ -180,6 +180,50 @@ func TestGetInterfaces(t *testing.T) {
 		}
 	})
 
+	t.Run("requests details=true", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("details") != "true" {
+				t.Errorf("query = %q, want details=true", r.URL.RawQuery)
+			}
+			testutil.WriteBody(w, `{"interfaces":{}}`)
+		}))
+		if _, err := c.GetInterfaces(context.Background()); err != nil {
+			t.Fatalf("GetInterfaces: %v", err)
+		}
+	})
+
+	t.Run("26.x details populate device mac members and counters", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{
+				"total":1,"rowCount":1,"current":1,
+				"rows":[{
+					"identifier":"lan","description":"LAN","enabled":true,
+					"addr4":"10.0.10.1/24","device":"bridge0","macaddr":"aa:bb:cc:dd:ee:00",
+					"link_type":"bridge",
+					"statistics":{"rx":{"packets":11,"bytes":1100},"tx":{"packets":22,"bytes":2200}},
+					"config":{"if":"bridge0","descr":"LAN","enable":"1","mtu":"1500","members":"igb0,igb1"}
+				}]
+			}`)
+		}))
+		ifaces, err := c.GetInterfaces(context.Background())
+		if err != nil {
+			t.Fatalf("GetInterfaces: %v", err)
+		}
+		if len(ifaces) != 1 {
+			t.Fatalf("interfaces = %+v, want 1", ifaces)
+		}
+		got := ifaces[0]
+		if got.Device != "bridge0" || got.MAC != "aa:bb:cc:dd:ee:00" || got.LinkType != "bridge" {
+			t.Errorf("identity = %+v", got)
+		}
+		if !got.Enabled || got.MTU != 1500 || strings.Join(got.Members, ",") != "igb0,igb1" {
+			t.Errorf("config = %+v", got)
+		}
+		if got.RxPackets != 11 || got.RxBytes != 1100 || got.TxPackets != 22 || got.TxBytes != 2200 {
+			t.Errorf("counters = %+v", got)
+		}
+	})
+
 	t.Run("bad json", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			testutil.WriteBody(w, `not json`)

@@ -141,6 +141,8 @@ type opnsenseSurface interface {
 	ListOneToOneRules(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseNatRule, error)
 	ListSourceNatRules(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseNatRule, error)
 	ListAliases(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseAlias, error)
+	ListServices(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseServiceStatus, error)
+	ListGateways(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseGatewayStatus, error)
 	GetOutboundNatMode(ctx context.Context, opts service.OpnsenseOptions) (string, error)
 	GetNAT(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseNatSummary, error)
 	Inventory(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseInventory, error)
@@ -576,7 +578,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		},
 		{
 			Name:        "opnsense_list_interfaces",
-			Description: "List OPNsense interfaces with their IP configuration.",
+			Description: "List OPNsense interfaces with IP configuration plus NIC identity (device, MAC), bridge members, and rx/tx counters when the controller answers details=true.",
 			InputSchema: opnsenseToolSchema(),
 		},
 		{
@@ -615,8 +617,18 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: opnsenseToolSchema(),
 		},
 		{
+			Name:        "opnsense_list_services",
+			Description: "List OPNsense controller services and whether each is running (answers whether DHCP/DNS daemons are up).",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_gateways",
+			Description: "List OPNsense gateway health (name, address, status, delay, loss). A 403 means the API user lacks the System: Gateways page privilege.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
 			Name:        "opnsense_inventory",
-			Description: "Observe the OPNsense firewall point-in-time: system metadata, its interfaces as networks with gateway bindings, the firewall rule count, and the active client (DHCP lease) count. Read-only.",
+			Description: "Observe the OPNsense firewall point-in-time: system metadata, interfaces as networks (with NIC/bridge details when available), firewall rule count, DHCP clients, services, and gateway health. Read-only.",
 			InputSchema: opnsenseToolSchema(),
 		},
 		{

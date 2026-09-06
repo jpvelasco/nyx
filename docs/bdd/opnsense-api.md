@@ -114,12 +114,29 @@ And the FreeBSD and OpenSSL entries are exposed without their prefixes
 And when the product entry carries no known-arch suffix, the version is the whole entry and the arch is empty (never guessed)
 
 ### S2.2 Interfaces
-Given `GET /api/interfaces/overview/interfaces_info` answers in one of two shapes: the pre-26.x name-keyed map `{"interfaces":{"lan":{"description":"LAN","ipv4":"10.0.0.1/24","ipv4_gateway":"10.0.0.254"}}}` or the 26.x paged rows shape `{"total":N,"rows":[{"identifier":"lan","description":"LAN","addr4":"10.0.0.1/24","ipv4":[{"ipaddr":"10.0.0.1/24"}],"gateways":["10.0.0.254"],...}]}`
+Given `GET /api/interfaces/overview/interfaces_info?details=true` answers in one of two shapes: the pre-26.x name-keyed map `{"interfaces":{"lan":{"description":"LAN","ipv4":"10.0.0.1/24","ipv4_gateway":"10.0.0.254"}}}` or the 26.x paged rows shape `{"total":N,"rows":[{"identifier":"lan","description":"LAN","addr4":"10.0.0.1/24","ipv4":[{"ipaddr":"10.0.0.1/24"}],"gateways":["10.0.0.254"],"device":"bridge0","macaddr":"aa:bb:cc:dd:ee:00","statistics":{"rx":{"packets":1,"bytes":2},"tx":{"packets":3,"bytes":4}},"config":{"if":"bridge0","members":"igb0,igb1","mtu":"1500"},...}]}`
 When `GetInterfaces` is called
-Then the rows shape is tried first (26.x-first, like the dual-backend lease routes) and a body with no `rows` field falls back to the legacy map, so both decode to the same interface list
+Then the request includes `details=true`
+And the rows shape is tried first (26.x-first, like the dual-backend lease routes) and a body with no `rows` field falls back to the legacy map, so both decode to the same interface list
 And each interface is returned sorted by name with the IP split from the `ip/prefix` form, prefix bits as `Subnet`, and the first gateway entry as `Gateway`
 And a rows entry whose `identifier` is empty (an unassigned device such as `enc0`/`pflog0`) carries no configuration and is skipped
 And the legacy `DHCP` flag is read only from the map shape (the rows shape has no equivalent), so a rows-shaped interface reports `DHCP=false`
+And a details-capable rows body also populates Device, MAC, LinkType, Enabled, MTU, Members, and rx/tx counters
+And the test: `TestGetInterfaces`
+
+### S2.11 Services
+Given `POST /api/core/service/search` with a datatables body (`current`/`rowCount`)
+When `GetServices` is called
+Then every page is concatenated and `running` decodes from bool, `"1"`/`"0"`, or integer
+And a 403 is the stable page-privilege error (inventory degrades)
+And the test: `TestGetServices`
+
+### S2.12 Gateway status
+Given `GET /api/routes/gateway/status` → `{"items":[{"name":"WAN_DHCP","address":"203.0.113.254","status":"none"}]}`
+When `GetGatewayStatus` is called
+Then each item is returned (or `rows` when that is the envelope)
+And a 403 is the stable page-privilege error (inventory degrades)
+And the test: `TestGetGatewayStatus`
 
 ### S2.3 Firewall rules
 Given `GET /api/firewall/filter/search_rule` → `{"total":N,"rows":[{...}]}`

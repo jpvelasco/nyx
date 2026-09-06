@@ -93,6 +93,39 @@ func TestOpnsenseServiceListInterfaces(t *testing.T) {
 	}
 }
 
+func TestOpnsenseServiceListServicesAndGateways(t *testing.T) {
+	t.Run("services", func(t *testing.T) {
+		ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/core/service/search" {
+				t.Errorf("path = %s", r.URL.Path)
+			}
+			testutil.WriteBody(w, `{"total":1,"rows":[{"name":"dnsmasq","running":true,"description":"Dnsmasq"}]}`)
+		})
+		svcs, err := NewOpnsenseService().ListServices(context.Background(), opnsenseOptions(ts))
+		if err != nil {
+			t.Fatalf("ListServices: %v", err)
+		}
+		if len(svcs) != 1 || svcs[0].Name != "dnsmasq" || !svcs[0].Running {
+			t.Errorf("services = %+v", svcs)
+		}
+	})
+	t.Run("gateways", func(t *testing.T) {
+		ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/routes/gateway/status" {
+				t.Errorf("path = %s", r.URL.Path)
+			}
+			testutil.WriteBody(w, `{"items":[{"name":"WAN_DHCP","status":"none","address":"203.0.113.254"}]}`)
+		})
+		gws, err := NewOpnsenseService().ListGateways(context.Background(), opnsenseOptions(ts))
+		if err != nil {
+			t.Fatalf("ListGateways: %v", err)
+		}
+		if len(gws) != 1 || gws[0].Name != "WAN_DHCP" || gws[0].Status != "none" {
+			t.Errorf("gateways = %+v", gws)
+		}
+	})
+}
+
 func TestOpnsenseServiceListFirewallRules(t *testing.T) {
 	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/firewall/filter/search_rule" {
@@ -165,6 +198,10 @@ func TestOpnsenseServiceInventory(t *testing.T) {
 				testutil.WriteBody(w, `{"total":2,"rows":[{"uuid":"u1","enabled":"1","action":"block"},{"uuid":"u2","enabled":"1","action":"pass"}]}`)
 			case "/api/dnsmasq/leases/search":
 				testutil.WriteBody(w, `{"leases":[{"mac":"aa","ip":"10.0.10.5","hostname":"nas"},{"mac":"bb","ip":"10.0.20.5","hostname":"cam"}]}`)
+			case "/api/core/service/search":
+				testutil.WriteBody(w, `{"total":1,"rows":[{"name":"dnsmasq","running":"1","description":"Dnsmasq DNS/DHCP"}]}`)
+			case "/api/routes/gateway/status":
+				testutil.WriteBody(w, `{"items":[{"name":"WAN_DHCP","address":"203.0.113.254","status":"none"}]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -188,6 +225,12 @@ func TestOpnsenseServiceInventory(t *testing.T) {
 		}
 		if inv.ClientCount != 2 {
 			t.Errorf("ClientCount = %d, want 2", inv.ClientCount)
+		}
+		if !inv.ServicesOK || len(inv.Services) != 1 || !inv.Services[0].Running {
+			t.Errorf("services = %+v", inv.Services)
+		}
+		if !inv.GatewaysOK || len(inv.Gateways) != 1 || inv.Gateways[0].Name != "WAN_DHCP" {
+			t.Errorf("gateways = %+v", inv.Gateways)
 		}
 		if len(inv.Warnings) != 0 {
 			t.Errorf("Warnings = %v, want none", inv.Warnings)

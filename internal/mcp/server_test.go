@@ -298,8 +298,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 40 {
-		t.Fatalf("expected 40 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 42 {
+		t.Fatalf("expected 42 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -308,7 +308,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_plan_port", "omada_apply_port_profile", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_inventory", "topology"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_plan_port", "omada_apply_port_profile", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_services", "opnsense_list_gateways", "opnsense_inventory", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -354,6 +354,8 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 		"omada_apply_port_profile":         {"host", "switch_mac", "port", "native"},
 		"opnsense_get_info":                {"host"},
 		"opnsense_list_interfaces":         {"host"},
+		"opnsense_list_services":           {"host"},
+		"opnsense_list_gateways":           {"host"},
 		"opnsense_list_firewall_rules":     {"host"},
 		"opnsense_list_clients":            {"host"},
 		"opnsense_list_port_forward_rules": {"host"},
@@ -1345,6 +1347,25 @@ func TestDispatchOpnsenseListClients(t *testing.T) {
 	}
 }
 
+func TestDispatchOpnsenseListServicesAndGateways(t *testing.T) {
+	stub := &stubOpnsenseSvc{
+		services: []service.OpnsenseServiceStatus{{Name: "dnsmasq", Running: true}},
+		gateways: []service.OpnsenseGatewayStatus{{Name: "WAN_DHCP", Status: "none"}},
+	}
+	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_list_services", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+	})
+	if isErr || !strings.Contains(text, `"name": "dnsmasq"`) || !strings.Contains(text, `"running": true`) {
+		t.Fatalf("services = (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_list_gateways", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+	})
+	if isErr || !strings.Contains(text, `"name": "WAN_DHCP"`) {
+		t.Fatalf("gateways = (%q, %v)", text, isErr)
+	}
+}
+
 func TestDispatchOpnsenseInventory(t *testing.T) {
 	stub := &stubOpnsenseSvc{inventory: &service.OpnsenseInventory{
 		Host:              "fw.local",
@@ -1811,6 +1832,8 @@ type stubOpnsenseSvc struct {
 	oneToOne     []service.OpnsenseNatRule
 	sourceNat    []service.OpnsenseNatRule
 	aliases      []service.OpnsenseAlias
+	services     []service.OpnsenseServiceStatus
+	gateways     []service.OpnsenseGatewayStatus
 	natMode      string
 	natSummary   *service.OpnsenseNatSummary
 	inventory    *service.OpnsenseInventory
@@ -1859,6 +1882,16 @@ func (s *stubOpnsenseSvc) ListSourceNatRules(_ context.Context, opts service.Opn
 func (s *stubOpnsenseSvc) ListAliases(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseAlias, error) {
 	s.lastOpts = opts
 	return s.aliases, s.err
+}
+
+func (s *stubOpnsenseSvc) ListServices(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseServiceStatus, error) {
+	s.lastOpts = opts
+	return s.services, s.err
+}
+
+func (s *stubOpnsenseSvc) ListGateways(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseGatewayStatus, error) {
+	s.lastOpts = opts
+	return s.gateways, s.err
 }
 
 func (s *stubOpnsenseSvc) GetOutboundNatMode(_ context.Context, opts service.OpnsenseOptions) (string, error) {
@@ -2363,6 +2396,8 @@ func TestDispatchNatReads_MissingHost(t *testing.T) {
 		"opnsense_list_source_nat_rules",
 		"opnsense_list_aliases",
 		"opnsense_get_nat",
+		"opnsense_list_services",
+		"opnsense_list_gateways",
 		"opnsense_inventory",
 	}
 	for _, tool := range opnsenseTools {
