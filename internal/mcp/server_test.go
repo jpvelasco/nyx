@@ -937,6 +937,13 @@ func TestDispatchOmadaGetClientTopology(t *testing.T) {
 	if !isErr || !strings.Contains(text, "client_mac parameter is required") {
 		t.Errorf("missing mac = (%q, %v)", text, isErr)
 	}
+	errStub := &stubOmadaSvc{err: errors.New("controller down")}
+	text, isErr = serverWithOmadaStub(errStub).DispatchToolForTest(context.Background(), "omada_get_client_topology", map[string]interface{}{
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "client_mac": "aa:bb:cc:dd:ee:01",
+	})
+	if !isErr || !strings.Contains(text, "omada client topology request failed") {
+		t.Errorf("service err = (%q, %v)", text, isErr)
+	}
 }
 
 func TestDispatchOmadaListNetworks_ServiceError(t *testing.T) {

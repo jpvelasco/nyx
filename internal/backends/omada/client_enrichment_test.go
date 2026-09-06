@@ -98,6 +98,16 @@ func TestGetClientTopology(t *testing.T) {
 	}
 }
 
+func TestGetClientTopologyError(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, -1, "boom", "null")
+	}))
+	_, err := c.GetClientTopology(context.Background(), "s1", "aa:bb:cc:dd:ee:01")
+	if err == nil || !strings.Contains(err.Error(), "getting client topology") {
+		t.Errorf("error = %v, want wrapped fetch error", err)
+	}
+}
+
 func TestGetGatewayDHCPUsers(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/openapi/v1/abc123/sites/s1/gateways/aa-bb-cc-dd-ee-00/dhcp/user-list" {

@@ -259,6 +259,30 @@ func TestOmadaServiceGetClientTopology(t *testing.T) {
 	}
 }
 
+func TestOmadaServiceGetClientTopology_Errors(t *testing.T) {
+	if _, err := NewOmadaService().GetClientTopology(context.Background(), OmadaOptions{
+		Host: "https://127.0.0.1:1", ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
+	}, "aa:bb:cc:dd:ee:01"); err == nil {
+		t.Fatal("unreachable host must error")
+	}
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/openapi/v1/abc123/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		default:
+			writeOmadaEnvelope(w, -1, "null")
+		}
+	})
+	_, err := NewOmadaService().GetClientTopology(context.Background(), OmadaOptions{
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
+	}, "aa:bb:cc:dd:ee:01")
+	if err == nil || !strings.Contains(err.Error(), "fetching client topology") {
+		t.Fatalf("err = %v, want fetching-client-topology wrap", err)
+	}
+}
+
 func TestOmadaServiceListNetworks_SiteSelection(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
