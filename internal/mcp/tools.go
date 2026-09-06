@@ -49,6 +49,10 @@ var toolHandlers = map[string]toolHandler{
 	"omada_list_gateway_dhcp_users":    (*Server).toolOmadaListGatewayDHCPUsers,
 	"omada_get_client_topology":        (*Server).toolOmadaGetClientTopology,
 	"omada_dhcp_path":                  (*Server).toolOmadaDHCPPath,
+	"omada_get_dhcp_server_info":       (*Server).toolOmadaGetDHCPServerInfo,
+	"omada_get_dhcp_snoop_status":      (*Server).toolOmadaGetDHCPSnoopStatus,
+	"omada_list_dhcp_snoops":           (*Server).toolOmadaListDHCPSnoops,
+	"omada_list_lan_multicasts":        (*Server).toolOmadaListLANMulticasts,
 	"omada_plan_port":                  (*Server).toolOmadaPlanPort,
 	"omada_apply_port_profile":         (*Server).toolOmadaApplyPortProfile,
 	"opnsense_get_info":                (*Server).toolOpnsenseGetInfo,
@@ -355,6 +359,53 @@ func (s *Server) toolOmadaDHCPPath(ctx context.Context, args map[string]interfac
 		return errResult(fmt.Sprintf("omada DHCP path request failed: %v", err))
 	}
 	return okResult(toJSON(rep))
+}
+
+func (s *Server) toolOmadaGetDHCPServerInfo(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	id, _ := args["network_id"].(string)
+	if strings.TrimSpace(id) == "" {
+		return errResult("network_id parameter is required")
+	}
+	info, err := s.omadaSvc.GetDHCPServerInfo(ctx, opts, id)
+	if err != nil {
+		return errResult(fmt.Sprintf("omada DHCP server info request failed: %v", err))
+	}
+	return okResult(toJSON(info))
+}
+
+func (s *Server) toolOmadaGetDHCPSnoopStatus(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.omadaJSON(ctx, args, "omada DHCP snooping status request failed", func(opts service.OmadaOptions) (interface{}, error) {
+		return s.omadaSvc.GetDHCPSnoopStatus(ctx, opts)
+	})
+}
+
+func (s *Server) toolOmadaListDHCPSnoops(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.omadaJSON(ctx, args, "omada DHCP snooping rules request failed", func(opts service.OmadaOptions) (interface{}, error) {
+		return s.omadaSvc.ListDHCPSnoops(ctx, opts)
+	})
+}
+
+func (s *Server) toolOmadaListLANMulticasts(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.omadaJSON(ctx, args, "omada LAN multicast rules request failed", func(opts service.OmadaOptions) (interface{}, error) {
+		return s.omadaSvc.ListLANMulticasts(ctx, opts)
+	})
+}
+
+// omadaJSON resolves Omada credentials then JSON-encodes a successful fetch.
+func (s *Server) omadaJSON(ctx context.Context, args map[string]interface{}, failPrefix string, fetch func(service.OmadaOptions) (interface{}, error)) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	v, err := fetch(opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("%s: %v", failPrefix, err))
+	}
+	return okResult(toJSON(v))
 }
 
 func (s *Server) toolOmadaInventory(ctx context.Context, args map[string]interface{}) toolDispatchResult {
