@@ -298,8 +298,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 44 {
-		t.Fatalf("expected 44 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 45 {
+		t.Fatalf("expected 45 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -308,7 +308,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_plan_port", "omada_apply_port_profile", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_services", "opnsense_list_gateways", "opnsense_inventory", "topology"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_plan_port", "omada_apply_port_profile", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_services", "opnsense_list_gateways", "opnsense_inventory", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -352,6 +352,7 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 		"omada_list_lan_profiles":          {"host"},
 		"omada_list_gateway_dhcp_users":    {"host", "gateway_mac"},
 		"omada_get_client_topology":        {"host", "client_mac"},
+		"omada_dhcp_path":                  {"host"},
 		"omada_plan_port":                  {"host", "switch_mac", "port", "native"},
 		"omada_apply_port_profile":         {"host", "switch_mac", "port", "native"},
 		"opnsense_get_info":                {"host"},
@@ -942,6 +943,25 @@ func TestDispatchOmadaGetClientTopology(t *testing.T) {
 		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "client_mac": "aa:bb:cc:dd:ee:01",
 	})
 	if !isErr || !strings.Contains(text, "omada client topology request failed") {
+		t.Errorf("service err = (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchOmadaDHCPPath(t *testing.T) {
+	stub := &stubOmadaSvc{dhcpPath: &service.OmadaDHCPPathReport{
+		Verdicts: []string{"client has no lease on the gateway table"},
+	}}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_dhcp_path", map[string]interface{}{
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "client_mac": "aa:bb:cc:dd:ee:01",
+	})
+	if isErr || !strings.Contains(text, "no lease") || stub.lastPathReq.ClientMAC != "aa:bb:cc:dd:ee:01" {
+		t.Fatalf("got (%q, %v) req=%+v", text, isErr, stub.lastPathReq)
+	}
+	errStub := &stubOmadaSvc{err: errors.New("compose failed")}
+	text, isErr = serverWithOmadaStub(errStub).DispatchToolForTest(context.Background(), "omada_dhcp_path", map[string]interface{}{
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "client_mac": "aa:bb:cc:dd:ee:01",
+	})
+	if !isErr || !strings.Contains(text, "omada DHCP path request failed") {
 		t.Errorf("service err = (%q, %v)", text, isErr)
 	}
 }
@@ -1740,6 +1760,8 @@ type stubOmadaSvc struct {
 	lastGWMAC     string
 	topoNodes     []service.OmadaClientTopologyNode
 	lastClientMAC string
+	dhcpPath      *service.OmadaDHCPPathReport
+	lastPathReq   service.OmadaDHCPPathRequest
 }
 
 func (s *stubOmadaSvc) Info(_ context.Context, opts service.OmadaOptions) (*service.OmadaInfo, error) {
@@ -1846,6 +1868,13 @@ func (s *stubOmadaSvc) GetClientTopology(_ context.Context, opts service.OmadaOp
 	s.lastOpts = opts
 	s.lastClientMAC = clientMAC
 	return s.topoNodes, s.err
+}
+
+func (s *stubOmadaSvc) DiagnoseDHCPPath(_ context.Context, opts service.OmadaOptions, req service.OmadaDHCPPathRequest) (*service.OmadaDHCPPathReport, error) {
+	s.calls++
+	s.lastOpts = opts
+	s.lastPathReq = req
+	return s.dhcpPath, s.err
 }
 
 func (s *stubOmadaSvc) ListLanProfiles(_ context.Context, opts service.OmadaOptions) ([]service.OmadaLanProfile, error) {
@@ -2455,6 +2484,7 @@ func TestDispatchNatReads_MissingHost(t *testing.T) {
 		"omada_list_lan_profiles",
 		"omada_list_gateway_dhcp_users",
 		"omada_get_client_topology",
+		"omada_dhcp_path",
 		"omada_plan_port",
 		"omada_apply_port_profile",
 	}

@@ -48,6 +48,7 @@ var toolHandlers = map[string]toolHandler{
 	"omada_list_lan_profiles":          (*Server).toolOmadaListLanProfiles,
 	"omada_list_gateway_dhcp_users":    (*Server).toolOmadaListGatewayDHCPUsers,
 	"omada_get_client_topology":        (*Server).toolOmadaGetClientTopology,
+	"omada_dhcp_path":                  (*Server).toolOmadaDHCPPath,
 	"omada_plan_port":                  (*Server).toolOmadaPlanPort,
 	"omada_apply_port_profile":         (*Server).toolOmadaApplyPortProfile,
 	"opnsense_get_info":                (*Server).toolOpnsenseGetInfo,
@@ -337,6 +338,23 @@ func (s *Server) toolOmadaGetClientTopology(ctx context.Context, args map[string
 		return errResult(fmt.Sprintf("omada client topology request failed: %v", err))
 	}
 	return okResult(toJSON(nodes))
+}
+
+func (s *Server) toolOmadaDHCPPath(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	mac, _ := args["client_mac"].(string)
+	sw, _ := args["switch_mac"].(string)
+	port, _ := args["port"].(float64)
+	rep, err := s.omadaSvc.DiagnoseDHCPPath(ctx, opts, service.OmadaDHCPPathRequest{
+		ClientMAC: mac, SwitchMAC: sw, Port: int(port),
+	})
+	if err != nil {
+		return errResult(fmt.Sprintf("omada DHCP path request failed: %v", err))
+	}
+	return okResult(toJSON(rep))
 }
 
 func (s *Server) toolOmadaInventory(ctx context.Context, args map[string]interface{}) toolDispatchResult {

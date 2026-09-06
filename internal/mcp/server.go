@@ -129,6 +129,7 @@ type omadaSurface interface {
 	ListLanProfiles(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaLanProfile, error)
 	ListGatewayDHCPUsers(ctx context.Context, opts service.OmadaOptions, gatewayMAC string) ([]service.OmadaGatewayDHCPUser, error)
 	GetClientTopology(ctx context.Context, opts service.OmadaOptions, clientMAC string) ([]service.OmadaClientTopologyNode, error)
+	DiagnoseDHCPPath(ctx context.Context, opts service.OmadaOptions, req service.OmadaDHCPPathRequest) (*service.OmadaDHCPPathReport, error)
 	PlanPort(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest) (*service.OmadaPortPlan, error)
 	ApplyPortProfile(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest, dryRun bool) (*service.OmadaPortProfileApplyResult, error)
 }
@@ -558,6 +559,15 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
 				"client_mac": {Type: "string", Description: "Client MAC (colon or dash separators)"},
 			}, []string{"host", "client_mac"}),
+		},
+		{
+			Name:        "omada_dhcp_path",
+			Description: "Compose the DHCP/VLAN path for a client MAC and/or a managed switch port: topology (stops at the managed hop), that port's trunk/access + native/tagged, involved LAN DHCP posture, and verdict candidates. Read-only. Requires client_mac or switch_mac+port.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"client_mac": {Type: "string", Description: "Client MAC (optional if switch_mac+port is set)"},
+				"switch_mac": {Type: "string", Description: "Managed switch MAC (optional if client_mac is set)"},
+				"port":       {Type: "integer", Description: "Managed switch port number (required with switch_mac)"},
+			}, []string{"host"}),
 		},
 		{
 			Name:        "omada_list_lan_profiles",
