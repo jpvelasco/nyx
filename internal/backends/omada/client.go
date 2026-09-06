@@ -503,6 +503,8 @@ func (c *Client) execute(req *http.Request, dest interface{}) error {
 		return &apiError{ErrorCode: env.ErrorCode, Msg: "invalid client credentials — check OMADA_CLIENT_ID and OMADA_CLIENT_SECRET"}
 	case -1005:
 		return &apiError{ErrorCode: env.ErrorCode, Msg: "operation forbidden — check account permissions"}
+	case -1600:
+		return &apiError{ErrorCode: env.ErrorCode, Msg: "unsupported request path (errorCode -1600) — this controller rejected the method or path; client-link-topology is POST-only with an empty body, not GET"}
 	default:
 		return &apiError{ErrorCode: env.ErrorCode, Msg: fmt.Sprintf("controller error %d: %s", env.ErrorCode, env.Msg)}
 	}

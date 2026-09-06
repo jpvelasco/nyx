@@ -74,6 +74,40 @@ func TestEnrichFromDHCP_EmptyUserList(t *testing.T) {
 	}
 }
 
+func TestGetClientTopology(t *testing.T) {
+	var method, path string
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		writeEnvelope(w, 0, "", `[
+			{"nodeType":"clientNode","clientNode":{"mac":"aa-bb-cc-dd-ee-01","name":"pc1","clientType":"wired","upOswInfo":{"mac":"aa-bb-cc-dd-ee-10","name":"SW-CORE","port":"8","linkSpeed":3}}},
+			{"nodeType":"deviceNode","deviceNode":{"mac":"aa-bb-cc-dd-ee-10","name":"SW-CORE","model":"SW","switchInfo":{"mac":"aa-bb-cc-dd-ee-10","name":"SW-CORE","port":"1"}}}
+		]`)
+	}))
+	nodes, err := c.GetClientTopology(context.Background(), "s1", "aa:bb:cc:dd:ee:01")
+	if err != nil {
+		t.Fatalf("GetClientTopology: %v", err)
+	}
+	if method != http.MethodPost {
+		t.Errorf("method = %s, want POST", method)
+	}
+	if path != "/openapi/v1/abc123/sites/s1/clients/aa-bb-cc-dd-ee-01/client-link-topology" {
+		t.Errorf("path = %s", path)
+	}
+	if len(nodes) != 2 || nodes[0].NodeType != "clientNode" || nodes[0].SwitchPort != "8" || nodes[1].Name != "SW-CORE" {
+		t.Fatalf("nodes = %+v", nodes)
+	}
+}
+
+func TestGetClientTopologyError(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, -1, "boom", "null")
+	}))
+	_, err := c.GetClientTopology(context.Background(), "s1", "aa:bb:cc:dd:ee:01")
+	if err == nil || !strings.Contains(err.Error(), "getting client topology") {
+		t.Errorf("error = %v, want wrapped fetch error", err)
+	}
+}
+
 func TestGetGatewayDHCPUsers(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/openapi/v1/abc123/sites/s1/gateways/aa-bb-cc-dd-ee-00/dhcp/user-list" {

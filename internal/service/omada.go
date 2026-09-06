@@ -69,6 +69,22 @@ type OmadaGatewayDHCPUser struct {
 	LeftLeaseSec int    `json:"left_lease_sec,omitempty"`
 }
 
+// OmadaClientTopologyNode is one hop in a client's uplink chain.
+type OmadaClientTopologyNode struct {
+	NodeType   string `json:"node_type"`
+	MAC        string `json:"mac,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Model      string `json:"model,omitempty"`
+	ClientType string `json:"client_type,omitempty"`
+	SwitchMAC  string `json:"switch_mac,omitempty"`
+	SwitchName string `json:"switch_name,omitempty"`
+	SwitchPort string `json:"switch_port,omitempty"`
+	APMAC      string `json:"ap_mac,omitempty"`
+	APName     string `json:"ap_name,omitempty"`
+	LinkSpeed  int    `json:"link_speed,omitempty"`
+	RSSI       int    `json:"rssi,omitempty"`
+}
+
 // OmadaACLRule is a switch or gateway ACL rule in a flat, agent-friendly shape.
 type OmadaACLRule struct {
 	ID         string `json:"id"`
@@ -1065,6 +1081,42 @@ func (s *OmadaService) ListGatewayDHCPUsers(ctx context.Context, opts OmadaOptio
 			Name:         r.Name,
 			NetworkName:  r.NetworkName,
 			LeftLeaseSec: r.LeftLeaseSec,
+		})
+	}
+	return out, nil
+}
+
+// GetClientTopology returns the client's uplink chain (POST-only Open API).
+// A dumb switch does not appear; the last managed port is the crime scene.
+func (s *OmadaService) GetClientTopology(ctx context.Context, opts OmadaOptions, clientMAC string) ([]OmadaClientTopologyNode, error) {
+	if strings.TrimSpace(clientMAC) == "" {
+		return nil, fmt.Errorf("client_mac is required")
+	}
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+
+	rows, err := client.GetClientTopology(ctx, site.EffectiveID(), clientMAC)
+	if err != nil {
+		return nil, fmt.Errorf("fetching client topology: %w", err)
+	}
+	out := make([]OmadaClientTopologyNode, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, OmadaClientTopologyNode{
+			NodeType:   r.NodeType,
+			MAC:        r.MAC,
+			Name:       r.Name,
+			Model:      r.Model,
+			ClientType: r.ClientType,
+			SwitchMAC:  r.SwitchMAC,
+			SwitchName: r.SwitchName,
+			SwitchPort: r.SwitchPort,
+			APMAC:      r.APMAC,
+			APName:     r.APName,
+			LinkSpeed:  r.LinkSpeed,
+			RSSI:       r.RSSI,
 		})
 	}
 	return out, nil

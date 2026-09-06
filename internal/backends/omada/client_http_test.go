@@ -239,6 +239,7 @@ func TestGetErrorCodes(t *testing.T) {
 		{"not logged in", -1000, "session expired"},
 		{"bad credentials", -44106, "invalid client credentials"},
 		{"forbidden", -1005, "operation forbidden"},
+		{"unsupported path", -1600, "unsupported request path"},
 		{"other", -7, "controller error -7"},
 	}
 	for _, tc := range cases {

@@ -79,6 +79,103 @@ func (c *Client) GetGatewayDHCPUsers(ctx context.Context, siteID, gatewayMAC str
 	return out, nil
 }
 
+// ClientTopologyNode is one hop in the client's uplink chain. nodeType is
+// "clientNode" for the client itself and "deviceNode" for managed
+// switches/APs/gateways. A dumb switch does not appear; the chain stops
+// at the managed port it is cabled into.
+type ClientTopologyNode struct {
+	NodeType   string
+	MAC        string
+	Name       string
+	Model      string
+	ClientType string
+	// Uplink switch port (client node) or this device's own switch info.
+	SwitchMAC  string
+	SwitchName string
+	SwitchPort string
+	// Uplink AP radio (client node) when the client is wireless.
+	APMAC     string
+	APName    string
+	LinkSpeed int
+	RSSI      int
+}
+
+type rawTopologyNode struct {
+	NodeType   string `json:"nodeType"`
+	ClientNode struct {
+		MAC        string `json:"mac"`
+		Name       string `json:"name"`
+		Model      string `json:"model"`
+		ClientType string `json:"clientType"`
+		UpOswInfo  struct {
+			MAC       string `json:"mac"`
+			Name      string `json:"name"`
+			Port      string `json:"port"`
+			LinkSpeed int    `json:"linkSpeed"`
+		} `json:"upOswInfo"`
+		UpApInfo struct {
+			MAC   string `json:"mac"`
+			Name  string `json:"name"`
+			RSSI  int    `json:"rssi"`
+			Radio string `json:"radio"`
+		} `json:"upApInfo"`
+	} `json:"clientNode"`
+	DeviceNode struct {
+		MAC        string `json:"mac"`
+		Name       string `json:"name"`
+		Model      string `json:"model"`
+		SwitchInfo struct {
+			MAC  string `json:"mac"`
+			Name string `json:"name"`
+			Port string `json:"port"`
+		} `json:"switchInfo"`
+		ApInfo struct {
+			MAC  string `json:"mac"`
+			Name string `json:"name"`
+			RSSI int    `json:"rssi"`
+		} `json:"apInfo"`
+	} `json:"deviceNode"`
+}
+
+// GetClientTopology POSTs an empty body to the per-client link-topology
+// endpoint and returns the uplink chain. GET on this path is -1600.
+func (c *Client) GetClientTopology(ctx context.Context, siteID, clientMAC string) ([]ClientTopologyNode, error) {
+	path := fmt.Sprintf("sites/%s/clients/%s/client-link-topology", siteID, dashMAC(clientMAC))
+	var raw []rawTopologyNode
+	if err := c.post(ctx, path, nil, &raw); err != nil {
+		return nil, fmt.Errorf("getting client topology for site %s: %w", siteID, err)
+	}
+	out := make([]ClientTopologyNode, 0, len(raw))
+	for _, n := range raw {
+		node := ClientTopologyNode{NodeType: n.NodeType}
+		if n.NodeType == "clientNode" || n.ClientNode.MAC != "" {
+			node.MAC = n.ClientNode.MAC
+			node.Name = n.ClientNode.Name
+			node.Model = n.ClientNode.Model
+			node.ClientType = n.ClientNode.ClientType
+			node.SwitchMAC = n.ClientNode.UpOswInfo.MAC
+			node.SwitchName = n.ClientNode.UpOswInfo.Name
+			node.SwitchPort = n.ClientNode.UpOswInfo.Port
+			node.LinkSpeed = n.ClientNode.UpOswInfo.LinkSpeed
+			node.APMAC = n.ClientNode.UpApInfo.MAC
+			node.APName = n.ClientNode.UpApInfo.Name
+			node.RSSI = n.ClientNode.UpApInfo.RSSI
+		} else {
+			node.MAC = n.DeviceNode.MAC
+			node.Name = n.DeviceNode.Name
+			node.Model = n.DeviceNode.Model
+			node.SwitchMAC = n.DeviceNode.SwitchInfo.MAC
+			node.SwitchName = n.DeviceNode.SwitchInfo.Name
+			node.SwitchPort = n.DeviceNode.SwitchInfo.Port
+			node.APMAC = n.DeviceNode.ApInfo.MAC
+			node.APName = n.DeviceNode.ApInfo.Name
+			node.RSSI = n.DeviceNode.ApInfo.RSSI
+		}
+		out = append(out, node)
+	}
+	return out, nil
+}
+
 // EnrichFromDHCP joins the site's DHCP user list onto the client rows by
 // normalized MAC. On a hit the client's IP, network name, and VLAN id are
 // filled in (the VLAN id comes from the network matching the row's netId);
