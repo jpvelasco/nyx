@@ -39,7 +39,7 @@ var mcpCapabilityTools = map[string]map[string][]string{
 		"info":      {"omada_get_info"},
 		"import":    {"omada_import"},
 		"check":     {"run_audit", "load_spec"},
-		"inventory": {"omada_inventory", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path"},
+		"inventory": {"omada_inventory", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts"},
 	},
 	"opnsense": {
 		"info": {"opnsense_get_info"},

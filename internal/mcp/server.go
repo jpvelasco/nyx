@@ -130,6 +130,10 @@ type omadaSurface interface {
 	ListGatewayDHCPUsers(ctx context.Context, opts service.OmadaOptions, gatewayMAC string) ([]service.OmadaGatewayDHCPUser, error)
 	GetClientTopology(ctx context.Context, opts service.OmadaOptions, clientMAC string) ([]service.OmadaClientTopologyNode, error)
 	DiagnoseDHCPPath(ctx context.Context, opts service.OmadaOptions, req service.OmadaDHCPPathRequest) (*service.OmadaDHCPPathReport, error)
+	GetDHCPServerInfo(ctx context.Context, opts service.OmadaOptions, networkID string) (*service.OmadaDHCPServerInfo, error)
+	GetDHCPSnoopStatus(ctx context.Context, opts service.OmadaOptions) (*service.OmadaDHCPSnoopStatus, error)
+	ListDHCPSnoops(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaDHCPSnoopRule, error)
+	ListLANMulticasts(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaLANMulticastRule, error)
 	PlanPort(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest) (*service.OmadaPortPlan, error)
 	ApplyPortProfile(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest, dryRun bool) (*service.OmadaPortProfileApplyResult, error)
 }
@@ -559,6 +563,28 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
 				"client_mac": {Type: "string", Description: "Client MAC (colon or dash separators)"},
 			}, []string{"host", "client_mac"}),
+		},
+		{
+			Name:        "omada_get_dhcp_server_info",
+			Description: "Read the per-network DHCP pool panel (available/total IPs and range). network_id is required. Read-only.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"network_id": {Type: "string", Description: "LAN network id from omada_list_networks"},
+			}, []string{"host", "network_id"}),
+		},
+		{
+			Name:        "omada_get_dhcp_snoop_status",
+			Description: "Read the site-wide DHCP snooping switch. Read-only.",
+			InputSchema: omadaToolSchema(),
+		},
+		{
+			Name:        "omada_list_dhcp_snoops",
+			Description: "List DHCP snooping rules for the site. Read-only.",
+			InputSchema: omadaToolSchema(),
+		},
+		{
+			Name:        "omada_list_lan_multicasts",
+			Description: "List multicast-filter / Multicast Snooping tab rules for the site. Read-only.",
+			InputSchema: omadaToolSchema(),
 		},
 		{
 			Name:        "omada_dhcp_path",
