@@ -14,6 +14,15 @@ import (
 // product version string embeds the build number and architecture.
 const systemInfoJSON = `{"name":"fw","versions":["OPNsense 24.1.7_2-amd64","FreeBSD 14.2-RELEASE-p1","OpenSSL 3.0.13"],"updates":"Click to check for updates."}`
 
+// restoreListPageSize shrinks the production page size so a multi-page
+// walk can be asserted without fabricating 500+ rows.
+func restoreListPageSize(t *testing.T, n int) {
+	t.Helper()
+	old := listPageSize
+	listPageSize = n
+	t.Cleanup(func() { listPageSize = old })
+}
+
 // newTestClient spins up a TLS test server (skipTLSVerify client) pointing at it.
 func newTestClient(t *testing.T, h http.HandlerFunc) (*Client, *httptest.Server) {
 	t.Helper()
@@ -287,6 +296,18 @@ func TestGetFirewallRules(t *testing.T) {
 		}
 	})
 
+	t.Run("403 privilege error is still a permission-denied", func(t *testing.T) {
+		// Import degrades only this stable 403; paging must not swallow it.
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			testutil.WriteBody(w, `{"message":"Forbidden"}`)
+		}))
+		_, err := c.GetFirewallRules(context.Background())
+		if err == nil || !isPermissionDenied(err) {
+			t.Errorf("error = %v, want permission-denied 403", err)
+		}
+	})
+
 	t.Run("bad json", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			testutil.WriteBody(w, `not json`)
@@ -294,6 +315,43 @@ func TestGetFirewallRules(t *testing.T) {
 		_, err := c.GetFirewallRules(context.Background())
 		if err == nil || !strings.Contains(err.Error(), "decoding firewall rules response") {
 			t.Errorf("error = %v, want decoding firewall rules response", err)
+		}
+	})
+
+	t.Run("walks every page", func(t *testing.T) {
+		// Issue #86: a controller that pages at 2 must not silently
+		// drop the remaining isolation rules.
+		restoreListPageSize(t, 2)
+		var pages []string
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			pages = append(pages, r.URL.RawQuery)
+			switch r.URL.Query().Get("current") {
+			case "1":
+				testutil.WriteBody(w, `{"total":3,"rowCount":2,"current":1,"rows":[
+					{"uuid":"u1","enabled":"1","action":"block","description":"page1a","interface":["lan"],"source_net":"any","destination_net":"any"},
+					{"uuid":"u2","enabled":"1","action":"block","description":"page1b","interface":["lan"],"source_net":"any","destination_net":"any"}
+				]}`)
+			case "2":
+				testutil.WriteBody(w, `{"total":3,"rowCount":2,"current":2,"rows":[
+					{"uuid":"u3","enabled":"1","action":"block","description":"page2","interface":["lan"],"source_net":"any","destination_net":"any"}
+				]}`)
+			default:
+				t.Errorf("unexpected query %q", r.URL.RawQuery)
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		rules, err := c.GetFirewallRules(context.Background())
+		if err != nil {
+			t.Fatalf("GetFirewallRules: %v", err)
+		}
+		if len(rules) != 3 {
+			t.Fatalf("rules = %d, want 3 concatenated pages (got %+v)", len(rules), rules)
+		}
+		if rules[2].RuleUUID != "u3" {
+			t.Errorf("last rule = %+v, want u3 from page 2", rules[2])
+		}
+		if len(pages) != 2 {
+			t.Errorf("pages = %v, want current=1 then current=2", pages)
 		}
 	})
 }

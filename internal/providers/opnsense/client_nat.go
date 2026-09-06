@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 )
 
@@ -115,19 +114,13 @@ func rawRows(rows json.RawMessage) []json.RawMessage {
 // decodeErr is the error prefix used when the paging envelope itself is
 // malformed.
 func (c *Client) natRules(ctx context.Context, path, decodeErr string) ([]NatRule, error) {
-	resp, err := c.do(ctx, http.MethodGet, path+"?current=1&rowCount="+strconv.Itoa(listPageSize), nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var env pagedEnvelope
-	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return nil, fmt.Errorf("%s: %w", decodeErr, err)
+	var raw []json.RawMessage
+	if _, err := fetchPagedList(ctx, c, path, listPageSize, &raw); err != nil {
+		return nil, remapPagedDecode(err, decodeErr)
 	}
 	var out []NatRule
-	for _, raw := range rawRows(env.Rows) {
-		if r := decodeNatRow(raw); r != nil {
+	for _, row := range raw {
+		if r := decodeNatRow(row); r != nil {
 			out = append(out, *r)
 		}
 	}
@@ -197,18 +190,12 @@ type aliasRow struct {
 
 // GetAliases returns all firewall aliases (GET /api/firewall/alias/search_item).
 func (c *Client) GetAliases(ctx context.Context) ([]Alias, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/firewall/alias/search_item?current=1&rowCount="+strconv.Itoa(listPageSize), nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var env pagedEnvelope
-	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return nil, fmt.Errorf("decoding aliases response: %w", err)
+	var rawRows []json.RawMessage
+	if _, err := fetchPagedList(ctx, c, "/firewall/alias/search_item", listPageSize, &rawRows); err != nil {
+		return nil, remapPagedDecode(err, "decoding aliases response")
 	}
 	var out []Alias
-	for _, raw := range rawRows(env.Rows) {
+	for _, raw := range rawRows {
 		var row aliasRow
 		if err := json.Unmarshal(raw, &row); err != nil {
 			continue

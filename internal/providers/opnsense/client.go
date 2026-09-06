@@ -303,23 +303,20 @@ func applyCIDR(iface *Interface, cidr string) {
 // transport, 5xx) fatal — a silent "0 policies" import for a broken key or
 // an unreachable controller would hide the real problem.
 func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
-	resp, err := c.doRequest(ctx, "/firewall/filter/search_rule")
-	if err != nil {
-		return nil, err
+	var raw []json.RawMessage
+	if _, err := fetchPagedList(ctx, c, "/firewall/filter/search_rule", listPageSize, &raw); err != nil {
+		return nil, remapPagedDecode(err, "decoding firewall rules response")
 	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Total int            `json:"total"`
-		Rows  []FirewallRule `json:"rows"`
+	out := make([]FirewallRule, 0, len(raw))
+	for _, row := range raw {
+		var rule FirewallRule
+		if err := json.Unmarshal(row, &rule); err != nil {
+			continue
+		}
+		rule.Disabled = rule.Enabled != "1"
+		out = append(out, rule)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding firewall rules response: %w", err)
-	}
-	for i := range result.Rows {
-		result.Rows[i].Disabled = result.Rows[i].Enabled != "1"
-	}
-	return result.Rows, nil
+	return out, nil
 }
 
 // leaseRoutes lists the DHCP lease endpoints per active DHCP backend. The
