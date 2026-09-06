@@ -71,6 +71,33 @@ func TestGetPortForwardRules(t *testing.T) {
 		}
 	})
 
+	t.Run("walks every page", func(t *testing.T) {
+		restoreListPageSize(t, 2)
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Query().Get("current") {
+			case "1":
+				testutil.WriteBody(w, `{"total":3,"rowCount":2,"current":1,"rows":[
+					{"rule":[{"uuid":"n1","interface":["wan"],"descr":"page1a"}]},
+					{"rule":[{"uuid":"n2","interface":["wan"],"descr":"page1b"}]}
+				]}`)
+			case "2":
+				testutil.WriteBody(w, `{"total":3,"rowCount":2,"current":2,"rows":[
+					{"rule":[{"uuid":"n3","interface":["wan"],"descr":"page2"}]}
+				]}`)
+			default:
+				t.Errorf("unexpected query %q", r.URL.RawQuery)
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		rules, err := c.GetPortForwardRules(context.Background())
+		if err != nil {
+			t.Fatalf("GetPortForwardRules: %v", err)
+		}
+		if len(rules) != 3 || rules[2].RuleUUID != "n3" {
+			t.Fatalf("rules = %+v, want 3 concatenated pages ending in n3", rules)
+		}
+	})
+
 	t.Run("rows without rule array are skipped", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			testutil.WriteBody(w, `{"total":1,"rows":[
@@ -256,6 +283,33 @@ func TestGetAliases(t *testing.T) {
 		}
 		if aliases[1].Type != "net" || aliases[1].Addresses[0] != "10.0.40.0/24" {
 			t.Errorf("alias[1] = %+v", aliases[1])
+		}
+	})
+
+	t.Run("walks every page", func(t *testing.T) {
+		restoreListPageSize(t, 2)
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Query().Get("current") {
+			case "1":
+				testutil.WriteBody(w, `{"total":3,"rowCount":2,"current":1,"rows":[
+					{"uuid":"a1","name":"ONE","type":"host","address":"10.0.40.10","enabled":"1"},
+					{"uuid":"a2","name":"TWO","type":"host","address":"10.0.40.20","enabled":"1"}
+				]}`)
+			case "2":
+				testutil.WriteBody(w, `{"total":3,"rowCount":2,"current":2,"rows":[
+					{"uuid":"a3","name":"THREE","type":"host","address":"10.0.40.30","enabled":"1"}
+				]}`)
+			default:
+				t.Errorf("unexpected query %q", r.URL.RawQuery)
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		aliases, err := c.GetAliases(context.Background())
+		if err != nil {
+			t.Fatalf("GetAliases: %v", err)
+		}
+		if len(aliases) != 3 || aliases[2].UUID != "a3" {
+			t.Fatalf("aliases = %+v, want 3 concatenated pages ending in a3", aliases)
 		}
 	})
 

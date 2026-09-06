@@ -7,18 +7,20 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 const (
-	// listPageSize is the page size used for all paginated list endpoints.
-	// Keeps the walk to one or two round trips for realistic rule sets.
-	listPageSize = 500
-
 	// maxListPages caps the number of page requests fetchPagedList issues.
 	// A controller that reports a huge total (or ignores current) would
 	// otherwise loop forever.
 	maxListPages = 100
 )
+
+// listPageSize is the page size used for all paginated list endpoints.
+// Keeps the walk to one or two round trips for realistic rule sets.
+// Tests shrink it so a multi-page walk can be asserted without 500+ rows.
+var listPageSize = 500
 
 // pagedEnvelope is the paging wrapper OPNsense's searchRule/searchItem
 // endpoints return.
@@ -77,6 +79,16 @@ func fetchPagedList(ctx context.Context, c *Client, path string, pageSize int, r
 	}
 	*rowsDest = all
 	return total, nil
+}
+
+// remapPagedDecode keeps the historical decode-error prefix when the
+// paging envelope itself is malformed. Transport and HTTP errors pass
+// through unchanged so 403 privilege degradation still matches.
+func remapPagedDecode(err error, prefix string) error {
+	if err != nil && strings.Contains(err.Error(), "decoding paged list response") {
+		return fmt.Errorf("%s: %w", prefix, err)
+	}
+	return err
 }
 
 // getJSON performs an authenticated GET and decodes the JSON body into dest.
