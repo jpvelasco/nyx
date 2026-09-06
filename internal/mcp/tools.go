@@ -56,6 +56,8 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_list_one_to_one_rules":   (*Server).toolOpnsenseListOneToOneRules,
 	"opnsense_list_source_nat_rules":   (*Server).toolOpnsenseListSourceNatRules,
 	"opnsense_list_aliases":            (*Server).toolOpnsenseListAliases,
+	"opnsense_list_services":           (*Server).toolOpnsenseListServices,
+	"opnsense_list_gateways":           (*Server).toolOpnsenseListGateways,
 	"opnsense_get_nat":                 (*Server).toolOpnsenseGetNAT,
 	"opnsense_inventory":               (*Server).toolOpnsenseInventory,
 	"opnsense_plan_nat":                (*Server).toolOpnsensePlanNat,
@@ -537,6 +539,30 @@ func (s *Server) toolOpnsenseListInterfaces(ctx context.Context, args map[string
 		return errResult(fmt.Sprintf("opnsense interfaces request failed: %v", err))
 	}
 	return okResult(toJSON(ifaces))
+}
+
+func (s *Server) toolOpnsenseListServices(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	svcs, err := s.opnsenseSvc.ListServices(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense services request failed: %v", err))
+	}
+	return okResult(toJSON(svcs))
+}
+
+func (s *Server) toolOpnsenseListGateways(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	gws, err := s.opnsenseSvc.ListGateways(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense gateways request failed: %v", err))
+	}
+	return okResult(toJSON(gws))
 }
 
 func (s *Server) toolOpnsenseListFirewallRules(ctx context.Context, args map[string]interface{}) toolDispatchResult {

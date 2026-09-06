@@ -38,6 +38,41 @@ type pagedEnvelope struct {
 // versions and a single malformed row must not fail the whole read).
 // Returns the total row count reported by the API on the first page.
 func fetchPagedList(ctx context.Context, c *Client, path string, pageSize int, rowsDest *[]json.RawMessage) (int, error) {
+	return walkPagedList(pageSize, path, rowsDest, func(page int, env *pagedEnvelope) error {
+		query := url.Values{
+			"current":  {strconv.Itoa(page)},
+			"rowCount": {strconv.Itoa(pageSize)},
+		}.Encode()
+		return getJSON(ctx, c, path+"?"+query, env)
+	})
+}
+
+// fetchPagedListPOST walks the same envelope over POST with a datatables body
+// ({"current":N,"rowCount":P,"sort":{},"searchPhrase":""}).
+func fetchPagedListPOST(ctx context.Context, c *Client, path string, pageSize int, rowsDest *[]json.RawMessage) (int, error) {
+	return walkPagedList(pageSize, path, rowsDest, func(page int, env *pagedEnvelope) error {
+		body, err := json.Marshal(map[string]interface{}{
+			"current":      page,
+			"rowCount":     pageSize,
+			"sort":         map[string]interface{}{},
+			"searchPhrase": "",
+		})
+		if err != nil {
+			return err
+		}
+		resp, err := c.do(ctx, http.MethodPost, path, body)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := json.NewDecoder(resp.Body).Decode(env); err != nil {
+			return fmt.Errorf("decoding paged list response: %w", err)
+		}
+		return nil
+	})
+}
+
+func walkPagedList(pageSize int, path string, rowsDest *[]json.RawMessage, fetch func(page int, env *pagedEnvelope) error) (int, error) {
 	var (
 		all   []json.RawMessage
 		total int
@@ -46,13 +81,8 @@ func fetchPagedList(ctx context.Context, c *Client, path string, pageSize int, r
 		if page > maxListPages {
 			return 0, fmt.Errorf("%s: controller did not terminate after %d pages — it may be ignoring current", path, maxListPages)
 		}
-		query := url.Values{
-			"current":  {strconv.Itoa(page)},
-			"rowCount": {strconv.Itoa(pageSize)},
-		}.Encode()
-
 		var env pagedEnvelope
-		if err := getJSON(ctx, c, path+"?"+query, &env); err != nil {
+		if err := fetch(page, &env); err != nil {
 			return 0, err
 		}
 		if page == 1 {

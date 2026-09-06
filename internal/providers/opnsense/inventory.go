@@ -29,6 +29,10 @@ type InventorySnapshot struct {
 	RulesOK    bool
 	Leases     []DHCPLease
 	LeasesOK   bool
+	Services   []Service
+	ServicesOK bool
+	Gateways   []GatewayStatus
+	GatewaysOK bool
 	Warnings   []string
 }
 
@@ -68,6 +72,22 @@ func (c *Client) FetchInventory(ctx context.Context) (*InventorySnapshot, error)
 	} else {
 		snap.Leases = leases
 		snap.LeasesOK = true
+	}
+
+	svcs, err := c.GetServices(ctx)
+	if err != nil {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("services unavailable: %v", err))
+	} else {
+		snap.Services = svcs
+		snap.ServicesOK = true
+	}
+
+	gws, err := c.GetGatewayStatus(ctx)
+	if err != nil {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("gateway status unavailable: %v", err))
+	} else {
+		snap.Gateways = gws
+		snap.GatewaysOK = true
 	}
 
 	return snap, nil
@@ -139,7 +159,14 @@ func RenderInventory(snap *InventorySnapshot, site string) string {
 	for _, iface := range snap.Interfaces {
 		zone := inferZone(iface.Name, iface.Description)
 		ip := orDash(iface.IP)
-		fmt.Fprintf(&b, "  %-8s %-16s %-15s zone: %s\n", "gateway", iface.Name, ip, zone)
+		extra := ""
+		if iface.Device != "" {
+			extra += " device:" + iface.Device
+		}
+		if len(iface.Members) > 0 {
+			extra += " members:" + strings.Join(iface.Members, ",")
+		}
+		fmt.Fprintf(&b, "  %-8s %-16s %-15s zone: %s%s\n", "gateway", iface.Name, ip, zone, extra)
 	}
 
 	if snap.RulesOK {
@@ -152,6 +179,30 @@ func RenderInventory(snap *InventorySnapshot, site string) string {
 
 	fmt.Fprintf(&b, "\n== Clients ==\n")
 	fmt.Fprintf(&b, "  %d active clients\n", snap.LeaseCount())
+
+	if snap.ServicesOK {
+		running := 0
+		for _, s := range snap.Services {
+			if s.Running {
+				running++
+			}
+		}
+		fmt.Fprintf(&b, "\n== Services (%d) ==\n", len(snap.Services))
+		fmt.Fprintf(&b, "  %d running\n", running)
+	} else {
+		fmt.Fprintf(&b, "\n== Services ==\n")
+		fmt.Fprintf(&b, "  unknown (fetch failed)\n")
+	}
+
+	if snap.GatewaysOK {
+		fmt.Fprintf(&b, "\n== Gateways (%d) ==\n", len(snap.Gateways))
+		for _, g := range snap.Gateways {
+			fmt.Fprintf(&b, "  %-16s %-10s %s\n", g.Name, orDash(g.Status), orDash(g.Address))
+		}
+	} else {
+		fmt.Fprintf(&b, "\n== Gateways ==\n")
+		fmt.Fprintf(&b, "  unknown (fetch failed)\n")
+	}
 	return b.String()
 }
 

@@ -47,6 +47,8 @@ var mcpCapabilityTools = map[string]map[string][]string{
 			"opnsense_list_interfaces",
 			"opnsense_list_firewall_rules",
 			"opnsense_list_clients",
+			"opnsense_list_services",
+			"opnsense_list_gateways",
 			"run_audit",
 			"load_spec",
 		},

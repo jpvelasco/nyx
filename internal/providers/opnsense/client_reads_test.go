@@ -255,6 +255,149 @@ func TestGetOutboundNatMode(t *testing.T) {
 	})
 }
 
+func TestGetServices(t *testing.T) {
+	t.Run("walks every page", func(t *testing.T) {
+		restoreListPageSize(t, 2)
+		var pages []int
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || r.URL.Path != "/api/core/service/search" {
+				t.Errorf("request = %s %s", r.Method, r.URL.Path)
+			}
+			var body struct {
+				Current int `json:"current"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			pages = append(pages, body.Current)
+			switch body.Current {
+			case 1:
+				testutil.WriteBody(w, `{"total":3,"rowCount":2,"current":1,"rows":[
+					{"name":"unbound","running":"1","description":"Unbound DNS"},
+					{"name":"dnsmasq","running":true,"description":"Dnsmasq DNS/DHCP"}
+				]}`)
+			case 2:
+				testutil.WriteBody(w, `{"total":3,"rowCount":2,"current":2,"rows":[
+					{"name":"openssh","running":"0","description":"Secure Shell"}
+				]}`)
+			default:
+				t.Errorf("unexpected current=%d", body.Current)
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		svcs, err := c.GetServices(context.Background())
+		if err != nil {
+			t.Fatalf("GetServices: %v", err)
+		}
+		if len(svcs) != 3 || svcs[1].Name != "dnsmasq" || !svcs[1].Running || svcs[2].Running {
+			t.Fatalf("services = %+v, want 3 concatenated pages", svcs)
+		}
+		if len(pages) != 2 {
+			t.Errorf("pages = %v, want [1 2]", pages)
+		}
+	})
+
+	t.Run("403 is permission-denied", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			testutil.WriteBody(w, `{"message":"Forbidden"}`)
+		}))
+		_, err := c.GetServices(context.Background())
+		if err == nil || !isPermissionDenied(err) {
+			t.Errorf("error = %v, want permission-denied", err)
+		}
+	})
+
+	t.Run("bad json", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `not json`)
+		}))
+		_, err := c.GetServices(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "decoding") {
+			t.Errorf("error = %v, want decode error", err)
+		}
+	})
+
+	t.Run("skips nameless and malformed rows", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"total":3,"rows":[
+				"not-an-object",
+				{"name":"","running":"1"},
+				{"name":"unbound","running":1,"description":"Unbound DNS"}
+			]}`)
+		}))
+		svcs, err := c.GetServices(context.Background())
+		if err != nil {
+			t.Fatalf("GetServices: %v", err)
+		}
+		if len(svcs) != 1 || svcs[0].Name != "unbound" || !svcs[0].Running {
+			t.Fatalf("services = %+v, want only the named integer-running row", svcs)
+		}
+	})
+}
+
+func TestGetGatewayStatus(t *testing.T) {
+	t.Run("items shape", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/routes/gateway/status" {
+				t.Errorf("path = %q", r.URL.Path)
+			}
+			testutil.WriteBody(w, `{"items":[
+				{"name":"WAN_DHCP","address":"203.0.113.254","status":"none","delay":"0.4 ms","loss":"0.0 %","stddev":"0.1 ms"},
+				{"name":"WAN_DHCP6","status":"down","delay":"~","loss":"100.0 %"}
+			]}`)
+		}))
+		gws, err := c.GetGatewayStatus(context.Background())
+		if err != nil {
+			t.Fatalf("GetGatewayStatus: %v", err)
+		}
+		if len(gws) != 2 || gws[0].Name != "WAN_DHCP" || gws[0].Status != "none" || gws[1].Status != "down" {
+			t.Fatalf("gateways = %+v", gws)
+		}
+	})
+
+	t.Run("403 is permission-denied", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			testutil.WriteBody(w, `{"message":"Forbidden"}`)
+		}))
+		_, err := c.GetGatewayStatus(context.Background())
+		if err == nil || !isPermissionDenied(err) {
+			t.Errorf("error = %v, want permission-denied", err)
+		}
+	})
+
+	t.Run("rows envelope fallback", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"rows":[{"name":"WAN_DHCP","status":"none"}]}`)
+		}))
+		gws, err := c.GetGatewayStatus(context.Background())
+		if err != nil {
+			t.Fatalf("GetGatewayStatus: %v", err)
+		}
+		if len(gws) != 1 || gws[0].Name != "WAN_DHCP" {
+			t.Fatalf("gateways = %+v", gws)
+		}
+	})
+
+	t.Run("bad json", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `not json`)
+		}))
+		_, err := c.GetGatewayStatus(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "decoding gateway status response") {
+			t.Errorf("error = %v, want decode error", err)
+		}
+	})
+}
+
+func TestDecodeLooseBool(t *testing.T) {
+	if decodeLooseBool(nil) || decodeLooseBool(json.RawMessage(`"nope"`)) {
+		t.Error("empty/unknown must be false")
+	}
+	if !decodeLooseBool(json.RawMessage(`1`)) || decodeLooseBool(json.RawMessage(`0`)) {
+		t.Error("integer 1/0 must map to true/false")
+	}
+}
+
 // S2.10 — aliases.
 func TestGetAliases(t *testing.T) {
 	t.Run("success", func(t *testing.T) {

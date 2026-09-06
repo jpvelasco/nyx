@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -92,13 +93,43 @@ func (si SystemInformation) stripVersionPrefix(prefix string) string {
 }
 
 // Interface represents an OPNsense interface with its IP configuration.
+// Details fields (Device, MAC, Members, counters) are populated when the
+// controller answers interfaces_info?details=true; they stay zero on the
+// legacy map shape.
 type Interface struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	DHCP        bool     `json:"dhcp"`
+	IP          string   `json:"ipv4"`
+	Subnet      int      `json:"-"`
+	Gateway     string   `json:"ipv4_gateway"`
+	Device      string   `json:"device,omitempty"`
+	MAC         string   `json:"mac,omitempty"`
+	LinkType    string   `json:"link_type,omitempty"`
+	Enabled     bool     `json:"enabled,omitempty"`
+	MTU         int      `json:"mtu,omitempty"`
+	Members     []string `json:"members,omitempty"`
+	RxPackets   uint64   `json:"rx_packets,omitempty"`
+	RxBytes     uint64   `json:"rx_bytes,omitempty"`
+	TxPackets   uint64   `json:"tx_packets,omitempty"`
+	TxBytes     uint64   `json:"tx_bytes,omitempty"`
+}
+
+// Service is one row from POST /api/core/service/search.
+type Service struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	DHCP        bool   `json:"dhcp"`
-	IP          string `json:"ipv4"`
-	Subnet      int    `json:"-"`
-	Gateway     string `json:"ipv4_gateway"`
+	Running     bool   `json:"running"`
+}
+
+// GatewayStatus is one row from GET /api/routes/gateway/status.
+type GatewayStatus struct {
+	Name    string `json:"name"`
+	Address string `json:"address,omitempty"`
+	Status  string `json:"status"`
+	Delay   string `json:"delay,omitempty"`
+	StdDev  string `json:"stddev,omitempty"`
+	Loss    string `json:"loss,omitempty"`
 }
 
 // FirewallRule represents a single firewall rule from OPNsense
@@ -192,13 +223,13 @@ func (c *Client) GetSystemInformation(ctx context.Context) (*SystemInformation, 
 }
 
 // GetInterfaces returns the list of interfaces with IP configuration
-// (GET /api/interfaces/overview/interfaces_info). The 26.x generation serves
+// (GET /api/interfaces/overview/interfaces_info?details=true). The 26.x generation serves
 // a paged rows shape ({"rows":[...]} keyed by "identifier"); the pre-26.x
 // shape is a name-keyed map ({"interfaces":{"lan":{...}}}). The rows shape is
 // tried first (26.x-first, like the dual-backend lease routes); a body with
 // no rows field falls back to the legacy map.
 func (c *Client) GetInterfaces(ctx context.Context) ([]Interface, error) {
-	resp, err := c.doRequest(ctx, "/interfaces/overview/interfaces_info")
+	resp, err := c.doRequest(ctx, "/interfaces/overview/interfaces_info?details=true")
 	if err != nil {
 		return nil, err
 	}
@@ -227,11 +258,31 @@ func parseInterfaces(raw []byte) ([]Interface, error) {
 		Rows []struct {
 			Identifier  string `json:"identifier"`
 			Description string `json:"description"`
+			Device      string `json:"device"`
+			MAC         string `json:"macaddr"`
+			LinkType    string `json:"link_type"`
+			Enabled     bool   `json:"enabled"`
 			Addr4       string `json:"addr4"`
 			IPV4        []struct {
 				IPAddr string `json:"ipaddr"`
 			} `json:"ipv4"`
-			Gateways []string `json:"gateways"`
+			Gateways   []string `json:"gateways"`
+			Statistics struct {
+				RX struct {
+					Packets uint64 `json:"packets"`
+					Bytes   uint64 `json:"bytes"`
+				} `json:"rx"`
+				TX struct {
+					Packets uint64 `json:"packets"`
+					Bytes   uint64 `json:"bytes"`
+				} `json:"tx"`
+			} `json:"statistics"`
+			Config struct {
+				IF      string `json:"if"`
+				Enable  string `json:"enable"`
+				MTU     string `json:"mtu"`
+				Members string `json:"members"`
+			} `json:"config"`
 		} `json:"rows"`
 	}
 	if err := json.Unmarshal(raw, &paged); err != nil {
@@ -244,7 +295,24 @@ func parseInterfaces(raw []byte) ([]Interface, error) {
 			if name == "" {
 				continue
 			}
-			iface := Interface{Name: name, Description: row.Description}
+			iface := Interface{
+				Name:        name,
+				Description: row.Description,
+				Device:      firstNonEmpty(row.Device, row.Config.IF),
+				MAC:         row.MAC,
+				LinkType:    row.LinkType,
+				Enabled:     row.Enabled || row.Config.Enable == "1",
+				RxPackets:   row.Statistics.RX.Packets,
+				RxBytes:     row.Statistics.RX.Bytes,
+				TxPackets:   row.Statistics.TX.Packets,
+				TxBytes:     row.Statistics.TX.Bytes,
+			}
+			if mtu, err := strconv.Atoi(row.Config.MTU); err == nil {
+				iface.MTU = mtu
+			}
+			if members := splitCSV(row.Config.Members); len(members) > 0 {
+				iface.Members = members
+			}
 			cidr := row.Addr4
 			if cidr == "" && len(row.IPV4) > 0 {
 				cidr = row.IPV4[0].IPAddr
@@ -293,6 +361,97 @@ func applyCIDR(iface *Interface, cidr string) {
 	iface.IP = ip.String()
 	ones, _ := ipnet.Mask.Size()
 	iface.Subnet = ones
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func splitCSV(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// GetServices returns the controller service table (POST /api/core/service/search).
+// A 403 is the stable page-privilege error and is returned as-is so inventory
+// can degrade it the same way as GetFirewallRules.
+func (c *Client) GetServices(ctx context.Context) ([]Service, error) {
+	var raw []json.RawMessage
+	if _, err := fetchPagedListPOST(ctx, c, "/core/service/search", listPageSize, &raw); err != nil {
+		return nil, remapPagedDecode(err, "decoding services response")
+	}
+	out := make([]Service, 0, len(raw))
+	for _, row := range raw {
+		var rec struct {
+			Name        string          `json:"name"`
+			Description string          `json:"description"`
+			Running     json.RawMessage `json:"running"`
+		}
+		if err := json.Unmarshal(row, &rec); err != nil || rec.Name == "" {
+			continue
+		}
+		out = append(out, Service{
+			Name:        rec.Name,
+			Description: rec.Description,
+			Running:     decodeLooseBool(rec.Running),
+		})
+	}
+	return out, nil
+}
+
+// GetGatewayStatus returns the gateway health table
+// (GET /api/routes/gateway/status). A 403 is the stable page-privilege
+// error and is returned as-is so inventory can degrade it.
+func (c *Client) GetGatewayStatus(ctx context.Context) ([]GatewayStatus, error) {
+	resp, err := c.doRequest(ctx, "/routes/gateway/status")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var env struct {
+		Items []GatewayStatus `json:"items"`
+		Rows  []GatewayStatus `json:"rows"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, fmt.Errorf("decoding gateway status response: %w", err)
+	}
+	if len(env.Items) > 0 {
+		return env.Items, nil
+	}
+	return env.Rows, nil
+}
+
+func decodeLooseBool(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var b bool
+	if json.Unmarshal(raw, &b) == nil {
+		return b
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s == "1" || strings.EqualFold(s, "true")
+	}
+	var n int
+	if json.Unmarshal(raw, &n) == nil {
+		return n != 0
+	}
+	return false
 }
 
 // GetFirewallRules returns all firewall rules from OPNsense.

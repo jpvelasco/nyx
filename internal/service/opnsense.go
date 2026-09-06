@@ -30,12 +30,39 @@ type OpnsenseInfo struct {
 
 // OpnsenseInterface is a firewall interface with its IP configuration.
 type OpnsenseInterface struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	DHCP        bool     `json:"dhcp"`
+	IP          string   `json:"ip"`
+	Subnet      int      `json:"subnet"`
+	Gateway     string   `json:"gateway"`
+	Device      string   `json:"device,omitempty"`
+	MAC         string   `json:"mac,omitempty"`
+	LinkType    string   `json:"link_type,omitempty"`
+	Enabled     bool     `json:"enabled,omitempty"`
+	MTU         int      `json:"mtu,omitempty"`
+	Members     []string `json:"members,omitempty"`
+	RxPackets   uint64   `json:"rx_packets,omitempty"`
+	RxBytes     uint64   `json:"rx_bytes,omitempty"`
+	TxPackets   uint64   `json:"tx_packets,omitempty"`
+	TxBytes     uint64   `json:"tx_bytes,omitempty"`
+}
+
+// OpnsenseServiceStatus is one controller service (name + running).
+type OpnsenseServiceStatus struct {
 	Name        string `json:"name"`
-	Description string `json:"description"`
-	DHCP        bool   `json:"dhcp"`
-	IP          string `json:"ip"`
-	Subnet      int    `json:"subnet"`
-	Gateway     string `json:"gateway"`
+	Description string `json:"description,omitempty"`
+	Running     bool   `json:"running"`
+}
+
+// OpnsenseGatewayStatus is one gateway health row.
+type OpnsenseGatewayStatus struct {
+	Name    string `json:"name"`
+	Address string `json:"address,omitempty"`
+	Status  string `json:"status"`
+	Delay   string `json:"delay,omitempty"`
+	StdDev  string `json:"stddev,omitempty"`
+	Loss    string `json:"loss,omitempty"`
 }
 
 // OpnsenseFirewallRule is a firewall filter rule in a flat, agent-friendly
@@ -95,15 +122,19 @@ type OpnsenseNatSummary struct {
 // exposes no managed-device inventory, so model/firmware/upgrade fields are
 // intentionally empty.
 type OpnsenseInventory struct {
-	Host              string            `json:"host"`
-	ControllerVersion string            `json:"controller_version,omitempty"`
-	Arch              string            `json:"arch,omitempty"`
-	Devices           []serviceDevice   `json:"devices"`
-	NetworkGateways   map[string]string `json:"network_gateways,omitempty"`
-	FirewallRuleCount int               `json:"firewall_rule_count"`
-	FirewallRulesOK   bool              `json:"firewall_rules_ok"`
-	ClientCount       int               `json:"client_count"`
-	Warnings          []string          `json:"warnings,omitempty"`
+	Host              string                  `json:"host"`
+	ControllerVersion string                  `json:"controller_version,omitempty"`
+	Arch              string                  `json:"arch,omitempty"`
+	Devices           []serviceDevice         `json:"devices"`
+	NetworkGateways   map[string]string       `json:"network_gateways,omitempty"`
+	FirewallRuleCount int                     `json:"firewall_rule_count"`
+	FirewallRulesOK   bool                    `json:"firewall_rules_ok"`
+	ClientCount       int                     `json:"client_count"`
+	Services          []OpnsenseServiceStatus `json:"services,omitempty"`
+	ServicesOK        bool                    `json:"services_ok,omitempty"`
+	Gateways          []OpnsenseGatewayStatus `json:"gateways,omitempty"`
+	GatewaysOK        bool                    `json:"gateways_ok,omitempty"`
+	Warnings          []string                `json:"warnings,omitempty"`
 }
 
 // OpnsenseAlias is a firewall address alias.
@@ -181,16 +212,75 @@ func (s *OpnsenseService) ListInterfaces(ctx context.Context, opts OpnsenseOptio
 	}
 	out := make([]OpnsenseInterface, 0, len(ifaces))
 	for _, i := range ifaces {
-		out = append(out, OpnsenseInterface{
-			Name:        i.Name,
-			Description: i.Description,
-			DHCP:        i.DHCP,
-			IP:          i.IP,
-			Subnet:      i.Subnet,
-			Gateway:     i.Gateway,
-		})
+		out = append(out, flattenInterface(i))
 	}
 	return out, nil
+}
+
+// ListServices returns the controller service table (name + running).
+func (s *OpnsenseService) ListServices(ctx context.Context, opts OpnsenseOptions) ([]OpnsenseServiceStatus, error) {
+	client := s.client(opts)
+	svcs, err := client.GetServices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return flattenServices(svcs), nil
+}
+
+// ListGateways returns the gateway health table.
+func (s *OpnsenseService) ListGateways(ctx context.Context, opts OpnsenseOptions) ([]OpnsenseGatewayStatus, error) {
+	client := s.client(opts)
+	gws, err := client.GetGatewayStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return flattenGateways(gws), nil
+}
+
+func flattenInterface(i opnsensebackend.Interface) OpnsenseInterface {
+	return OpnsenseInterface{
+		Name:        i.Name,
+		Description: i.Description,
+		DHCP:        i.DHCP,
+		IP:          i.IP,
+		Subnet:      i.Subnet,
+		Gateway:     i.Gateway,
+		Device:      i.Device,
+		MAC:         i.MAC,
+		LinkType:    i.LinkType,
+		Enabled:     i.Enabled,
+		MTU:         i.MTU,
+		Members:     i.Members,
+		RxPackets:   i.RxPackets,
+		RxBytes:     i.RxBytes,
+		TxPackets:   i.TxPackets,
+		TxBytes:     i.TxBytes,
+	}
+}
+
+func flattenServices(in []opnsensebackend.Service) []OpnsenseServiceStatus {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]OpnsenseServiceStatus, len(in))
+	for i, s := range in {
+		out[i] = OpnsenseServiceStatus{Name: s.Name, Description: s.Description, Running: s.Running}
+	}
+	return out
+}
+
+func flattenGateways(in []opnsensebackend.GatewayStatus) []OpnsenseGatewayStatus {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]OpnsenseGatewayStatus, len(in))
+	for i, g := range in {
+		out[i] = OpnsenseGatewayStatus{
+			Name: g.Name, Address: g.Address, Status: g.Status,
+			Delay: g.Delay, StdDev: g.StdDev, Loss: g.Loss,
+		}
+	}
+	return out
 }
 
 // ListFirewallRules returns the firewall filter rules.
@@ -388,6 +478,10 @@ func (s *OpnsenseService) Inventory(ctx context.Context, opts OpnsenseOptions) (
 	inv.FirewallRuleCount = len(snap.Rules)
 	inv.FirewallRulesOK = snap.RulesOK
 	inv.ClientCount = snap.LeaseCount()
+	inv.Services = flattenServices(snap.Services)
+	inv.ServicesOK = snap.ServicesOK
+	inv.Gateways = flattenGateways(snap.Gateways)
+	inv.GatewaysOK = snap.GatewaysOK
 	for _, d := range specInv.Devices {
 		inv.Devices = append(inv.Devices, serviceDevice{
 			Type:     d.Type,
