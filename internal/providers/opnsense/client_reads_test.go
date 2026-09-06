@@ -305,6 +305,33 @@ func TestGetServices(t *testing.T) {
 			t.Errorf("error = %v, want permission-denied", err)
 		}
 	})
+
+	t.Run("bad json", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `not json`)
+		}))
+		_, err := c.GetServices(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "decoding") {
+			t.Errorf("error = %v, want decode error", err)
+		}
+	})
+
+	t.Run("skips nameless and malformed rows", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"total":3,"rows":[
+				"not-an-object",
+				{"name":"","running":"1"},
+				{"name":"unbound","running":1,"description":"Unbound DNS"}
+			]}`)
+		}))
+		svcs, err := c.GetServices(context.Background())
+		if err != nil {
+			t.Fatalf("GetServices: %v", err)
+		}
+		if len(svcs) != 1 || svcs[0].Name != "unbound" || !svcs[0].Running {
+			t.Fatalf("services = %+v, want only the named integer-running row", svcs)
+		}
+	})
 }
 
 func TestGetGatewayStatus(t *testing.T) {
@@ -337,6 +364,38 @@ func TestGetGatewayStatus(t *testing.T) {
 			t.Errorf("error = %v, want permission-denied", err)
 		}
 	})
+
+	t.Run("rows envelope fallback", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"rows":[{"name":"WAN_DHCP","status":"none"}]}`)
+		}))
+		gws, err := c.GetGatewayStatus(context.Background())
+		if err != nil {
+			t.Fatalf("GetGatewayStatus: %v", err)
+		}
+		if len(gws) != 1 || gws[0].Name != "WAN_DHCP" {
+			t.Fatalf("gateways = %+v", gws)
+		}
+	})
+
+	t.Run("bad json", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `not json`)
+		}))
+		_, err := c.GetGatewayStatus(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "decoding gateway status response") {
+			t.Errorf("error = %v, want decode error", err)
+		}
+	})
+}
+
+func TestDecodeLooseBool(t *testing.T) {
+	if decodeLooseBool(nil) || decodeLooseBool(json.RawMessage(`"nope"`)) {
+		t.Error("empty/unknown must be false")
+	}
+	if !decodeLooseBool(json.RawMessage(`1`)) || decodeLooseBool(json.RawMessage(`0`)) {
+		t.Error("integer 1/0 must map to true/false")
+	}
 }
 
 // S2.10 — aliases.

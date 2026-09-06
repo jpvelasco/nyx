@@ -124,6 +124,22 @@ func TestOpnsenseServiceListServicesAndGateways(t *testing.T) {
 			t.Errorf("gateways = %+v", gws)
 		}
 	})
+	t.Run("services error", func(t *testing.T) {
+		ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		})
+		if _, err := NewOpnsenseService().ListServices(context.Background(), opnsenseOptions(ts)); err == nil {
+			t.Fatal("expected ListServices error")
+		}
+	})
+	t.Run("gateways error", func(t *testing.T) {
+		ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		})
+		if _, err := NewOpnsenseService().ListGateways(context.Background(), opnsenseOptions(ts)); err == nil {
+			t.Fatal("expected ListGateways error")
+		}
+	})
 }
 
 func TestOpnsenseServiceListFirewallRules(t *testing.T) {

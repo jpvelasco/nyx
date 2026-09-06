@@ -8,7 +8,7 @@ import (
 func TestRenderInventory(t *testing.T) {
 	snap := &InventorySnapshot{
 		System:     mustSystemInfo(t),
-		Interfaces: []Interface{{Name: "lan", Description: "LAN", IP: "10.0.0.1", Subnet: 24, Gateway: "10.0.0.254"}},
+		Interfaces: []Interface{{Name: "lan", Description: "LAN", IP: "10.0.0.1", Subnet: 24, Gateway: "10.0.0.254", Device: "bridge0", Members: []string{"igb0", "igb1"}}},
 		Rules:      []FirewallRule{{}, {}, {}},
 		RulesOK:    true,
 		Leases:     []DHCPLease{{}, {}},
@@ -22,6 +22,8 @@ func TestRenderInventory(t *testing.T) {
 		"== Networks (1) ==",
 		"gateway: 10.0.0.254",
 		"== Devices (1) ==",
+		"device:bridge0",
+		"members:igb0,igb1",
 		"== Firewall rules (3) ==",
 		"3 rules",
 		"== Clients ==",

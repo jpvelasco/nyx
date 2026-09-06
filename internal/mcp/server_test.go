@@ -1364,6 +1364,19 @@ func TestDispatchOpnsenseListServicesAndGateways(t *testing.T) {
 	if isErr || !strings.Contains(text, `"name": "WAN_DHCP"`) {
 		t.Fatalf("gateways = (%q, %v)", text, isErr)
 	}
+	errStub := &stubOpnsenseSvc{err: errors.New("fetch failed")}
+	text, isErr = serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_list_services", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+	})
+	if !isErr || !strings.Contains(text, "opnsense services request failed") {
+		t.Errorf("services err = (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_list_gateways", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+	})
+	if !isErr || !strings.Contains(text, "opnsense gateways request failed") {
+		t.Errorf("gateways err = (%q, %v)", text, isErr)
+	}
 }
 
 func TestDispatchOpnsenseInventory(t *testing.T) {
