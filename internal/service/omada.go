@@ -181,6 +181,10 @@ type OmadaNatFacts struct {
 	OneToOneRules     int                   `json:"one_to_one_rules"`
 	ALG               OmadaALGSettings      `json:"alg"`
 	Firewall          OmadaFirewallSettings `json:"firewall"`
+
+	// gatewayIPs are the managed-gateway addresses used only to decide
+	// path membership. They are never serialized or printed.
+	gatewayIPs []string
 }
 
 // NatFacts gathers the Omada-side NAT observations in a single session.
@@ -233,7 +237,9 @@ func (s *OmadaService) NatFacts(ctx context.Context, opts OmadaOptions) (*OmadaN
 	for _, d := range devices {
 		if d.IsGateway() {
 			facts.HasManagedGateway = true
-			break
+			if d.IP != "" {
+				facts.gatewayIPs = append(facts.gatewayIPs, d.IP)
+			}
 		}
 	}
 	return facts, nil

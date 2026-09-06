@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"net"
+	"strings"
 
 	topology "github.com/jpvelasco/nyx/internal/topology"
 )
@@ -54,9 +56,11 @@ func (s *TopologyService) Report(ctx context.Context, opts TopologyOptions) (*To
 
 	rep := &TopologyReport{Devices: []topology.DeviceReport{}}
 	var facts []topology.DeviceFacts
+	var omadaFacts *OmadaNatFacts
 
 	if opts.Omada != nil {
-		omadaFacts, err := s.Omada.NatFacts(ctx, *opts.Omada)
+		var err error
+		omadaFacts, err = s.Omada.NatFacts(ctx, *opts.Omada)
 		if err != nil {
 			return nil, fmt.Errorf("observing omada: %w", err)
 		}
@@ -75,13 +79,21 @@ func (s *TopologyService) Report(ctx context.Context, opts TopologyOptions) (*To
 			return nil, fmt.Errorf("observing opnsense: %w", err)
 		}
 		rep.Opnsense = nat
-		facts = append(facts, topology.DeviceFacts{
+		opnsenseFacts := topology.DeviceFacts{
 			Provider:         topology.ProviderOpnsense,
 			OutboundNatMode:  nat.OutboundNatMode,
 			SourceNatRules:   len(nat.SourceNatRules),
 			PortForwardRules: len(nat.PortForwardRules),
 			OneToOneRules:    len(nat.OneToOneRules),
-		})
+		}
+		// Path membership is best-effort: a missing interfaces read
+		// leaves the device on-path (conservative). Addresses stay
+		// in this function — they never enter DeviceFacts.
+		if ifaces, err := s.Opnsense.ListInterfaces(ctx, *opts.Opnsense); err == nil &&
+			omadaFacts != nil && addrsOverlap(omadaFacts.gatewayIPs, interfaceGateways(ifaces)) {
+			opnsenseFacts.DownstreamOfManagedGateway = true
+		}
+		facts = append(facts, opnsenseFacts)
 	}
 
 	classified := topology.BuildReport(facts)
@@ -89,4 +101,45 @@ func (s *TopologyService) Report(ctx context.Context, opts TopologyOptions) (*To
 	rep.Risk = string(classified.Risk)
 	rep.Reason = classified.Reason
 	return rep, nil
+}
+
+// interfaceGateways collects the default-gateway addresses advertised on
+// every interface. Empty values are dropped.
+func interfaceGateways(ifaces []OpnsenseInterface) []string {
+	out := make([]string, 0, len(ifaces))
+	for _, i := range ifaces {
+		if g := strings.TrimSpace(i.Gateway); g != "" {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// addrsOverlap reports whether any address in a equals any address in b.
+// Comparison is IP-canonical and never emits the values.
+func addrsOverlap(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(a))
+	for _, s := range a {
+		if ip := canonicalIP(s); ip != "" {
+			seen[ip] = struct{}{}
+		}
+	}
+	for _, s := range b {
+		if _, ok := seen[canonicalIP(s)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// canonicalIP returns the net.IP string form of s, or "" if s is not an IP.
+func canonicalIP(s string) string {
+	ip := net.ParseIP(strings.TrimSpace(s))
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
 }

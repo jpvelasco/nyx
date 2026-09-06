@@ -340,13 +340,21 @@ Given one `nat_router` and one `bridge` (the reference topology: Omada gateway u
 When the topology report is built
 Then the risk is `none`
 
-Given two `nat_router` devices
+Given two `nat_router` devices on the inferred egress path
 When the topology report is built
 Then the risk is `double_nat`
 
-Given one `nat_router` and one `indeterminate`
+Given two `nat_router` devices where one is downstream of the managed gateway (its WAN default gateway equals the managed gateway address)
+When the topology report is built
+Then the risk is `multiple_nat_configured` (the downstream device is a LAN client, not an egress hop)
+
+Given one `nat_router` and one `indeterminate` on the inferred egress path
 When the topology report is built
 Then the risk is `double_nat` (conservative: the indeterminate device may be a second NAT point)
+
+Given one `nat_router` and one downstream `indeterminate` (WAN default gateway equals the managed gateway)
+When the topology report is built
+Then the risk is `multiple_nat_configured`
 
 Given only indeterminate or unknown devices (at most one NAT)
 When the topology report is built
