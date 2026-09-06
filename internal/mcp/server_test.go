@@ -298,8 +298,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 45 {
-		t.Fatalf("expected 45 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 49 {
+		t.Fatalf("expected 49 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -308,7 +308,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_plan_port", "omada_apply_port_profile", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_services", "opnsense_list_gateways", "opnsense_inventory", "topology"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_plan_port", "omada_apply_port_profile", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_services", "opnsense_list_gateways", "opnsense_inventory", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -353,6 +353,10 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 		"omada_list_gateway_dhcp_users":    {"host", "gateway_mac"},
 		"omada_get_client_topology":        {"host", "client_mac"},
 		"omada_dhcp_path":                  {"host"},
+		"omada_get_dhcp_server_info":       {"host", "network_id"},
+		"omada_get_dhcp_snoop_status":      {"host"},
+		"omada_list_dhcp_snoops":           {"host"},
+		"omada_list_lan_multicasts":        {"host"},
 		"omada_plan_port":                  {"host", "switch_mac", "port", "native"},
 		"omada_apply_port_profile":         {"host", "switch_mac", "port", "native"},
 		"opnsense_get_info":                {"host"},
@@ -944,6 +948,34 @@ func TestDispatchOmadaGetClientTopology(t *testing.T) {
 	})
 	if !isErr || !strings.Contains(text, "omada client topology request failed") {
 		t.Errorf("service err = (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchOmadaDHCPExtras(t *testing.T) {
+	stub := &stubOmadaSvc{
+		dhcpInfo:    &service.OmadaDHCPServerInfo{NetworkID: "n1", AvailableIPs: 12},
+		snoopStatus: &service.OmadaDHCPSnoopStatus{Enabled: true},
+		snoopRules:  []service.OmadaDHCPSnoopRule{{Name: "trust", Enabled: true}},
+		multicasts:  []service.OmadaLANMulticastRule{{Name: "ssdp", Enabled: true}},
+	}
+	args := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw"}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_get_dhcp_server_info", map[string]interface{}{
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "network_id": "n1",
+	})
+	if isErr || !strings.Contains(text, `"available_ips": 12`) {
+		t.Fatalf("server info = (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_get_dhcp_snoop_status", args)
+	if isErr || !strings.Contains(text, `"enabled": true`) {
+		t.Fatalf("snoop status = (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_dhcp_snoops", args)
+	if isErr || !strings.Contains(text, "trust") {
+		t.Fatalf("snoop rules = (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_lan_multicasts", args)
+	if isErr || !strings.Contains(text, "ssdp") {
+		t.Fatalf("multicasts = (%q, %v)", text, isErr)
 	}
 }
 
@@ -1762,6 +1794,10 @@ type stubOmadaSvc struct {
 	lastClientMAC string
 	dhcpPath      *service.OmadaDHCPPathReport
 	lastPathReq   service.OmadaDHCPPathRequest
+	dhcpInfo      *service.OmadaDHCPServerInfo
+	snoopStatus   *service.OmadaDHCPSnoopStatus
+	snoopRules    []service.OmadaDHCPSnoopRule
+	multicasts    []service.OmadaLANMulticastRule
 }
 
 func (s *stubOmadaSvc) Info(_ context.Context, opts service.OmadaOptions) (*service.OmadaInfo, error) {
@@ -1875,6 +1911,30 @@ func (s *stubOmadaSvc) DiagnoseDHCPPath(_ context.Context, opts service.OmadaOpt
 	s.lastOpts = opts
 	s.lastPathReq = req
 	return s.dhcpPath, s.err
+}
+
+func (s *stubOmadaSvc) GetDHCPServerInfo(_ context.Context, opts service.OmadaOptions, _ string) (*service.OmadaDHCPServerInfo, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.dhcpInfo, s.err
+}
+
+func (s *stubOmadaSvc) GetDHCPSnoopStatus(_ context.Context, opts service.OmadaOptions) (*service.OmadaDHCPSnoopStatus, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.snoopStatus, s.err
+}
+
+func (s *stubOmadaSvc) ListDHCPSnoops(_ context.Context, opts service.OmadaOptions) ([]service.OmadaDHCPSnoopRule, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.snoopRules, s.err
+}
+
+func (s *stubOmadaSvc) ListLANMulticasts(_ context.Context, opts service.OmadaOptions) ([]service.OmadaLANMulticastRule, error) {
+	s.calls++
+	s.lastOpts = opts
+	return s.multicasts, s.err
 }
 
 func (s *stubOmadaSvc) ListLanProfiles(_ context.Context, opts service.OmadaOptions) ([]service.OmadaLanProfile, error) {
@@ -2485,6 +2545,10 @@ func TestDispatchNatReads_MissingHost(t *testing.T) {
 		"omada_list_gateway_dhcp_users",
 		"omada_get_client_topology",
 		"omada_dhcp_path",
+		"omada_get_dhcp_server_info",
+		"omada_get_dhcp_snoop_status",
+		"omada_list_dhcp_snoops",
+		"omada_list_lan_multicasts",
 		"omada_plan_port",
 		"omada_apply_port_profile",
 	}

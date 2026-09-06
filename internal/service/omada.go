@@ -69,6 +69,34 @@ type OmadaGatewayDHCPUser struct {
 	LeftLeaseSec int    `json:"left_lease_sec,omitempty"`
 }
 
+// OmadaDHCPServerInfo is the per-network DHCP pool panel (available IPs).
+type OmadaDHCPServerInfo struct {
+	NetworkID    string `json:"network_id"`
+	AvailableIPs int    `json:"available_ips"`
+	TotalIPs     int    `json:"total_ips,omitempty"`
+	Start        string `json:"start,omitempty"`
+	End          string `json:"end,omitempty"`
+}
+
+// OmadaDHCPSnoopStatus is the site-wide DHCP snooping switch.
+type OmadaDHCPSnoopStatus struct {
+	Enabled bool `json:"enabled"`
+}
+
+// OmadaDHCPSnoopRule is one DHCP snooping rule.
+type OmadaDHCPSnoopRule struct {
+	ID      string `json:"id,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Enabled bool   `json:"enabled"`
+}
+
+// OmadaLANMulticastRule is one multicast-filter row.
+type OmadaLANMulticastRule struct {
+	ID      string `json:"id,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Enabled bool   `json:"enabled"`
+}
+
 // OmadaClientTopologyNode is one hop in a client's uplink chain.
 type OmadaClientTopologyNode struct {
 	NodeType   string `json:"node_type"`
@@ -1082,6 +1110,76 @@ func (s *OmadaService) ListGatewayDHCPUsers(ctx context.Context, opts OmadaOptio
 			NetworkName:  r.NetworkName,
 			LeftLeaseSec: r.LeftLeaseSec,
 		})
+	}
+	return out, nil
+}
+
+// GetDHCPServerInfo returns the pool panel (available-IP count) for one LAN.
+func (s *OmadaService) GetDHCPServerInfo(ctx context.Context, opts OmadaOptions, networkID string) (*OmadaDHCPServerInfo, error) {
+	if strings.TrimSpace(networkID) == "" {
+		return nil, fmt.Errorf("network_id is required")
+	}
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+	info, err := client.GetDHCPServerInfo(ctx, site.EffectiveID(), networkID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching DHCP server info: %w", err)
+	}
+	return &OmadaDHCPServerInfo{
+		NetworkID: networkID, AvailableIPs: info.AvailableIPs, TotalIPs: info.TotalIPs,
+		Start: info.Start, End: info.End,
+	}, nil
+}
+
+// GetDHCPSnoopStatus returns the site-wide DHCP snooping switch.
+func (s *OmadaService) GetDHCPSnoopStatus(ctx context.Context, opts OmadaOptions) (*OmadaDHCPSnoopStatus, error) {
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+	st, err := client.GetDHCPSnoopStatus(ctx, site.EffectiveID())
+	if err != nil {
+		return nil, fmt.Errorf("fetching DHCP snooping status: %w", err)
+	}
+	return &OmadaDHCPSnoopStatus{Enabled: st.Enabled}, nil
+}
+
+// ListDHCPSnoops returns the site's DHCP snooping rules.
+func (s *OmadaService) ListDHCPSnoops(ctx context.Context, opts OmadaOptions) ([]OmadaDHCPSnoopRule, error) {
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+	rows, err := client.GetDHCPSnoops(ctx, site.EffectiveID())
+	if err != nil {
+		return nil, fmt.Errorf("fetching DHCP snooping rules: %w", err)
+	}
+	out := make([]OmadaDHCPSnoopRule, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, OmadaDHCPSnoopRule{ID: r.ID, Name: r.Name, Enabled: r.Enabled})
+	}
+	return out, nil
+}
+
+// ListLANMulticasts returns the site's multicast-filter / snooping-tab rules.
+func (s *OmadaService) ListLANMulticasts(ctx context.Context, opts OmadaOptions) ([]OmadaLANMulticastRule, error) {
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+	rows, err := client.GetLANMulticasts(ctx, site.EffectiveID())
+	if err != nil {
+		return nil, fmt.Errorf("fetching LAN multicast rules: %w", err)
+	}
+	out := make([]OmadaLANMulticastRule, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, OmadaLANMulticastRule{ID: r.ID, Name: r.Name, Enabled: r.Enabled})
 	}
 	return out, nil
 }

@@ -230,6 +230,47 @@ func TestOmadaServiceListGatewayDHCPUsers(t *testing.T) {
 	}
 }
 
+func TestOmadaServiceDHCPExtras(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/openapi/v1/abc123/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case "/openapi/v1/abc123/sites/s1/networks/n1/dhcp-server-info":
+			writeOmadaEnvelope(w, 0, `{"availableIpCount":12,"totalIpCount":180,"ipaddrStart":"10.0.10.20","ipaddrEnd":"10.0.10.200"}`)
+		case "/openapi/v1/abc123/sites/s1/dhcpSnoops/status":
+			writeOmadaEnvelope(w, 0, `{"enable":true}`)
+		case "/openapi/v1/abc123/sites/s1/dhcpSnoops":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"r1","name":"trust","enabled":true}]}`)
+		case "/openapi/v1/abc123/sites/s1/lan-multicasts":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"m1","name":"ssdp","status":true}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	opts := OmadaOptions{Host: ts.URL, ClientID: "a", ClientSecret: "b", SkipTLSVerify: true}
+	info, err := NewOmadaService().GetDHCPServerInfo(context.Background(), opts, "n1")
+	if err != nil || info.AvailableIPs != 12 {
+		t.Fatalf("info = %+v err=%v", info, err)
+	}
+	if _, err := NewOmadaService().GetDHCPServerInfo(context.Background(), opts, ""); err == nil {
+		t.Fatal("empty network_id must error")
+	}
+	st, err := NewOmadaService().GetDHCPSnoopStatus(context.Background(), opts)
+	if err != nil || !st.Enabled {
+		t.Fatalf("status = %+v err=%v", st, err)
+	}
+	rules, err := NewOmadaService().ListDHCPSnoops(context.Background(), opts)
+	if err != nil || len(rules) != 1 {
+		t.Fatalf("rules = %+v err=%v", rules, err)
+	}
+	mcs, err := NewOmadaService().ListLANMulticasts(context.Background(), opts)
+	if err != nil || len(mcs) != 1 || !mcs[0].Enabled {
+		t.Fatalf("multicasts = %+v err=%v", mcs, err)
+	}
+}
+
 func TestOmadaServiceGetClientTopology(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
