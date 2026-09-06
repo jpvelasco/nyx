@@ -75,6 +75,10 @@ func TestBuildReportRisk(t *testing.T) {
 			{Provider: ProviderOmada, HasManagedGateway: true},
 			{Provider: ProviderOpnsense, OutboundNatMode: "automatic"},
 		}, RiskDouble},
+		{"two routers but one is a LAN client", []DeviceFacts{
+			{Provider: ProviderOmada, HasManagedGateway: true},
+			{Provider: ProviderOpnsense, OutboundNatMode: "automatic", DownstreamOfManagedGateway: true},
+		}, RiskMultipleConfigured},
 		{"omada router plus transparent opnsense", []DeviceFacts{
 			{Provider: ProviderOmada, HasManagedGateway: true},
 			{Provider: ProviderOpnsense, OutboundNatMode: "disabled"},
@@ -86,6 +90,10 @@ func TestBuildReportRisk(t *testing.T) {
 			{Provider: ProviderOmada, HasManagedGateway: true},
 			{Provider: ProviderOpnsense, OutboundNatMode: "disabled", SourceNatRules: 1},
 		}, RiskDouble},
+		{"router plus downstream indeterminate", []DeviceFacts{
+			{Provider: ProviderOmada, HasManagedGateway: true},
+			{Provider: ProviderOpnsense, OutboundNatMode: "disabled", SourceNatRules: 1, DownstreamOfManagedGateway: true},
+		}, RiskMultipleConfigured},
 		{"indeterminate only", []DeviceFacts{
 			{Provider: ProviderOpnsense, OutboundNatMode: "disabled", SourceNatRules: 1},
 		}, RiskIndeterminate},
@@ -112,6 +120,53 @@ func TestBuildReportRisk(t *testing.T) {
 				t.Errorf("devices = %d, want %d", len(rep.Devices), len(tc.facts))
 			}
 		})
+	}
+}
+
+// TestBuildReportRisk_DownstreamReason states that extra NAT-configured
+// devices off the egress path produce multiple_nat_configured, not a
+// path-claiming double_nat message.
+func TestBuildReportRisk_DownstreamReason(t *testing.T) {
+	rep := BuildReport([]DeviceFacts{
+		{Provider: ProviderOmada, HasManagedGateway: true},
+		{Provider: ProviderOpnsense, OutboundNatMode: "automatic", DownstreamOfManagedGateway: true},
+	})
+	if rep.Risk != RiskMultipleConfigured {
+		t.Fatalf("risk = %q, want %q", rep.Risk, RiskMultipleConfigured)
+	}
+	if !strings.Contains(rep.Reason, "egress path") {
+		t.Errorf("reason %q should explain the devices are not on the same egress path", rep.Reason)
+	}
+	if strings.Contains(rep.Reason, "will be rewritten more than once") {
+		t.Errorf("reason %q still claims a path rewrite", rep.Reason)
+	}
+}
+
+// TestClassify_DownstreamEvidence tags a LAN-side device so the operator
+// can see why it was excluded from the egress verdict.
+func TestClassify_DownstreamEvidence(t *testing.T) {
+	_, evidence := Classify(DeviceFacts{
+		Provider:                   ProviderOpnsense,
+		OutboundNatMode:            "automatic",
+		DownstreamOfManagedGateway: true,
+	})
+	joined := strings.Join(evidence, " ")
+	if !strings.Contains(joined, "LAN client") {
+		t.Errorf("evidence %v should note the device is a LAN client, not an egress hop", evidence)
+	}
+}
+
+// TestClassify_ConfigOnlyEvidence distinguishes factory-default outbound
+// NAT from observed NAT rules so a config-only nat_router is not read as
+// a hot-path rewrite.
+func TestClassify_ConfigOnlyEvidence(t *testing.T) {
+	_, evidence := Classify(DeviceFacts{
+		Provider:        ProviderOpnsense,
+		OutboundNatMode: "automatic",
+	})
+	joined := strings.Join(evidence, " ")
+	if !strings.Contains(joined, "config-only") {
+		t.Errorf("evidence %v should tag a default outbound-NAT mode with no rules as config-only", evidence)
 	}
 }
 

@@ -225,6 +225,11 @@ func topoOpnsenseServer(t *testing.T) *httptest.Server {
 			"/api/firewall/one_to_one/search_rule",
 			"/api/firewall/source_nat/search_rule":
 			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"interfaces":{
+				"lan":{"description":"LAN","dhcp":false,"ipv4":"10.0.40.1/24","ipv4_gateway":""},
+				"wan":{"description":"WAN","dhcp":true,"ipv4":"203.0.113.1/24","ipv4_gateway":"203.0.113.254"}
+			}}`)
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)

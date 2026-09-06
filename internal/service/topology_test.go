@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,11 +41,16 @@ func omadaGatewayServer(t *testing.T) *httptest.Server {
 	})
 }
 
-// opnsenseNatModeServer serves the OPNsense NAT endpoints with the given
-// outbound NAT mode. dNatNotFound makes the port-forward endpoint 404 to
-// exercise the hard-error path.
-func opnsenseNatModeServer(t *testing.T, snatMode string, dNatNotFound bool) *httptest.Server {
+// opnsenseNatObserver serves the OPNsense NAT + interfaces endpoints the
+// topology report reads. wanGateway is the WAN default gateway advertised
+// on interfaces_info (empty = public-looking upstream, i.e. on-path).
+// dNatNotFound makes the port-forward endpoint 404 to exercise the
+// hard-error path.
+func opnsenseNatObserver(t *testing.T, snatMode, wanGateway string, dNatNotFound bool) *httptest.Server {
 	t.Helper()
+	if wanGateway == "" {
+		wanGateway = "203.0.113.254"
+	}
 	return opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if dNatNotFound && r.URL.Path == "/api/firewall/d_nat/search_rule" {
 			w.WriteHeader(http.StatusNotFound)
@@ -57,11 +63,24 @@ func opnsenseNatModeServer(t *testing.T, snatMode string, dNatNotFound bool) *ht
 			"/api/firewall/one_to_one/search_rule",
 			"/api/firewall/source_nat/search_rule":
 			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, fmt.Sprintf(`{"interfaces":{
+				"lan":{"description":"LAN","dhcp":false,"ipv4":"10.0.40.1/24","ipv4_gateway":""},
+				"wan":{"description":"WAN","dhcp":true,"ipv4":"10.0.0.10/24","ipv4_gateway":%q}
+			}}`, wanGateway))
 		default:
 			t.Errorf("unexpected opnsense path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
+}
+
+func opnsenseDownstreamServer(t *testing.T, snatMode, gatewayIP string) *httptest.Server {
+	return opnsenseNatObserver(t, snatMode, gatewayIP, false)
+}
+
+func opnsenseNatModeServer(t *testing.T, snatMode string, dNatNotFound bool) *httptest.Server {
+	return opnsenseNatObserver(t, snatMode, "", dNatNotFound)
 }
 
 func TestTopologyServiceReport(t *testing.T) {
@@ -119,6 +138,28 @@ func TestTopologyServiceReport(t *testing.T) {
 		}
 	})
 
+	t.Run("downstream NAT appliance is not double NAT", func(t *testing.T) {
+		// Issue #102: a LAN-side appliance whose WAN default gateway is
+		// the managed gateway is a client, not an egress hop.
+		om := omadaGatewayServer(t)
+		// WAN default gateway matches the Omada gateway address from
+		// omadaGatewayServer — the box is a LAN client, not an egress hop.
+		op := opnsenseDownstreamServer(t, "automatic", "10.0.0.254")
+		rep, err := NewTopologyService().Report(context.Background(), TopologyOptions{
+			Omada:    omadaOpts(om),
+			Opnsense: opnsenseOpts(op),
+		})
+		if err != nil {
+			t.Fatalf("Report: %v", err)
+		}
+		if rep.Risk != "multiple_nat_configured" {
+			t.Errorf("risk = %q, want multiple_nat_configured; reason: %s", rep.Risk, rep.Reason)
+		}
+		if !strings.Contains(rep.Reason, "egress path") {
+			t.Errorf("reason %q should say the devices are not on the same egress path", rep.Reason)
+		}
+	})
+
 	t.Run("opnsense alone with disabled mode is no risk", func(t *testing.T) {
 		op := opnsenseNatModeServer(t, "disabled", false)
 		rep, err := NewTopologyService().Report(context.Background(), TopologyOptions{
@@ -139,6 +180,53 @@ func TestTopologyServiceReport(t *testing.T) {
 		_, err := NewTopologyService().Report(context.Background(), TopologyOptions{})
 		if err == nil || !strings.Contains(err.Error(), "at least one provider") {
 			t.Errorf("err = %v, want provider-required error", err)
+		}
+	})
+
+	t.Run("addrsOverlap is IP-canonical and never guesses", func(t *testing.T) {
+		if !addrsOverlap([]string{"10.0.0.254"}, []string{"10.0.0.254"}) {
+			t.Error("identical addresses should overlap")
+		}
+		if addrsOverlap([]string{"10.0.0.254"}, []string{"203.0.113.254"}) {
+			t.Error("distinct addresses should not overlap")
+		}
+		if addrsOverlap(nil, []string{"10.0.0.254"}) || addrsOverlap([]string{"10.0.0.254"}, nil) {
+			t.Error("empty side should not overlap")
+		}
+		if addrsOverlap([]string{"not-an-ip"}, []string{"10.0.0.254"}) {
+			t.Error("unparseable addresses should not overlap")
+		}
+	})
+
+	t.Run("interfaces read failure is best-effort", func(t *testing.T) {
+		// Path membership cannot be proven, so two NAT-configured
+		// devices stay a conservative double_nat — the report must
+		// still succeed.
+		om := omadaGatewayServer(t)
+		op := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/firewall/source_nat/get":
+				testutil.WriteBody(w, testutil.SNATModeBody("automatic"))
+			case "/api/firewall/d_nat/search_rule",
+				"/api/firewall/one_to_one/search_rule",
+				"/api/firewall/source_nat/search_rule":
+				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/interfaces/overview/interfaces_info":
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Errorf("unexpected opnsense path %s", r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+			}
+		})
+		rep, err := NewTopologyService().Report(context.Background(), TopologyOptions{
+			Omada:    omadaOpts(om),
+			Opnsense: opnsenseOpts(op),
+		})
+		if err != nil {
+			t.Fatalf("Report: %v", err)
+		}
+		if rep.Risk != "double_nat" {
+			t.Errorf("risk = %q, want conservative double_nat; reason: %s", rep.Risk, rep.Reason)
 		}
 	})
 

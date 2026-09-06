@@ -74,6 +74,12 @@ type DeviceFacts struct {
 	// HasManagedGateway reports whether the site has a managed gateway device
 	// (Omada). A managed gateway is a router that source-NATs its LANs.
 	HasManagedGateway bool
+
+	// DownstreamOfManagedGateway is true when this device's WAN default
+	// gateway is the managed gateway — it is a LAN client, not an egress
+	// hop. The comparison happens in the service layer; addresses never
+	// enter these facts.
+	DownstreamOfManagedGateway bool
 }
 
 // explicitNatReports counts the explicit NAT rules and reports the breakdown.
@@ -117,14 +123,20 @@ func IsRole(s string) bool {
 // case. When no mode is exposed, rule counts and managed-gateway presence
 // stand in.
 func Classify(f DeviceFacts) (NatRole, []string) {
+	var role NatRole
+	var evidence []string
 	switch f.Provider {
 	case ProviderOpnsense:
-		return classifyOpnsense(f)
+		role, evidence = classifyOpnsense(f)
 	case ProviderOmada:
-		return classifyOmada(f)
+		role, evidence = classifyOmada(f)
 	default:
-		return RoleUnknown, []string{"unknown provider: cannot classify"}
+		role, evidence = RoleUnknown, []string{"unknown provider: cannot classify"}
 	}
+	if f.DownstreamOfManagedGateway {
+		evidence = append(evidence, "WAN default gateway points at the managed gateway (LAN client, not an egress hop)")
+	}
+	return role, evidence
 }
 
 func classifyOpnsense(f DeviceFacts) (NatRole, []string) {
@@ -161,6 +173,8 @@ func classifyOpnsense(f DeviceFacts) (NatRole, []string) {
 		evidence := []string{"outbound NAT mode is " + f.OutboundNatMode + " (generates source NAT)"}
 		if f.explicitNatReports() != "no explicit NAT rules" {
 			evidence = append(evidence, f.explicitNatReports())
+		} else {
+			evidence = append(evidence, "config-only: no explicit NAT rules observed")
 		}
 		return RoleNatRouter, evidence
 	}
@@ -196,6 +210,11 @@ const (
 	// NAT (or an indeterminate device may be one).
 	RiskDouble DoubleNatRisk = "double_nat"
 
+	// RiskMultipleConfigured: two or more devices have source-NAT
+	// configured, but they are not on the same inferred egress path
+	// (e.g. a LAN-side appliance whose WAN points at the managed gateway).
+	RiskMultipleConfigured DoubleNatRisk = "multiple_nat_configured"
+
 	// RiskIndeterminate: the facts cannot rule double NAT in or out.
 	RiskIndeterminate DoubleNatRisk = "indeterminate"
 )
@@ -217,36 +236,59 @@ type DeviceReport struct {
 }
 
 // BuildReport classifies every device and derives the site's double-NAT risk.
-// The risk is "double_nat" when two or more observed devices would source-NAT
-// the same traffic; an indeterminate device counts as a potential second
-// NAT point (conservative), but two unknowns alone only yield "indeterminate".
+// The risk is "double_nat" only when two or more devices on the inferred
+// egress path would source-NAT the same traffic. A device whose WAN default
+// gateway points at the managed gateway is a LAN client and is excluded from
+// the path count; extra NAT-configured devices off the path yield
+// "multiple_nat_configured" instead of a path-claiming double_nat. An
+// on-path indeterminate device still counts as a potential second NAT point
+// (conservative); two unknowns alone only yield "indeterminate".
 func BuildReport(facts []DeviceFacts) *Report {
 	rep := &Report{Devices: make([]DeviceReport, 0, len(facts))}
-	nats, indets := 0, 0
+	var path, off natCounts
 	for _, f := range facts {
 		role, evidence := Classify(f)
 		rep.Devices = append(rep.Devices, DeviceReport{Provider: f.Provider, Role: role, Evidence: evidence})
-		switch role {
-		case RoleNatRouter:
-			nats++
-		case RoleIndeterminate:
-			indets++
+		if f.DownstreamOfManagedGateway {
+			off.add(role)
+			continue
 		}
+		path.add(role)
 	}
 	switch {
-	case nats >= 2:
+	case path.nats >= 2:
 		rep.Risk = RiskDouble
-		rep.Reason = strconv.Itoa(nats) + " observed devices perform source NAT; outbound traffic will be rewritten more than once"
-	case nats == 1 && indets > 0:
+		rep.Reason = strconv.Itoa(path.nats) + " observed devices on the egress path perform source NAT; outbound traffic will be rewritten more than once"
+	case path.nats == 1 && path.indets > 0:
 		rep.Risk = RiskDouble
-		rep.Reason = "one device performs source NAT and at least one other is indeterminate; verify the " +
+		rep.Reason = "one device on the egress path performs source NAT and at least one other on the path is indeterminate; verify the " +
 			"indeterminate device is not source-NATing (double NAT risk)"
-	case nats == 0 && indets >= 1:
+	case path.nats == 0 && path.indets >= 1:
 		rep.Risk = RiskIndeterminate
-		rep.Reason = "no confirmed source-NAT device, but the NAT posture of at least one device is indeterminate"
+		rep.Reason = "no confirmed source-NAT device on the egress path, but the NAT posture of at least one on-path device is indeterminate"
+	case off.total() > 0 && path.total()+off.total() >= 2:
+		rep.Risk = RiskMultipleConfigured
+		rep.Reason = strconv.Itoa(path.nats+off.nats) + " devices have source-NAT configured, but they are not on the same egress path; " +
+			strconv.Itoa(off.total()) + " sit downstream of the managed gateway as LAN clients"
 	default:
 		rep.Risk = RiskNone
 		rep.Reason = "at most one device performs source NAT; no double NAT observed"
 	}
 	return rep
 }
+
+// natCounts tallies source-NAT and indeterminate devices for one path bucket.
+type natCounts struct {
+	nats, indets int
+}
+
+func (c *natCounts) add(role NatRole) {
+	switch role {
+	case RoleNatRouter:
+		c.nats++
+	case RoleIndeterminate:
+		c.indets++
+	}
+}
+
+func (c natCounts) total() int { return c.nats + c.indets }
