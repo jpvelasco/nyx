@@ -38,6 +38,13 @@ func TestGetDHCPSnoopStatusAndRules(t *testing.T) {
 	if err != nil || st == nil || !st.Enabled {
 		t.Fatalf("status = %+v err=%v", st, err)
 	}
+	cStatus, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 0, "", `{"status":true}`)
+	}))
+	st, err = cStatus.GetDHCPSnoopStatus(context.Background(), "s1")
+	if err != nil || st == nil || !st.Enabled {
+		t.Fatalf("status-flag = %+v err=%v", st, err)
+	}
 	rules, err := c.GetDHCPSnoops(context.Background(), "s1")
 	if err != nil || len(rules) != 1 || rules[0].Name != "trust-ports" || !rules[0].Enabled {
 		t.Fatalf("rules = %+v err=%v", rules, err)

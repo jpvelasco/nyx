@@ -1119,69 +1119,57 @@ func (s *OmadaService) GetDHCPServerInfo(ctx context.Context, opts OmadaOptions,
 	if strings.TrimSpace(networkID) == "" {
 		return nil, fmt.Errorf("network_id is required")
 	}
-	client, site, err := s.session(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer client.Logout(ctx) //nolint:errcheck
-	info, err := client.GetDHCPServerInfo(ctx, site.EffectiveID(), networkID)
-	if err != nil {
-		return nil, fmt.Errorf("fetching DHCP server info: %w", err)
-	}
-	return &OmadaDHCPServerInfo{
-		NetworkID: networkID, AvailableIPs: info.AvailableIPs, TotalIPs: info.TotalIPs,
-		Start: info.Start, End: info.End,
-	}, nil
+	return withSession(s, ctx, opts, func(client *omadabackend.Client, siteID string) (*OmadaDHCPServerInfo, error) {
+		info, err := client.GetDHCPServerInfo(ctx, siteID, networkID)
+		if err != nil {
+			return nil, fmt.Errorf("fetching DHCP server info: %w", err)
+		}
+		return &OmadaDHCPServerInfo{
+			NetworkID: networkID, AvailableIPs: info.AvailableIPs, TotalIPs: info.TotalIPs,
+			Start: info.Start, End: info.End,
+		}, nil
+	})
 }
 
 // GetDHCPSnoopStatus returns the site-wide DHCP snooping switch.
 func (s *OmadaService) GetDHCPSnoopStatus(ctx context.Context, opts OmadaOptions) (*OmadaDHCPSnoopStatus, error) {
-	client, site, err := s.session(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer client.Logout(ctx) //nolint:errcheck
-	st, err := client.GetDHCPSnoopStatus(ctx, site.EffectiveID())
-	if err != nil {
-		return nil, fmt.Errorf("fetching DHCP snooping status: %w", err)
-	}
-	return &OmadaDHCPSnoopStatus{Enabled: st.Enabled}, nil
+	return withSession(s, ctx, opts, func(client *omadabackend.Client, siteID string) (*OmadaDHCPSnoopStatus, error) {
+		st, err := client.GetDHCPSnoopStatus(ctx, siteID)
+		if err != nil {
+			return nil, fmt.Errorf("fetching DHCP snooping status: %w", err)
+		}
+		return &OmadaDHCPSnoopStatus{Enabled: st.Enabled}, nil
+	})
 }
 
 // ListDHCPSnoops returns the site's DHCP snooping rules.
 func (s *OmadaService) ListDHCPSnoops(ctx context.Context, opts OmadaOptions) ([]OmadaDHCPSnoopRule, error) {
-	client, site, err := s.session(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer client.Logout(ctx) //nolint:errcheck
-	rows, err := client.GetDHCPSnoops(ctx, site.EffectiveID())
-	if err != nil {
-		return nil, fmt.Errorf("fetching DHCP snooping rules: %w", err)
-	}
-	out := make([]OmadaDHCPSnoopRule, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, OmadaDHCPSnoopRule{ID: r.ID, Name: r.Name, Enabled: r.Enabled})
-	}
-	return out, nil
+	return withSession(s, ctx, opts, func(client *omadabackend.Client, siteID string) ([]OmadaDHCPSnoopRule, error) {
+		rows, err := client.GetDHCPSnoops(ctx, siteID)
+		if err != nil {
+			return nil, fmt.Errorf("fetching DHCP snooping rules: %w", err)
+		}
+		out := make([]OmadaDHCPSnoopRule, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, OmadaDHCPSnoopRule{ID: r.ID, Name: r.Name, Enabled: r.Enabled})
+		}
+		return out, nil
+	})
 }
 
 // ListLANMulticasts returns the site's multicast-filter / snooping-tab rules.
 func (s *OmadaService) ListLANMulticasts(ctx context.Context, opts OmadaOptions) ([]OmadaLANMulticastRule, error) {
-	client, site, err := s.session(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer client.Logout(ctx) //nolint:errcheck
-	rows, err := client.GetLANMulticasts(ctx, site.EffectiveID())
-	if err != nil {
-		return nil, fmt.Errorf("fetching LAN multicast rules: %w", err)
-	}
-	out := make([]OmadaLANMulticastRule, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, OmadaLANMulticastRule{ID: r.ID, Name: r.Name, Enabled: r.Enabled})
-	}
-	return out, nil
+	return withSession(s, ctx, opts, func(client *omadabackend.Client, siteID string) ([]OmadaLANMulticastRule, error) {
+		rows, err := client.GetLANMulticasts(ctx, siteID)
+		if err != nil {
+			return nil, fmt.Errorf("fetching LAN multicast rules: %w", err)
+		}
+		out := make([]OmadaLANMulticastRule, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, OmadaLANMulticastRule{ID: r.ID, Name: r.Name, Enabled: r.Enabled})
+		}
+		return out, nil
+	})
 }
 
 // GetClientTopology returns the client's uplink chain (POST-only Open API).
@@ -1732,4 +1720,15 @@ func (s *OmadaService) session(ctx context.Context, opts OmadaOptions) (*omadaba
 		return nil, omadabackend.Site{}, err
 	}
 	return client, site, nil
+}
+
+// withSession opens a logged-in site session, runs fn, then logs out.
+func withSession[T any](s *OmadaService, ctx context.Context, opts OmadaOptions, fn func(*omadabackend.Client, string) (T, error)) (T, error) {
+	var zero T
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return zero, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+	return fn(client, site.EffectiveID())
 }

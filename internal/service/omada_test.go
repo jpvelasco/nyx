@@ -491,6 +491,38 @@ func TestOmadaService_SessionFailures(t *testing.T) {
 			_, err := NewOmadaService().ApplyPortProfile(context.Background(), opts, OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "trusted"}, false)
 			return err
 		}},
+		{"dhcp-server-info/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().GetDHCPServerInfo(context.Background(), opts, "n1")
+			return err
+		}},
+		{"dhcp-server-info/connect-fail", connectOpts, "fetching controller info", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().GetDHCPServerInfo(context.Background(), opts, "n1")
+			return err
+		}},
+		{"dhcp-snoop-status/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().GetDHCPSnoopStatus(context.Background(), opts)
+			return err
+		}},
+		{"dhcp-snoop-status/connect-fail", connectOpts, "fetching controller info", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().GetDHCPSnoopStatus(context.Background(), opts)
+			return err
+		}},
+		{"dhcp-snoops/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().ListDHCPSnoops(context.Background(), opts)
+			return err
+		}},
+		{"dhcp-snoops/connect-fail", connectOpts, "fetching controller info", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().ListDHCPSnoops(context.Background(), opts)
+			return err
+		}},
+		{"lan-multicasts/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().ListLANMulticasts(context.Background(), opts)
+			return err
+		}},
+		{"lan-multicasts/connect-fail", connectOpts, "fetching controller info", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().ListLANMulticasts(context.Background(), opts)
+			return err
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

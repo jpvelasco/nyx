@@ -78,26 +78,30 @@ func (c *Client) GetDHCPSnoopStatus(ctx context.Context, siteID string) (*DHCPSn
 
 // GetDHCPSnoops returns the paged DHCP snooping rule list.
 func (c *Client) GetDHCPSnoops(ctx context.Context, siteID string) ([]DHCPSnoopRule, error) {
-	rows, _, err := fetchPaged[namedToggleRow](ctx, c, fmt.Sprintf("sites/%s/dhcpSnoops", siteID), defaultPageSize)
-	if err != nil {
-		return nil, fmt.Errorf("getting DHCP snooping rules for site %s: %w", siteID, err)
-	}
-	out := make([]DHCPSnoopRule, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, DHCPSnoopRule{ID: r.ID, Name: r.Name, Enabled: r.Enabled || r.Status})
-	}
-	return out, nil
+	return fetchNamedToggles(ctx, c, fmt.Sprintf("sites/%s/dhcpSnoops", siteID),
+		fmt.Sprintf("DHCP snooping rules for site %s", siteID),
+		func(r namedToggleRow) DHCPSnoopRule {
+			return DHCPSnoopRule{ID: r.ID, Name: r.Name, Enabled: r.Enabled || r.Status}
+		})
 }
 
 // GetLANMulticasts returns the paged multicast-filter / snooping-tab rules.
 func (c *Client) GetLANMulticasts(ctx context.Context, siteID string) ([]LANMulticastRule, error) {
-	rows, _, err := fetchPaged[namedToggleRow](ctx, c, fmt.Sprintf("sites/%s/lan-multicasts", siteID), defaultPageSize)
+	return fetchNamedToggles(ctx, c, fmt.Sprintf("sites/%s/lan-multicasts", siteID),
+		fmt.Sprintf("LAN multicast rules for site %s", siteID),
+		func(r namedToggleRow) LANMulticastRule {
+			return LANMulticastRule{ID: r.ID, Name: r.Name, Enabled: r.Enabled || r.Status}
+		})
+}
+
+func fetchNamedToggles[T any](ctx context.Context, c *Client, path, wrap string, mapFn func(namedToggleRow) T) ([]T, error) {
+	rows, _, err := fetchPaged[namedToggleRow](ctx, c, path, defaultPageSize)
 	if err != nil {
-		return nil, fmt.Errorf("getting LAN multicast rules for site %s: %w", siteID, err)
+		return nil, fmt.Errorf("getting %s: %w", wrap, err)
 	}
-	out := make([]LANMulticastRule, 0, len(rows))
+	out := make([]T, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, LANMulticastRule{ID: r.ID, Name: r.Name, Enabled: r.Enabled || r.Status})
+		out = append(out, mapFn(r))
 	}
 	return out, nil
 }
