@@ -957,6 +957,13 @@ func TestDispatchOmadaDHCPPath(t *testing.T) {
 	if isErr || !strings.Contains(text, "no lease") || stub.lastPathReq.ClientMAC != "aa:bb:cc:dd:ee:01" {
 		t.Fatalf("got (%q, %v) req=%+v", text, isErr, stub.lastPathReq)
 	}
+	errStub := &stubOmadaSvc{err: errors.New("compose failed")}
+	text, isErr = serverWithOmadaStub(errStub).DispatchToolForTest(context.Background(), "omada_dhcp_path", map[string]interface{}{
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "client_mac": "aa:bb:cc:dd:ee:01",
+	})
+	if !isErr || !strings.Contains(text, "omada DHCP path request failed") {
+		t.Errorf("service err = (%q, %v)", text, isErr)
+	}
 }
 
 func TestDispatchOmadaListNetworks_ServiceError(t *testing.T) {
