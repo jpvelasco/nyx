@@ -561,6 +561,50 @@ func TestDeleteSourceNatRule(t *testing.T) {
 	})
 }
 
+func TestApplyFirewallFilter(t *testing.T) {
+	t.Run("ok status", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || r.URL.Path != "/api/firewall/filter/apply" {
+				t.Errorf("request = %s %s", r.Method, r.URL.Path)
+			}
+			testutil.WriteBody(w, `{"status":"ok"}`)
+		}))
+		if err := c.ApplyFirewallFilter(context.Background()); err != nil {
+			t.Fatalf("ApplyFirewallFilter: %v", err)
+		}
+	})
+
+	t.Run("bad json", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `not json`)
+		}))
+		err := c.ApplyFirewallFilter(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "decoding firewall filter apply response") {
+			t.Errorf("error = %v, want decode error", err)
+		}
+	})
+
+	t.Run("non-ok status", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"status":"failed"}`)
+		}))
+		err := c.ApplyFirewallFilter(context.Background())
+		if err == nil || !strings.Contains(err.Error(), `status "failed"`) {
+			t.Errorf("error = %v, want status failed", err)
+		}
+	})
+
+	t.Run("non-ok result", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"result":"failed"}`)
+		}))
+		err := c.ApplyFirewallFilter(context.Background())
+		if err == nil || !strings.Contains(err.Error(), `returned "failed"`) {
+			t.Errorf("error = %v, want result failed", err)
+		}
+	})
+}
+
 // S3.1 — unknown collections are rejected before any request is made.
 func TestNatWirePayloadUnknownCollection(t *testing.T) {
 	_, err := natWirePayload("alias", natRuleSpec{})
