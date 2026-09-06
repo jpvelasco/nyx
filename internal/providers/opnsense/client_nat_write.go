@@ -185,6 +185,32 @@ type natSetResult struct {
 	Result string `json:"result"`
 }
 
+// ApplyFirewallFilter commits staged firewall/NAT changes to the
+// dataplane (POST /api/firewall/filter/apply — 26.x activate step
+// inherited from filter_base). This is S3.9; do not call the dead
+// /firewall/filter_base/apply path.
+func (c *Client) ApplyFirewallFilter(ctx context.Context) error {
+	resp, err := c.do(ctx, http.MethodPost, filterApplyPath, []byte(`{}`))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var res struct {
+		Status string `json:"status"`
+		Result string `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return fmt.Errorf("decoding firewall filter apply response: %w", err)
+	}
+	if res.Status != "" && res.Status != "ok" {
+		return fmt.Errorf("firewall filter apply returned status %q", res.Status)
+	}
+	if res.Result != "" && res.Result != "ok" && res.Result != "saved" {
+		return fmt.Errorf("firewall filter apply returned %q", res.Result)
+	}
+	return nil
+}
+
 // natSet posts a set_rule or del_rule request.
 func (c *Client) natSet(ctx context.Context, path string, body []byte) error {
 	resp, err := c.do(ctx, http.MethodPost, path, body)

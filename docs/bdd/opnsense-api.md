@@ -197,13 +197,13 @@ Then `info` and `inventory` require the **Dashboard** page only (both `system_in
 And a full `import` additionally requires **Firewall: Filter** (rules → policies) and the **Diagnostics: DHCP** page (leases → client estimate); a user missing either still gets a usable, warned import per S2.12 instead of a fatal error
 And the `nat_check` surface requires the **Firewall: NAT** page (outbound mode plus the NAT rule listings) on top of the Dashboard-only set
 
-## §3 Mutations (S3.1–S3.6 Implemented — PR 2 slice 1; S3.7–S3.9 Planned)
+## §3 Mutations (S3.1–S3.6 + S3.9 Implemented; S3.7–S3.8 Planned)
 
 **No mutation may ship until the matching scenario below is marked
 Implemented with its test mirror** (hard lock: no opt-in escape hatch).
-S3.1–S3.6 (NAT CRUD) are Implemented in this slice; S3.7 (alias CRUD),
-S3.8 (filter CRUD), and S3.9 (`filter_base/apply`) are Planned. S3.10
-stays reserved forever.
+S3.1–S3.6 (NAT CRUD) and S3.9 (`firewall/filter/apply`) are Implemented;
+S3.7 (alias CRUD) and S3.8 (filter CRUD) are Planned. S3.10 stays
+reserved forever.
 
 | Endpoint | Operation | Scenario |
 | -------- | --------- | -------- |
@@ -215,7 +215,7 @@ stays reserved forever.
 | `POST /api/firewall/source_nat/add_rule` / `set_rule/<uuid>` / `del_rule/<uuid>` | Source NAT CRUD | S3.6 |
 | `POST /api/firewall/alias/add_item` / `set_item/<uuid>` / `del_item/<uuid>` | Alias CRUD | S3.7 |
 | `POST /api/firewall/filter/add_rule` / `set_rule/<uuid>` / `del_rule/<uuid>` / `toggle_rule/<uuid>,<enabled>` | Firewall rule CRUD | S3.8 |
-| `POST /api/firewall/filter_base/apply` | Commit staged firewall/NAT changes | S3.9 |
+| `POST /api/firewall/filter/apply` | Commit staged firewall/NAT changes (26.x activate; do not call dead `filter_base/apply`) | S3.9 |
 | `POST /api/firewall/alias/reconfigure` | Apply staged alias changes | S3.10 |
 
 Mutations are dry-run by default: a dry-run issues **zero** POSTs. NAT writes
@@ -223,10 +223,10 @@ against a bridge/indeterminate-classified device are refused without explicit
 `allow_double_nat` (double-NAT protection — see topology phase); writes
 against an `unknown` device are refused **always**, even with
 `allow_double_nat` (you cannot consent to a risk that was not measured).
-Every NAT mutation in this slice is **staged**: it saves to the controller
-config but is not in the dataplane until `filter_base/apply` (S3.9) commits
-it — the plan and apply results state this explicitly (guardrail lock
-below).
+Plan / dry-run NAT mutations are **staged**: they name the write and
+state that `firewall/filter/apply` (S3.9) is required before traffic
+changes. A real (non-dry-run) `ApplyNat` POSTs the write and then
+`firewall/filter/apply`; an apply failure must not be reported as live.
 
 ### S3.1 Create port forward (Implemented)
 Given `POST /api/firewall/d_nat/add_rule` with body `{"rule":{"sequence":"99","interface":"lan","protocol":"tcp","destination":{"network":"10.0.40.10"},"local-port":"443","target":"10.0.40.20","descr":"web"}`
@@ -272,6 +272,16 @@ And manual outbound rules only take effect with `snat_mode` = `advanced` or `hyb
 And the toggle uses the **`enabled`** polarity: `toggle_rule/<uuid>,1` enables, `toggle_rule/<uuid>,0` disables
 And the test: `TestCreateSourceNatRule` / `TestSetSourceNatRule` / `TestDeleteSourceNatRule`
 
+### S3.9 Commit staged NAT to the dataplane (Implemented)
+Given a successful non-dry-run NAT mutation (create / set / del / toggle)
+When `ApplyNat` finishes the write
+Then it POSTs `/api/firewall/filter/apply` (26.x activate; never `/firewall/filter_base/apply`)
+And the result `endpoints` list the write then `/firewall/filter/apply`
+And the result warning states the change is in the dataplane
+And a failed apply POST is a hard error naming the staged-vs-live gap (do not pretend live)
+And dry-run / refused / idempotent no-ops issue zero POSTs and keep the staged warning
+And the tests: `TestApplyNat_DataplaneApplyAfterMutation` / `TestApplyNat_ApplyFailureDoesNotPretendLive`
+
 ### PR 2 guardrail locks (binding)
 
 - **Dry-run = zero POSTs.** A dry-run previews the diff and issues no
@@ -282,10 +292,10 @@ And the test: `TestCreateSourceNatRule` / `TestSetSourceNatRule` / `TestDeleteSo
 - **Filter interface derived from the source zone.** A rule whose source
   zone cannot be mapped to a firewall interface is a hard error — the
   provider must not guess the interface.
-- **Staged vs live is explicit.** Each mutation scenario names whether it
-  stages (`filter_base/apply` required) or applies live; the plan result
-  always states the provider name and the exact API endpoints it would
-  call.
+- **Staged vs live is explicit.** Plan / dry-run results name
+  `firewall/filter/apply` as the remaining dataplane step. A real
+  `ApplyNat` POSTs that step after the write; an apply failure is a
+  hard error and must not be reported as live.
 - **Outbound NAT mode drift → `unknown`.** An absent or unselected
   `snat_mode` entry is reported as `unknown` and never guessed; mutation
   plans against an `unknown` device are **always** refused, even with
