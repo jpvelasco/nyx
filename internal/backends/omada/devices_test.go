@@ -169,6 +169,18 @@ func TestGatewayForNetworkMACPreferredOverIP(t *testing.T) {
 	}
 }
 
+func TestDashMAC(t *testing.T) {
+	if got := dashMAC("aa:bb:cc:dd:ee:00"); got != "aa-bb-cc-dd-ee-00" {
+		t.Errorf("dashMAC(colon) = %q", got)
+	}
+	if got := dashMAC("AABBCCDDEE00"); got != "aa-bb-cc-dd-ee-00" {
+		t.Errorf("dashMAC(bare) = %q", got)
+	}
+	if got := dashMAC("bad"); got != "bad" {
+		t.Errorf("dashMAC(invalid) = %q, want passthrough", got)
+	}
+}
+
 func TestNormalizeMAC(t *testing.T) {
 	// Normalization is total: colons, spaces, and dashes all collapse to the
 	// same canonical form, so mixed separators compare equal.

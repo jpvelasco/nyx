@@ -117,6 +117,23 @@ func NormalizeMAC(mac string) string {
 	return mac
 }
 
+// dashMAC formats a MAC as aa-bb-cc-dd-ee-00 for Open API path segments
+// that use dash separators (e.g. the gateway DHCP user list).
+func dashMAC(mac string) string {
+	n := NormalizeMAC(mac)
+	if len(n) != 12 {
+		return mac
+	}
+	var b strings.Builder
+	for i := 0; i < 12; i += 2 {
+		if i > 0 {
+			b.WriteByte('-')
+		}
+		b.WriteString(n[i : i+2])
+	}
+	return b.String()
+}
+
 // SortedDevices returns a copy of the slice sorted by type (gateway,
 // switch, ap, other) then name so inventory output is stable across runs.
 func SortedDevices(devices []Device) []Device {

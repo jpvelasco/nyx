@@ -46,6 +46,7 @@ var toolHandlers = map[string]toolHandler{
 	"omada_get_uplink_info":            (*Server).toolOmadaGetUplinkInfo,
 	"omada_list_switch_ports":          (*Server).toolOmadaListSwitchPorts,
 	"omada_list_lan_profiles":          (*Server).toolOmadaListLanProfiles,
+	"omada_list_gateway_dhcp_users":    (*Server).toolOmadaListGatewayDHCPUsers,
 	"omada_plan_port":                  (*Server).toolOmadaPlanPort,
 	"omada_apply_port_profile":         (*Server).toolOmadaApplyPortProfile,
 	"opnsense_get_info":                (*Server).toolOpnsenseGetInfo,
@@ -303,6 +304,22 @@ func (s *Server) toolOmadaListClients(ctx context.Context, args map[string]inter
 		return errResult(fmt.Sprintf("omada clients request failed: %v", err))
 	}
 	return okResult(toJSON(clients))
+}
+
+func (s *Server) toolOmadaListGatewayDHCPUsers(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	mac, _ := args["gateway_mac"].(string)
+	if strings.TrimSpace(mac) == "" {
+		return errResult("gateway_mac parameter is required")
+	}
+	rows, err := s.omadaSvc.ListGatewayDHCPUsers(ctx, opts, mac)
+	if err != nil {
+		return errResult(fmt.Sprintf("omada gateway DHCP users request failed: %v", err))
+	}
+	return okResult(toJSON(rows))
 }
 
 func (s *Server) toolOmadaInventory(ctx context.Context, args map[string]interface{}) toolDispatchResult {

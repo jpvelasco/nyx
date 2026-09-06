@@ -168,7 +168,7 @@ func TestOmadaServiceListNetworks(t *testing.T) {
 		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			// Open API shape: DHCP flag nested under dhcpSettingsVO
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
-				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"dhcpSettingsVO":{"enable":true},"deviceMac":"aa:bb:cc:dd:ee:00"},
+				{"id":"n1","name":"Trusted","purpose":"lan","vlan":10,"gatewaySubnet":"10.0.10.1/24","isolation":false,"dhcpGuard":true,"dhcpSettingsVO":{"enable":true,"ipaddrStart":"10.0.10.20","ipaddrEnd":"10.0.10.200","leasetime":120},"deviceMac":"aa:bb:cc:dd:ee:00"},
 				{"id":"n2","name":"IoT","purpose":"lan","vlan":20,"gatewaySubnet":"10.0.20.1/24","isolation":true,"dhcpSettingsVO":{"enable":false},"deviceMac":"aa:bb:cc:dd:ee:00"}]}`)
 		default:
 			http.NotFound(w, r)
@@ -191,9 +191,42 @@ func TestOmadaServiceListNetworks(t *testing.T) {
 	if trusted.VLANID != 10 || !trusted.DHCPEnabled || trusted.Isolated {
 		t.Errorf("trusted = %+v, want vlan 10, dhcp on, not isolated", trusted)
 	}
+	if trusted.DHCPStart != "10.0.10.20" || trusted.DHCPEnd != "10.0.10.200" || !trusted.DHCPGuard {
+		t.Errorf("trusted pool/posture = %+v", trusted)
+	}
 	iot := nets[1]
 	if iot.VLANID != 20 || iot.DHCPEnabled || !iot.Isolated {
 		t.Errorf("iot = %+v, want vlan 20, dhcp off, isolated", iot)
+	}
+}
+
+func TestOmadaServiceListGatewayDHCPUsers(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/openapi/v1/abc123/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case "/openapi/v1/abc123/sites/s1/gateways/aa-bb-cc-dd-ee-00/dhcp/user-list":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[
+				{"ipAddress":"10.0.10.20","macAddress":"aa-bb-cc-dd-ee-01","name":"pc1","netName":"Trusted","leftLeaseTime":3600}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	rows, err := NewOmadaService().ListGatewayDHCPUsers(context.Background(), OmadaOptions{
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
+	}, "aa:bb:cc:dd:ee:00")
+	if err != nil {
+		t.Fatalf("ListGatewayDHCPUsers: %v", err)
+	}
+	if len(rows) != 1 || rows[0].IP != "10.0.10.20" || rows[0].NetworkName != "Trusted" {
+		t.Fatalf("rows = %+v", rows)
+	}
+	if _, err := NewOmadaService().ListGatewayDHCPUsers(context.Background(), OmadaOptions{
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
+	}, ""); err == nil {
+		t.Fatal("empty gateway_mac must error")
 	}
 }
 

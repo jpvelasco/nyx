@@ -127,6 +127,7 @@ type omadaSurface interface {
 	GetUplinkInfo(ctx context.Context, opts service.OmadaOptions, macs []string) ([]service.OmadaUplinkInfo, error)
 	ListSwitchPorts(ctx context.Context, opts service.OmadaOptions, switchMAC string) ([]service.OmadaSwitchPort, error)
 	ListLanProfiles(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaLanProfile, error)
+	ListGatewayDHCPUsers(ctx context.Context, opts service.OmadaOptions, gatewayMAC string) ([]service.OmadaGatewayDHCPUser, error)
 	PlanPort(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest) (*service.OmadaPortPlan, error)
 	ApplyPortProfile(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest, dryRun bool) (*service.OmadaPortProfileApplyResult, error)
 }
@@ -542,6 +543,13 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
 				"switch_mac": {Type: "string", Description: "Optional switch MAC to filter ports; empty lists every switch in the site"},
 			}, []string{"host"}),
+		},
+		{
+			Name:        "omada_list_gateway_dhcp_users",
+			Description: "List the fresher per-gateway DHCP lease table (ip, mac, name, network, remaining lease). gateway_mac is required. Read-only.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"gateway_mac": {Type: "string", Description: "Managed gateway MAC (colon or dash separators)"},
+			}, []string{"host", "gateway_mac"}),
 		},
 		{
 			Name:        "omada_list_lan_profiles",
