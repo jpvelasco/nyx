@@ -260,6 +260,10 @@ func TestOpnsenseServiceApplyNat(t *testing.T) {
 	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			posts++
+			if r.URL.Path == "/api/firewall/filter/apply" {
+				testutil.WriteBody(w, `{"status":"ok"}`)
+				return
+			}
 			testutil.WriteBody(w, `{"result":"saved","uuid":"new-1"}`)
 			return
 		}
@@ -278,8 +282,8 @@ func TestOpnsenseServiceApplyNat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyNat: %v", err)
 	}
-	if posts != 1 {
-		t.Fatalf("posts = %d, want 1", posts)
+	if posts != 2 {
+		t.Fatalf("posts = %d, want 2 (add_rule then filter/apply)", posts)
 	}
 	if res.Provider != "opnsense" || res.Outcome != "created" || res.RuleUUID != "new-1" {
 		t.Errorf("result = %+v", res)

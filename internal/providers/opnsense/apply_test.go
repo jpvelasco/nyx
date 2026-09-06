@@ -46,6 +46,12 @@ func natTestServerWithOpt(t *testing.T, mode, rows string, h http.HandlerFunc, o
 	t.Helper()
 	mux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
+			// A real mutation now always follows with S3.9 filter/apply.
+			// Tests that need to fail or inspect that POST use natFullTestServer.
+			if r.URL.Path == "/api/firewall/filter/apply" {
+				testutil.WriteBody(w, `{"status":"ok"}`)
+				return
+			}
 			if h != nil {
 				h(w, r)
 				return
@@ -280,6 +286,98 @@ func TestValidateNatRequest(t *testing.T) {
 	}
 }
 
+// TestApplyNat_DataplaneApplyAfterMutation is S3.9: a real (non-dry-run)
+// mutation must POST firewall/filter/apply after the write so the change
+// is in the dataplane, not only config.xml.
+func TestApplyNat_DataplaneApplyAfterMutation(t *testing.T) {
+	var paths []string
+	ts, posts := natFullTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			paths = append(paths, r.URL.Path)
+			switch r.URL.Path {
+			case "/api/firewall/d_nat/set_rule/u-1":
+				testutil.WriteBody(w, `{"result":"saved"}`)
+			case "/api/firewall/filter/apply":
+				testutil.WriteBody(w, `{"status":"ok"}`)
+			default:
+				t.Errorf("unexpected POST path %q", r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+			}
+			return
+		}
+		switch r.URL.Path {
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody("automatic"))
+		case "/api/firewall/d_nat/search_rule":
+			testutil.WriteBody(w, `{"total":1,"rows":[`+natCreateRows+`]}`)
+		case "/api/firewall/one_to_one/search_rule", "/api/firewall/source_nat/search_rule":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		default:
+			t.Errorf("unexpected GET path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	p := &Provider{}
+	req := natCreateReq
+	req.Action = "update"
+	req.RuleUUID = "u-1"
+	res, err := p.ApplyNat(context.Background(), req, natApplyOpts(t, ts))
+	if err != nil {
+		t.Fatalf("ApplyNat: %v", err)
+	}
+	if *posts != 2 {
+		t.Fatalf("posts = %d, want 2 (mutation then filter/apply)", *posts)
+	}
+	if len(paths) != 2 || paths[0] != "/api/firewall/d_nat/set_rule/u-1" || paths[1] != "/api/firewall/filter/apply" {
+		t.Errorf("POST order = %v, want set_rule then filter/apply", paths)
+	}
+	if len(res.Endpoints) != 2 || res.Endpoints[1] != "/firewall/filter/apply" {
+		t.Errorf("endpoints = %v, want mutation then /firewall/filter/apply", res.Endpoints)
+	}
+	joined := strings.Join(res.Warnings, " ")
+	if strings.Contains(joined, "not in the dataplane") {
+		t.Errorf("warnings %v still claim the change is staged-only", res.Warnings)
+	}
+	if !strings.Contains(joined, "dataplane") {
+		t.Errorf("warnings %v should state the dataplane was committed", res.Warnings)
+	}
+}
+
+// TestApplyNat_ApplyFailureDoesNotPretendLive: if filter/apply fails, the
+// mutation must not be reported as live — the staged write already happened
+// and the agent must see that the dataplane commit did not.
+func TestApplyNat_ApplyFailureDoesNotPretendLive(t *testing.T) {
+	ts, _ := natFullTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			switch r.URL.Path {
+			case "/api/firewall/d_nat/set_rule/u-1":
+				testutil.WriteBody(w, `{"result":"saved"}`)
+			case "/api/firewall/filter/apply":
+				w.WriteHeader(http.StatusInternalServerError)
+				testutil.WriteBody(w, `{"message":"apply failed"}`)
+			default:
+				t.Errorf("unexpected POST path %q", r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+			}
+			return
+		}
+		switch r.URL.Path {
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody("automatic"))
+		default:
+			testutil.WriteBody(w, `{"total":1,"rows":[`+natCreateRows+`]}`)
+		}
+	}))
+	p := &Provider{}
+	req := natCreateReq
+	req.Action = "update"
+	req.RuleUUID = "u-1"
+	_, err := p.ApplyNat(context.Background(), req, natApplyOpts(t, ts))
+	if err == nil || !strings.Contains(err.Error(), "dataplane") {
+		t.Fatalf("err = %v, want a dataplane-apply failure (do not pretend live)", err)
+	}
+}
+
 func TestApplyNat_DryRunZeroPosts(t *testing.T) {
 	ts, posts := natTestServer(t, "automatic", natCreateRows, nil)
 	p := &Provider{}
@@ -335,13 +433,16 @@ func TestApplyNat_CreatePostsAndRefetches(t *testing.T) {
 	var created bool
 	ts, posts := natFullTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
-			if r.URL.Path != "/api/firewall/d_nat/add_rule" {
+			switch r.URL.Path {
+			case "/api/firewall/d_nat/add_rule":
+				created = true
+				testutil.WriteBody(w, `{"result":"saved","uuid":"new-1"}`)
+			case "/api/firewall/filter/apply":
+				testutil.WriteBody(w, `{"status":"ok"}`)
+			default:
 				t.Errorf("unexpected POST path %q", r.URL.Path)
 				w.WriteHeader(http.StatusNotFound)
-				return
 			}
-			created = true
-			testutil.WriteBody(w, `{"result":"saved","uuid":"new-1"}`)
 			return
 		}
 		switch r.URL.Path {
@@ -365,13 +466,13 @@ func TestApplyNat_CreatePostsAndRefetches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyNat: %v", err)
 	}
-	if *posts != 1 {
-		t.Fatalf("posts = %d, want 1", *posts)
+	if *posts != 2 {
+		t.Fatalf("posts = %d, want 2 (add_rule then filter/apply)", *posts)
 	}
 	if res.Outcome != "created" || res.RuleUUID != "new-1" {
 		t.Errorf("outcome/uuid = %q/%q", res.Outcome, res.RuleUUID)
 	}
-	if len(res.Endpoints) != 1 || res.Endpoints[0] != "/firewall/d_nat/add_rule" {
+	if len(res.Endpoints) != 2 || res.Endpoints[0] != "/firewall/d_nat/add_rule" || res.Endpoints[1] != "/firewall/filter/apply" {
 		t.Errorf("endpoints = %v", res.Endpoints)
 	}
 	if res.Before == res.After {
@@ -407,13 +508,16 @@ func TestApplyNat_CreateUUIDFallbackToMatch(t *testing.T) {
 	var created bool
 	ts, posts := natFullTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
-			if r.URL.Path != "/api/firewall/d_nat/add_rule" {
+			switch r.URL.Path {
+			case "/api/firewall/d_nat/add_rule":
+				created = true
+				testutil.WriteBody(w, `{"result":"saved"}`)
+			case "/api/firewall/filter/apply":
+				testutil.WriteBody(w, `{"status":"ok"}`)
+			default:
 				t.Errorf("unexpected POST path %q", r.URL.Path)
 				w.WriteHeader(http.StatusNotFound)
-				return
 			}
-			created = true
-			testutil.WriteBody(w, `{"result":"saved"}`)
 			return
 		}
 		switch r.URL.Path {
@@ -437,8 +541,8 @@ func TestApplyNat_CreateUUIDFallbackToMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyNat: %v", err)
 	}
-	if *posts != 1 {
-		t.Fatalf("posts = %d, want 1", *posts)
+	if *posts != 2 {
+		t.Fatalf("posts = %d, want 2 (add_rule then filter/apply)", *posts)
 	}
 	if res.Outcome != "created" || res.RuleUUID != "match-1" {
 		t.Errorf("outcome/uuid = %q/%q, want created/match-1", res.Outcome, res.RuleUUID)
@@ -460,13 +564,13 @@ func TestApplyNat_UpdatePostsSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyNat: %v", err)
 	}
-	if *posts != 1 {
-		t.Fatalf("posts = %d, want 1", *posts)
+	if *posts != 2 {
+		t.Fatalf("posts = %d, want 2 (set_rule then filter/apply)", *posts)
 	}
 	if res.Outcome != "updated" || res.RuleUUID != "u-1" {
 		t.Errorf("outcome/uuid = %q/%q", res.Outcome, res.RuleUUID)
 	}
-	if len(res.Endpoints) != 1 || res.Endpoints[0] != "/firewall/d_nat/set_rule/u-1" {
+	if len(res.Endpoints) != 2 || res.Endpoints[0] != "/firewall/d_nat/set_rule/u-1" || res.Endpoints[1] != "/firewall/filter/apply" {
 		t.Errorf("endpoints = %v", res.Endpoints)
 	}
 }
@@ -484,13 +588,13 @@ func TestApplyNat_DeletePostsDel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyNat: %v", err)
 	}
-	if *posts != 1 {
-		t.Fatalf("posts = %d, want 1", *posts)
+	if *posts != 2 {
+		t.Fatalf("posts = %d, want 2 (del_rule then filter/apply)", *posts)
 	}
 	if res.Outcome != "deleted" || res.RuleUUID != "u-1" {
 		t.Errorf("outcome/uuid = %q/%q", res.Outcome, res.RuleUUID)
 	}
-	if len(res.Endpoints) != 1 || res.Endpoints[0] != "/firewall/d_nat/del_rule/u-1" {
+	if len(res.Endpoints) != 2 || res.Endpoints[0] != "/firewall/d_nat/del_rule/u-1" || res.Endpoints[1] != "/firewall/filter/apply" {
 		t.Errorf("endpoints = %v", res.Endpoints)
 	}
 }
@@ -516,8 +620,8 @@ func TestApplyNat_TogglePostsTogglePolarity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ApplyNat: %v", err)
 			}
-			if *posts != 1 {
-				t.Fatalf("posts = %d, want 1", *posts)
+			if *posts != 2 {
+				t.Fatalf("posts = %d, want 2 (toggle then filter/apply)", *posts)
 			}
 			if res.Outcome != "updated" || res.RuleUUID != "u-1" {
 				t.Errorf("outcome/uuid = %q/%q", res.Outcome, res.RuleUUID)
@@ -552,10 +656,10 @@ func TestApplyNat_OneToOneAndSourceNatWrites(t *testing.T) {
 			if err != nil {
 				t.Fatalf("create: %v", err)
 			}
-			if *posts != 1 || res.Outcome != "created" || res.RuleUUID != "new-1" {
+			if *posts != 2 || res.Outcome != "created" || res.RuleUUID != "new-1" {
 				t.Fatalf("create outcome = %q, posts = %d", res.Outcome, *posts)
 			}
-			if len(res.Endpoints) != 1 || !strings.Contains(res.Endpoints[0], tc.coll) {
+			if len(res.Endpoints) != 2 || !strings.Contains(res.Endpoints[0], tc.coll) || res.Endpoints[1] != "/firewall/filter/apply" {
 				t.Errorf("endpoints = %v", res.Endpoints)
 			}
 		})

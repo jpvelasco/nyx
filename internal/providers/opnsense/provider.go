@@ -501,6 +501,14 @@ func (o *Provider) ApplyNat(ctx context.Context, req providers.NatApplyRequest, 
 		// Dry-run, refusal, and idempotent no-ops post nothing — the
 		// planned endpoint is the evidence of what would have been hit.
 		endpoints = []string{natPlanEndpoint(op, req)}
+	} else {
+		// A real mutation is still only in config.xml until the 26.x
+		// activate step runs. Failure here must not look like a live apply.
+		if err := client.ApplyFirewallFilter(ctx); err != nil {
+			return nil, fmt.Errorf("committing NAT change to the dataplane (config.xml is staged; traffic is unchanged): %w", err)
+		}
+		endpoints = append(endpoints, filterApplyPath)
+		warnings = []string{natAppliedWarning}
 	}
 	return &providers.NatApplyResult{
 		Provider:  "opnsense",

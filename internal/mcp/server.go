@@ -626,7 +626,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		},
 		{
 			Name:        "opnsense_apply_nat",
-			Description: "Apply an OPNsense NAT mutation (port-forward, one-to-one, or source-NAT create/update/delete/toggle). Dry-run by default: set dry_run=false to apply for real. A real apply stages changes to config.xml — they are not in the dataplane until the controller applies them (S3.9, follow-up). The result carries before/after evidence and the exact API endpoint(s) touched.",
+			Description: "Apply an OPNsense NAT mutation (port-forward, one-to-one, or source-NAT create/update/delete/toggle). Dry-run by default: set dry_run=false to apply for real. A real apply writes config.xml and then POSTs firewall/filter/apply so the change is in the dataplane; an apply failure is reported and is not treated as live. The result carries before/after evidence and the exact API endpoint(s) touched.",
 			InputSchema: opnsenseNatToolSchema(),
 		},
 		{
@@ -706,8 +706,8 @@ func opnsenseToolSchema() inputSchema {
 
 // opnsenseNatToolSchema returns the OPNsense NAT-mutation tool schema:
 // credential fields plus the mutation request shape. Dry-run defaults true;
-// a real apply stages changes to config.xml (not the dataplane until the
-// controller applies them).
+// a real apply writes config.xml and then POSTs firewall/filter/apply
+// (S3.9) so the change is in the dataplane.
 func opnsenseNatToolSchema() inputSchema {
 	return opnsenseToolSchemaExtra(map[string]propSchema{
 		"operation":        {Type: "string", Description: "NAT collection: port_forward, one_to_one, or source_nat"},

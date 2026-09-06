@@ -115,11 +115,19 @@ func (g *natGuardOutcome) natGuardWarning(allowDoubleNat bool) string {
 	}
 }
 
-// natStagedWarning is the staged-vs-live fact every PlanNat/ApplyNat result
-// carries (BDD §3 guardrail lock): NAT writes save to config.xml only; the
-// dataplane commit is a follow-up commit.
+// natStagedWarning is the staged-vs-live fact every PlanNat result (and
+// every dry-run / refused / unchanged ApplyNat) carries: the write, if
+// any, is config.xml only until firewall/filter/apply commits it.
 const natStagedWarning = "OPNsense NAT changes are staged (config.xml) and are not in the dataplane until the " +
 	"controller applies them; no traffic is affected by this call. Verify with a follow-up read."
+
+// natAppliedWarning is the live-dataplane fact a real ApplyNat carries
+// after firewall/filter/apply succeeds (S3.9).
+const natAppliedWarning = "OPNsense NAT change was committed to the dataplane via firewall/filter/apply."
+
+// filterApplyPath is the 26.x activate step inherited from filter_base.
+// Do not revive the dead /firewall/filter_base/apply path.
+const filterApplyPath = "/firewall/filter/apply"
 
 // marshalRules marshals a NAT rule list to JSON for Before/After evidence.
 // An empty list marshals as "[]", never "null".
