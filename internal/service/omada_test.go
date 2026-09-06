@@ -230,6 +230,35 @@ func TestOmadaServiceListGatewayDHCPUsers(t *testing.T) {
 	}
 }
 
+func TestOmadaServiceGetClientTopology(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case r.URL.Path == "/openapi/v1/abc123/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/openapi/v1/abc123/sites/s1/clients/aa-bb-cc-dd-ee-01/client-link-topology":
+			writeOmadaEnvelope(w, 0, `[{"nodeType":"clientNode","clientNode":{"mac":"aa-bb-cc-dd-ee-01","upOswInfo":{"port":"8"}}}]`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	nodes, err := NewOmadaService().GetClientTopology(context.Background(), OmadaOptions{
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
+	}, "aa:bb:cc:dd:ee:01")
+	if err != nil {
+		t.Fatalf("GetClientTopology: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].SwitchPort != "8" {
+		t.Fatalf("nodes = %+v", nodes)
+	}
+	if _, err := NewOmadaService().GetClientTopology(context.Background(), OmadaOptions{
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
+	}, ""); err == nil {
+		t.Fatal("empty client_mac must error")
+	}
+}
+
 func TestOmadaServiceListNetworks_SiteSelection(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

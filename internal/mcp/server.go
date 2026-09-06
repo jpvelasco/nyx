@@ -128,6 +128,7 @@ type omadaSurface interface {
 	ListSwitchPorts(ctx context.Context, opts service.OmadaOptions, switchMAC string) ([]service.OmadaSwitchPort, error)
 	ListLanProfiles(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaLanProfile, error)
 	ListGatewayDHCPUsers(ctx context.Context, opts service.OmadaOptions, gatewayMAC string) ([]service.OmadaGatewayDHCPUser, error)
+	GetClientTopology(ctx context.Context, opts service.OmadaOptions, clientMAC string) ([]service.OmadaClientTopologyNode, error)
 	PlanPort(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest) (*service.OmadaPortPlan, error)
 	ApplyPortProfile(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest, dryRun bool) (*service.OmadaPortProfileApplyResult, error)
 }
@@ -550,6 +551,13 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
 				"gateway_mac": {Type: "string", Description: "Managed gateway MAC (colon or dash separators)"},
 			}, []string{"host", "gateway_mac"}),
+		},
+		{
+			Name:        "omada_get_client_topology",
+			Description: "Read the client's uplink chain (POST-only): client node plus managed switch/AP/gateway hops. A dumb switch does not appear — the last managed port is the crime scene. Works for leaseless clients. client_mac is required.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"client_mac": {Type: "string", Description: "Client MAC (colon or dash separators)"},
+			}, []string{"host", "client_mac"}),
 		},
 		{
 			Name:        "omada_list_lan_profiles",
