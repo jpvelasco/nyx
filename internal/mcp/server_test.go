@@ -298,8 +298,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 42 {
-		t.Fatalf("expected 42 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 43 {
+		t.Fatalf("expected 43 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -308,7 +308,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_plan_port", "omada_apply_port_profile", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_services", "opnsense_list_gateways", "opnsense_inventory", "topology"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_plan_port", "omada_apply_port_profile", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_services", "opnsense_list_gateways", "opnsense_inventory", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -350,6 +350,7 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 		"omada_get_uplink_info":            {"host", "device_mac"},
 		"omada_list_switch_ports":          {"host"},
 		"omada_list_lan_profiles":          {"host"},
+		"omada_list_gateway_dhcp_users":    {"host", "gateway_mac"},
 		"omada_plan_port":                  {"host", "switch_mac", "port", "native"},
 		"omada_apply_port_profile":         {"host", "switch_mac", "port", "native"},
 		"opnsense_get_info":                {"host"},
@@ -898,6 +899,24 @@ func TestDispatchOmadaListNetworks_Success(t *testing.T) {
 	}
 	if strings.Contains(text, "pw") {
 		t.Error("tool output must not echo the client secret")
+	}
+}
+
+func TestDispatchOmadaListGatewayDHCPUsers(t *testing.T) {
+	stub := &stubOmadaSvc{dhcpUsers: []service.OmadaGatewayDHCPUser{
+		{IP: "10.0.10.20", MAC: "aa-bb-cc-dd-ee-01", NetworkName: "Trusted"},
+	}}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_gateway_dhcp_users", map[string]interface{}{
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "gateway_mac": "aa:bb:cc:dd:ee:00",
+	})
+	if isErr || !strings.Contains(text, `"ip": "10.0.10.20"`) || stub.lastGWMAC != "aa:bb:cc:dd:ee:00" {
+		t.Fatalf("got (%q, %v) lastMAC=%q", text, isErr, stub.lastGWMAC)
+	}
+	text, isErr = serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_list_gateway_dhcp_users", map[string]interface{}{
+		"host": "omada.local", "client_id": "cid-1", "client_secret": "pw",
+	})
+	if !isErr || !strings.Contains(text, "gateway_mac parameter is required") {
+		t.Errorf("missing mac = (%q, %v)", text, isErr)
 	}
 }
 
@@ -1691,6 +1710,8 @@ type stubOmadaSvc struct {
 	lastPortReq  service.OmadaPortProfileRequest
 	lastDryRun   bool
 	calls        int
+	dhcpUsers    []service.OmadaGatewayDHCPUser
+	lastGWMAC    string
 }
 
 func (s *stubOmadaSvc) Info(_ context.Context, opts service.OmadaOptions) (*service.OmadaInfo, error) {
@@ -1783,6 +1804,13 @@ func (s *stubOmadaSvc) ListSwitchPorts(_ context.Context, opts service.OmadaOpti
 	s.calls++
 	s.lastOpts = opts
 	return s.switchPorts, s.err
+}
+
+func (s *stubOmadaSvc) ListGatewayDHCPUsers(_ context.Context, opts service.OmadaOptions, gatewayMAC string) ([]service.OmadaGatewayDHCPUser, error) {
+	s.calls++
+	s.lastOpts = opts
+	s.lastGWMAC = gatewayMAC
+	return s.dhcpUsers, s.err
 }
 
 func (s *stubOmadaSvc) ListLanProfiles(_ context.Context, opts service.OmadaOptions) ([]service.OmadaLanProfile, error) {
@@ -2390,6 +2418,7 @@ func TestDispatchNatReads_MissingHost(t *testing.T) {
 		"omada_get_uplink_info",
 		"omada_list_switch_ports",
 		"omada_list_lan_profiles",
+		"omada_list_gateway_dhcp_users",
 		"omada_plan_port",
 		"omada_apply_port_profile",
 	}

@@ -74,6 +74,27 @@ func TestEnrichFromDHCP_EmptyUserList(t *testing.T) {
 	}
 }
 
+func TestGetGatewayDHCPUsers(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/openapi/v1/abc123/sites/s1/gateways/aa-bb-cc-dd-ee-00/dhcp/user-list" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("pageSize") == "" {
+			t.Error("pageSize is required")
+		}
+		writeEnvelope(w, 0, "", `{"totalRows":1,"data":[
+			{"ipAddress":"10.0.10.20","macAddress":"aa-bb-cc-dd-ee-01","name":"pc1","netName":"Trusted","leftLeaseTime":3600}
+		]}`)
+	}))
+	rows, err := c.GetGatewayDHCPUsers(context.Background(), "s1", "aa:bb:cc:dd:ee:00")
+	if err != nil {
+		t.Fatalf("GetGatewayDHCPUsers: %v", err)
+	}
+	if len(rows) != 1 || rows[0].IP != "10.0.10.20" || NormalizeMAC(rows[0].MAC) != "aabbccddee01" || rows[0].NetworkName != "Trusted" {
+		t.Fatalf("rows = %+v", rows)
+	}
+}
+
 func TestEnrichFromDHCPFetchErrorPropagates(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeEnvelope(w, -1, "boom", "null")

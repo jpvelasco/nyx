@@ -39,7 +39,7 @@ var mcpCapabilityTools = map[string]map[string][]string{
 		"info":      {"omada_get_info"},
 		"import":    {"omada_import"},
 		"check":     {"run_audit", "load_spec"},
-		"inventory": {"omada_inventory"},
+		"inventory": {"omada_inventory", "omada_list_gateway_dhcp_users"},
 	},
 	"opnsense": {
 		"info": {"opnsense_get_info"},

@@ -102,6 +102,33 @@ func TestGetNetworksLiveWireShape(t *testing.T) {
 	}
 }
 
+func TestGetNetworksDHCPPosture(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{
+			"id":"n1","name":"Trusted","purpose":"interface","vlan":10,
+			"gatewaySubnet":"10.0.10.1/24","isolation":false,
+			"igmpSnoopEnable":true,"mldSnoopEnable":false,
+			"dhcpL2RelayEnable":true,"dhcpGuard":true,"dhcpv6Guard":false,
+			"portal":false,"allLan":false,"primary":true,
+			"dhcpSettingsVO":{"enable":true,"ipaddrStart":"10.0.10.20","ipaddrEnd":"10.0.10.200","leasetime":120,"dhcpns":"10.0.10.1"}
+		}]}`)
+	}))
+	nets, err := c.GetNetworks(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("GetNetworks: %v", err)
+	}
+	if len(nets) != 1 {
+		t.Fatalf("networks = %d, want 1", len(nets))
+	}
+	n := nets[0]
+	if n.DHCPStart != "10.0.10.20" || n.DHCPEnd != "10.0.10.200" || n.LeaseTime != 120 || n.DHCPDNS != "10.0.10.1" {
+		t.Errorf("pool = %+v", n)
+	}
+	if !n.IGMPSnoop || n.MLDSnoop || !n.DHCPL2Relay || !n.DHCPGuard || n.DHCPv6Guard || !n.Primary {
+		t.Errorf("posture = %+v", n)
+	}
+}
+
 func TestGetNetworksResponseShapes(t *testing.T) {
 	t.Run("direct array", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

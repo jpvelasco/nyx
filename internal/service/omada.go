@@ -46,6 +46,27 @@ type OmadaNetwork struct {
 	Gateway     string `json:"gateway"`
 	Isolated    bool   `json:"isolated"`
 	DHCPEnabled bool   `json:"dhcp_enabled"`
+	DHCPStart   string `json:"dhcp_start,omitempty"`
+	DHCPEnd     string `json:"dhcp_end,omitempty"`
+	LeaseTime   int    `json:"lease_time,omitempty"`
+	DHCPDNS     string `json:"dhcp_dns,omitempty"`
+	IGMPSnoop   bool   `json:"igmp_snoop,omitempty"`
+	MLDSnoop    bool   `json:"mld_snoop,omitempty"`
+	DHCPL2Relay bool   `json:"dhcp_l2_relay,omitempty"`
+	DHCPGuard   bool   `json:"dhcp_guard,omitempty"`
+	DHCPv6Guard bool   `json:"dhcpv6_guard,omitempty"`
+	Portal      bool   `json:"portal,omitempty"`
+	AllLan      bool   `json:"all_lan,omitempty"`
+	Primary     bool   `json:"primary,omitempty"`
+}
+
+// OmadaGatewayDHCPUser is one row of the per-gateway DHCP lease table.
+type OmadaGatewayDHCPUser struct {
+	IP           string `json:"ip"`
+	MAC          string `json:"mac"`
+	Name         string `json:"name,omitempty"`
+	NetworkName  string `json:"network_name,omitempty"`
+	LeftLeaseSec int    `json:"left_lease_sec,omitempty"`
 }
 
 // OmadaACLRule is a switch or gateway ACL rule in a flat, agent-friendly shape.
@@ -991,15 +1012,59 @@ func (s *OmadaService) ListNetworks(ctx context.Context, opts OmadaOptions) ([]O
 	}
 	out := make([]OmadaNetwork, 0, len(nets))
 	for _, n := range nets {
-		out = append(out, OmadaNetwork{
-			ID:          n.ID,
-			Name:        n.Name,
-			Purpose:     n.Purpose,
-			VLANID:      n.VLANID,
-			CIDR:        n.CIDR(),
-			Gateway:     n.Gateway(),
-			Isolated:    n.Isolated,
-			DHCPEnabled: n.DHCPEnabled,
+		out = append(out, flattenOmadaNetwork(n))
+	}
+	return out, nil
+}
+
+func flattenOmadaNetwork(n omadabackend.Network) OmadaNetwork {
+	return OmadaNetwork{
+		ID:          n.ID,
+		Name:        n.Name,
+		Purpose:     n.Purpose,
+		VLANID:      n.VLANID,
+		CIDR:        n.CIDR(),
+		Gateway:     n.Gateway(),
+		Isolated:    n.Isolated,
+		DHCPEnabled: n.DHCPEnabled,
+		DHCPStart:   n.DHCPStart,
+		DHCPEnd:     n.DHCPEnd,
+		LeaseTime:   n.LeaseTime,
+		DHCPDNS:     n.DHCPDNS,
+		IGMPSnoop:   n.IGMPSnoop,
+		MLDSnoop:    n.MLDSnoop,
+		DHCPL2Relay: n.DHCPL2Relay,
+		DHCPGuard:   n.DHCPGuard,
+		DHCPv6Guard: n.DHCPv6Guard,
+		Portal:      n.Portal,
+		AllLan:      n.AllLan,
+		Primary:     n.Primary,
+	}
+}
+
+// ListGatewayDHCPUsers returns the fresher per-gateway DHCP lease table.
+func (s *OmadaService) ListGatewayDHCPUsers(ctx context.Context, opts OmadaOptions, gatewayMAC string) ([]OmadaGatewayDHCPUser, error) {
+	if strings.TrimSpace(gatewayMAC) == "" {
+		return nil, fmt.Errorf("gateway_mac is required")
+	}
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+
+	rows, err := client.GetGatewayDHCPUsers(ctx, site.EffectiveID(), gatewayMAC)
+	if err != nil {
+		return nil, fmt.Errorf("fetching gateway DHCP users: %w", err)
+	}
+	out := make([]OmadaGatewayDHCPUser, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, OmadaGatewayDHCPUser{
+			IP:           r.IP,
+			MAC:          r.MAC,
+			Name:         r.Name,
+			NetworkName:  r.NetworkName,
+			LeftLeaseSec: r.LeftLeaseSec,
 		})
 	}
 	return out, nil

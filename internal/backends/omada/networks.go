@@ -36,6 +36,18 @@ type Network struct {
 	Isolated      bool
 	DHCPEnabled   bool
 	DeviceMac     string // MAC of the device this LAN is bound to
+	DHCPStart     string
+	DHCPEnd       string
+	LeaseTime     int
+	DHCPDNS       string
+	IGMPSnoop     bool
+	MLDSnoop      bool
+	DHCPL2Relay   bool
+	DHCPGuard     bool
+	DHCPv6Guard   bool
+	Portal        bool
+	AllLan        bool
+	Primary       bool
 }
 
 // lanPurpose is the wire value of "purpose": the 6.x Open API sends
@@ -75,9 +87,21 @@ type rawNetwork struct {
 	GatewaySubnet string     `json:"gatewaySubnet"`
 	Isolated      bool       `json:"isolation"`
 	DHCPSettings  struct {
-		Enable bool `json:"enable"`
+		Enable      bool   `json:"enable"`
+		IPAddrStart string `json:"ipaddrStart"`
+		IPAddrEnd   string `json:"ipaddrEnd"`
+		LeaseTime   int    `json:"leasetime"`
+		DHCPNS      string `json:"dhcpns"`
 	} `json:"dhcpSettingsVO"`
-	DeviceMac string `json:"deviceMac"`
+	DeviceMac         string `json:"deviceMac"`
+	IGMPSnoopEnable   bool   `json:"igmpSnoopEnable"`
+	MLDSnoopEnable    bool   `json:"mldSnoopEnable"`
+	DHCPL2RelayEnable bool   `json:"dhcpL2RelayEnable"`
+	DHCPGuard         bool   `json:"dhcpGuard"`
+	DHCPv6Guard       bool   `json:"dhcpv6Guard"`
+	Portal            bool   `json:"portal"`
+	AllLan            bool   `json:"allLan"`
+	Primary           bool   `json:"primary"`
 }
 
 // UnmarshalJSON decodes the wire shape so the nested DHCP switch
@@ -96,6 +120,18 @@ func (n *Network) UnmarshalJSON(data []byte) error {
 		Isolated:      raw.Isolated,
 		DHCPEnabled:   raw.DHCPSettings.Enable,
 		DeviceMac:     raw.DeviceMac,
+		DHCPStart:     raw.DHCPSettings.IPAddrStart,
+		DHCPEnd:       raw.DHCPSettings.IPAddrEnd,
+		LeaseTime:     raw.DHCPSettings.LeaseTime,
+		DHCPDNS:       raw.DHCPSettings.DHCPNS,
+		IGMPSnoop:     raw.IGMPSnoopEnable,
+		MLDSnoop:      raw.MLDSnoopEnable,
+		DHCPL2Relay:   raw.DHCPL2RelayEnable,
+		DHCPGuard:     raw.DHCPGuard,
+		DHCPv6Guard:   raw.DHCPv6Guard,
+		Portal:        raw.Portal,
+		AllLan:        raw.AllLan,
+		Primary:       raw.Primary,
 	}
 	return nil
 }

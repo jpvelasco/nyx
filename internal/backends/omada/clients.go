@@ -39,6 +39,46 @@ func (c *Client) GetClients(ctx context.Context, siteID string) ([]ConnectedClie
 	return clients, nil
 }
 
+// GatewayDHCPUser is one row of the fresher per-gateway DHCP lease table
+// (GET sites/{siteId}/gateways/{gatewayMac}/dhcp/user-list). pageSize is
+// required; page starts at 1. MACs may be dash-separated.
+type GatewayDHCPUser struct {
+	IP           string
+	MAC          string
+	Name         string
+	NetworkName  string
+	LeftLeaseSec int
+}
+
+type gatewayDHCPUserRow struct {
+	IPAddress     string `json:"ipAddress"`
+	MACAddress    string `json:"macAddress"`
+	Name          string `json:"name"`
+	NetName       string `json:"netName"`
+	LeftLeaseTime int    `json:"leftLeaseTime"`
+}
+
+// GetGatewayDHCPUsers returns the gateway's DHCP lease table. gatewayMAC
+// is normalized for the path (controller accepts either separator).
+func (c *Client) GetGatewayDHCPUsers(ctx context.Context, siteID, gatewayMAC string) ([]GatewayDHCPUser, error) {
+	path := fmt.Sprintf("sites/%s/gateways/%s/dhcp/user-list", siteID, dashMAC(gatewayMAC))
+	rows, _, err := fetchPaged[gatewayDHCPUserRow](ctx, c, path, defaultPageSize)
+	if err != nil {
+		return nil, fmt.Errorf("getting gateway DHCP users for site %s: %w", siteID, err)
+	}
+	out := make([]GatewayDHCPUser, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, GatewayDHCPUser{
+			IP:           r.IPAddress,
+			MAC:          r.MACAddress,
+			Name:         r.Name,
+			NetworkName:  r.NetName,
+			LeftLeaseSec: r.LeftLeaseTime,
+		})
+	}
+	return out, nil
+}
+
 // EnrichFromDHCP joins the site's DHCP user list onto the client rows by
 // normalized MAC. On a hit the client's IP, network name, and VLAN id are
 // filled in (the VLAN id comes from the network matching the row's netId);
