@@ -47,6 +47,34 @@ func TestRenderInventory(t *testing.T) {
 	}
 }
 
+func TestRenderInventoryReconOK(t *testing.T) {
+	snap := &InventorySnapshot{
+		Interfaces:     []Interface{{Name: "lan", IP: "10.0.10.1", Subnet: 24}},
+		Bridges:        []Bridge{{UUID: "b1", Description: "lan-br", Members: []string{"igb0"}}},
+		BridgesOK:      true,
+		IfSettings:     []InterfaceSetting{{Name: "lan"}},
+		IfSettingsOK:   true,
+		Dnsmasq:        &DnsmasqSettings{Enabled: true, Ranges: []DnsmasqRange{{Start: "10.0.10.100"}}, Hosts: []DnsmasqHost{{Host: "printer"}}},
+		DnsmasqOK:      true,
+		PfStats:        &PfStatistics{StateCount: 4},
+		PfStatsOK:      true,
+		KernelRoutes:   []KernelRoute{{Destination: "default"}},
+		KernelRoutesOK: true,
+	}
+	out := RenderInventory(snap, "opnsense-firewall")
+	for _, want := range []string{
+		"== Bridges (1) ==", "lan-br", "members:igb0",
+		"== Interface settings (1) ==", "1 configured",
+		"== Dnsmasq ==", "on, 1 range, 1 host",
+		"== pf statistics ==", "4 states",
+		"== Kernel routes (1) ==", "1 route",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRenderInventoryUnknownScopes(t *testing.T) {
 	snap := &InventorySnapshot{
 		Interfaces: []Interface{{Name: "lan", IP: "10.0.0.1", Subnet: 24}},

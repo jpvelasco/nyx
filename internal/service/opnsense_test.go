@@ -184,6 +184,38 @@ func TestOpnsenseServiceReconReads(t *testing.T) {
 	}
 }
 
+func TestOpnsenseServiceReconReadErrors(t *testing.T) {
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	opts := opnsenseOptions(ts)
+	svc := NewOpnsenseService()
+	if _, err := svc.ListBridges(context.Background(), opts); err == nil {
+		t.Fatal("expected ListBridges error")
+	}
+	if _, err := svc.ListInterfaceSettings(context.Background(), opts); err == nil {
+		t.Fatal("expected ListInterfaceSettings error")
+	}
+	if _, err := svc.GetDnsmasqSettings(context.Background(), opts); err == nil {
+		t.Fatal("expected GetDnsmasqSettings error")
+	}
+	if _, err := svc.GetPfStatistics(context.Background(), opts); err == nil {
+		t.Fatal("expected GetPfStatistics error")
+	}
+	if _, err := svc.ListKernelRoutes(context.Background(), opts); err == nil {
+		t.Fatal("expected ListKernelRoutes error")
+	}
+}
+
+func TestFlattenReconNil(t *testing.T) {
+	if flattenBridges(nil) != nil || flattenIfSettings(nil) != nil || flattenRoutes(nil) != nil {
+		t.Fatal("nil slices should stay nil")
+	}
+	if flattenDnsmasq(nil) != nil || flattenPf(nil) != nil {
+		t.Fatal("nil pointers should stay nil")
+	}
+}
+
 func TestOpnsenseServiceListFirewallRules(t *testing.T) {
 	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/firewall/filter/search_rule" {
