@@ -432,15 +432,15 @@ func matchACLRule(rules []FirewallRule, networks []intent.Network, aliases []Ali
 		}
 		src := resolveEndpointZone(r.Source, networks, aliases)
 		dst := resolveEndpointZone(r.Destination, networks, aliases)
-		if endpointMatches(src, r.Source, from, networks, aliases) &&
-			endpointMatches(dst, r.Destination, to, networks, aliases) {
+		if endpointMatches(src, r.Source, from, networks) &&
+			endpointMatches(dst, r.Destination, to, networks) {
 			return r
 		}
 	}
 	return nil
 }
 
-func endpointMatches(resolved, raw, want string, networks []intent.Network, aliases []Alias) bool {
+func endpointMatches(resolved, raw, want string, networks []intent.Network) bool {
 	if want == "" {
 		return false
 	}
@@ -456,11 +456,6 @@ func endpointMatches(resolved, raw, want string, networks []intent.Network, alia
 			if n.CIDR != "" && (raw == n.CIDR || strings.HasPrefix(raw, strings.Split(n.CIDR, "/")[0])) {
 				return true
 			}
-		}
-	}
-	for _, a := range aliases {
-		if strings.EqualFold(a.Name, want) && strings.EqualFold(raw, a.Name) {
-			return true
 		}
 	}
 	return false
