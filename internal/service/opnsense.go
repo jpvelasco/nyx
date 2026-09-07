@@ -76,6 +76,10 @@ type OpnsenseFirewallRule struct {
 	Protocol    string   `json:"protocol"`
 	Source      string   `json:"source"`
 	Destination string   `json:"destination"`
+	SourcePort  string   `json:"source_port,omitempty"`
+	DestPort    string   `json:"destination_port,omitempty"`
+	Direction   string   `json:"direction,omitempty"`
+	IPProtocol  string   `json:"ipprotocol,omitempty"`
 	Label       string   `json:"label"`
 }
 
@@ -504,17 +508,7 @@ func (s *OpnsenseService) ListFirewallRules(ctx context.Context, opts OpnsenseOp
 	}
 	out := make([]OpnsenseFirewallRule, 0, len(rules))
 	for _, r := range rules {
-		out = append(out, OpnsenseFirewallRule{
-			UUID:        r.RuleUUID,
-			Enabled:     !r.Disabled,
-			Disabled:    r.Disabled,
-			Action:      r.Action,
-			Interfaces:  r.Interface,
-			Protocol:    r.Protocol,
-			Source:      r.Source,
-			Destination: r.Destination,
-			Label:       r.Label,
-		})
+		out = append(out, flattenFirewallRule(r))
 	}
 	return out, nil
 }
@@ -540,17 +534,26 @@ func (s *OpnsenseService) GetFirewallRule(ctx context.Context, opts OpnsenseOpti
 	if err != nil {
 		return nil, err
 	}
-	return &OpnsenseFirewallRule{
-		UUID:        rule.RuleUUID,
-		Enabled:     !rule.Disabled,
-		Disabled:    rule.Disabled,
-		Action:      rule.Action,
-		Interfaces:  rule.Interface,
-		Protocol:    rule.Protocol,
-		Source:      rule.Source,
-		Destination: rule.Destination,
-		Label:       rule.Label,
-	}, nil
+	r := flattenFirewallRule(*rule)
+	return &r, nil
+}
+
+func flattenFirewallRule(r opnsensebackend.FirewallRule) OpnsenseFirewallRule {
+	return OpnsenseFirewallRule{
+		UUID:        r.RuleUUID,
+		Enabled:     !r.Disabled,
+		Disabled:    r.Disabled,
+		Action:      r.Action,
+		Interfaces:  r.Interface,
+		Protocol:    r.Protocol,
+		Source:      r.Source,
+		Destination: r.Destination,
+		SourcePort:  r.SourcePort,
+		DestPort:    r.DestPort,
+		Direction:   r.Direction,
+		IPProtocol:  r.IPProtocol,
+		Label:       r.Label,
+	}
 }
 
 // flattenNat maps the client's flat NAT rows into the service shape.

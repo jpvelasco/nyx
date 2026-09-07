@@ -60,6 +60,7 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_get_info":                (*Server).toolOpnsenseGetInfo,
 	"opnsense_list_interfaces":         (*Server).toolOpnsenseListInterfaces,
 	"opnsense_list_firewall_rules":     (*Server).toolOpnsenseListFirewallRules,
+	"opnsense_get_firewall_rule":       (*Server).toolOpnsenseGetFirewallRule,
 	"opnsense_list_clients":            (*Server).toolOpnsenseListClients,
 	"opnsense_list_port_forward_rules": (*Server).toolOpnsenseListPortForwardRules,
 	"opnsense_list_one_to_one_rules":   (*Server).toolOpnsenseListOneToOneRules,
@@ -778,6 +779,22 @@ func (s *Server) opnsenseReadJSON(ctx context.Context, args map[string]interface
 		return errResult(fmt.Sprintf("%s: %v", failPrefix, err))
 	}
 	return okResult(toJSON(got))
+}
+
+func (s *Server) toolOpnsenseGetFirewallRule(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	uuid := argString(args, "uuid")
+	if uuid == "" {
+		return errResult("uuid parameter is required")
+	}
+	rule, err := s.opnsenseSvc.GetFirewallRule(ctx, opts, uuid)
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense firewall rule request failed: %v", err))
+	}
+	return okResult(toJSON(rule))
 }
 
 func (s *Server) toolOpnsenseListFirewallRules(ctx context.Context, args map[string]interface{}) toolDispatchResult {

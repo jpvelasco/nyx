@@ -145,6 +145,7 @@ type opnsenseSurface interface {
 	Info(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseInfo, error)
 	ListInterfaces(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseInterface, error)
 	ListFirewallRules(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseFirewallRule, error)
+	GetFirewallRule(ctx context.Context, opts service.OpnsenseOptions, uuid string) (*service.OpnsenseFirewallRule, error)
 	ListClients(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseClient, error)
 	ListPortForwardRules(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseNatRule, error)
 	ListOneToOneRules(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseNatRule, error)
@@ -673,8 +674,15 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		},
 		{
 			Name:        "opnsense_list_firewall_rules",
-			Description: "List OPNsense firewall filter rules (actions pass/block/reject).",
+			Description: "List OPNsense firewall filter rules (actions pass/block/reject), including ports, direction, and ipprotocol.",
 			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_get_firewall_rule",
+			Description: "Fetch one OPNsense firewall filter rule by UUID.",
+			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
+				"uuid": {Type: "string", Description: "Firewall rule UUID"},
+			}, []string{"host", "uuid"}),
 		},
 		{
 			Name:        "opnsense_list_clients",

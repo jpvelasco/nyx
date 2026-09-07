@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/models"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/testutil"
 )
@@ -844,7 +845,7 @@ func TestProviderInventory(t *testing.T) {
 	})
 }
 
-func TestProviderCheckACL(t *testing.T) {
+func TestProviderCheckACL_MissingHost(t *testing.T) {
 	p := &Provider{}
 	res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{PolicyName: "x"}, providers.ImportOptions{})
 	if err != nil {
@@ -853,8 +854,441 @@ func TestProviderCheckACL(t *testing.T) {
 	if res.Status != "error" {
 		t.Errorf("status = %s, want error", res.Status)
 	}
-	if res.Summary != "CheckACL is not yet implemented for the OPNsense provider" {
-		t.Errorf("summary = %q", res.Summary)
+}
+
+func TestProviderCheckACL_AgainstRules(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"interfaces":{
+				"lan":{"description":"LAN","ipv4":"10.0.10.1/24"},
+				"iot":{"description":"IoT","ipv4":"10.0.60.1/24"}
+			}}`)
+		case "/api/firewall/alias/search_item":
+			testutil.WriteBody(w, `{"total":2,"rows":[
+				{"uuid":"a1","name":"trusted_net","type":"net","address":"10.0.10.0/24","enabled":"1"},
+				{"uuid":"a2","name":"iot_net","type":"net","address":"10.0.60.0/24","enabled":"1"}
+			]}`)
+		case "/api/firewall/filter/search_rule":
+			testutil.WriteBody(w, `{"total":2,"rows":[
+				{"uuid":"deny1","enabled":"1","action":"block","description":"isolate-iot","interface":["lan"],"source_net":"trusted_net","destination_net":"iot_net","destination_port":"any","direction":"in","ipprotocol":"inet"},
+				{"uuid":"pass1","enabled":"1","action":"pass","description":"allow-dns","interface":["lan"],"source_net":"trusted_net","destination_net":"any"}
+			]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	p := &Provider{}
+	opts := providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true}
+	res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{
+		PolicyName: "isolate-iot", From: "trusted", To: "iot", Action: "deny", ExpectEnforced: true,
+	}, opts)
+	if err != nil {
+		t.Fatalf("CheckACL: %v", err)
+	}
+	if res.Status != models.StatusPass {
+		t.Errorf("status = %s summary=%q, want pass", res.Status, res.Summary)
+	}
+}
+
+func TestResolveEndpointZone_Alias(t *testing.T) {
+	networks := []intent.Network{
+		{Name: "lan", CIDR: "10.0.10.0/24", Zone: "trusted"},
+		{Name: "iot", CIDR: "10.0.60.0/24", Zone: "iot"},
+	}
+	aliases := []Alias{
+		{Name: "trusted_net", Addresses: []string{"10.0.10.0/24"}},
+		{Name: "empty_alias"},
+		{Name: "disabled", Disabled: true, Addresses: []string{"10.0.10.0/24"}},
+		{Name: "lan"},
+	}
+	if got := resolveEndpointZone("trusted_net", networks, aliases); got != "trusted" {
+		t.Errorf("alias resolve = %q, want trusted", got)
+	}
+	if got := resolveEndpointZone("lan", networks, nil); got != "trusted" {
+		t.Errorf("name resolve = %q, want trusted", got)
+	}
+	if got := resolveEndpointZone("any", networks, aliases); got != "" {
+		t.Errorf("any = %q", got)
+	}
+	if got := resolveEndpointZone("disabled", networks, aliases); got != "" {
+		t.Errorf("disabled alias = %q", got)
+	}
+	if got := resolveEndpointZone("", networks, aliases); got != "" {
+		t.Errorf("empty = %q", got)
+	}
+}
+
+func TestMatchACLRuleAndPolicyAction(t *testing.T) {
+	if policyAction("block") != "deny" || policyAction("pass") != "allow" || policyAction("foo") != "" {
+		t.Fatal("policyAction mapping")
+	}
+	if !isDenyAction("reject") || isDenyAction("pass") {
+		t.Fatal("isDenyAction")
+	}
+	rules := []FirewallRule{
+		{RuleUUID: "x", Label: "isolate-iot", Action: "block", Source: "trusted_net", Destination: "iot_net"},
+		{RuleUUID: "y", Action: "pass", Source: "lan", Destination: "any", Disabled: true},
+	}
+	networks := []intent.Network{
+		{Name: "lan", CIDR: "10.0.10.0/24", Zone: "trusted"},
+		{Name: "iot", CIDR: "10.0.60.0/24", Zone: "iot"},
+	}
+	aliases := []Alias{
+		{Name: "trusted_net", Addresses: []string{"10.0.10.0/24"}},
+		{Name: "iot_net", Addresses: []string{"10.0.60.0/24"}},
+	}
+	if got := matchACLRule(rules, networks, aliases, providers.ACLCheckRequest{PolicyName: "isolate-iot"}); got == nil || got.RuleUUID != "x" {
+		t.Fatalf("name match = %+v", got)
+	}
+	if got := matchACLRule(rules, networks, aliases, providers.ACLCheckRequest{From: "trusted", To: "iot"}); got == nil {
+		t.Fatal("endpoint match")
+	}
+}
+
+func TestProviderCheckACL_PassVsDeny(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"interfaces":{"lan":{"description":"LAN","ipv4":"10.0.10.1/24"}}}`)
+		case "/api/firewall/alias/search_item":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/firewall/filter/search_rule":
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"p1","enabled":"1","action":"pass","description":"allow-all","source_net":"lan","destination_net":"any"}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	p := &Provider{}
+	opts := providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true}
+	res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{From: "lan", To: "iot", Action: "deny", ExpectEnforced: true}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != models.StatusFail {
+		t.Errorf("deny expect against pass = %s %q", res.Status, res.Summary)
+	}
+	res, err = p.CheckACL(context.Background(), providers.ACLCheckRequest{From: "nope", To: "nope", Action: "deny", ExpectEnforced: true}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != models.StatusFail {
+		t.Errorf("no match = %s", res.Status)
+	}
+	res, err = p.CheckACL(context.Background(), providers.ACLCheckRequest{From: "lan", To: "any", Action: "allow"}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != models.StatusPass {
+		t.Errorf("allow expect against pass = %s %q", res.Status, res.Summary)
+	}
+	res, err = p.CheckACL(context.Background(), providers.ACLCheckRequest{From: "nope", To: "nope", Action: "allow"}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != models.StatusFail || !strings.Contains(res.Summary, "no covering pass") {
+		t.Errorf("allow no match = %s %q", res.Status, res.Summary)
+	}
+}
+
+func TestProviderCheckACL_DenyWhenAllowExpected(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"interfaces":{"lan":{"description":"LAN","ipv4":"10.0.10.1/24"},"skip":{"ipv4":""}}}`)
+		case "/api/firewall/alias/search_item":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/firewall/filter/search_rule":
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"d1","enabled":"1","action":"reject","description":"block-it","source_net":"lan","destination_net":"iot"}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	opts := providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true}
+	res, err := (&Provider{}).CheckACL(context.Background(), providers.ACLCheckRequest{PolicyName: "d1", Action: "allow"}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != models.StatusFail || !strings.Contains(res.Summary, "expected allow") {
+		t.Errorf("got %s %q", res.Status, res.Summary)
+	}
+}
+
+func TestProviderCheckACL_AliasFetchFatal(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.10.1/24"}}}`)
+		case "/api/firewall/alias/search_item":
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	res, err := (&Provider{}).CheckACL(context.Background(), providers.ACLCheckRequest{From: "lan", To: "iot"}, providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+	if err != nil || res.Status != models.StatusError || !strings.Contains(res.Summary, "aliases") {
+		t.Fatalf("got %+v %v", res, err)
+	}
+}
+
+func TestEndpointMatches(t *testing.T) {
+	networks := []intent.Network{{Name: "lan", CIDR: "10.0.10.0/24", Zone: "trusted"}}
+	if endpointMatches("", "", "", networks) {
+		t.Fatal("empty want")
+	}
+	if !endpointMatches("trusted", "10.0.10.0/24", "lan", networks) {
+		t.Fatal("cidr raw match")
+	}
+	if !endpointMatches("", "trusted_net", "trusted_net", networks) {
+		t.Fatal("alias raw match")
+	}
+	if !endpointMatches("", "10.0.10.0", "trusted", networks) {
+		t.Fatal("network-address prefix match")
+	}
+}
+
+func TestResolveEndpointZone_MoreCases(t *testing.T) {
+	networks := []intent.Network{
+		{Name: "lan", CIDR: "10.0.10.0/24", Zone: "trusted"},
+		{Name: "iot", CIDR: "10.0.60.0/24", Zone: ""},
+	}
+	aliases := []Alias{
+		{Name: "by-name", Addresses: []string{"iot"}},
+		{Name: "trusted"},
+	}
+	if got := resolveEndpointZone("by-name", networks, aliases); got != "iot" {
+		t.Errorf("member name = %q, want iot", got)
+	}
+	if got := resolveEndpointZone("trusted", networks, aliases); got != "trusted" {
+		t.Errorf("alias named after zone = %q", got)
+	}
+	if got := resolveEndpointZone("unknown", networks, aliases); got != "" {
+		t.Errorf("unknown = %q", got)
+	}
+}
+
+func TestProviderCheckACL_FetchErrors(t *testing.T) {
+	t.Run("interfaces fail", func(t *testing.T) {
+		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer ts.Close()
+		res, err := (&Provider{}).CheckACL(context.Background(), providers.ACLCheckRequest{From: "a", To: "b"}, providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err != nil || res.Status != models.StatusError {
+			t.Fatalf("got %+v %v", res, err)
+		}
+	})
+	t.Run("rules fail", func(t *testing.T) {
+		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/interfaces/overview/interfaces_info" {
+				testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.10.1/24"}}}`)
+				return
+			}
+			if r.URL.Path == "/api/firewall/alias/search_item" {
+				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer ts.Close()
+		res, err := (&Provider{}).CheckACL(context.Background(), providers.ACLCheckRequest{From: "lan", To: "iot"}, providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err != nil || res.Status != models.StatusError || !strings.Contains(res.Summary, "firewall rules") {
+			t.Fatalf("got %+v %v", res, err)
+		}
+	})
+}
+
+func TestImportSpec_AliasNamedPolicies(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/diagnostics/system/system_information":
+			testutil.WriteBody(w, systemInfoJSON)
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"interfaces":{
+				"lan":{"description":"LAN","ipv4":"10.0.10.1/24","ipv4_gateway":"10.0.10.1"},
+				"iot":{"description":"IoT","ipv4":"10.0.60.1/24","ipv4_gateway":"10.0.60.1"}
+			}}`)
+		case "/api/firewall/filter/search_rule":
+			testutil.WriteBody(w, `{"total":2,"rows":[
+				{"uuid":"d1","enabled":"1","action":"block","description":"isolate-iot","source_net":"trusted_net","destination_net":"iot_net"},
+				{"uuid":"p1","enabled":"1","action":"pass","description":"allow-dns","source_net":"trusted_net","destination_net":"iot_net"}
+			]}`)
+		case "/api/firewall/alias/search_item":
+			testutil.WriteBody(w, `{"total":2,"rows":[
+				{"name":"trusted_net","type":"net","address":"10.0.10.0/24","enabled":"1"},
+				{"name":"iot_net","type":"net","address":"10.0.60.0/24","enabled":"1"}
+			]}`)
+		case "/api/dnsmasq/leases/search":
+			testutil.WriteBody(w, `{"leases":[]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	res, err := (&Provider{}).ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+	if err != nil {
+		t.Fatalf("ImportSpec: %v", err)
+	}
+	var sawDeny, sawAllow bool
+	for _, p := range res.Spec.Policies {
+		if p.Action == "deny" && p.To == "iot" {
+			sawDeny = true
+		}
+		if p.Action == "allow" && p.To == "iot" {
+			sawAllow = true
+		}
+	}
+	if !sawDeny || !sawAllow {
+		t.Fatalf("policies = %+v, want alias-resolved deny and allow", res.Spec.Policies)
+	}
+}
+
+func TestImportSpec_AliasErrorsAndUnknownAction(t *testing.T) {
+	serveImport := func(t *testing.T, aliasStatus int, extraRules string) *httptest.Server {
+		t.Helper()
+		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/diagnostics/system/system_information":
+				testutil.WriteBody(w, systemInfoJSON)
+			case "/api/interfaces/overview/interfaces_info":
+				testutil.WriteBody(w, `{"interfaces":{"lan":{"description":"LAN","ipv4":"10.0.10.1/24"}}}`)
+			case "/api/firewall/filter/search_rule":
+				if extraRules != "" {
+					testutil.WriteBody(w, extraRules)
+					return
+				}
+				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/firewall/alias/search_item":
+				w.WriteHeader(aliasStatus)
+				switch aliasStatus {
+				case http.StatusOK:
+					testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+				case http.StatusForbidden:
+					testutil.WriteBody(w, `{"error":"page privilege denied"}`)
+				}
+			case "/api/dnsmasq/leases/search":
+				testutil.WriteBody(w, `{"leases":[]}`)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		t.Cleanup(ts.Close)
+		return ts
+	}
+
+	t.Run("alias 500 is fatal", func(t *testing.T) {
+		ts := serveImport(t, http.StatusInternalServerError, "")
+		_, err := (&Provider{}).ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err == nil || !strings.Contains(err.Error(), "fetching aliases") {
+			t.Fatalf("error = %v, want fetching aliases", err)
+		}
+	})
+
+	t.Run("alias 403 degrades", func(t *testing.T) {
+		ts := serveImport(t, http.StatusForbidden, "")
+		res, err := (&Provider{}).ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err != nil {
+			t.Fatalf("ImportSpec: %v", err)
+		}
+		if !slices.ContainsFunc(res.Warnings, func(w string) bool {
+			return strings.Contains(w, "firewall aliases unavailable:")
+		}) {
+			t.Errorf("warnings = %v, want alias privilege warning", res.Warnings)
+		}
+	})
+
+	t.Run("unknown action is skipped", func(t *testing.T) {
+		ts := serveImport(t, http.StatusOK, `{"total":1,"rows":[{"uuid":"x","enabled":"1","action":"rejectout","source_net":"10.0.10.5","destination_net":"10.0.10.9"}]}`)
+		res, err := (&Provider{}).ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err != nil {
+			t.Fatalf("ImportSpec: %v", err)
+		}
+		if res.PolicyCount != 0 {
+			t.Errorf("PolicyCount = %d, want 0 for unknown action", res.PolicyCount)
+		}
+	})
+
+	t.Run("unnamed resolvable rule gets generated name", func(t *testing.T) {
+		ts := serveImport(t, http.StatusOK, `{"total":2,"rows":[
+			{"uuid":"d1","enabled":"1","action":"block","source_net":"10.0.10.5","destination_net":"10.0.10.9"},
+			{"uuid":"off","enabled":"0","action":"block","source_net":"10.0.10.5","destination_net":"10.0.10.9"}
+		]}`)
+		res, err := (&Provider{}).ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err != nil {
+			t.Fatalf("ImportSpec: %v", err)
+		}
+		if res.PolicyCount != 1 || res.Spec.Policies[0].Name == "" {
+			t.Fatalf("policies = %+v, want one generated-name deny", res.Spec.Policies)
+		}
+	})
+}
+
+func TestProviderCheckACL_PassWhenDenyExpected(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"interfaces":{"lan":{"description":"LAN","ipv4":"10.0.10.1/24"}}}`)
+		case "/api/firewall/alias/search_item":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/firewall/filter/search_rule":
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"p1","enabled":"1","action":"pass","description":"allow-all","source_net":"lan","destination_net":"any"}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	res, err := (&Provider{}).CheckACL(context.Background(), providers.ACLCheckRequest{
+		PolicyName: "allow-all", Action: "deny", ExpectEnforced: true,
+	}, providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != models.StatusFail || !strings.Contains(res.Summary, "expected deny") {
+		t.Errorf("got %s %q", res.Status, res.Summary)
+	}
+}
+
+func TestMatchACLRule_SkipsDisabled(t *testing.T) {
+	rules := []FirewallRule{
+		{RuleUUID: "off-name", Label: "isolate-iot", Action: "block", Disabled: true},
+		{RuleUUID: "off-ep", Action: "block", Source: "lan", Destination: "iot", Disabled: true},
+		{RuleUUID: "on", Action: "block", Source: "lan", Destination: "iot"},
+	}
+	networks := []intent.Network{{Name: "lan", CIDR: "10.0.10.0/24", Zone: "trusted"}, {Name: "iot", CIDR: "10.0.60.0/24", Zone: "iot"}}
+	if got := matchACLRule(rules, networks, nil, providers.ACLCheckRequest{PolicyName: "isolate-iot"}); got != nil {
+		t.Fatalf("disabled name match = %+v", got)
+	}
+	if got := matchACLRule(rules, networks, nil, providers.ACLCheckRequest{From: "lan", To: "iot"}); got == nil || got.RuleUUID != "on" {
+		t.Fatalf("endpoint match skipped disabled = %+v", got)
+	}
+}
+
+func TestResolveEndpointZone_EmptyZoneFallbacks(t *testing.T) {
+	networks := []intent.Network{
+		{Name: "iot", CIDR: "10.0.60.0/24", Zone: ""},
+		{Name: "guest", CIDR: "10.0.70.0/24", Zone: ""},
+		{Name: "lan", CIDR: "10.0.10.0/24", Zone: "trusted"},
+	}
+	aliases := []Alias{
+		{Name: "by-cidr-name", Addresses: []string{"10.0.60.0/24"}},
+		{Name: "by-iface", Addresses: []string{"lan"}},
+		{Name: "guest"},
+	}
+	if got := resolveEndpointZone("by-cidr-name", networks, aliases); got != "iot" {
+		t.Errorf("member cidr empty zone = %q, want iot", got)
+	}
+	if got := resolveEndpointZone("by-iface", networks, aliases); got != "trusted" {
+		t.Errorf("member name with zone = %q, want trusted", got)
+	}
+	if got := resolveEndpointZone("guest", networks, aliases); got != "guest" {
+		t.Errorf("alias named after network = %q, want guest", got)
+	}
+	if got := resolveEndpointZone("iot", networks, nil); got != "iot" {
+		t.Errorf("address network name empty zone = %q, want iot", got)
 	}
 }
 

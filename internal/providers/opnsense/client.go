@@ -142,6 +142,10 @@ type FirewallRule struct {
 	Protocol    string   `json:"protocol"`
 	Source      string   `json:"source_net"`
 	Destination string   `json:"destination_net"`
+	SourcePort  string   `json:"source_port,omitempty"`
+	DestPort    string   `json:"destination_port,omitempty"`
+	Direction   string   `json:"direction,omitempty"`
+	IPProtocol  string   `json:"ipprotocol,omitempty"`
 	Label       string   `json:"description"`
 	// Disabled is derived from Enabled after decoding.
 	Disabled bool
