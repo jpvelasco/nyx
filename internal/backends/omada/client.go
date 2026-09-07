@@ -34,6 +34,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jpvelasco/nyx/internal/tlsutil"
 )
 
 const (
@@ -328,7 +330,7 @@ func (c *Client) fetchInfo(ctx context.Context) (*ControllerInfo, error) {
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, tlsutil.Annotate(err)
 	}
 	defer resp.Body.Close()
 
@@ -465,7 +467,7 @@ func (c *Client) execute(req *http.Request, dest interface{}) error {
 	// #nosec G704 — user-specified controller host, not a third-party redirect
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("http request to %s: %w", req.URL.Path, err)
+		return tlsutil.Annotate(fmt.Errorf("http request to %s: %w", req.URL.Path, err))
 	}
 	defer resp.Body.Close()
 
