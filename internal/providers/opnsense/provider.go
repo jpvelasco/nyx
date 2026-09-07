@@ -56,8 +56,8 @@ func (o *Provider) Capabilities() []string {
 // is covered by the Dashboard page privilege — the firmware endpoints
 // require the separate System: Firmware privilege.
 func (o *Provider) Info(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInfo, error) {
-	if opts.Host == "" {
-		return nil, fmt.Errorf("--host is required for opnsense provider")
+	if err := requireHost(opts); err != nil {
+		return nil, err
 	}
 	client := newProviderClient(opts)
 	sys, err := client.GetSystemInformation(ctx)
@@ -79,11 +79,8 @@ func (o *Provider) Info(ctx context.Context, opts providers.ImportOptions) (*pro
 // metadata, its interfaces as networks, the firewall rule count, and the
 // active DHCP-lease (client) count. It is read-only and never mutates.
 func (o *Provider) Inventory(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInventory, error) {
-	if opts.Host == "" {
-		return nil, fmt.Errorf("--host is required for opnsense provider")
-	}
-	if opts.ClientID == "" || opts.ClientSecret == "" {
-		return nil, fmt.Errorf("--client-id and --client-secret are required (API key and secret)")
+	if err := requireAuth(opts); err != nil {
+		return nil, err
 	}
 	client := newProviderClient(opts)
 	snap, err := client.FetchInventory(ctx)
@@ -101,11 +98,8 @@ func (o *Provider) Inventory(ctx context.Context, opts providers.ImportOptions) 
 
 // ImportSpec builds a full intent spec by querying interfaces, firewall rules, DHCP leases, etc. from OPNsense.
 func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions) (*providers.ImportResult, error) {
-	if opts.Host == "" {
-		return nil, fmt.Errorf("--host is required for opnsense provider")
-	}
-	if opts.ClientID == "" || opts.ClientSecret == "" {
-		return nil, fmt.Errorf("--client-id and --client-secret are required (API key and secret)")
+	if err := requireAuth(opts); err != nil {
+		return nil, err
 	}
 
 	client := newProviderClient(opts)
@@ -587,6 +581,28 @@ func (o *Provider) applyNatMutation(ctx context.Context, client *Client, op natO
 		}
 		return "updated", ruleUUID, []string{op.toggle}, true, nil
 	}
+}
+
+// requireHost fails fast when no controller host was given, so a missing
+// host is a configuration error instead of a dial against an empty host.
+func requireHost(opts providers.ImportOptions) error {
+	if opts.Host == "" {
+		return fmt.Errorf("--host is required for opnsense provider")
+	}
+	return nil
+}
+
+// requireAuth requires both a host and the API key/secret pair. ClientID
+// and ClientSecret hold the API key and secret after CLI/env/store
+// resolution — the user-facing flags are --api-key / --api-secret.
+func requireAuth(opts providers.ImportOptions) error {
+	if err := requireHost(opts); err != nil {
+		return err
+	}
+	if opts.ClientID == "" || opts.ClientSecret == "" {
+		return fmt.Errorf("--api-key and --api-secret are required")
+	}
+	return nil
 }
 
 // requireNatHost fails fast when no controller host was given, so a

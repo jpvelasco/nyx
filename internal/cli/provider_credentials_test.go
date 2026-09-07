@@ -7,6 +7,8 @@ import (
 
 	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/providers"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // clearProviderEnv clears the env var names of both known providers so the
@@ -169,6 +171,109 @@ func TestRequireProviderHost_ResolvedHostPasses(t *testing.T) {
 	for _, name := range []string{"omada", "opnsense", "fake"} {
 		if err := requireProviderHost(providers.ImportOptions{Host: "10.0.11.1"}, name); err != nil {
 			t.Errorf("requireProviderHost(%q) with resolved host = %v, want nil", name, err)
+		}
+	}
+}
+
+func TestProviderCredFlags_OmadaVsOpnsense(t *testing.T) {
+	// Look up flags on built cobra commands. Existing providerImportOptions
+	// tests keep setting the package vars, not flag names.
+	cases := []struct {
+		name        string
+		cmd         *cobra.Command
+		wantPresent []string
+		wantAbsent  []string
+		wantHelp    map[string]string
+	}{
+		{
+			name:        "omada info",
+			cmd:         buildInfoCmd(&fakeProvider{name: "omada"}),
+			wantPresent: []string{"host", "client-id", "client-secret"},
+			wantAbsent:  []string{"api-key", "api-secret"},
+			wantHelp: map[string]string{
+				"client-id":     "Omada Open API client ID",
+				"client-secret": "Omada Open API client secret",
+			},
+		},
+		{
+			name:        "opnsense info",
+			cmd:         buildInfoCmd(&fakeProvider{name: "opnsense"}),
+			wantPresent: []string{"host", "api-key", "api-secret"},
+			wantAbsent:  []string{"client-id", "client-secret"},
+			wantHelp: map[string]string{
+				"api-key":    "OPNsense API key",
+				"api-secret": "OPNsense API secret",
+			},
+		},
+		{
+			name:        "opnsense import",
+			cmd:         buildImportCmd(&fakeProvider{name: "opnsense"}),
+			wantPresent: []string{"api-key", "api-secret"},
+			wantAbsent:  []string{"client-id", "client-secret"},
+		},
+		{
+			name:        "opnsense check",
+			cmd:         buildCheckCmd(&fakeProvider{name: "opnsense"}),
+			wantPresent: []string{"api-key", "api-secret"},
+			wantAbsent:  []string{"client-id", "client-secret"},
+		},
+		{
+			name:        "opnsense inventory",
+			cmd:         buildInventoryCmd(&fakeProvider{name: "opnsense"}),
+			wantPresent: []string{"api-key", "api-secret"},
+			wantAbsent:  []string{"client-id", "client-secret"},
+		},
+		{
+			name:        "unknown provider keeps omada flags",
+			cmd:         buildInfoCmd(&fakeProvider{name: "fake"}),
+			wantPresent: []string{"client-id", "client-secret"},
+			wantAbsent:  []string{"api-key", "api-secret"},
+		},
+		{
+			name:        "omada extra uplink-info",
+			cmd:         buildOmadaUplinkInfoCmd(),
+			wantPresent: []string{"client-id", "client-secret"},
+			wantAbsent:  []string{"api-key", "api-secret"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertProviderCredFlags(t, tc.cmd.Flags(), tc.wantPresent, tc.wantAbsent, tc.wantHelp)
+		})
+	}
+}
+
+func TestProviderCredFlags_OpnsenseBindsToSharedVars(t *testing.T) {
+	saveRestoreGlobals(t)
+	cmd := buildInfoCmd(&fakeProvider{name: "opnsense"})
+	if err := cmd.ParseFlags([]string{"--host", "10.0.11.1", "--api-key", "k", "--api-secret", "s"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	if providerHost != "10.0.11.1" || providerClientID != "k" || providerClientSecret != "s" {
+		t.Errorf("bound vars = host=%q id=%q secret=%q, want 10.0.11.1/k/s",
+			providerHost, providerClientID, providerClientSecret)
+	}
+}
+
+func assertProviderCredFlags(t *testing.T, flags *pflag.FlagSet, present, absent []string, help map[string]string) {
+	t.Helper()
+	for _, name := range present {
+		if flags.Lookup(name) == nil {
+			t.Errorf("missing flag --%s", name)
+		}
+	}
+	for _, name := range absent {
+		if flags.Lookup(name) != nil {
+			t.Errorf("unexpected flag --%s", name)
+		}
+	}
+	for name, want := range help {
+		f := flags.Lookup(name)
+		if f == nil {
+			continue
+		}
+		if f.Usage != want {
+			t.Errorf("--%s help = %q, want %q", name, f.Usage, want)
 		}
 	}
 }

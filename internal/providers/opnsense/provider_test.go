@@ -175,7 +175,15 @@ func TestProviderImportSpec(t *testing.T) {
 	t.Run("missing credentials", func(t *testing.T) {
 		p := &Provider{}
 		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: "h"})
-		if err == nil || !strings.Contains(err.Error(), "--client-id and --client-secret are required") {
+		if err == nil || !strings.Contains(err.Error(), "--api-key and --api-secret are required") {
+			t.Errorf("error = %v, want credentials required", err)
+		}
+	})
+
+	t.Run("partial credentials", func(t *testing.T) {
+		p := &Provider{}
+		_, err := p.ImportSpec(context.Background(), providers.ImportOptions{Host: "h", ClientID: "key"})
+		if err == nil || !strings.Contains(err.Error(), "--api-key and --api-secret are required") {
 			t.Errorf("error = %v, want credentials required", err)
 		}
 	})
@@ -655,7 +663,7 @@ func TestProviderInventory(t *testing.T) {
 	t.Run("missing credentials", func(t *testing.T) {
 		p := &Provider{}
 		_, err := p.Inventory(context.Background(), providers.ImportOptions{Host: "h"})
-		if err == nil || !strings.Contains(err.Error(), "--client-id and --client-secret are required") {
+		if err == nil || !strings.Contains(err.Error(), "--api-key and --api-secret are required") {
 			t.Errorf("error = %v, want credentials required", err)
 		}
 	})
