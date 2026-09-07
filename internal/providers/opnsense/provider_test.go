@@ -897,12 +897,26 @@ func TestResolveEndpointZone_Alias(t *testing.T) {
 		{Name: "lan", CIDR: "10.0.10.0/24", Zone: "trusted"},
 		{Name: "iot", CIDR: "10.0.60.0/24", Zone: "iot"},
 	}
-	aliases := []Alias{{Name: "trusted_net", Addresses: []string{"10.0.10.0/24"}}}
+	aliases := []Alias{
+		{Name: "trusted_net", Addresses: []string{"10.0.10.0/24"}},
+		{Name: "empty_alias"},
+		{Name: "disabled", Disabled: true, Addresses: []string{"10.0.10.0/24"}},
+		{Name: "lan"},
+	}
 	if got := resolveEndpointZone("trusted_net", networks, aliases); got != "trusted" {
 		t.Errorf("alias resolve = %q, want trusted", got)
 	}
 	if got := resolveEndpointZone("lan", networks, nil); got != "trusted" {
 		t.Errorf("name resolve = %q, want trusted", got)
+	}
+	if got := resolveEndpointZone("any", networks, aliases); got != "" {
+		t.Errorf("any = %q", got)
+	}
+	if got := resolveEndpointZone("disabled", networks, aliases); got != "" {
+		t.Errorf("disabled alias = %q", got)
+	}
+	if got := resolveEndpointZone("", networks, aliases); got != "" {
+		t.Errorf("empty = %q", got)
 	}
 }
 
