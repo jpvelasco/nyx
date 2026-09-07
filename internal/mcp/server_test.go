@@ -298,8 +298,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 54 {
-		t.Fatalf("expected 54 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 56 {
+		t.Fatalf("expected 56 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -308,7 +308,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_plan_port", "omada_apply_port_profile", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_inventory", "topology"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_plan_port", "omada_apply_port_profile", "omada_plan_lan", "omada_apply_lan", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_inventory", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -359,6 +359,8 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 		"omada_list_lan_multicasts":        {"host"},
 		"omada_plan_port":                  {"host", "switch_mac", "port", "native"},
 		"omada_apply_port_profile":         {"host", "switch_mac", "port", "native"},
+		"omada_plan_lan":                   {"host", "name"},
+		"omada_apply_lan":                  {"host", "name"},
 		"opnsense_get_info":                {"host"},
 		"opnsense_list_interfaces":         {"host"},
 		"opnsense_list_services":           {"host"},
@@ -2010,6 +2012,22 @@ func (s *stubOmadaSvc) ApplyPortProfile(_ context.Context, opts service.OmadaOpt
 	res := *s.portApply
 	res.DryRun = dryRun // mirror the arg so handlers can be asserted on the wire
 	return &res, s.err
+}
+
+func (s *stubOmadaSvc) PlanLAN(_ context.Context, opts service.OmadaOptions, req service.OmadaLANRequest) (*service.OmadaLANPlan, error) {
+	s.lastOpts = opts
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &service.OmadaLANPlan{Action: "create", Network: req.Name}, nil
+}
+
+func (s *stubOmadaSvc) ApplyLAN(_ context.Context, opts service.OmadaOptions, req service.OmadaLANRequest, dryRun bool) (*service.OmadaLANApplyResult, error) {
+	s.lastOpts = opts
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &service.OmadaLANApplyResult{Outcome: "created", DryRun: dryRun}, nil
 }
 
 func sliceEq(a, b []string) bool {

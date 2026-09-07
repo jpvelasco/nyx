@@ -1763,6 +1763,38 @@ func TestOmadaServiceListLanProfiles_FetchFails(t *testing.T) {
 	}
 }
 
+func TestOmadaServicePlanApplyLAN(t *testing.T) {
+	st := omadaPortStateFresh()
+	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+	svc := NewOmadaService()
+	ctx := context.Background()
+	opts := omadaPortOpts(ts.URL)
+	plan, err := svc.PlanLAN(ctx, opts, OmadaLANRequest{Name: "trusted"})
+	if err != nil {
+		t.Fatalf("PlanLAN existing: %v", err)
+	}
+	if plan.Action != "unchanged" && plan.Action != "update" && plan.Action != "create" {
+		t.Errorf("plan action = %q", plan.Action)
+	}
+	create, err := svc.PlanLAN(ctx, opts, OmadaLANRequest{Name: "newlan", VLAN: 99, GatewaySubnet: "10.0.99.1/24"})
+	if err != nil {
+		t.Fatalf("PlanLAN create: %v", err)
+	}
+	if create.Action != "create" {
+		t.Errorf("create action = %q", create.Action)
+	}
+	if _, err := svc.PlanLAN(ctx, opts, OmadaLANRequest{}); err == nil {
+		t.Fatal("expected name required")
+	}
+	dry, err := svc.ApplyLAN(ctx, opts, OmadaLANRequest{Name: "newlan", VLAN: 99, GatewaySubnet: "10.0.99.1/24"}, true)
+	if err != nil {
+		t.Fatalf("ApplyLAN dry: %v", err)
+	}
+	if !dry.DryRun || dry.Outcome != "create" && dry.Outcome != "created" {
+		t.Errorf("dry = %+v", dry)
+	}
+}
+
 func TestOmadaServicePlanPort(t *testing.T) {
 	st := omadaPortStateFresh()
 	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))

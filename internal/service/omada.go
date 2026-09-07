@@ -1703,6 +1703,141 @@ func diffFromPolicy(p intent.Policy, currentAction, proposedAction string) Omada
 	return OmadaPolicyDiff{Name: p.Name, From: p.From, To: p.To, CurrentAction: currentAction, ProposedAction: proposedAction}
 }
 
+// OmadaLANRequest is a plan/apply LAN mutation.
+type OmadaLANRequest struct {
+	Name          string
+	VLAN          int
+	GatewaySubnet string
+	Isolated      bool
+	DHCPEnabled   bool
+	DHCPStart     string
+	DHCPEnd       string
+	LeaseTime     int
+	DHCPDNS       string
+	DHCPL2Relay   bool
+	DHCPGuard     bool
+	IGMPSnoop     bool
+	MLDSnoop      bool
+	Delete        bool
+}
+
+// OmadaLANPlan previews a LAN create/update/delete.
+type OmadaLANPlan struct {
+	Action  string `json:"action"` // create / update / delete / unchanged
+	Network string `json:"network"`
+	ID      string `json:"id,omitempty"`
+	Before  string `json:"before,omitempty"`
+	After   string `json:"after,omitempty"`
+}
+
+// OmadaLANApplyResult is the apply outcome.
+type OmadaLANApplyResult struct {
+	Outcome string `json:"outcome"`
+	ID      string `json:"id,omitempty"`
+	DryRun  bool   `json:"dry_run"`
+	Before  string `json:"before,omitempty"`
+	After   string `json:"after,omitempty"`
+}
+
+func (req OmadaLANRequest) write() omadabackend.LANWrite {
+	return omadabackend.LANWrite{
+		Name:              req.Name,
+		Purpose:           0,
+		VLANID:            req.VLAN,
+		GatewaySubnet:     req.GatewaySubnet,
+		Isolation:         req.Isolated,
+		IGMPSnoopEnable:   req.IGMPSnoop,
+		MLDSnoopEnable:    req.MLDSnoop,
+		DHCPL2RelayEnable: req.DHCPL2Relay,
+		DHCPGuard:         req.DHCPGuard,
+		DHCPSettings: omadabackend.DHCPSettingsVO{
+			Enable:      req.DHCPEnabled,
+			IPAddrStart: req.DHCPStart,
+			IPAddrEnd:   req.DHCPEnd,
+			LeaseTime:   req.LeaseTime,
+			DHCPNS:      req.DHCPDNS,
+		},
+	}
+}
+
+// PlanLAN previews creating, updating, or deleting a site LAN.
+func (s *OmadaService) PlanLAN(ctx context.Context, opts OmadaOptions, req OmadaLANRequest) (*OmadaLANPlan, error) {
+	if req.Name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+	nets, err := client.GetNetworks(ctx, site.EffectiveID())
+	if err != nil {
+		return nil, err
+	}
+	cur, ok := omadabackend.FindNetwork(nets, req.Name)
+	plan := &OmadaLANPlan{Network: req.Name}
+	if req.Delete {
+		if !ok {
+			plan.Action = "unchanged"
+			return plan, nil
+		}
+		plan.Action = "delete"
+		plan.ID = cur.ID
+		return plan, nil
+	}
+	w := req.write()
+	if !ok {
+		plan.Action = "create"
+		return plan, nil
+	}
+	plan.ID = cur.ID
+	if omadabackend.LANMatchesWrite(cur, w) {
+		plan.Action = "unchanged"
+		return plan, nil
+	}
+	plan.Action = "update"
+	return plan, nil
+}
+
+// ApplyLAN creates, updates, or deletes a site LAN. Dry-run by default
+// at the MCP layer.
+func (s *OmadaService) ApplyLAN(ctx context.Context, opts OmadaOptions, req OmadaLANRequest, dryRun bool) (*OmadaLANApplyResult, error) {
+	plan, err := s.PlanLAN(ctx, opts, req)
+	if err != nil {
+		return nil, err
+	}
+	res := &OmadaLANApplyResult{Outcome: plan.Action, ID: plan.ID, DryRun: dryRun}
+	if dryRun || plan.Action == "unchanged" {
+		return res, nil
+	}
+	client, site, err := s.session(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+	siteID := site.EffectiveID()
+	switch plan.Action {
+	case "create":
+		id, err := client.CreateLANNetwork(ctx, siteID, req.write())
+		if err != nil {
+			return nil, err
+		}
+		res.ID = id
+		res.Outcome = "created"
+	case "update":
+		if err := client.UpdateLANNetwork(ctx, siteID, plan.ID, req.write()); err != nil {
+			return nil, err
+		}
+		res.Outcome = "updated"
+	case "delete":
+		if err := client.DeleteLANNetwork(ctx, siteID, plan.ID); err != nil {
+			return nil, err
+		}
+		res.Outcome = "deleted"
+	}
+	return res, nil
+}
+
 func (s *OmadaService) newClient(ctx context.Context, opts OmadaOptions) (*omadabackend.Client, error) {
 	return s.NewClient(ctx, opts.Host, opts.SkipTLSVerify, opts.CACertPath)
 }

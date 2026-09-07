@@ -136,6 +136,8 @@ type omadaSurface interface {
 	ListLANMulticasts(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaLANMulticastRule, error)
 	PlanPort(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest) (*service.OmadaPortPlan, error)
 	ApplyPortProfile(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest, dryRun bool) (*service.OmadaPortProfileApplyResult, error)
+	PlanLAN(ctx context.Context, opts service.OmadaOptions, req service.OmadaLANRequest) (*service.OmadaLANPlan, error)
+	ApplyLAN(ctx context.Context, opts service.OmadaOptions, req service.OmadaLANRequest, dryRun bool) (*service.OmadaLANApplyResult, error)
 }
 
 // opnsenseSurface is the OPNsense observation surface exposed to agents.
@@ -615,6 +617,35 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"tagged":       {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
 				"profile_name": {Type: "string", Description: "Optional name for a new profile; derived when empty"},
 			}, []string{"host", "switch_mac", "port", "native"}),
+		},
+		{
+			Name:        "omada_plan_lan",
+			Description: "Preview creating, updating, or deleting an Omada site LAN/VLAN including DHCP pool and posture. Read-only.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"name":           {Type: "string", Description: "LAN network name"},
+				"vlan":           {Type: "integer", Description: "VLAN id"},
+				"gateway_subnet": {Type: "string", Description: "Gateway/prefix, e.g. 10.0.10.1/24"},
+				"isolated":       {Type: "boolean", Description: "L2 isolation"},
+				"dhcp_enabled":   {Type: "boolean", Description: "Enable the DHCP pool"},
+				"dhcp_start":     {Type: "string", Description: "DHCP pool start"},
+				"dhcp_end":       {Type: "string", Description: "DHCP pool end"},
+				"delete":         {Type: "boolean", Description: "Preview a delete"},
+			}, []string{"host", "name"}),
+		},
+		{
+			Name:        "omada_apply_lan",
+			Description: "Create, update, or delete an Omada site LAN/VLAN including DHCP pool and posture. Idempotent (created/updated/unchanged/deleted). Dry-run default: set dry_run=false to apply.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"name":           {Type: "string", Description: "LAN network name"},
+				"vlan":           {Type: "integer", Description: "VLAN id"},
+				"gateway_subnet": {Type: "string", Description: "Gateway/prefix, e.g. 10.0.10.1/24"},
+				"isolated":       {Type: "boolean", Description: "L2 isolation"},
+				"dhcp_enabled":   {Type: "boolean", Description: "Enable the DHCP pool"},
+				"dhcp_start":     {Type: "string", Description: "DHCP pool start"},
+				"dhcp_end":       {Type: "string", Description: "DHCP pool end"},
+				"delete":         {Type: "boolean", Description: "Delete the LAN"},
+				"dry_run":        {Type: "boolean", Description: "Preview only. Default true."},
+			}, []string{"host", "name"}),
 		},
 		{
 			Name:        "omada_apply_port_profile",

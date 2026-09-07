@@ -129,6 +129,48 @@ func TestGetNetworksDHCPPosture(t *testing.T) {
 	}
 }
 
+func TestCreateUpdateDeleteLANNetwork(t *testing.T) {
+	var gotMethod, gotPath string
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/lan-networks"):
+			writeEnvelope(w, 0, "", `{"id":"n-new"}`)
+		case r.Method == http.MethodPut:
+			writeEnvelope(w, 0, "", `{}`)
+		case r.Method == http.MethodDelete:
+			writeEnvelope(w, 0, "", `{}`)
+		default:
+			writeEnvelope(w, -1600, "bad", "null")
+		}
+	}))
+	id, err := c.CreateLANNetwork(context.Background(), "s1", LANWrite{Name: "iot", VLANID: 60, GatewaySubnet: "10.0.60.1/24"})
+	if err != nil || id != "n-new" {
+		t.Fatalf("create = %q, %v", id, err)
+	}
+	if gotMethod != http.MethodPost || !strings.HasSuffix(gotPath, "/lan-networks") {
+		t.Errorf("create path = %s %s", gotMethod, gotPath)
+	}
+	if err := c.UpdateLANNetwork(context.Background(), "s1", "n1", LANWrite{Name: "iot"}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if err := c.DeleteLANNetwork(context.Background(), "s1", "n1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+}
+
+func TestLANMatchesWrite(t *testing.T) {
+	n := Network{Name: "iot", VLANID: 60, GatewaySubnet: "10.0.60.1/24", DHCPEnabled: true, DHCPStart: "10.0.60.20", DHCPEnd: "10.0.60.200"}
+	w := LANWrite{Name: "iot", VLANID: 60, GatewaySubnet: "10.0.60.1/24", DHCPSettings: DHCPSettingsVO{Enable: true, IPAddrStart: "10.0.60.20", IPAddrEnd: "10.0.60.200"}}
+	if !LANMatchesWrite(n, w) {
+		t.Fatal("want match")
+	}
+	w.VLANID = 61
+	if LANMatchesWrite(n, w) {
+		t.Fatal("want mismatch on vlan")
+	}
+}
+
 func TestGetNetworksResponseShapes(t *testing.T) {
 	t.Run("direct array", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
