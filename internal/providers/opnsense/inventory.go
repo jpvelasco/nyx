@@ -23,17 +23,27 @@ const emptyTopologyWarning = "no networks found on the controller — the interf
 // inventory — so a failure there fails the whole call; system info, rules,
 // and leases are best-effort and degrade into Warnings.
 type InventorySnapshot struct {
-	System     *SystemInformation
-	Interfaces []Interface
-	Rules      []FirewallRule
-	RulesOK    bool
-	Leases     []DHCPLease
-	LeasesOK   bool
-	Services   []Service
-	ServicesOK bool
-	Gateways   []GatewayStatus
-	GatewaysOK bool
-	Warnings   []string
+	System         *SystemInformation
+	Interfaces     []Interface
+	Rules          []FirewallRule
+	RulesOK        bool
+	Leases         []DHCPLease
+	LeasesOK       bool
+	Services       []Service
+	ServicesOK     bool
+	Gateways       []GatewayStatus
+	GatewaysOK     bool
+	Bridges        []Bridge
+	BridgesOK      bool
+	IfSettings     []InterfaceSetting
+	IfSettingsOK   bool
+	Dnsmasq        *DnsmasqSettings
+	DnsmasqOK      bool
+	PfStats        *PfStatistics
+	PfStatsOK      bool
+	KernelRoutes   []KernelRoute
+	KernelRoutesOK bool
+	Warnings       []string
 }
 
 // FetchInventory loads the firewall's full observation in one pass. The
@@ -88,6 +98,46 @@ func (c *Client) FetchInventory(ctx context.Context) (*InventorySnapshot, error)
 	} else {
 		snap.Gateways = gws
 		snap.GatewaysOK = true
+	}
+
+	bridges, err := c.GetBridgeSettings(ctx)
+	if err != nil {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("bridge settings unavailable: %v", err))
+	} else {
+		snap.Bridges = bridges
+		snap.BridgesOK = true
+	}
+
+	ifs, err := c.GetInterfaceSettings(ctx)
+	if err != nil {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("interface settings unavailable: %v", err))
+	} else {
+		snap.IfSettings = ifs
+		snap.IfSettingsOK = true
+	}
+
+	dns, err := c.GetDnsmasqSettings(ctx)
+	if err != nil {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("dnsmasq settings unavailable: %v", err))
+	} else {
+		snap.Dnsmasq = dns
+		snap.DnsmasqOK = true
+	}
+
+	pf, err := c.GetPfStatistics(ctx)
+	if err != nil {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("pf statistics unavailable: %v", err))
+	} else {
+		snap.PfStats = pf
+		snap.PfStatsOK = true
+	}
+
+	routes, err := c.GetKernelRoutes(ctx)
+	if err != nil {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("kernel routes unavailable: %v", err))
+	} else {
+		snap.KernelRoutes = routes
+		snap.KernelRoutesOK = true
 	}
 
 	return snap, nil
@@ -201,6 +251,52 @@ func RenderInventory(snap *InventorySnapshot, site string) string {
 		}
 	} else {
 		fmt.Fprintf(&b, "\n== Gateways ==\n")
+		fmt.Fprintf(&b, "  unknown (fetch failed)\n")
+	}
+
+	if snap.BridgesOK {
+		fmt.Fprintf(&b, "\n== Bridges (%d) ==\n", len(snap.Bridges))
+		for _, br := range snap.Bridges {
+			fmt.Fprintf(&b, "  %-16s members:%s\n", orDash(firstNonEmpty(br.Description, br.UUID)), orDash(strings.Join(br.Members, ",")))
+		}
+	} else {
+		fmt.Fprintf(&b, "\n== Bridges ==\n")
+		fmt.Fprintf(&b, "  unknown (fetch failed)\n")
+	}
+
+	if snap.IfSettingsOK {
+		fmt.Fprintf(&b, "\n== Interface settings (%d) ==\n", len(snap.IfSettings))
+		fmt.Fprintf(&b, "  %d configured\n", len(snap.IfSettings))
+	} else {
+		fmt.Fprintf(&b, "\n== Interface settings ==\n")
+		fmt.Fprintf(&b, "  unknown (fetch failed)\n")
+	}
+
+	if snap.DnsmasqOK && snap.Dnsmasq != nil {
+		on := "off"
+		if snap.Dnsmasq.Enabled {
+			on = "on"
+		}
+		fmt.Fprintf(&b, "\n== Dnsmasq ==\n")
+		fmt.Fprintf(&b, "  %s, %d range%s, %d host%s\n", on, len(snap.Dnsmasq.Ranges), plural(len(snap.Dnsmasq.Ranges)), len(snap.Dnsmasq.Hosts), plural(len(snap.Dnsmasq.Hosts)))
+	} else {
+		fmt.Fprintf(&b, "\n== Dnsmasq ==\n")
+		fmt.Fprintf(&b, "  unknown (fetch failed)\n")
+	}
+
+	if snap.PfStatsOK && snap.PfStats != nil {
+		fmt.Fprintf(&b, "\n== pf statistics ==\n")
+		fmt.Fprintf(&b, "  %d states\n", snap.PfStats.StateCount)
+	} else {
+		fmt.Fprintf(&b, "\n== pf statistics ==\n")
+		fmt.Fprintf(&b, "  unknown (fetch failed)\n")
+	}
+
+	if snap.KernelRoutesOK {
+		fmt.Fprintf(&b, "\n== Kernel routes (%d) ==\n", len(snap.KernelRoutes))
+		fmt.Fprintf(&b, "  %d route%s\n", len(snap.KernelRoutes), plural(len(snap.KernelRoutes)))
+	} else {
+		fmt.Fprintf(&b, "\n== Kernel routes ==\n")
 		fmt.Fprintf(&b, "  unknown (fetch failed)\n")
 	}
 	return b.String()

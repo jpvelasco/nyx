@@ -52,8 +52,15 @@ var mcpCapabilityTools = map[string]map[string][]string{
 			"run_audit",
 			"load_spec",
 		},
-		"check":     {"run_audit", "load_spec"},
-		"inventory": {"opnsense_inventory"},
+		"check": {"run_audit", "load_spec"},
+		"inventory": {
+			"opnsense_inventory",
+			"opnsense_list_bridges",
+			"opnsense_list_interface_settings",
+			"opnsense_get_dnsmasq_settings",
+			"opnsense_get_pf_statistics",
+			"opnsense_list_kernel_routes",
+		},
 	},
 }
 

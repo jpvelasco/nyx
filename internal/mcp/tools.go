@@ -65,6 +65,11 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_list_aliases":            (*Server).toolOpnsenseListAliases,
 	"opnsense_list_services":           (*Server).toolOpnsenseListServices,
 	"opnsense_list_gateways":           (*Server).toolOpnsenseListGateways,
+	"opnsense_list_bridges":            (*Server).toolOpnsenseListBridges,
+	"opnsense_list_interface_settings": (*Server).toolOpnsenseListInterfaceSettings,
+	"opnsense_get_dnsmasq_settings":    (*Server).toolOpnsenseGetDnsmasqSettings,
+	"opnsense_get_pf_statistics":       (*Server).toolOpnsenseGetPfStatistics,
+	"opnsense_list_kernel_routes":      (*Server).toolOpnsenseListKernelRoutes,
 	"opnsense_get_nat":                 (*Server).toolOpnsenseGetNAT,
 	"opnsense_inventory":               (*Server).toolOpnsenseInventory,
 	"opnsense_plan_nat":                (*Server).toolOpnsensePlanNat,
@@ -666,6 +671,48 @@ func (s *Server) toolOpnsenseListGateways(ctx context.Context, args map[string]i
 		return errResult(fmt.Sprintf("opnsense gateways request failed: %v", err))
 	}
 	return okResult(toJSON(gws))
+}
+
+func (s *Server) toolOpnsenseListBridges(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "opnsense bridges request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.ListBridges(ctx, opts)
+	})
+}
+
+func (s *Server) toolOpnsenseListInterfaceSettings(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "opnsense interface settings request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.ListInterfaceSettings(ctx, opts)
+	})
+}
+
+func (s *Server) toolOpnsenseGetDnsmasqSettings(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "opnsense dnsmasq settings request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.GetDnsmasqSettings(ctx, opts)
+	})
+}
+
+func (s *Server) toolOpnsenseGetPfStatistics(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "opnsense pf statistics request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.GetPfStatistics(ctx, opts)
+	})
+}
+
+func (s *Server) toolOpnsenseListKernelRoutes(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "opnsense kernel routes request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.ListKernelRoutes(ctx, opts)
+	})
+}
+
+func (s *Server) opnsenseReadJSON(ctx context.Context, args map[string]interface{}, failPrefix string, fn func(context.Context, service.OpnsenseOptions) (any, error)) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	got, err := fn(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("%s: %v", failPrefix, err))
+	}
+	return okResult(toJSON(got))
 }
 
 func (s *Server) toolOpnsenseListFirewallRules(ctx context.Context, args map[string]interface{}) toolDispatchResult {

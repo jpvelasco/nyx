@@ -122,19 +122,86 @@ type OpnsenseNatSummary struct {
 // exposes no managed-device inventory, so model/firmware/upgrade fields are
 // intentionally empty.
 type OpnsenseInventory struct {
-	Host              string                  `json:"host"`
-	ControllerVersion string                  `json:"controller_version,omitempty"`
-	Arch              string                  `json:"arch,omitempty"`
-	Devices           []serviceDevice         `json:"devices"`
-	NetworkGateways   map[string]string       `json:"network_gateways,omitempty"`
-	FirewallRuleCount int                     `json:"firewall_rule_count"`
-	FirewallRulesOK   bool                    `json:"firewall_rules_ok"`
-	ClientCount       int                     `json:"client_count"`
-	Services          []OpnsenseServiceStatus `json:"services,omitempty"`
-	ServicesOK        bool                    `json:"services_ok,omitempty"`
-	Gateways          []OpnsenseGatewayStatus `json:"gateways,omitempty"`
-	GatewaysOK        bool                    `json:"gateways_ok,omitempty"`
-	Warnings          []string                `json:"warnings,omitempty"`
+	Host                string                   `json:"host"`
+	ControllerVersion   string                   `json:"controller_version,omitempty"`
+	Arch                string                   `json:"arch,omitempty"`
+	Devices             []serviceDevice          `json:"devices"`
+	NetworkGateways     map[string]string        `json:"network_gateways,omitempty"`
+	FirewallRuleCount   int                      `json:"firewall_rule_count"`
+	FirewallRulesOK     bool                     `json:"firewall_rules_ok"`
+	ClientCount         int                      `json:"client_count"`
+	Services            []OpnsenseServiceStatus  `json:"services,omitempty"`
+	ServicesOK          bool                     `json:"services_ok,omitempty"`
+	Gateways            []OpnsenseGatewayStatus  `json:"gateways,omitempty"`
+	GatewaysOK          bool                     `json:"gateways_ok,omitempty"`
+	Bridges             []OpnsenseBridge         `json:"bridges,omitempty"`
+	BridgesOK           bool                     `json:"bridges_ok,omitempty"`
+	InterfaceSettings   []OpnsenseIfSetting      `json:"interface_settings,omitempty"`
+	InterfaceSettingsOK bool                     `json:"interface_settings_ok,omitempty"`
+	Dnsmasq             *OpnsenseDnsmasqSettings `json:"dnsmasq,omitempty"`
+	DnsmasqOK           bool                     `json:"dnsmasq_ok,omitempty"`
+	PfStatistics        *OpnsensePfStatistics    `json:"pf_statistics,omitempty"`
+	PfStatisticsOK      bool                     `json:"pf_statistics_ok,omitempty"`
+	KernelRoutes        []OpnsenseKernelRoute    `json:"kernel_routes,omitempty"`
+	KernelRoutesOK      bool                     `json:"kernel_routes_ok,omitempty"`
+	Warnings            []string                 `json:"warnings,omitempty"`
+}
+
+// OpnsenseBridge is one configured bridge and its members.
+type OpnsenseBridge struct {
+	UUID        string   `json:"uuid"`
+	Description string   `json:"description,omitempty"`
+	Members     []string `json:"members,omitempty"`
+	STP         bool     `json:"stp,omitempty"`
+}
+
+// OpnsenseIfSetting is one configured interface from interfaces/settings/get.
+type OpnsenseIfSetting struct {
+	Name        string `json:"name"`
+	Device      string `json:"device,omitempty"`
+	Description string `json:"description,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	IPv4        string `json:"ipv4,omitempty"`
+	Subnet      string `json:"subnet,omitempty"`
+}
+
+// OpnsenseDnsmasqSettings is the observe subset of Dnsmasq settings.
+type OpnsenseDnsmasqSettings struct {
+	Enabled    bool                   `json:"enabled"`
+	Interfaces []string               `json:"interfaces,omitempty"`
+	Ranges     []OpnsenseDnsmasqRange `json:"ranges,omitempty"`
+	Hosts      []OpnsenseDnsmasqHost  `json:"hosts,omitempty"`
+}
+
+// OpnsenseDnsmasqRange is one DHCP range.
+type OpnsenseDnsmasqRange struct {
+	UUID      string `json:"uuid,omitempty"`
+	Interface string `json:"interface,omitempty"`
+	Start     string `json:"start,omitempty"`
+	End       string `json:"end,omitempty"`
+}
+
+// OpnsenseDnsmasqHost is one static host mapping.
+type OpnsenseDnsmasqHost struct {
+	UUID   string `json:"uuid,omitempty"`
+	Host   string `json:"host,omitempty"`
+	Domain string `json:"domain,omitempty"`
+	IP     string `json:"ip,omitempty"`
+}
+
+// OpnsensePfStatistics is the pf state-table summary.
+type OpnsensePfStatistics struct {
+	StateCount  int `json:"state_count"`
+	SourceCount int `json:"source_count,omitempty"`
+	Limit       int `json:"limit,omitempty"`
+}
+
+// OpnsenseKernelRoute is one kernel routing-table row.
+type OpnsenseKernelRoute struct {
+	Destination string `json:"destination"`
+	Gateway     string `json:"gateway,omitempty"`
+	Netif       string `json:"netif,omitempty"`
+	Flags       string `json:"flags,omitempty"`
 }
 
 // OpnsenseAlias is a firewall address alias.
@@ -279,6 +346,110 @@ func flattenGateways(in []opnsensebackend.GatewayStatus) []OpnsenseGatewayStatus
 			Name: g.Name, Address: g.Address, Status: g.Status,
 			Delay: g.Delay, StdDev: g.StdDev, Loss: g.Loss,
 		}
+	}
+	return out
+}
+
+// ListBridges returns configured bridges and their members.
+func (s *OpnsenseService) ListBridges(ctx context.Context, opts OpnsenseOptions) ([]OpnsenseBridge, error) {
+	client := s.client(opts)
+	got, err := client.GetBridgeSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return flattenBridges(got), nil
+}
+
+// ListInterfaceSettings returns the per-interface config map.
+func (s *OpnsenseService) ListInterfaceSettings(ctx context.Context, opts OpnsenseOptions) ([]OpnsenseIfSetting, error) {
+	client := s.client(opts)
+	got, err := client.GetInterfaceSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return flattenIfSettings(got), nil
+}
+
+// GetDnsmasqSettings returns Dnsmasq enable/interfaces/ranges/hosts.
+func (s *OpnsenseService) GetDnsmasqSettings(ctx context.Context, opts OpnsenseOptions) (*OpnsenseDnsmasqSettings, error) {
+	client := s.client(opts)
+	got, err := client.GetDnsmasqSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return flattenDnsmasq(got), nil
+}
+
+// GetPfStatistics returns the pf state-table summary.
+func (s *OpnsenseService) GetPfStatistics(ctx context.Context, opts OpnsenseOptions) (*OpnsensePfStatistics, error) {
+	client := s.client(opts)
+	got, err := client.GetPfStatistics(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return flattenPf(got), nil
+}
+
+// ListKernelRoutes returns the kernel routing table.
+func (s *OpnsenseService) ListKernelRoutes(ctx context.Context, opts OpnsenseOptions) ([]OpnsenseKernelRoute, error) {
+	client := s.client(opts)
+	got, err := client.GetKernelRoutes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return flattenRoutes(got), nil
+}
+
+func flattenBridges(in []opnsensebackend.Bridge) []OpnsenseBridge {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]OpnsenseBridge, len(in))
+	for i, b := range in {
+		out[i] = OpnsenseBridge{UUID: b.UUID, Description: b.Description, Members: b.Members, STP: b.STP}
+	}
+	return out
+}
+
+func flattenIfSettings(in []opnsensebackend.InterfaceSetting) []OpnsenseIfSetting {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]OpnsenseIfSetting, len(in))
+	for i, s := range in {
+		out[i] = OpnsenseIfSetting{Name: s.Name, Device: s.Device, Description: s.Description, Enabled: s.Enabled, IPv4: s.IPv4, Subnet: s.Subnet}
+	}
+	return out
+}
+
+func flattenDnsmasq(in *opnsensebackend.DnsmasqSettings) *OpnsenseDnsmasqSettings {
+	if in == nil {
+		return nil
+	}
+	out := &OpnsenseDnsmasqSettings{Enabled: in.Enabled, Interfaces: in.Interfaces}
+	for _, r := range in.Ranges {
+		out.Ranges = append(out.Ranges, OpnsenseDnsmasqRange{UUID: r.UUID, Interface: r.Interface, Start: r.Start, End: r.End})
+	}
+	for _, h := range in.Hosts {
+		out.Hosts = append(out.Hosts, OpnsenseDnsmasqHost{UUID: h.UUID, Host: h.Host, Domain: h.Domain, IP: h.IP})
+	}
+	return out
+}
+
+func flattenPf(in *opnsensebackend.PfStatistics) *OpnsensePfStatistics {
+	if in == nil {
+		return nil
+	}
+	return &OpnsensePfStatistics{StateCount: in.StateCount, SourceCount: in.SourceCount, Limit: in.Limit}
+}
+
+func flattenRoutes(in []opnsensebackend.KernelRoute) []OpnsenseKernelRoute {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]OpnsenseKernelRoute, len(in))
+	for i, r := range in {
+		out[i] = OpnsenseKernelRoute{Destination: r.Destination, Gateway: r.Gateway, Netif: r.Netif, Flags: r.Flags}
 	}
 	return out
 }
@@ -482,6 +653,16 @@ func (s *OpnsenseService) Inventory(ctx context.Context, opts OpnsenseOptions) (
 	inv.ServicesOK = snap.ServicesOK
 	inv.Gateways = flattenGateways(snap.Gateways)
 	inv.GatewaysOK = snap.GatewaysOK
+	inv.Bridges = flattenBridges(snap.Bridges)
+	inv.BridgesOK = snap.BridgesOK
+	inv.InterfaceSettings = flattenIfSettings(snap.IfSettings)
+	inv.InterfaceSettingsOK = snap.IfSettingsOK
+	inv.Dnsmasq = flattenDnsmasq(snap.Dnsmasq)
+	inv.DnsmasqOK = snap.DnsmasqOK
+	inv.PfStatistics = flattenPf(snap.PfStats)
+	inv.PfStatisticsOK = snap.PfStatsOK
+	inv.KernelRoutes = flattenRoutes(snap.KernelRoutes)
+	inv.KernelRoutesOK = snap.KernelRoutesOK
 	for _, d := range specInv.Devices {
 		inv.Devices = append(inv.Devices, serviceDevice{
 			Type:     d.Type,

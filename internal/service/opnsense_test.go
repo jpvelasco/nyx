@@ -142,6 +142,48 @@ func TestOpnsenseServiceListServicesAndGateways(t *testing.T) {
 	})
 }
 
+func TestOpnsenseServiceReconReads(t *testing.T) {
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/interfaces/bridge_settings/search_item":
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"b1","descr":"lan-br","members":"igb0"}]}`)
+		case "/api/interfaces/settings/get":
+			testutil.WriteBody(w, `{"interface":{"lan":{"enable":"1","if":"bridge0"}}}`)
+		case "/api/dnsmasq/settings/get":
+			testutil.WriteBody(w, `{"dnsmasq":{"enable":"1"}}`)
+		case "/api/diagnostics/firewall/pf_statistics":
+			testutil.WriteBody(w, `{"states":{"current":9}}`)
+		case "/api/diagnostics/interface/get_routes":
+			testutil.WriteBody(w, `{"rows":[{"destination":"default","gateway":"203.0.113.1"}]}`)
+		default:
+			t.Errorf("unexpected %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	opts := opnsenseOptions(ts)
+	svc := NewOpnsenseService()
+	br, err := svc.ListBridges(context.Background(), opts)
+	if err != nil || len(br) != 1 || br[0].UUID != "b1" {
+		t.Fatalf("bridges = %+v, %v", br, err)
+	}
+	ifs, err := svc.ListInterfaceSettings(context.Background(), opts)
+	if err != nil || len(ifs) != 1 || ifs[0].Name != "lan" || !ifs[0].Enabled {
+		t.Fatalf("ifsettings = %+v, %v", ifs, err)
+	}
+	dns, err := svc.GetDnsmasqSettings(context.Background(), opts)
+	if err != nil || dns == nil || !dns.Enabled {
+		t.Fatalf("dnsmasq = %+v, %v", dns, err)
+	}
+	pf, err := svc.GetPfStatistics(context.Background(), opts)
+	if err != nil || pf == nil || pf.StateCount != 9 {
+		t.Fatalf("pf = %+v, %v", pf, err)
+	}
+	rt, err := svc.ListKernelRoutes(context.Background(), opts)
+	if err != nil || len(rt) != 1 || rt[0].Destination != "default" {
+		t.Fatalf("routes = %+v, %v", rt, err)
+	}
+}
+
 func TestOpnsenseServiceListFirewallRules(t *testing.T) {
 	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/firewall/filter/search_rule" {
@@ -218,6 +260,16 @@ func TestOpnsenseServiceInventory(t *testing.T) {
 				testutil.WriteBody(w, `{"total":1,"rows":[{"name":"dnsmasq","running":"1","description":"Dnsmasq DNS/DHCP"}]}`)
 			case "/api/routes/gateway/status":
 				testutil.WriteBody(w, `{"items":[{"name":"WAN_DHCP","address":"203.0.113.254","status":"none"}]}`)
+			case "/api/interfaces/bridge_settings/search_item":
+				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/interfaces/settings/get":
+				testutil.WriteBody(w, `{"interface":{}}`)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, `{"dnsmasq":{"enable":"0"}}`)
+			case "/api/diagnostics/firewall/pf_statistics":
+				testutil.WriteBody(w, `{"states":{"current":0}}`)
+			case "/api/diagnostics/interface/get_routes":
+				testutil.WriteBody(w, `{"rows":[]}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}

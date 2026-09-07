@@ -136,6 +136,16 @@ func opnsenseServer(t *testing.T, leases string) *httptest.Server {
 			testutil.WriteBody(w, `{"total":1,"rows":[{"name":"dnsmasq","running":"1","description":"Dnsmasq DNS/DHCP"}]}`)
 		case "/api/routes/gateway/status":
 			testutil.WriteBody(w, `{"items":[{"name":"WAN_DHCP","address":"203.0.113.254","status":"none"}]}`)
+		case "/api/interfaces/bridge_settings/search_item":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/interfaces/settings/get":
+			testutil.WriteBody(w, `{"interface":{}}`)
+		case "/api/dnsmasq/settings/get":
+			testutil.WriteBody(w, `{"dnsmasq":{"enable":"0"}}`)
+		case "/api/diagnostics/firewall/pf_statistics":
+			testutil.WriteBody(w, `{"states":{"current":0}}`)
+		case "/api/diagnostics/interface/get_routes":
+			testutil.WriteBody(w, `{"rows":[]}`)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -730,8 +740,8 @@ func TestProviderInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Inventory: %v (only interfaces is fatal)", err)
 		}
-		if len(res.Warnings) != 5 {
-			t.Errorf("Warnings = %v, want 5 (system info, rules, leases, services, gateways)", res.Warnings)
+		if len(res.Warnings) != 10 {
+			t.Errorf("Warnings = %v, want 10 (system, rules, leases, services, gateways + 5 recon reads)", res.Warnings)
 		}
 		if len(res.Inventory.Devices) != 1 {
 			t.Errorf("Devices = %+v, want 1 (interfaces still fetched)", res.Inventory.Devices)

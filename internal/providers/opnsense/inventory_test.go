@@ -30,6 +30,11 @@ func TestRenderInventory(t *testing.T) {
 		"2 active clients",
 		"== Services ==",
 		"== Gateways ==",
+		"== Bridges ==",
+		"== Interface settings ==",
+		"== Dnsmasq ==",
+		"== pf statistics ==",
+		"== Kernel routes ==",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render output missing %q:\n%s", want, out)

@@ -298,8 +298,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 49 {
-		t.Fatalf("expected 49 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 54 {
+		t.Fatalf("expected 54 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -308,7 +308,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_plan_port", "omada_apply_port_profile", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_services", "opnsense_list_gateways", "opnsense_inventory", "topology"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_plan_port", "omada_apply_port_profile", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_inventory", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -363,6 +363,11 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 		"opnsense_list_interfaces":         {"host"},
 		"opnsense_list_services":           {"host"},
 		"opnsense_list_gateways":           {"host"},
+		"opnsense_list_bridges":            {"host"},
+		"opnsense_list_interface_settings": {"host"},
+		"opnsense_get_dnsmasq_settings":    {"host"},
+		"opnsense_get_pf_statistics":       {"host"},
+		"opnsense_list_kernel_routes":      {"host"},
 		"opnsense_list_firewall_rules":     {"host"},
 		"opnsense_list_clients":            {"host"},
 		"opnsense_list_port_forward_rules": {"host"},
@@ -1488,6 +1493,38 @@ func TestDispatchOpnsenseListServicesAndGateways(t *testing.T) {
 	}
 }
 
+func TestDispatchOpnsenseReconReads(t *testing.T) {
+	stub := &stubOpnsenseSvc{
+		bridges:    []service.OpnsenseBridge{{UUID: "b1", Members: []string{"igb0"}}},
+		ifSettings: []service.OpnsenseIfSetting{{Name: "lan", Enabled: true}},
+		dnsmasq:    &service.OpnsenseDnsmasqSettings{Enabled: true},
+		pfStats:    &service.OpnsensePfStatistics{StateCount: 7},
+		routes:     []service.OpnsenseKernelRoute{{Destination: "default"}},
+	}
+	args := map[string]interface{}{"host": "fw.local", "api_key": "key1", "api_secret": "secret1"}
+	cases := []struct {
+		tool string
+		want string
+	}{
+		{"opnsense_list_bridges", `"uuid": "b1"`},
+		{"opnsense_list_interface_settings", `"name": "lan"`},
+		{"opnsense_get_dnsmasq_settings", `"enabled": true`},
+		{"opnsense_get_pf_statistics", `"state_count": 7`},
+		{"opnsense_list_kernel_routes", `"destination": "default"`},
+	}
+	for _, tc := range cases {
+		text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), tc.tool, args)
+		if isErr || !strings.Contains(text, tc.want) {
+			t.Errorf("%s = (%q, %v), want %q", tc.tool, text, isErr, tc.want)
+		}
+	}
+	errStub := &stubOpnsenseSvc{err: errors.New("fetch failed")}
+	text, isErr := serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_list_bridges", args)
+	if !isErr || !strings.Contains(text, "opnsense bridges request failed") {
+		t.Errorf("bridges err = (%q, %v)", text, isErr)
+	}
+}
+
 func TestDispatchOpnsenseInventory(t *testing.T) {
 	stub := &stubOpnsenseSvc{inventory: &service.OpnsenseInventory{
 		Host:              "fw.local",
@@ -2011,6 +2048,11 @@ type stubOpnsenseSvc struct {
 	aliases      []service.OpnsenseAlias
 	services     []service.OpnsenseServiceStatus
 	gateways     []service.OpnsenseGatewayStatus
+	bridges      []service.OpnsenseBridge
+	ifSettings   []service.OpnsenseIfSetting
+	dnsmasq      *service.OpnsenseDnsmasqSettings
+	pfStats      *service.OpnsensePfStatistics
+	routes       []service.OpnsenseKernelRoute
 	natMode      string
 	natSummary   *service.OpnsenseNatSummary
 	inventory    *service.OpnsenseInventory
@@ -2069,6 +2111,31 @@ func (s *stubOpnsenseSvc) ListServices(_ context.Context, opts service.OpnsenseO
 func (s *stubOpnsenseSvc) ListGateways(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseGatewayStatus, error) {
 	s.lastOpts = opts
 	return s.gateways, s.err
+}
+
+func (s *stubOpnsenseSvc) ListBridges(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseBridge, error) {
+	s.lastOpts = opts
+	return s.bridges, s.err
+}
+
+func (s *stubOpnsenseSvc) ListInterfaceSettings(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseIfSetting, error) {
+	s.lastOpts = opts
+	return s.ifSettings, s.err
+}
+
+func (s *stubOpnsenseSvc) GetDnsmasqSettings(_ context.Context, opts service.OpnsenseOptions) (*service.OpnsenseDnsmasqSettings, error) {
+	s.lastOpts = opts
+	return s.dnsmasq, s.err
+}
+
+func (s *stubOpnsenseSvc) GetPfStatistics(_ context.Context, opts service.OpnsenseOptions) (*service.OpnsensePfStatistics, error) {
+	s.lastOpts = opts
+	return s.pfStats, s.err
+}
+
+func (s *stubOpnsenseSvc) ListKernelRoutes(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKernelRoute, error) {
+	s.lastOpts = opts
+	return s.routes, s.err
 }
 
 func (s *stubOpnsenseSvc) GetOutboundNatMode(_ context.Context, opts service.OpnsenseOptions) (string, error) {
@@ -2582,6 +2649,11 @@ func TestDispatchNatReads_MissingHost(t *testing.T) {
 		"opnsense_get_nat",
 		"opnsense_list_services",
 		"opnsense_list_gateways",
+		"opnsense_list_bridges",
+		"opnsense_list_interface_settings",
+		"opnsense_get_dnsmasq_settings",
+		"opnsense_get_pf_statistics",
+		"opnsense_list_kernel_routes",
 		"opnsense_inventory",
 	}
 	for _, tool := range opnsenseTools {
