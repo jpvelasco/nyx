@@ -1763,6 +1763,129 @@ func TestOmadaServiceListLanProfiles_FetchFails(t *testing.T) {
 	}
 }
 
+func TestOmadaServicePlanApplyLAN(t *testing.T) {
+	st := omadaPortStateFresh()
+	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+	svc := NewOmadaService()
+	ctx := context.Background()
+	opts := omadaPortOpts(ts.URL)
+	plan, err := svc.PlanLAN(ctx, opts, OmadaLANRequest{Name: "trusted"})
+	if err != nil {
+		t.Fatalf("PlanLAN existing: %v", err)
+	}
+	if plan.Action != "unchanged" && plan.Action != "update" && plan.Action != "create" {
+		t.Errorf("plan action = %q", plan.Action)
+	}
+	create, err := svc.PlanLAN(ctx, opts, OmadaLANRequest{Name: "newlan", VLAN: 99, GatewaySubnet: "10.0.99.1/24"})
+	if err != nil {
+		t.Fatalf("PlanLAN create: %v", err)
+	}
+	if create.Action != "create" {
+		t.Errorf("create action = %q", create.Action)
+	}
+	if _, err := svc.PlanLAN(ctx, opts, OmadaLANRequest{}); err == nil {
+		t.Fatal("expected name required")
+	}
+	dry, err := svc.ApplyLAN(ctx, opts, OmadaLANRequest{Name: "newlan", VLAN: 99, GatewaySubnet: "10.0.99.1/24"}, true)
+	if err != nil {
+		t.Fatalf("ApplyLAN dry: %v", err)
+	}
+	if !dry.DryRun || dry.Outcome != "create" && dry.Outcome != "created" {
+		t.Errorf("dry = %+v", dry)
+	}
+	del, err := svc.PlanLAN(ctx, opts, OmadaLANRequest{Name: "trusted", Delete: true})
+	if err != nil {
+		t.Fatalf("PlanLAN delete: %v", err)
+	}
+	if del.Action != "delete" && del.Action != "unchanged" {
+		t.Errorf("delete action = %q", del.Action)
+	}
+	missing, err := svc.PlanLAN(ctx, opts, OmadaLANRequest{Name: "no-such-lan", Delete: true})
+	if err != nil || missing.Action != "unchanged" {
+		t.Fatalf("delete missing = %+v, %v", missing, err)
+	}
+}
+
+func TestOmadaServiceApplyLAN_Mutations(t *testing.T) {
+	st := omadaPortStateFresh()
+	created := false
+	h := omadaPortBaseHandler(t, st)
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/lan-networks") && r.Method == http.MethodPost {
+			created = true
+			writeOmadaEnvelope(w, 0, `{"id":"n-new"}`)
+			return
+		}
+		if strings.Contains(r.URL.Path, "/lan-networks/") && r.Method == http.MethodPut {
+			writeOmadaEnvelope(w, 0, `{}`)
+			return
+		}
+		if strings.Contains(r.URL.Path, "/lan-networks/") && r.Method == http.MethodDelete {
+			writeOmadaEnvelope(w, 0, `{}`)
+			return
+		}
+		h(w, r)
+	})
+	svc := NewOmadaService()
+	ctx := context.Background()
+	opts := omadaPortOpts(ts.URL)
+	res, err := svc.ApplyLAN(ctx, opts, OmadaLANRequest{Name: "newlan", VLAN: 99, GatewaySubnet: "10.0.99.1/24"}, false)
+	if err != nil {
+		t.Fatalf("create apply: %v", err)
+	}
+	if res.Outcome != "created" || !created {
+		t.Errorf("create = %+v created=%v", res, created)
+	}
+	// existing trusted network should update or stay unchanged
+	res, err = svc.ApplyLAN(ctx, opts, OmadaLANRequest{Name: "trusted", VLAN: 1, Isolated: true}, false)
+	if err != nil {
+		t.Fatalf("update apply: %v", err)
+	}
+	if res.Outcome != "updated" && res.Outcome != "unchanged" {
+		t.Errorf("update = %+v", res)
+	}
+	res, err = svc.ApplyLAN(ctx, opts, OmadaLANRequest{Name: "trusted", Delete: true}, false)
+	if err != nil {
+		t.Fatalf("delete apply: %v", err)
+	}
+	if res.Outcome != "deleted" && res.Outcome != "unchanged" {
+		t.Errorf("delete = %+v", res)
+	}
+}
+
+func TestOmadaServicePlanApplyLAN_Errors(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/openapi/authorize/token" {
+			writeOmadaEnvelope(w, 0, `{"accessToken":"t"}`)
+			return
+		}
+		writeOmadaEnvelope(w, -33004, `null`)
+	})
+	opts := omadaPortOpts(ts.URL)
+	if _, err := NewOmadaService().PlanLAN(context.Background(), opts, OmadaLANRequest{Name: "iot"}); err == nil {
+		t.Fatal("expected PlanLAN fetch error")
+	}
+	if _, err := NewOmadaService().ApplyLAN(context.Background(), opts, OmadaLANRequest{Name: "iot"}, false); err == nil {
+		t.Fatal("expected ApplyLAN fetch error")
+	}
+}
+
+func TestOmadaServiceApplyLAN_CreateFails(t *testing.T) {
+	st := omadaPortStateFresh()
+	h := omadaPortBaseHandler(t, st)
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/lan-networks") && r.Method == http.MethodPost {
+			writeOmadaEnvelope(w, -1001, `null`)
+			return
+		}
+		h(w, r)
+	})
+	_, err := NewOmadaService().ApplyLAN(context.Background(), omadaPortOpts(ts.URL), OmadaLANRequest{Name: "newlan", VLAN: 99, GatewaySubnet: "10.0.99.1/24"}, false)
+	if err == nil {
+		t.Fatal("expected create failure")
+	}
+}
+
 func TestOmadaServicePlanPort(t *testing.T) {
 	st := omadaPortStateFresh()
 	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))

@@ -50,6 +50,76 @@ type Network struct {
 	Primary       bool
 }
 
+// LANWrite is the create/update payload for a site LAN network.
+type LANWrite struct {
+	Name              string         `json:"name"`
+	Purpose           int            `json:"purpose"` // 0 VLAN
+	VLANID            int            `json:"vlan"`
+	GatewaySubnet     string         `json:"gatewaySubnet"`
+	Isolation         bool           `json:"isolation"`
+	IGMPSnoopEnable   bool           `json:"igmpSnoopEnable"`
+	MLDSnoopEnable    bool           `json:"mldSnoopEnable"`
+	DHCPL2RelayEnable bool           `json:"dhcpL2RelayEnable"`
+	DHCPGuard         bool           `json:"dhcpGuard"`
+	DHCPv6Guard       bool           `json:"dhcpv6Guard"`
+	DHCPSettings      DHCPSettingsVO `json:"dhcpSettingsVO"`
+}
+
+// DHCPSettingsVO is the nested DHCP pool on a LAN write.
+type DHCPSettingsVO struct {
+	Enable      bool   `json:"enable"`
+	IPAddrStart string `json:"ipaddrStart,omitempty"`
+	IPAddrEnd   string `json:"ipaddrEnd,omitempty"`
+	LeaseTime   int    `json:"leasetime,omitempty"`
+	DHCPNS      string `json:"dhcpns,omitempty"`
+}
+
+// CreateLANNetwork POSTs a new site LAN and returns its id.
+func (c *Client) CreateLANNetwork(ctx context.Context, siteID string, w LANWrite) (string, error) {
+	var res struct {
+		ID string `json:"id"`
+	}
+	if err := c.post(ctx, fmt.Sprintf("sites/%s/lan-networks", siteID), w, &res); err != nil {
+		return "", fmt.Errorf("creating LAN %q: %w", w.Name, err)
+	}
+	if res.ID == "" {
+		return "", fmt.Errorf("creating LAN %q: controller returned no network id", w.Name)
+	}
+	return res.ID, nil
+}
+
+// UpdateLANNetwork PUTs the full writable LAN payload.
+func (c *Client) UpdateLANNetwork(ctx context.Context, siteID, networkID string, w LANWrite) error {
+	if err := c.put(ctx, fmt.Sprintf("sites/%s/lan-networks/%s", siteID, networkID), w, nil); err != nil {
+		return fmt.Errorf("updating LAN %q: %w", networkID, err)
+	}
+	return nil
+}
+
+// DeleteLANNetwork deletes a site LAN.
+func (c *Client) DeleteLANNetwork(ctx context.Context, siteID, networkID string) error {
+	if err := c.delete(ctx, fmt.Sprintf("sites/%s/lan-networks/%s", siteID, networkID)); err != nil {
+		return fmt.Errorf("deleting LAN %q: %w", networkID, err)
+	}
+	return nil
+}
+
+// LANMatchesWrite reports whether an existing network already has the
+// requested name, VLAN, CIDR, DHCP pool, and posture.
+func LANMatchesWrite(n Network, w LANWrite) bool {
+	return strings.EqualFold(n.Name, w.Name) &&
+		n.VLANID == w.VLANID &&
+		n.GatewaySubnet == w.GatewaySubnet &&
+		n.Isolated == w.Isolation &&
+		n.DHCPEnabled == w.DHCPSettings.Enable &&
+		n.DHCPStart == w.DHCPSettings.IPAddrStart &&
+		n.DHCPEnd == w.DHCPSettings.IPAddrEnd &&
+		n.DHCPL2Relay == w.DHCPL2RelayEnable &&
+		n.DHCPGuard == w.DHCPGuard &&
+		n.IGMPSnoop == w.IGMPSnoopEnable &&
+		n.MLDSnoop == w.MLDSnoopEnable
+}
+
 // lanPurpose is the wire value of "purpose": the 6.x Open API sends
 // integer(int32) (0: VLAN, 1: interface); older fixtures send the string
 // form. It decodes both and exposes the display string.

@@ -55,6 +55,8 @@ var toolHandlers = map[string]toolHandler{
 	"omada_list_lan_multicasts":        (*Server).toolOmadaListLANMulticasts,
 	"omada_plan_port":                  (*Server).toolOmadaPlanPort,
 	"omada_apply_port_profile":         (*Server).toolOmadaApplyPortProfile,
+	"omada_plan_lan":                   (*Server).toolOmadaPlanLAN,
+	"omada_apply_lan":                  (*Server).toolOmadaApplyLAN,
 	"opnsense_get_info":                (*Server).toolOpnsenseGetInfo,
 	"opnsense_list_interfaces":         (*Server).toolOpnsenseListInterfaces,
 	"opnsense_list_firewall_rules":     (*Server).toolOpnsenseListFirewallRules,
@@ -621,6 +623,55 @@ func (s *Server) toolOmadaApplyPortProfile(ctx context.Context, args map[string]
 	res, err := s.omadaSvc.ApplyPortProfile(ctx, opts, req, argBoolDefault(args, "dry_run", true))
 	if err != nil {
 		return errResult(fmt.Sprintf("omada port profile apply failed: %v", err))
+	}
+	return okResult(toJSON(res))
+}
+
+func lanRequestFromArgs(args map[string]interface{}) (service.OmadaLANRequest, string) {
+	req := service.OmadaLANRequest{
+		Name:          argString(args, "name"),
+		VLAN:          argIntDefault(args, "vlan", 0),
+		GatewaySubnet: argString(args, "gateway_subnet"),
+		Isolated:      argBoolDefault(args, "isolated", false),
+		DHCPEnabled:   argBoolDefault(args, "dhcp_enabled", false),
+		DHCPStart:     argString(args, "dhcp_start"),
+		DHCPEnd:       argString(args, "dhcp_end"),
+		Delete:        argBoolDefault(args, "delete", false),
+	}
+	if req.Name == "" {
+		return req, "name parameter is required"
+	}
+	return req, ""
+}
+
+func (s *Server) toolOmadaPlanLAN(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req, rmsg := lanRequestFromArgs(args)
+	if rmsg != "" {
+		return errResult(rmsg)
+	}
+	plan, err := s.omadaSvc.PlanLAN(ctx, opts, req)
+	if err != nil {
+		return errResult(fmt.Sprintf("omada lan plan request failed: %v", err))
+	}
+	return okResult(toJSON(plan))
+}
+
+func (s *Server) toolOmadaApplyLAN(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req, rmsg := lanRequestFromArgs(args)
+	if rmsg != "" {
+		return errResult(rmsg)
+	}
+	res, err := s.omadaSvc.ApplyLAN(ctx, opts, req, argBoolDefault(args, "dry_run", true))
+	if err != nil {
+		return errResult(fmt.Sprintf("omada lan apply failed: %v", err))
 	}
 	return okResult(toJSON(res))
 }
