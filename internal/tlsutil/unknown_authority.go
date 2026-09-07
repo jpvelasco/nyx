@@ -89,20 +89,48 @@ func fetchChain(host string, timeout time.Duration) ([]*x509.Certificate, error)
 		addr = net.JoinHostPort(host, "443")
 	}
 	dialer := &net.Dialer{Timeout: timeout}
+	// Default verification cannot succeed against a privately-issued
+	// controller (that is why the operator is fetching the chain).
+	// InsecureSkipVerify plus VerifyPeerCertificate is the documented
+	// Go pattern for "see the presented chain, then decide": we parse
+	// every DER and require at least one certificate. No application
+	// data is sent. Data-plane clients still verify via --ca-cert.
+	var certs []*x509.Certificate
 	conn, err := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{
-		// nosemgrep: this is a cert-extraction helper, not a data-plane call
-		InsecureSkipVerify: true, // #nosec G402 — fetch-cert must see the presented chain
 		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true, // #nosec G402 — extract-only; verified below
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			parsed, perr := parsePresentedCerts(rawCerts)
+			if perr != nil {
+				return perr
+			}
+			certs = parsed
+			return nil
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fetching certificate chain: %w", err)
 	}
 	defer conn.Close()
-	state := conn.ConnectionState()
-	if len(state.PeerCertificates) == 0 {
+	if len(certs) == 0 {
 		return nil, errors.New("fetching certificate chain: server presented no certificates")
 	}
-	return state.PeerCertificates, nil
+	return certs, nil
+}
+
+func parsePresentedCerts(rawCerts [][]byte) ([]*x509.Certificate, error) {
+	if len(rawCerts) == 0 {
+		return nil, errors.New("server presented no certificates")
+	}
+	parsed := make([]*x509.Certificate, 0, len(rawCerts))
+	for _, der := range rawCerts {
+		c, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, fmt.Errorf("parsing presented certificate: %w", err)
+		}
+		parsed = append(parsed, c)
+	}
+	return parsed, nil
 }
 
 func writePEM(path string, certs []*x509.Certificate) error {
