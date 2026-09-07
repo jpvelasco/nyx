@@ -400,6 +400,47 @@ func (s *OpnsenseService) ListKernelRoutes(ctx context.Context, opts OpnsenseOpt
 	return flattenRoutes(got), nil
 }
 
+// OpnsenseKeaSubnet is one Kea DHCPv4 subnet.
+type OpnsenseKeaSubnet struct {
+	UUID        string `json:"uuid"`
+	Subnet      string `json:"subnet"`
+	Description string `json:"description,omitempty"`
+}
+
+// OpnsenseKeaReservation is one Kea static mapping.
+type OpnsenseKeaReservation struct {
+	UUID     string `json:"uuid"`
+	IP       string `json:"ip,omitempty"`
+	MAC      string `json:"mac,omitempty"`
+	Hostname string `json:"hostname,omitempty"`
+}
+
+// ListKeaSubnets returns Kea DHCPv4 subnets.
+func (s *OpnsenseService) ListKeaSubnets(ctx context.Context, opts OpnsenseOptions) ([]OpnsenseKeaSubnet, error) {
+	got, err := s.client(opts).GetKeaSubnets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]OpnsenseKeaSubnet, len(got))
+	for i, x := range got {
+		out[i] = OpnsenseKeaSubnet{UUID: x.UUID, Subnet: x.Subnet, Description: x.Description}
+	}
+	return out, nil
+}
+
+// ListKeaReservations returns Kea DHCPv4 reservations.
+func (s *OpnsenseService) ListKeaReservations(ctx context.Context, opts OpnsenseOptions) ([]OpnsenseKeaReservation, error) {
+	got, err := s.client(opts).GetKeaReservations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]OpnsenseKeaReservation, len(got))
+	for i, x := range got {
+		out[i] = OpnsenseKeaReservation{UUID: x.UUID, IP: x.IP, MAC: x.MAC, Hostname: x.Hostname}
+	}
+	return out, nil
+}
+
 func flattenBridges(in []opnsensebackend.Bridge) []OpnsenseBridge {
 	if len(in) == 0 {
 		return nil

@@ -72,6 +72,8 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_get_dnsmasq_settings":    (*Server).toolOpnsenseGetDnsmasqSettings,
 	"opnsense_get_pf_statistics":       (*Server).toolOpnsenseGetPfStatistics,
 	"opnsense_list_kernel_routes":      (*Server).toolOpnsenseListKernelRoutes,
+	"opnsense_list_kea_subnets":        (*Server).toolOpnsenseListKeaSubnets,
+	"opnsense_list_kea_reservations":   (*Server).toolOpnsenseListKeaReservations,
 	"opnsense_get_nat":                 (*Server).toolOpnsenseGetNAT,
 	"opnsense_inventory":               (*Server).toolOpnsenseInventory,
 	"opnsense_plan_nat":                (*Server).toolOpnsensePlanNat,
@@ -745,6 +747,18 @@ func (s *Server) toolOpnsenseGetDnsmasqSettings(ctx context.Context, args map[st
 func (s *Server) toolOpnsenseGetPfStatistics(ctx context.Context, args map[string]interface{}) toolDispatchResult {
 	return s.opnsenseReadJSON(ctx, args, "opnsense pf statistics request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 		return s.opnsenseSvc.GetPfStatistics(ctx, opts)
+	})
+}
+
+func (s *Server) toolOpnsenseListKeaSubnets(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "opnsense kea subnets request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.ListKeaSubnets(ctx, opts)
+	})
+}
+
+func (s *Server) toolOpnsenseListKeaReservations(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "opnsense kea reservations request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.ListKeaReservations(ctx, opts)
 	})
 }
 
