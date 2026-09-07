@@ -144,7 +144,7 @@ func buildInfoCmd(p providers.Provider) *cobra.Command {
 			return nil
 		},
 	}
-	addProviderFlags(cmd)
+	addProviderFlags(cmd, p.Name())
 	return cmd
 }
 
@@ -194,7 +194,7 @@ func buildImportCmd(p providers.Provider) *cobra.Command {
 			return nil
 		},
 	}
-	addProviderFlags(cmd)
+	addProviderFlags(cmd, p.Name())
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name (defaults to first site)")
 	cmd.Flags().StringVar(&providerOutFile, "out", "", "Write spec YAML to file (default: stdout)")
 	cmd.Flags().BoolVar(&providerDebug, "debug", false, "Print raw API responses to stderr")
@@ -243,7 +243,7 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 			return statusExitError(result.Report.Status)
 		},
 	}
-	addProviderFlags(cmd)
+	addProviderFlags(cmd, p.Name())
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name")
 	cmd.Flags().BoolVar(&providerDebug, "debug", false, "Print raw API responses to stderr")
 	return cmd
@@ -289,7 +289,7 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 			return nil
 		},
 	}
-	addProviderFlags(cmd)
+	addProviderFlags(cmd, p.Name())
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name (defaults to first site)")
 	cmd.Flags().BoolVar(&providerDebug, "debug", false, "Print raw API responses to stderr")
 	return cmd
@@ -383,12 +383,24 @@ func requireProviderHost(opts providers.ImportOptions, providerName string) erro
 		hostEnv, providerName, credEnv)
 }
 
-func addProviderFlags(cmd *cobra.Command) {
+func addProviderFlags(cmd *cobra.Command, providerName string) {
 	cmd.Flags().StringVar(&providerHost, "host", "", "Controller IP or hostname")
-	cmd.Flags().StringVar(&providerClientID, "client-id", "", "Omada Open API client ID")
-	cmd.Flags().StringVar(&providerClientSecret, "client-secret", "", "Omada Open API client secret")
+	idName, secretName, idHelp, secretHelp := providerCredFlagNames(providerName)
+	cmd.Flags().StringVar(&providerClientID, idName, "", idHelp)
+	cmd.Flags().StringVar(&providerClientSecret, secretName, "", secretHelp)
 	cmd.Flags().BoolVar(&providerSkipTLS, "skip-tls-verify", false, "Skip TLS certificate verification (like curl -k)")
 	cmd.Flags().StringVar(&providerCACertPath, "ca-cert", "", "Path to custom CA certificate PEM file")
+}
+
+// providerCredFlagNames returns the CLI flag names and help text for the
+// credential pair. Both providers still bind onto providerClientID /
+// providerClientSecret; only the user-facing names differ. Unknown
+// providers keep the historical Omada flags.
+func providerCredFlagNames(providerName string) (idName, secretName, idHelp, secretHelp string) {
+	if strings.EqualFold(providerName, "opnsense") {
+		return "api-key", "api-secret", "OPNsense API key", "OPNsense API secret"
+	}
+	return "client-id", "client-secret", "Omada Open API client ID", "Omada Open API client secret"
 }
 
 func marshalSpecYAML(result *providers.ImportResult, providerName string) ([]byte, error) {

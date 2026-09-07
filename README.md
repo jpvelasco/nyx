@@ -333,7 +333,7 @@ Credentials can be passed via flags, env vars (`OMADA_HOST`, `OMADA_CLIENT_ID`, 
 
 ### OPNsense
 
-OPNsense provider supports info, import, and check. Use your OPNsense address (typically the LAN or a management IP):
+OPNsense provider supports info, import, check, and inventory. Use your OPNsense address (typically the LAN or a management IP):
 
 ```bash
 # Example using the canonical management gateway (see docs/naming.md)
@@ -344,6 +344,9 @@ nyx opnsense import --host 10.0.11.1 --api-key <key> --api-secret <secret>
 
 # Import and audit in one step
 nyx opnsense check --host 10.0.11.1 --api-key <key> --api-secret <secret> --spec examples/homelab.yaml
+
+# Point-in-time inventory (interfaces, firewall rules, DHCP clients)
+nyx opnsense inventory --host 10.0.11.1 --api-key <key> --api-secret <secret>
 ```
 
 ## Project Structure
