@@ -1870,6 +1870,22 @@ func TestOmadaServicePlanApplyLAN_Errors(t *testing.T) {
 	}
 }
 
+func TestOmadaServiceApplyLAN_CreateFails(t *testing.T) {
+	st := omadaPortStateFresh()
+	h := omadaPortBaseHandler(t, st)
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/lan-networks") && r.Method == http.MethodPost {
+			writeOmadaEnvelope(w, -1001, `null`)
+			return
+		}
+		h(w, r)
+	})
+	_, err := NewOmadaService().ApplyLAN(context.Background(), omadaPortOpts(ts.URL), OmadaLANRequest{Name: "newlan", VLAN: 99, GatewaySubnet: "10.0.99.1/24"}, false)
+	if err == nil {
+		t.Fatal("expected create failure")
+	}
+}
+
 func TestOmadaServicePlanPort(t *testing.T) {
 	st := omadaPortStateFresh()
 	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
