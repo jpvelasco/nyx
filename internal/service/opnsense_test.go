@@ -704,4 +704,40 @@ func TestOpnsenseServiceFilter_Errors(t *testing.T) {
 	if _, err := NewOpnsenseService().PlanFilter(context.Background(), opts, OpnsenseFilterRequest{Kind: "alias", Name: "x"}); err == nil {
 		t.Fatal("expected alias list error")
 	}
+
+	listed := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "filter/search_rule"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"r1","enabled":"1","action":"block","description":"isolate","source_net":"lan","destination_net":"iot"}]}`)
+		case strings.Contains(r.URL.Path, "alias/search_item"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"a1","name":"iot_net","type":"network","address":"10.0.60.0/24","enabled":"1"}]}`)
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+	lopts := opnsenseOptions(listed)
+	svc := NewOpnsenseService()
+	miss, err := svc.PlanFilter(context.Background(), lopts, OpnsenseFilterRequest{Name: "nope", Delete: true})
+	if err != nil || miss.Action != "unchanged" {
+		t.Fatalf("filter delete miss = %+v %v", miss, err)
+	}
+	amiss, err := svc.PlanFilter(context.Background(), lopts, OpnsenseFilterRequest{Kind: "alias", Name: "nope", Delete: true})
+	if err != nil || amiss.Action != "unchanged" {
+		t.Fatalf("alias delete miss = %+v %v", amiss, err)
+	}
+	if _, err := svc.ApplyFilter(context.Background(), lopts, OpnsenseFilterRequest{Name: "isolate", Action: "reject", Source: "lan", Destination: "iot", Enabled: true}, false); err == nil {
+		t.Fatal("expected filter update write error")
+	}
+	if _, err := svc.ApplyFilter(context.Background(), lopts, OpnsenseFilterRequest{Name: "isolate", Delete: true}, false); err == nil {
+		t.Fatal("expected filter delete write error")
+	}
+	if _, err := svc.ApplyFilter(context.Background(), lopts, OpnsenseFilterRequest{Kind: "alias", Name: "iot_net", Addresses: []string{"10.0.99.0/24"}, Enabled: true}, false); err == nil {
+		t.Fatal("expected alias update write error")
+	}
+	if _, err := svc.ApplyFilter(context.Background(), lopts, OpnsenseFilterRequest{Kind: "alias", Name: "iot_net", Delete: true}, false); err == nil {
+		t.Fatal("expected alias delete write error")
+	}
+	if _, err := svc.ApplyFilter(context.Background(), lopts, OpnsenseFilterRequest{Action: "block", Source: "guest", Destination: "iot", Enabled: true}, false); err == nil {
+		t.Fatal("expected filter create write error")
+	}
 }

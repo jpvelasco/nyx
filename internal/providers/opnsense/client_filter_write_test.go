@@ -79,6 +79,12 @@ func TestFilterAliasWritesAndHelpers(t *testing.T) {
 	if AliasMatchesWrite(aliases[0], AliasWrite{Name: "other"}) {
 		t.Fatal("want alias name mismatch")
 	}
+	if FilterMatchesWrite(rules[0], FilterWrite{Action: "block", Source: "lan", Destination: "iot", Description: "other", Enabled: true}) {
+		t.Fatal("want description mismatch")
+	}
+	if AliasMatchesWrite(aliases[0], AliasWrite{Name: "iot_net", Type: "host", Addresses: []string{"10.0.60.0/24"}}) {
+		t.Fatal("want alias type mismatch")
+	}
 	w := FilterWrite{Action: "block", Interface: "lan", Protocol: "tcp", SourcePort: "any", DestPort: "443", Direction: "in", IPProtocol: "inet", Description: "https"}
 	if _, err := filterWire(w); err != nil {
 		t.Fatal(err)
