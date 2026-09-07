@@ -62,6 +62,7 @@ var mcpCapabilityTools = map[string]map[string][]string{
 			"opnsense_list_kernel_routes",
 			"opnsense_list_kea_subnets",
 			"opnsense_list_kea_reservations",
+			"opnsense_list_vlans",
 		},
 	},
 }
