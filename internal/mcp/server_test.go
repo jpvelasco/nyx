@@ -1467,6 +1467,12 @@ func TestDispatchOpnsenseGetFirewallRule(t *testing.T) {
 	}); !isErr || !strings.Contains(text, "uuid parameter is required") {
 		t.Errorf("missing uuid = (%q, %v)", text, isErr)
 	}
+	errStub := &stubOpnsenseSvc{err: errors.New("boom")}
+	if text, isErr := serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_get_firewall_rule", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1", "uuid": "u1",
+	}); !isErr || !strings.Contains(text, "firewall rule request failed") {
+		t.Errorf("get err = (%q, %v)", text, isErr)
+	}
 }
 
 func TestDispatchOpnsenseListClients(t *testing.T) {
