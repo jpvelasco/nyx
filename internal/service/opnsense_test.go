@@ -547,3 +547,68 @@ func TestOpnsenseServicePlanApplyVLAN(t *testing.T) {
 		t.Fatalf("delete missing = %+v %v", missingDel, err)
 	}
 }
+
+func TestOpnsenseServiceVLAN_Errors(t *testing.T) {
+	failAll := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	opts := opnsenseOptions(failAll)
+	if _, err := NewOpnsenseService().ListVLANs(context.Background(), opts); err == nil {
+		t.Fatal("expected list error")
+	}
+	if _, err := NewOpnsenseService().PlanVLAN(context.Background(), opts, OpnsenseVLANRequest{Parent: "igb0", Tag: 10}); err == nil {
+		t.Fatal("expected vlan plan fetch error")
+	}
+	if _, err := NewOpnsenseService().PlanVLAN(context.Background(), opts, OpnsenseVLANRequest{Kind: "bridge", UUID: "b1", Members: []string{"igb0"}}); err == nil {
+		t.Fatal("expected bridge plan fetch error")
+	}
+	if _, err := NewOpnsenseService().ApplyVLAN(context.Background(), opts, OpnsenseVLANRequest{Parent: "igb0", Tag: 10}, false); err == nil {
+		t.Fatal("expected apply plan error")
+	}
+
+	writeFail := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "vlan_settings/search_item"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"v1","if":"igb0","tag":"60","descr":"iot"}]}`)
+		case strings.Contains(r.URL.Path, "bridge_settings/search_item"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"b1","members":"igb0"}]}`)
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+	wopts := opnsenseOptions(writeFail)
+	if _, err := NewOpnsenseService().ApplyVLAN(context.Background(), wopts, OpnsenseVLANRequest{Parent: "igb0", Tag: 70}, false); err == nil {
+		t.Fatal("expected create write error")
+	}
+	if _, err := NewOpnsenseService().ApplyVLAN(context.Background(), wopts, OpnsenseVLANRequest{Parent: "igb0", Tag: 60, Description: "x"}, false); err == nil {
+		t.Fatal("expected update write error")
+	}
+	if _, err := NewOpnsenseService().ApplyVLAN(context.Background(), wopts, OpnsenseVLANRequest{UUID: "v1", Delete: true}, false); err == nil {
+		t.Fatal("expected delete write error")
+	}
+	if _, err := NewOpnsenseService().ApplyVLAN(context.Background(), wopts, OpnsenseVLANRequest{Kind: "bridge", UUID: "b1", Members: []string{"igb0", "igb1"}}, false); err == nil {
+		t.Fatal("expected bridge write error")
+	}
+
+	reconfFail := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "search_item"):
+			if strings.Contains(r.URL.Path, "bridge") {
+				testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"b1","members":"igb0"}]}`)
+				return
+			}
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case strings.Contains(r.URL.Path, "reconfigure"):
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			testutil.WriteBody(w, `{"result":"saved","uuid":"v-new"}`)
+		}
+	})
+	ropts := opnsenseOptions(reconfFail)
+	if _, err := NewOpnsenseService().ApplyVLAN(context.Background(), ropts, OpnsenseVLANRequest{Parent: "igb0", Tag: 80}, false); err == nil {
+		t.Fatal("expected vlan reconfigure error")
+	}
+	if _, err := NewOpnsenseService().ApplyVLAN(context.Background(), ropts, OpnsenseVLANRequest{Kind: "bridge", UUID: "b1", Members: []string{"igb0", "igb1"}}, false); err == nil {
+		t.Fatal("expected bridge reconfigure error")
+	}
+}

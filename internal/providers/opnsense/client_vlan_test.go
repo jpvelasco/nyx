@@ -102,4 +102,16 @@ func TestGetVLANs_SkipsMalformedAndReconfigureErrors(t *testing.T) {
 	if err := badJSON.ReconfigureVLANs(context.Background()); err == nil {
 		t.Fatal("expected decode error")
 	}
+	if BridgeMembersMatch([]string{"igb0", "igb1"}, []string{"igb0", "igb2"}) {
+		t.Fatal("want member mismatch")
+	}
+	failSearch, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	if _, err := failSearch.GetVLANs(context.Background()); err == nil {
+		t.Fatal("expected search error")
+	}
+	if err := failSearch.ReconfigureVLANs(context.Background()); err == nil {
+		t.Fatal("expected post error")
+	}
 }
