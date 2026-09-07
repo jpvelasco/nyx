@@ -150,6 +150,11 @@ type opnsenseSurface interface {
 	ListAliases(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseAlias, error)
 	ListServices(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseServiceStatus, error)
 	ListGateways(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseGatewayStatus, error)
+	ListBridges(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseBridge, error)
+	ListInterfaceSettings(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseIfSetting, error)
+	GetDnsmasqSettings(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseDnsmasqSettings, error)
+	GetPfStatistics(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsensePfStatistics, error)
+	ListKernelRoutes(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKernelRoute, error)
 	GetOutboundNatMode(ctx context.Context, opts service.OpnsenseOptions) (string, error)
 	GetNAT(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseNatSummary, error)
 	Inventory(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseInventory, error)
@@ -676,6 +681,31 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		{
 			Name:        "opnsense_list_gateways",
 			Description: "List OPNsense gateway health (name, address, status, delay, loss). A 403 means the API user lacks the System: Gateways page privilege.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_bridges",
+			Description: "List OPNsense configured bridges and their member NICs (GET interfaces/bridge_settings/search_item). A 403 means the API user lacks the Network: Interfaces page privilege.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_interface_settings",
+			Description: "List OPNsense per-interface config (enable, device, address) from GET interfaces/settings/get. A 403 means the API user lacks the Network: Interfaces page privilege.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_get_dnsmasq_settings",
+			Description: "Read OPNsense Dnsmasq settings: enabled, listening interfaces, DHCP ranges, and static hosts. A 403 means the API user lacks the DHCPv4 page privilege.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_get_pf_statistics",
+			Description: "Read OPNsense pf state-table summary (current states / limit). A 403 means the API user lacks the Diagnostics: Firewall page privilege.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_kernel_routes",
+			Description: "List the OPNsense kernel routing table (GET diagnostics/interface/get_routes). A 403 means the API user lacks the Diagnostics: Interfaces page privilege.",
 			InputSchema: opnsenseToolSchema(),
 		},
 		{

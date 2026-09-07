@@ -138,6 +138,41 @@ Then each item is returned (or `rows` when that is the envelope)
 And a 403 is the stable page-privilege error (inventory degrades)
 And the test: `TestGetGatewayStatus`
 
+### S2.13 Bridge settings
+Given `GET /api/interfaces/bridge_settings/search_item` → paged rows with uuid, descr/description, members, stp
+When `GetBridgeSettings` is called
+Then each named row is returned with members split on commas and stp decoded as a loose bool
+And a 403 is the stable page-privilege error (inventory degrades)
+And the test: `TestGetBridgeSettings`
+
+### S2.14 Interface settings
+Given `GET /api/interfaces/settings/get` → `{"interface":{"lan":{"enable":"1","if":"bridge0",...}}}`
+When `GetInterfaceSettings` is called
+Then each named interface is returned with enable/device/address
+And a 403 is the stable page-privilege error (inventory degrades)
+And the test: `TestGetInterfaceSettings`
+
+### S2.15 Dnsmasq settings
+Given `GET /api/dnsmasq/settings/get` → `{"dnsmasq":{"enable":"1","interface":{...},"dhcp":{"range":{...},"host":{...}}}}`
+When `GetDnsmasqSettings` is called
+Then enabled, selected listening interfaces, DHCP ranges, and static hosts are returned
+And a 403 is the stable page-privilege error (inventory degrades)
+And the test: `TestGetDnsmasqSettings`
+
+### S2.16 pf statistics
+Given `GET /api/diagnostics/firewall/pf_statistics` → nested `states.current` / `limit`
+When `GetPfStatistics` is called
+Then StateCount/Limit/SourceCount are populated from the first non-zero of the known envelopes
+And a 403 is the stable page-privilege error (inventory degrades)
+And the test: `TestGetPfStatistics`
+
+### S2.17 Kernel routes
+Given `GET /api/diagnostics/interface/get_routes` → `{"rows":[...]}` or `{"routes":[...]}`
+When `GetKernelRoutes` is called
+Then each destination/gateway/netif/flags row is returned
+And a 403 is the stable page-privilege error (inventory degrades)
+And the test: `TestGetKernelRoutes`
+
 ### S2.3 Firewall rules
 Given `GET /api/firewall/filter/search_rule` → `{"total":N,"rows":[{...}]}`
 When `GetFirewallRules` is called

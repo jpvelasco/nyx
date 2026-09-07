@@ -30,6 +30,11 @@ func TestRenderInventory(t *testing.T) {
 		"2 active clients",
 		"== Services ==",
 		"== Gateways ==",
+		"== Bridges ==",
+		"== Interface settings ==",
+		"== Dnsmasq ==",
+		"== pf statistics ==",
+		"== Kernel routes ==",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render output missing %q:\n%s", want, out)
@@ -39,6 +44,34 @@ func TestRenderInventory(t *testing.T) {
 	// the renderer must not duplicate them (#60).
 	if strings.Contains(out, "DHCP leases unavailable") {
 		t.Errorf("render must not print warnings (CLI layer owns them):\n%s", out)
+	}
+}
+
+func TestRenderInventoryReconOK(t *testing.T) {
+	snap := &InventorySnapshot{
+		Interfaces:     []Interface{{Name: "lan", IP: "10.0.10.1", Subnet: 24}},
+		Bridges:        []Bridge{{UUID: "b1", Description: "lan-br", Members: []string{"igb0"}}},
+		BridgesOK:      true,
+		IfSettings:     []InterfaceSetting{{Name: "lan"}},
+		IfSettingsOK:   true,
+		Dnsmasq:        &DnsmasqSettings{Enabled: true, Ranges: []DnsmasqRange{{Start: "10.0.10.100"}}, Hosts: []DnsmasqHost{{Host: "printer"}}},
+		DnsmasqOK:      true,
+		PfStats:        &PfStatistics{StateCount: 4},
+		PfStatsOK:      true,
+		KernelRoutes:   []KernelRoute{{Destination: "default"}},
+		KernelRoutesOK: true,
+	}
+	out := RenderInventory(snap, "opnsense-firewall")
+	for _, want := range []string{
+		"== Bridges (1) ==", "lan-br", "members:igb0",
+		"== Interface settings (1) ==", "1 configured",
+		"== Dnsmasq ==", "on, 1 range, 1 host",
+		"== pf statistics ==", "4 states",
+		"== Kernel routes (1) ==", "1 route",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render missing %q:\n%s", want, out)
+		}
 	}
 }
 
