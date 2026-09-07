@@ -26,7 +26,7 @@ npm install -g nyx-audit-cli
 # it detects the missing binary and downloads it automatically. Or manually:
 #   node $(npm root -g)/nyx-audit-cli/install.js
 
-# Or build from source (requires Go 1.25+)
+# Or build from source (requires the Go version in go.mod, currently 1.26.8)
 git clone https://github.com/jpvelasco/nyx.git && cd nyx && make build
 
 # Discover hosts on a subnet
@@ -57,7 +57,7 @@ For the full story of what this feels like on a real multi-VLAN homelab (includi
 
 ## Prerequisites
 
-- **Go 1.25+** — to build from source
+- **Go 1.26.8** — to build from source (`go.mod` is authoritative if this drifts)
 - **nmap** — required for `discover` and `subnet_discovery` assertions
 
   nyx does not bundle nmap. Install it for your platform:
