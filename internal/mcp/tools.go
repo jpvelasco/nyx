@@ -85,6 +85,8 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_list_vlans":              (*Server).toolOpnsenseListVLANs,
 	"opnsense_plan_vlan":               (*Server).toolOpnsensePlanVLAN,
 	"opnsense_apply_vlan":              (*Server).toolOpnsenseApplyVLAN,
+	"opnsense_plan_filter":             (*Server).toolOpnsensePlanFilter,
+	"opnsense_apply_filter":            (*Server).toolOpnsenseApplyFilter,
 	"topology":                         (*Server).toolTopology,
 }
 
@@ -1066,6 +1068,48 @@ func (s *Server) toolOpnsenseApplyVLAN(ctx context.Context, args map[string]inte
 	res, err := s.opnsenseSvc.ApplyVLAN(ctx, opts, req, argBoolDefault(args, "dry_run", true))
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense vlan apply failed: %v", err))
+	}
+	return okResult(toJSON(res))
+}
+
+func filterRequestFromArgs(args map[string]interface{}) service.OpnsenseFilterRequest {
+	return service.OpnsenseFilterRequest{
+		Kind:        argString(args, "kind"),
+		UUID:        argString(args, "uuid"),
+		Name:        argString(args, "name"),
+		Action:      argString(args, "action"),
+		Interface:   argString(args, "interface"),
+		Protocol:    argString(args, "protocol"),
+		Source:      argString(args, "source"),
+		Destination: argString(args, "destination"),
+		Addresses:   splitCSV(argString(args, "addresses")),
+		AliasType:   argString(args, "alias_type"),
+		Description: argString(args, "description"),
+		Enabled:     argBoolDefault(args, "enabled", true),
+		Delete:      argBoolDefault(args, "delete", false),
+	}
+}
+
+func (s *Server) toolOpnsensePlanFilter(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	plan, err := s.opnsenseSvc.PlanFilter(ctx, opts, filterRequestFromArgs(args))
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense filter plan request failed: %v", err))
+	}
+	return okResult(toJSON(plan))
+}
+
+func (s *Server) toolOpnsenseApplyFilter(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	res, err := s.opnsenseSvc.ApplyFilter(ctx, opts, filterRequestFromArgs(args), argBoolDefault(args, "dry_run", true))
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense filter apply failed: %v", err))
 	}
 	return okResult(toJSON(res))
 }

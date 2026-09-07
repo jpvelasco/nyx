@@ -612,3 +612,132 @@ func TestOpnsenseServiceVLAN_Errors(t *testing.T) {
 		t.Fatal("expected bridge reconfigure error")
 	}
 }
+
+func TestOpnsenseServicePlanApplyFilter(t *testing.T) {
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "filter/search_rule"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"r1","enabled":"1","action":"block","description":"isolate","source_net":"lan","destination_net":"iot"}]}`)
+		case strings.Contains(r.URL.Path, "alias/search_item"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"a1","name":"iot_net","type":"network","address":"10.0.60.0/24","enabled":"1"}]}`)
+		case strings.Contains(r.URL.Path, "add_"):
+			testutil.WriteBody(w, `{"result":"saved","uuid":"new"}`)
+		default:
+			testutil.WriteBody(w, `{"result":"saved"}`)
+		}
+	})
+	svc := NewOpnsenseService()
+	ctx := context.Background()
+	opts := opnsenseOptions(ts)
+	unchanged, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Name: "isolate", Action: "block", Source: "lan", Destination: "iot", Enabled: true})
+	if err != nil || unchanged.Action != "unchanged" {
+		t.Fatalf("unchanged = %+v %v", unchanged, err)
+	}
+	create, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Action: "block", Source: "guest", Destination: "iot", Enabled: true})
+	if err != nil || create.Action != "create" {
+		t.Fatalf("create = %+v %v", create, err)
+	}
+	dry, err := svc.ApplyFilter(ctx, opts, OpnsenseFilterRequest{Action: "block", Source: "guest", Destination: "iot"}, true)
+	if err != nil || !dry.DryRun {
+		t.Fatalf("dry = %+v %v", dry, err)
+	}
+	created, err := svc.ApplyFilter(ctx, opts, OpnsenseFilterRequest{Action: "block", Source: "guest", Destination: "iot", Enabled: true}, false)
+	if err != nil || created.Outcome != "created" {
+		t.Fatalf("created = %+v %v", created, err)
+	}
+	aliasCreate, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Kind: "alias", Name: "guest_net", Addresses: []string{"10.0.70.0/24"}, Enabled: true})
+	if err != nil || aliasCreate.Action != "create" {
+		t.Fatalf("alias create = %+v %v", aliasCreate, err)
+	}
+	aliasApplied, err := svc.ApplyFilter(ctx, opts, OpnsenseFilterRequest{Kind: "alias", Name: "guest_net", Addresses: []string{"10.0.70.0/24"}, Enabled: true}, false)
+	if err != nil || aliasApplied.Outcome != "created" {
+		t.Fatalf("alias apply = %+v %v", aliasApplied, err)
+	}
+	if _, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{}); err == nil {
+		t.Fatal("expected source/destination required")
+	}
+	upd, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Name: "isolate", Action: "reject", Source: "lan", Destination: "iot", Enabled: true})
+	if err != nil || upd.Action != "update" {
+		t.Fatalf("update = %+v %v", upd, err)
+	}
+	updated, err := svc.ApplyFilter(ctx, opts, OpnsenseFilterRequest{Name: "isolate", Action: "reject", Source: "lan", Destination: "iot", Enabled: true}, false)
+	if err != nil || updated.Outcome != "updated" {
+		t.Fatalf("updated apply = %+v %v", updated, err)
+	}
+	del, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Name: "isolate", Delete: true})
+	if err != nil || del.Action != "delete" {
+		t.Fatalf("delete = %+v %v", del, err)
+	}
+	deleted, err := svc.ApplyFilter(ctx, opts, OpnsenseFilterRequest{Name: "isolate", Delete: true}, false)
+	if err != nil || deleted.Outcome != "deleted" {
+		t.Fatalf("deleted apply = %+v %v", deleted, err)
+	}
+	aliasSame, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Kind: "alias", Name: "iot_net", AliasType: "network", Addresses: []string{"10.0.60.0/24"}, Enabled: true})
+	if err != nil || aliasSame.Action != "unchanged" {
+		t.Fatalf("alias unchanged = %+v %v", aliasSame, err)
+	}
+	aliasUpd, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Kind: "alias", Name: "iot_net", Addresses: []string{"10.0.60.0/24", "10.0.61.0/24"}, Enabled: true})
+	if err != nil || aliasUpd.Action != "update" {
+		t.Fatalf("alias update = %+v %v", aliasUpd, err)
+	}
+	aliasUpdated, err := svc.ApplyFilter(ctx, opts, OpnsenseFilterRequest{Kind: "alias", Name: "iot_net", Addresses: []string{"10.0.60.0/24", "10.0.61.0/24"}, Enabled: true}, false)
+	if err != nil || aliasUpdated.Outcome != "updated" {
+		t.Fatalf("alias updated apply = %+v %v", aliasUpdated, err)
+	}
+	aliasDel, err := svc.ApplyFilter(ctx, opts, OpnsenseFilterRequest{Kind: "alias", Name: "iot_net", Delete: true}, false)
+	if err != nil || aliasDel.Outcome != "deleted" {
+		t.Fatalf("alias delete = %+v %v", aliasDel, err)
+	}
+	if _, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Kind: "alias"}); err == nil {
+		t.Fatal("expected alias name required")
+	}
+}
+
+func TestOpnsenseServiceFilter_Errors(t *testing.T) {
+	fail := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	opts := opnsenseOptions(fail)
+	if _, err := NewOpnsenseService().PlanFilter(context.Background(), opts, OpnsenseFilterRequest{Source: "lan", Destination: "iot"}); err == nil {
+		t.Fatal("expected filter list error")
+	}
+	if _, err := NewOpnsenseService().PlanFilter(context.Background(), opts, OpnsenseFilterRequest{Kind: "alias", Name: "x"}); err == nil {
+		t.Fatal("expected alias list error")
+	}
+
+	listed := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "filter/search_rule"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"r1","enabled":"1","action":"block","description":"isolate","source_net":"lan","destination_net":"iot"}]}`)
+		case strings.Contains(r.URL.Path, "alias/search_item"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"a1","name":"iot_net","type":"network","address":"10.0.60.0/24","enabled":"1"}]}`)
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+	lopts := opnsenseOptions(listed)
+	svc := NewOpnsenseService()
+	miss, err := svc.PlanFilter(context.Background(), lopts, OpnsenseFilterRequest{Name: "nope", Delete: true})
+	if err != nil || miss.Action != "unchanged" {
+		t.Fatalf("filter delete miss = %+v %v", miss, err)
+	}
+	amiss, err := svc.PlanFilter(context.Background(), lopts, OpnsenseFilterRequest{Kind: "alias", Name: "nope", Delete: true})
+	if err != nil || amiss.Action != "unchanged" {
+		t.Fatalf("alias delete miss = %+v %v", amiss, err)
+	}
+	if _, err := svc.ApplyFilter(context.Background(), lopts, OpnsenseFilterRequest{Name: "isolate", Action: "reject", Source: "lan", Destination: "iot", Enabled: true}, false); err == nil {
+		t.Fatal("expected filter update write error")
+	}
+	if _, err := svc.ApplyFilter(context.Background(), lopts, OpnsenseFilterRequest{Name: "isolate", Delete: true}, false); err == nil {
+		t.Fatal("expected filter delete write error")
+	}
+	if _, err := svc.ApplyFilter(context.Background(), lopts, OpnsenseFilterRequest{Kind: "alias", Name: "iot_net", Addresses: []string{"10.0.99.0/24"}, Enabled: true}, false); err == nil {
+		t.Fatal("expected alias update write error")
+	}
+	if _, err := svc.ApplyFilter(context.Background(), lopts, OpnsenseFilterRequest{Kind: "alias", Name: "iot_net", Delete: true}, false); err == nil {
+		t.Fatal("expected alias delete write error")
+	}
+	if _, err := svc.ApplyFilter(context.Background(), lopts, OpnsenseFilterRequest{Action: "block", Source: "guest", Destination: "iot", Enabled: true}, false); err == nil {
+		t.Fatal("expected filter create write error")
+	}
+}

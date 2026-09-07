@@ -925,6 +925,196 @@ func (s *OpnsenseService) ApplyVLAN(ctx context.Context, opts OpnsenseOptions, r
 	return res, nil
 }
 
+// OpnsenseFilterRequest is a plan/apply filter-rule or alias mutation.
+type OpnsenseFilterRequest struct {
+	Kind        string // filter (default) | alias
+	UUID        string
+	Name        string
+	Action      string
+	Interface   string
+	Protocol    string
+	Source      string
+	Destination string
+	Addresses   []string
+	AliasType   string
+	Description string
+	Enabled     bool
+	Delete      bool
+}
+
+// OpnsenseFilterPlan previews a filter/alias mutation.
+type OpnsenseFilterPlan struct {
+	Action string `json:"action"`
+	Kind   string `json:"kind"`
+	UUID   string `json:"uuid,omitempty"`
+}
+
+// OpnsenseFilterApplyResult is the apply outcome.
+type OpnsenseFilterApplyResult struct {
+	Outcome string `json:"outcome"`
+	Kind    string `json:"kind"`
+	UUID    string `json:"uuid,omitempty"`
+	DryRun  bool   `json:"dry_run"`
+}
+
+func filterKind(kind string) string {
+	if strings.EqualFold(kind, "alias") {
+		return "alias"
+	}
+	return "filter"
+}
+
+// PlanFilter previews creating, updating, or deleting a filter rule or alias.
+func (s *OpnsenseService) PlanFilter(ctx context.Context, opts OpnsenseOptions, req OpnsenseFilterRequest) (*OpnsenseFilterPlan, error) {
+	kind := filterKind(req.Kind)
+	plan := &OpnsenseFilterPlan{Kind: kind, UUID: req.UUID}
+	client := s.client(opts)
+	if kind == "alias" {
+		if req.Name == "" && req.UUID == "" {
+			return nil, fmt.Errorf("name or uuid is required for alias mutations")
+		}
+		aliases, err := client.GetAliases(ctx)
+		if err != nil {
+			return nil, err
+		}
+		cur, ok := opnsensebackend.FindAlias(aliases, req.UUID, req.Name)
+		if req.Delete {
+			if !ok {
+				plan.Action = "unchanged"
+				return plan, nil
+			}
+			plan.Action = "delete"
+			plan.UUID = cur.UUID
+			return plan, nil
+		}
+		w := opnsensebackend.AliasWrite{Name: req.Name, Type: req.AliasType, Addresses: req.Addresses, Description: req.Description, Enabled: req.Enabled}
+		if !ok {
+			plan.Action = "create"
+			return plan, nil
+		}
+		plan.UUID = cur.UUID
+		if opnsensebackend.AliasMatchesWrite(cur, w) {
+			plan.Action = "unchanged"
+			return plan, nil
+		}
+		plan.Action = "update"
+		return plan, nil
+	}
+	if req.UUID == "" && req.Name == "" && !req.Delete {
+		if req.Source == "" || req.Destination == "" {
+			return nil, fmt.Errorf("source and destination are required to create a filter rule")
+		}
+	}
+	rules, err := client.GetFirewallRules(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cur, ok := opnsensebackend.FindFilterRule(rules, req.UUID, req.Name)
+	if req.Delete {
+		if !ok {
+			plan.Action = "unchanged"
+			return plan, nil
+		}
+		plan.Action = "delete"
+		plan.UUID = cur.RuleUUID
+		return plan, nil
+	}
+	w := opnsensebackend.FilterWrite{
+		Action: firstNonEmptySvc(req.Action, "block"), Interface: req.Interface, Protocol: req.Protocol,
+		Source: req.Source, Destination: req.Destination, Description: req.Description, Enabled: req.Enabled,
+	}
+	if !ok {
+		plan.Action = "create"
+		return plan, nil
+	}
+	plan.UUID = cur.RuleUUID
+	if opnsensebackend.FilterMatchesWrite(cur, w) {
+		plan.Action = "unchanged"
+		return plan, nil
+	}
+	plan.Action = "update"
+	return plan, nil
+}
+
+func firstNonEmptySvc(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// ApplyFilter creates/updates/deletes a filter rule or alias. Real apply
+// reconfigures aliases and always POSTs firewall/filter/apply.
+func (s *OpnsenseService) ApplyFilter(ctx context.Context, opts OpnsenseOptions, req OpnsenseFilterRequest, dryRun bool) (*OpnsenseFilterApplyResult, error) {
+	plan, err := s.PlanFilter(ctx, opts, req)
+	if err != nil {
+		return nil, err
+	}
+	res := &OpnsenseFilterApplyResult{Outcome: plan.Action, Kind: plan.Kind, UUID: plan.UUID, DryRun: dryRun}
+	if dryRun || plan.Action == "unchanged" {
+		return res, nil
+	}
+	client := s.client(opts)
+	if plan.Kind == "alias" {
+		w := opnsensebackend.AliasWrite{Name: req.Name, Type: req.AliasType, Addresses: req.Addresses, Description: req.Description, Enabled: req.Enabled}
+		switch plan.Action {
+		case "create":
+			id, err := client.CreateAlias(ctx, w)
+			if err != nil {
+				return nil, err
+			}
+			res.UUID = id
+			res.Outcome = "created"
+		case "update":
+			if err := client.SetAlias(ctx, plan.UUID, w); err != nil {
+				return nil, err
+			}
+			res.Outcome = "updated"
+		case "delete":
+			if err := client.DeleteAlias(ctx, plan.UUID); err != nil {
+				return nil, err
+			}
+			res.Outcome = "deleted"
+		}
+		if err := client.ReconfigureAliases(ctx); err != nil {
+			return nil, err
+		}
+		if err := client.ApplyFirewallFilter(ctx); err != nil {
+			return nil, err
+		}
+		return res, nil
+	}
+	w := opnsensebackend.FilterWrite{
+		Action: firstNonEmptySvc(req.Action, "block"), Interface: req.Interface, Protocol: req.Protocol,
+		Source: req.Source, Destination: req.Destination, Description: req.Description, Enabled: req.Enabled,
+	}
+	switch plan.Action {
+	case "create":
+		id, err := client.CreateFilterRule(ctx, w)
+		if err != nil {
+			return nil, err
+		}
+		res.UUID = id
+		res.Outcome = "created"
+	case "update":
+		if err := client.SetFilterRule(ctx, plan.UUID, w); err != nil {
+			return nil, err
+		}
+		res.Outcome = "updated"
+	case "delete":
+		if err := client.DeleteFilterRule(ctx, plan.UUID); err != nil {
+			return nil, err
+		}
+		res.Outcome = "deleted"
+	}
+	if err := client.ApplyFirewallFilter(ctx); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
 // newNatMutator resolves the provider's NAT mutation surface (type-assertion
 // safety rail, mirrors the Omada applier).
 func (s *OpnsenseService) natMutator() (providers.NatMutationProvider, error) {

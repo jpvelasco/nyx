@@ -171,6 +171,8 @@ type opnsenseSurface interface {
 	ListVLANs(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseVLAN, error)
 	PlanVLAN(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseVLANRequest) (*service.OpnsenseVLANPlan, error)
 	ApplyVLAN(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseVLANRequest, dryRun bool) (*service.OpnsenseVLANApplyResult, error)
+	PlanFilter(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseFilterRequest) (*service.OpnsenseFilterPlan, error)
+	ApplyFilter(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseFilterRequest, dryRun bool) (*service.OpnsenseFilterApplyResult, error)
 }
 
 // topologySurface is the cross-provider topology assessment exposed to
@@ -843,6 +845,43 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"uuid":        {Type: "string", Description: "Existing VLAN or bridge uuid"},
 				"members":     {Type: "string", Description: "Comma-separated bridge members"},
 				"delete":      {Type: "boolean", Description: "Delete the VLAN device"},
+				"dry_run":     {Type: "boolean", Description: "Preview only. Default true."},
+			}, []string{"host"}),
+		},
+		{
+			Name:        "opnsense_plan_filter",
+			Description: "Preview creating, updating, or deleting an OPNsense MVC filter rule or alias. Read-only.",
+			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
+				"kind":        {Type: "string", Description: "filter (default) or alias"},
+				"uuid":        {Type: "string", Description: "Existing rule or alias uuid"},
+				"name":        {Type: "string", Description: "Rule description or alias name"},
+				"action":      {Type: "string", Description: "pass, block, or reject"},
+				"interface":   {Type: "string", Description: "Filter interface (lan, opt1, bridge0)"},
+				"source":      {Type: "string", Description: "Source net or alias name"},
+				"destination": {Type: "string", Description: "Destination net or alias name"},
+				"addresses":   {Type: "string", Description: "Comma-separated alias members"},
+				"alias_type":  {Type: "string", Description: "Alias type (network, host)"},
+				"description": {Type: "string", Description: "Optional description"},
+				"enabled":     {Type: "boolean", Description: "Whether the rule or alias is enabled"},
+				"delete":      {Type: "boolean", Description: "Preview a delete"},
+			}, []string{"host"}),
+		},
+		{
+			Name:        "opnsense_apply_filter",
+			Description: "Create, update, or delete an OPNsense MVC filter rule or alias, then apply/reconfigure. Dry-run default.",
+			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
+				"kind":        {Type: "string", Description: "filter (default) or alias"},
+				"uuid":        {Type: "string", Description: "Existing rule or alias uuid"},
+				"name":        {Type: "string", Description: "Rule description or alias name"},
+				"action":      {Type: "string", Description: "pass, block, or reject"},
+				"interface":   {Type: "string", Description: "Filter interface (lan, opt1, bridge0)"},
+				"source":      {Type: "string", Description: "Source net or alias name"},
+				"destination": {Type: "string", Description: "Destination net or alias name"},
+				"addresses":   {Type: "string", Description: "Comma-separated alias members"},
+				"alias_type":  {Type: "string", Description: "Alias type (network, host)"},
+				"description": {Type: "string", Description: "Optional description"},
+				"enabled":     {Type: "boolean", Description: "Whether the rule or alias is enabled"},
+				"delete":      {Type: "boolean", Description: "Delete the rule or alias"},
 				"dry_run":     {Type: "boolean", Description: "Preview only. Default true."},
 			}, []string{"host"}),
 		},
