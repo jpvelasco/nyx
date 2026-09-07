@@ -1529,6 +1529,26 @@ func TestDispatchOpnsenseReconReads(t *testing.T) {
 	}
 }
 
+func TestDispatchOpnsenseKea(t *testing.T) {
+	stub := &stubOpnsenseSvc{}
+	args := map[string]interface{}{"host": "fw.local", "api_key": "k", "api_secret": "s"}
+	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_list_kea_subnets", args)
+	if isErr || !strings.Contains(text, "10.0.10.0/24") {
+		t.Fatalf("subnets = (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_list_kea_reservations", args)
+	if isErr || !strings.Contains(text, "10.0.10.20") {
+		t.Fatalf("resv = (%q, %v)", text, isErr)
+	}
+	errStub := &stubOpnsenseSvc{err: errors.New("boom")}
+	if text, isErr := serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_list_kea_subnets", args); !isErr || !strings.Contains(text, "kea subnets") {
+		t.Errorf("subnet err = (%q, %v)", text, isErr)
+	}
+	if text, isErr := serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_list_kea_reservations", args); !isErr || !strings.Contains(text, "kea reservations") {
+		t.Errorf("resv err = (%q, %v)", text, isErr)
+	}
+}
+
 func TestDispatchOpnsenseInventory(t *testing.T) {
 	stub := &stubOpnsenseSvc{inventory: &service.OpnsenseInventory{
 		Host:              "fw.local",
