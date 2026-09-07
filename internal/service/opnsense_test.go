@@ -465,3 +465,52 @@ func TestOpnsenseService_ConnectFailure(t *testing.T) {
 		t.Fatalf("Info error = %v, want connect failure", err)
 	}
 }
+
+func TestOpnsenseServicePlanApplyVLAN(t *testing.T) {
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "vlan_settings/search_item"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"v1","if":"igb0","tag":"60","descr":"iot"}]}`)
+		case strings.Contains(r.URL.Path, "bridge_settings/search_item"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"b1","members":"igb0"}]}`)
+		case strings.Contains(r.URL.Path, "add_item"):
+			testutil.WriteBody(w, `{"result":"saved","uuid":"v-new"}`)
+		default:
+			testutil.WriteBody(w, `{"result":"saved"}`)
+		}
+	})
+	svc := NewOpnsenseService()
+	ctx := context.Background()
+	opts := opnsenseOptions(ts)
+	listed, err := svc.ListVLANs(ctx, opts)
+	if err != nil || len(listed) != 1 || listed[0].Tag != 60 {
+		t.Fatalf("list = %+v %v", listed, err)
+	}
+	unchanged, err := svc.PlanVLAN(ctx, opts, OpnsenseVLANRequest{Parent: "igb0", Tag: 60, Description: "iot"})
+	if err != nil || unchanged.Action != "unchanged" {
+		t.Fatalf("unchanged = %+v %v", unchanged, err)
+	}
+	create, err := svc.PlanVLAN(ctx, opts, OpnsenseVLANRequest{Parent: "igb0", Tag: 70})
+	if err != nil || create.Action != "create" || !strings.Contains(create.Warning, "GUI") {
+		t.Fatalf("create = %+v %v", create, err)
+	}
+	dry, err := svc.ApplyVLAN(ctx, opts, OpnsenseVLANRequest{Parent: "igb0", Tag: 70}, true)
+	if err != nil || !dry.DryRun || dry.Outcome != "create" {
+		t.Fatalf("dry = %+v %v", dry, err)
+	}
+	created, err := svc.ApplyVLAN(ctx, opts, OpnsenseVLANRequest{Parent: "igb0", Tag: 70, Description: "guest"}, false)
+	if err != nil || created.Outcome != "created" || created.UUID != "v-new" {
+		t.Fatalf("created = %+v %v", created, err)
+	}
+	br, err := svc.PlanVLAN(ctx, opts, OpnsenseVLANRequest{Kind: "bridge", UUID: "b1", Members: []string{"igb0", "igb0.60"}})
+	if err != nil || br.Action != "update" {
+		t.Fatalf("bridge plan = %+v %v", br, err)
+	}
+	applied, err := svc.ApplyVLAN(ctx, opts, OpnsenseVLANRequest{Kind: "bridge", UUID: "b1", Members: []string{"igb0", "igb0.60"}}, false)
+	if err != nil || applied.Outcome != "updated" {
+		t.Fatalf("bridge apply = %+v %v", applied, err)
+	}
+	if _, err := svc.PlanVLAN(ctx, opts, OpnsenseVLANRequest{}); err == nil {
+		t.Fatal("expected parent/tag required")
+	}
+}

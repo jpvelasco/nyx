@@ -82,6 +82,9 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_inventory":               (*Server).toolOpnsenseInventory,
 	"opnsense_plan_nat":                (*Server).toolOpnsensePlanNat,
 	"opnsense_apply_nat":               (*Server).toolOpnsenseApplyNat,
+	"opnsense_list_vlans":              (*Server).toolOpnsenseListVLANs,
+	"opnsense_plan_vlan":               (*Server).toolOpnsensePlanVLAN,
+	"opnsense_apply_vlan":              (*Server).toolOpnsenseApplyVLAN,
 	"topology":                         (*Server).toolTopology,
 }
 
@@ -1013,6 +1016,56 @@ func (s *Server) toolOpnsenseApplyNat(ctx context.Context, args map[string]inter
 	res, err := s.opnsenseSvc.ApplyNat(ctx, opts, req)
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense apply request failed: %v", err))
+	}
+	return okResult(toJSON(res))
+}
+
+func (s *Server) toolOpnsenseListVLANs(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	rows, err := s.opnsenseSvc.ListVLANs(ctx, opts)
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense vlans request failed: %v", err))
+	}
+	return okResult(toJSON(rows))
+}
+
+func vlanRequestFromArgs(args map[string]interface{}) (service.OpnsenseVLANRequest, string) {
+	return service.OpnsenseVLANRequest{
+		Kind:        argString(args, "kind"),
+		Parent:      argString(args, "parent"),
+		Tag:         argIntDefault(args, "tag", 0),
+		Description: argString(args, "description"),
+		UUID:        argString(args, "uuid"),
+		Members:     splitCSV(argString(args, "members")),
+		Delete:      argBoolDefault(args, "delete", false),
+	}, ""
+}
+
+func (s *Server) toolOpnsensePlanVLAN(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req, _ := vlanRequestFromArgs(args)
+	plan, err := s.opnsenseSvc.PlanVLAN(ctx, opts, req)
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense vlan plan request failed: %v", err))
+	}
+	return okResult(toJSON(plan))
+}
+
+func (s *Server) toolOpnsenseApplyVLAN(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req, _ := vlanRequestFromArgs(args)
+	res, err := s.opnsenseSvc.ApplyVLAN(ctx, opts, req, argBoolDefault(args, "dry_run", true))
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense vlan apply failed: %v", err))
 	}
 	return okResult(toJSON(res))
 }
