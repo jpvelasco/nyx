@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/jpvelasco/nyx/internal/tlsutil"
 )
 
 const (
@@ -83,7 +85,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) (*htt
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil, err
 			}
-			lastErr = fmt.Errorf("connecting to OPNsense at %s: %w", c.host, err)
+			lastErr = tlsutil.Annotate(fmt.Errorf("connecting to OPNsense at %s: %w", c.host, err))
 		} else {
 			if c.Debug {
 				c.debugDump(resp, method, path)

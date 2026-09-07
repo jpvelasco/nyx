@@ -45,6 +45,24 @@ func TestNewClientNormalisesHost(t *testing.T) {
 	}
 }
 
+func TestDoUnknownAuthorityHintsPinning(t *testing.T) {
+	url, _ := testutil.CASignedServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		testutil.WriteBody(w, systemInfoJSON)
+	}))
+	c := NewClient(url, "k", "s", false, "")
+	_, err := c.doRequest(context.Background(), "/diagnostics/system/system_information")
+	if err == nil {
+		t.Fatal("expected unknown-authority failure")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "--ca-cert") {
+		t.Errorf("error %q does not name --ca-cert", msg)
+	}
+	if !strings.Contains(msg, "--skip-tls-verify") {
+		t.Errorf("error %q does not name --skip-tls-verify", msg)
+	}
+}
+
 func TestDoRequest(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		var sawKey, sawSecret string

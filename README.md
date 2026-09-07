@@ -331,6 +331,8 @@ Port profile **writes** (plan + apply, dry-run by default) are available as MCP 
 
 Credentials can be passed via flags, env vars (`OMADA_HOST`, `OMADA_CLIENT_ID`, `OMADA_CLIENT_SECRET`), the Windows Credential Manager (entry `nyx-omada-<host>`, created with `cmdkey /generic:nyx-omada-<host> /user:<client-id> /pass:<client-secret>`), or the encrypted store (`nyx credentials set omada`).
 
+If the controller presents a privately-issued certificate, pin it with `--ca-cert <pem>` instead of `--skip-tls-verify`.
+
 ### OPNsense
 
 OPNsense provider supports info, import, check, and inventory. Use your OPNsense address (typically the LAN or a management IP):
