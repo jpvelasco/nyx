@@ -1886,6 +1886,110 @@ func TestOmadaServiceApplyLAN_CreateFails(t *testing.T) {
 	}
 }
 
+func omadaSSIDHandler(t *testing.T, ssids string, failGroups, failSSIDs bool) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case r.URL.Path == "/openapi/v1/abc123/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case strings.Contains(r.URL.Path, "/wlan-groups"):
+			if failGroups {
+				writeOmadaEnvelope(w, -33004, `null`)
+				return
+			}
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"g1","name":"Default"}]}`)
+		case strings.HasSuffix(r.URL.Path, "/ssids") && r.Method == http.MethodGet:
+			if failSSIDs {
+				writeOmadaEnvelope(w, -33004, `null`)
+				return
+			}
+			writeOmadaEnvelope(w, 0, ssids)
+		case strings.HasSuffix(r.URL.Path, "/ssids") && r.Method == http.MethodPost:
+			writeOmadaEnvelope(w, 0, `{"id":"s-new"}`)
+		case strings.Contains(r.URL.Path, "/ssids/") && r.Method == http.MethodPut:
+			writeOmadaEnvelope(w, 0, `{}`)
+		case strings.Contains(r.URL.Path, "/ssids/") && r.Method == http.MethodDelete:
+			writeOmadaEnvelope(w, 0, `{}`)
+		default:
+			writeOmadaEnvelope(w, -1, `null`)
+		}
+	}
+}
+
+func TestOmadaServiceListPlanApplySSID(t *testing.T) {
+	const listed = `{"totalRows":1,"data":[{"id":"s1","name":"iot-wifi","ssid":"iot","enable":true,"vlanId":60,"security":"wpa2","wlanGroupId":"g1"}]}`
+	ts := omadaTestServer(t, omadaSSIDHandler(t, listed, false, false))
+	svc := NewOmadaService()
+	ctx := context.Background()
+	opts := omadaPortOpts(ts.URL)
+
+	inv, err := svc.ListSSIDs(ctx, opts)
+	if err != nil || len(inv.SSIDs) != 1 || inv.SSIDs[0].SSID != "iot" || len(inv.Groups) != 1 {
+		t.Fatalf("ListSSIDs = %+v %v", inv, err)
+	}
+	unchanged, err := svc.PlanSSID(ctx, opts, OmadaSSIDRequest{Name: "iot-wifi", SSID: "iot", Enabled: true, VLAN: 60, Security: "wpa2", WLANGroup: "Default"})
+	if err != nil || unchanged.Action != "unchanged" {
+		t.Fatalf("unchanged = %+v %v", unchanged, err)
+	}
+	create, err := svc.PlanSSID(ctx, opts, OmadaSSIDRequest{SSID: "guest", VLAN: 70})
+	if err != nil || create.Action != "create" {
+		t.Fatalf("create = %+v %v", create, err)
+	}
+	update, err := svc.PlanSSID(ctx, opts, OmadaSSIDRequest{Name: "iot-wifi", VLAN: 61, Enabled: true})
+	if err != nil || update.Action != "update" {
+		t.Fatalf("update = %+v %v", update, err)
+	}
+	del, err := svc.PlanSSID(ctx, opts, OmadaSSIDRequest{Name: "iot-wifi", Delete: true})
+	if err != nil || del.Action != "delete" {
+		t.Fatalf("delete = %+v %v", del, err)
+	}
+	missing, err := svc.PlanSSID(ctx, opts, OmadaSSIDRequest{Name: "nope", Delete: true})
+	if err != nil || missing.Action != "unchanged" {
+		t.Fatalf("delete missing = %+v %v", missing, err)
+	}
+	if _, err := svc.PlanSSID(ctx, opts, OmadaSSIDRequest{}); err == nil {
+		t.Fatal("expected name or ssid required")
+	}
+	dry, err := svc.ApplySSID(ctx, opts, OmadaSSIDRequest{SSID: "guest", VLAN: 70}, true)
+	if err != nil || !dry.DryRun || dry.Outcome != "create" {
+		t.Fatalf("dry = %+v %v", dry, err)
+	}
+	created, err := svc.ApplySSID(ctx, opts, OmadaSSIDRequest{SSID: "guest", VLAN: 70}, false)
+	if err != nil || created.Outcome != "created" || created.ID != "s-new" {
+		t.Fatalf("created = %+v %v", created, err)
+	}
+	updated, err := svc.ApplySSID(ctx, opts, OmadaSSIDRequest{Name: "iot-wifi", VLAN: 61, Enabled: true}, false)
+	if err != nil || updated.Outcome != "updated" {
+		t.Fatalf("updated = %+v %v", updated, err)
+	}
+	deleted, err := svc.ApplySSID(ctx, opts, OmadaSSIDRequest{Name: "iot-wifi", Delete: true}, false)
+	if err != nil || deleted.Outcome != "deleted" {
+		t.Fatalf("deleted = %+v %v", deleted, err)
+	}
+}
+
+func TestOmadaServiceSSID_Errors(t *testing.T) {
+	opts := omadaPortOpts(omadaTestServer(t, omadaSSIDHandler(t, `{"totalRows":0,"data":[]}`, true, false)).URL)
+	if _, err := NewOmadaService().ListSSIDs(context.Background(), opts); err == nil {
+		t.Fatal("expected list groups error")
+	}
+	if _, err := NewOmadaService().PlanSSID(context.Background(), opts, OmadaSSIDRequest{Name: "x"}); err == nil {
+		t.Fatal("expected plan groups error after ssid list")
+	}
+	failSSIDs := omadaPortOpts(omadaTestServer(t, omadaSSIDHandler(t, ``, false, true)).URL)
+	if _, err := NewOmadaService().ListSSIDs(context.Background(), failSSIDs); err == nil {
+		t.Fatal("expected list ssids error")
+	}
+	if _, err := NewOmadaService().PlanSSID(context.Background(), failSSIDs, OmadaSSIDRequest{Name: "x"}); err == nil {
+		t.Fatal("expected plan ssid list error")
+	}
+	if _, err := NewOmadaService().ApplySSID(context.Background(), failSSIDs, OmadaSSIDRequest{Name: "x"}, false); err == nil {
+		t.Fatal("expected apply plan error")
+	}
+}
+
 func TestOmadaServicePlanPort(t *testing.T) {
 	st := omadaPortStateFresh()
 	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
