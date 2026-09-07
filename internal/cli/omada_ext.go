@@ -83,7 +83,7 @@ func buildOmadaUplinkInfoCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&omadaUplinkMAC, "mac", "", "Device MAC to look up (required)")
-	addProviderFlags(cmd)
+	addProviderFlags(cmd, "omada")
 	return cmd
 }
 
@@ -129,7 +129,7 @@ func buildOmadaSwitchPortsCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&omadaSwitchPortMAC, "switch-mac", "", "Switch MAC to filter (default: every switch)")
-	addProviderFlags(cmd)
+	addProviderFlags(cmd, "omada")
 	return cmd
 }
 
@@ -168,7 +168,7 @@ func buildOmadaLanProfilesCmd() *cobra.Command {
 			return nil
 		},
 	}
-	addProviderFlags(cmd)
+	addProviderFlags(cmd, "omada")
 	return cmd
 }
 
