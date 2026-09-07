@@ -39,7 +39,7 @@ const (
 // AssignIPGapWarning is the open upstream limitation: creating a VLAN
 // device or editing bridge members does not assign the device to optN
 // or set IPv4/IPv6. The GUI still owns that step.
-const AssignIPGapWarning = "OPNsense cannot assign the new VLAN/bridge device to an opt interface or set IPv4/IPv6 via the public API — do that once in the GUI, then continue with DHCP/firewall."
+const AssignIPGapWarning = "OPNsense cannot assign the new VLAN/bridge device to an opt interface or set addressing via the public API — do that once in the GUI, then continue with DHCP/firewall."
 
 // GetVLANs returns configured VLAN devices (GET search_item).
 func (c *Client) GetVLANs(ctx context.Context) ([]VLAN, error) {

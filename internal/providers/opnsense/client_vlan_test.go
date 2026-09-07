@@ -70,4 +70,36 @@ func TestVLANHelpers(t *testing.T) {
 	if BridgeMembersMatch([]string{"igb0"}, []string{"igb0", "igb1"}) {
 		t.Fatal("want length mismatch")
 	}
+	if VLANMatchesWrite(rows[0], VLANWrite{Parent: "igb0", Tag: 60, Description: "other"}) {
+		t.Fatal("want description mismatch")
+	}
+}
+
+func TestGetVLANs_SkipsMalformedAndReconfigureErrors(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "search_item") {
+			testutil.WriteBody(w, `{"total":2,"rows":["x",{"uuid":"","tag":"1"},{"uuid":"ok","if":"igb1","tag":"10"}]}`)
+			return
+		}
+		testutil.WriteBody(w, `{"status":"failed"}`)
+	}))
+	got, err := c.GetVLANs(context.Background())
+	if err != nil || len(got) != 1 || got[0].UUID != "ok" {
+		t.Fatalf("got %+v %v", got, err)
+	}
+	if err := c.ReconfigureVLANs(context.Background()); err == nil {
+		t.Fatal("expected reconfigure status error")
+	}
+	failResult, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		testutil.WriteBody(w, `{"result":"nope"}`)
+	}))
+	if err := failResult.ReconfigureBridges(context.Background()); err == nil {
+		t.Fatal("expected reconfigure result error")
+	}
+	badJSON, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		testutil.WriteBody(w, `{`)
+	}))
+	if err := badJSON.ReconfigureVLANs(context.Background()); err == nil {
+		t.Fatal("expected decode error")
+	}
 }

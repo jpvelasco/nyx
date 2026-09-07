@@ -513,4 +513,37 @@ func TestOpnsenseServicePlanApplyVLAN(t *testing.T) {
 	if _, err := svc.PlanVLAN(ctx, opts, OpnsenseVLANRequest{}); err == nil {
 		t.Fatal("expected parent/tag required")
 	}
+	upd, err := svc.PlanVLAN(ctx, opts, OpnsenseVLANRequest{Parent: "igb0", Tag: 60, Description: "iot-renamed"})
+	if err != nil || upd.Action != "update" {
+		t.Fatalf("update plan = %+v %v", upd, err)
+	}
+	updated, err := svc.ApplyVLAN(ctx, opts, OpnsenseVLANRequest{Parent: "igb0", Tag: 60, Description: "iot-renamed"}, false)
+	if err != nil || updated.Outcome != "updated" {
+		t.Fatalf("update apply = %+v %v", updated, err)
+	}
+	del, err := svc.PlanVLAN(ctx, opts, OpnsenseVLANRequest{UUID: "v1", Delete: true})
+	if err != nil || del.Action != "delete" {
+		t.Fatalf("delete plan = %+v %v", del, err)
+	}
+	deleted, err := svc.ApplyVLAN(ctx, opts, OpnsenseVLANRequest{UUID: "v1", Delete: true}, false)
+	if err != nil || deleted.Outcome != "deleted" {
+		t.Fatalf("delete apply = %+v %v", deleted, err)
+	}
+	same, err := svc.PlanVLAN(ctx, opts, OpnsenseVLANRequest{Kind: "bridge", UUID: "b1", Members: []string{"igb0"}})
+	if err != nil || same.Action != "unchanged" {
+		t.Fatalf("bridge unchanged = %+v %v", same, err)
+	}
+	if _, err := svc.PlanVLAN(ctx, opts, OpnsenseVLANRequest{Kind: "bridge"}); err == nil {
+		t.Fatal("expected bridge uuid required")
+	}
+	if _, err := svc.PlanVLAN(ctx, opts, OpnsenseVLANRequest{Kind: "bridge", UUID: "missing", Members: []string{"igb0"}}); err == nil {
+		t.Fatal("expected missing bridge")
+	}
+	if _, err := svc.PlanVLAN(ctx, opts, OpnsenseVLANRequest{Kind: "bridge", UUID: "b1", Delete: true}); err == nil {
+		t.Fatal("expected bridge delete unsupported")
+	}
+	missingDel, err := svc.PlanVLAN(ctx, opts, OpnsenseVLANRequest{UUID: "nope", Delete: true})
+	if err != nil || missingDel.Action != "unchanged" {
+		t.Fatalf("delete missing = %+v %v", missingDel, err)
+	}
 }
