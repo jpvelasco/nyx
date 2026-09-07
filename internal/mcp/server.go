@@ -138,6 +138,9 @@ type omadaSurface interface {
 	ApplyPortProfile(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest, dryRun bool) (*service.OmadaPortProfileApplyResult, error)
 	PlanLAN(ctx context.Context, opts service.OmadaOptions, req service.OmadaLANRequest) (*service.OmadaLANPlan, error)
 	ApplyLAN(ctx context.Context, opts service.OmadaOptions, req service.OmadaLANRequest, dryRun bool) (*service.OmadaLANApplyResult, error)
+	ListSSIDs(ctx context.Context, opts service.OmadaOptions) (*service.OmadaSSIDInventory, error)
+	PlanSSID(ctx context.Context, opts service.OmadaOptions, req service.OmadaSSIDRequest) (*service.OmadaSSIDPlan, error)
+	ApplySSID(ctx context.Context, opts service.OmadaOptions, req service.OmadaSSIDRequest, dryRun bool) (*service.OmadaSSIDApplyResult, error)
 }
 
 // opnsenseSurface is the OPNsense observation surface exposed to agents.
@@ -649,6 +652,40 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"delete":         {Type: "boolean", Description: "Delete the LAN"},
 				"dry_run":        {Type: "boolean", Description: "Preview only. Default true."},
 			}, []string{"host", "name"}),
+		},
+		{
+			Name:        "omada_list_ssids",
+			Description: "List Omada site WLAN groups and SSIDs (broadcast name, VLAN, security, enabled). Read-only.",
+			InputSchema: omadaToolSchema(),
+		},
+		{
+			Name:        "omada_plan_ssid",
+			Description: "Preview creating, updating, or deleting an Omada site SSID (VLAN rebind, enable, security). Read-only.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"name":       {Type: "string", Description: "SSID record name (or broadcast name)"},
+				"ssid":       {Type: "string", Description: "Broadcast SSID"},
+				"enabled":    {Type: "boolean", Description: "Whether the SSID is enabled"},
+				"wlan_group": {Type: "string", Description: "WLAN group name or id"},
+				"vlan":       {Type: "integer", Description: "VLAN id bound to the SSID"},
+				"security":   {Type: "string", Description: "Security mode, e.g. wpa2"},
+				"band":       {Type: "string", Description: "Radio band if the controller exposes it"},
+				"delete":     {Type: "boolean", Description: "Preview a delete"},
+			}, []string{"host"}),
+		},
+		{
+			Name:        "omada_apply_ssid",
+			Description: "Create, update, or delete an Omada site SSID. Idempotent (created/updated/unchanged/deleted). Dry-run default: set dry_run=false to apply.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"name":       {Type: "string", Description: "SSID record name (or broadcast name)"},
+				"ssid":       {Type: "string", Description: "Broadcast SSID"},
+				"enabled":    {Type: "boolean", Description: "Whether the SSID is enabled"},
+				"wlan_group": {Type: "string", Description: "WLAN group name or id"},
+				"vlan":       {Type: "integer", Description: "VLAN id bound to the SSID"},
+				"security":   {Type: "string", Description: "Security mode, e.g. wpa2"},
+				"band":       {Type: "string", Description: "Radio band if the controller exposes it"},
+				"delete":     {Type: "boolean", Description: "Delete the SSID"},
+				"dry_run":    {Type: "boolean", Description: "Preview only. Default true."},
+			}, []string{"host"}),
 		},
 		{
 			Name:        "omada_apply_port_profile",

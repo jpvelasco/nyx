@@ -57,6 +57,9 @@ var toolHandlers = map[string]toolHandler{
 	"omada_apply_port_profile":         (*Server).toolOmadaApplyPortProfile,
 	"omada_plan_lan":                   (*Server).toolOmadaPlanLAN,
 	"omada_apply_lan":                  (*Server).toolOmadaApplyLAN,
+	"omada_list_ssids":                 (*Server).toolOmadaListSSIDs,
+	"omada_plan_ssid":                  (*Server).toolOmadaPlanSSID,
+	"omada_apply_ssid":                 (*Server).toolOmadaApplySSID,
 	"opnsense_get_info":                (*Server).toolOpnsenseGetInfo,
 	"opnsense_list_interfaces":         (*Server).toolOpnsenseListInterfaces,
 	"opnsense_list_firewall_rules":     (*Server).toolOpnsenseListFirewallRules,
@@ -675,6 +678,61 @@ func (s *Server) toolOmadaApplyLAN(ctx context.Context, args map[string]interfac
 	res, err := s.omadaSvc.ApplyLAN(ctx, opts, req, argBoolDefault(args, "dry_run", true))
 	if err != nil {
 		return errResult(fmt.Sprintf("omada lan apply failed: %v", err))
+	}
+	return okResult(toJSON(res))
+}
+
+func (s *Server) toolOmadaListSSIDs(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.omadaJSON(ctx, args, "omada ssids request failed", func(opts service.OmadaOptions) (interface{}, error) {
+		return s.omadaSvc.ListSSIDs(ctx, opts)
+	})
+}
+
+func ssidRequestFromArgs(args map[string]interface{}) (service.OmadaSSIDRequest, string) {
+	req := service.OmadaSSIDRequest{
+		Name:      argString(args, "name"),
+		SSID:      argString(args, "ssid"),
+		Enabled:   argBoolDefault(args, "enabled", false),
+		WLANGroup: argString(args, "wlan_group"),
+		VLAN:      argIntDefault(args, "vlan", 0),
+		Security:  argString(args, "security"),
+		Band:      argString(args, "band"),
+		Delete:    argBoolDefault(args, "delete", false),
+	}
+	if req.Name == "" && req.SSID == "" {
+		return req, "name or ssid parameter is required"
+	}
+	return req, ""
+}
+
+func (s *Server) toolOmadaPlanSSID(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req, rmsg := ssidRequestFromArgs(args)
+	if rmsg != "" {
+		return errResult(rmsg)
+	}
+	plan, err := s.omadaSvc.PlanSSID(ctx, opts, req)
+	if err != nil {
+		return errResult(fmt.Sprintf("omada ssid plan request failed: %v", err))
+	}
+	return okResult(toJSON(plan))
+}
+
+func (s *Server) toolOmadaApplySSID(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req, rmsg := ssidRequestFromArgs(args)
+	if rmsg != "" {
+		return errResult(rmsg)
+	}
+	res, err := s.omadaSvc.ApplySSID(ctx, opts, req, argBoolDefault(args, "dry_run", true))
+	if err != nil {
+		return errResult(fmt.Sprintf("omada ssid apply failed: %v", err))
 	}
 	return okResult(toJSON(res))
 }
