@@ -8,6 +8,9 @@ come from the officially published spec on
 `omada-northbound-docs.tplinkcloud.com` (per-version docs, e.g. the 6.2.x
 catalogs), cross-checked read-only against a live controller.
 
+Gateway client-discovery SYN traffic (the controller's own probes, not
+nyx scans) is documented in [omada-syn-traffic.md](omada-syn-traffic.md).
+
 ## What it is
 
 - Base URL: `https://<controller-host>/openapi/v1/{omadacId}/...`
