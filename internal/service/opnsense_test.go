@@ -612,3 +612,48 @@ func TestOpnsenseServiceVLAN_Errors(t *testing.T) {
 		t.Fatal("expected bridge reconfigure error")
 	}
 }
+
+func TestOpnsenseServicePlanApplyFilter(t *testing.T) {
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "filter/search_rule"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"r1","enabled":"1","action":"block","description":"isolate","source_net":"lan","destination_net":"iot"}]}`)
+		case strings.Contains(r.URL.Path, "alias/search_item"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"a1","name":"iot_net","type":"network","address":"10.0.60.0/24","enabled":"1"}]}`)
+		case strings.Contains(r.URL.Path, "add_"):
+			testutil.WriteBody(w, `{"result":"saved","uuid":"new"}`)
+		default:
+			testutil.WriteBody(w, `{"result":"saved"}`)
+		}
+	})
+	svc := NewOpnsenseService()
+	ctx := context.Background()
+	opts := opnsenseOptions(ts)
+	unchanged, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Name: "isolate", Action: "block", Source: "lan", Destination: "iot", Enabled: true})
+	if err != nil || unchanged.Action != "unchanged" {
+		t.Fatalf("unchanged = %+v %v", unchanged, err)
+	}
+	create, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Action: "block", Source: "guest", Destination: "iot", Enabled: true})
+	if err != nil || create.Action != "create" {
+		t.Fatalf("create = %+v %v", create, err)
+	}
+	dry, err := svc.ApplyFilter(ctx, opts, OpnsenseFilterRequest{Action: "block", Source: "guest", Destination: "iot"}, true)
+	if err != nil || !dry.DryRun {
+		t.Fatalf("dry = %+v %v", dry, err)
+	}
+	created, err := svc.ApplyFilter(ctx, opts, OpnsenseFilterRequest{Action: "block", Source: "guest", Destination: "iot", Enabled: true}, false)
+	if err != nil || created.Outcome != "created" {
+		t.Fatalf("created = %+v %v", created, err)
+	}
+	aliasCreate, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Kind: "alias", Name: "guest_net", Addresses: []string{"10.0.70.0/24"}, Enabled: true})
+	if err != nil || aliasCreate.Action != "create" {
+		t.Fatalf("alias create = %+v %v", aliasCreate, err)
+	}
+	aliasApplied, err := svc.ApplyFilter(ctx, opts, OpnsenseFilterRequest{Kind: "alias", Name: "guest_net", Addresses: []string{"10.0.70.0/24"}, Enabled: true}, false)
+	if err != nil || aliasApplied.Outcome != "created" {
+		t.Fatalf("alias apply = %+v %v", aliasApplied, err)
+	}
+	if _, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{}); err == nil {
+		t.Fatal("expected source/destination required")
+	}
+}

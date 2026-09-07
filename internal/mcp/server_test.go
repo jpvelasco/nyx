@@ -299,8 +299,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 65 {
-		t.Fatalf("expected 65 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 67 {
+		t.Fatalf("expected 67 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -309,7 +309,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_plan_port", "omada_apply_port_profile", "omada_plan_lan", "omada_apply_lan", "omada_list_ssids", "omada_plan_ssid", "omada_apply_ssid", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_get_firewall_rule", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_vlans", "opnsense_plan_vlan", "opnsense_apply_vlan", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_list_kea_subnets", "opnsense_list_kea_reservations", "opnsense_inventory", "topology"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_plan_port", "omada_apply_port_profile", "omada_plan_lan", "omada_apply_lan", "omada_list_ssids", "omada_plan_ssid", "omada_apply_ssid", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_get_firewall_rule", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_vlans", "opnsense_plan_vlan", "opnsense_apply_vlan", "opnsense_plan_filter", "opnsense_apply_filter", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_list_kea_subnets", "opnsense_list_kea_reservations", "opnsense_inventory", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -368,6 +368,8 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 		"opnsense_list_vlans":              {"host"},
 		"opnsense_plan_vlan":               {"host"},
 		"opnsense_apply_vlan":              {"host"},
+		"opnsense_plan_filter":             {"host"},
+		"opnsense_apply_filter":            {"host"},
 		"opnsense_get_info":                {"host"},
 		"opnsense_list_interfaces":         {"host"},
 		"opnsense_list_services":           {"host"},
@@ -2378,6 +2380,42 @@ func (s *stubOpnsenseSvc) ApplyVLAN(_ context.Context, opts service.OpnsenseOpti
 		return nil, s.err
 	}
 	return &service.OpnsenseVLANApplyResult{Outcome: "create", Kind: "vlan", DryRun: dryRun, Warning: "GUI"}, nil
+}
+
+func (s *stubOpnsenseSvc) PlanFilter(_ context.Context, opts service.OpnsenseOptions, req service.OpnsenseFilterRequest) (*service.OpnsenseFilterPlan, error) {
+	s.lastOpts = opts
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &service.OpnsenseFilterPlan{Action: "create", Kind: "filter"}, nil
+}
+
+func (s *stubOpnsenseSvc) ApplyFilter(_ context.Context, opts service.OpnsenseOptions, req service.OpnsenseFilterRequest, dryRun bool) (*service.OpnsenseFilterApplyResult, error) {
+	s.lastOpts = opts
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &service.OpnsenseFilterApplyResult{Outcome: "create", Kind: "filter", DryRun: dryRun}, nil
+}
+
+func TestDispatchOpnsenseFilter(t *testing.T) {
+	stub := &stubOpnsenseSvc{}
+	args := map[string]interface{}{"host": "fw.local", "api_key": "k", "api_secret": "s", "source": "lan", "destination": "iot", "action": "block"}
+	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_plan_filter", args)
+	if isErr || !strings.Contains(text, `"action": "create"`) {
+		t.Fatalf("plan = (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_apply_filter", args)
+	if isErr || !strings.Contains(text, `"dry_run": true`) {
+		t.Fatalf("apply = (%q, %v)", text, isErr)
+	}
+	errStub := &stubOpnsenseSvc{err: errors.New("boom")}
+	if text, isErr := serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_plan_filter", args); !isErr || !strings.Contains(text, "opnsense filter plan request failed") {
+		t.Errorf("plan err = (%q, %v)", text, isErr)
+	}
+	if text, isErr := serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_apply_filter", args); !isErr || !strings.Contains(text, "opnsense filter apply failed") {
+		t.Errorf("apply err = (%q, %v)", text, isErr)
+	}
 }
 
 func TestDispatchOpnsenseVLAN(t *testing.T) {
