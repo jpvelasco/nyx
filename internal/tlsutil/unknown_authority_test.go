@@ -2,16 +2,10 @@ package tlsutil
 
 import (
 	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
-	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
 func TestAnnotate_UnknownAuthority(t *testing.T) {
@@ -55,146 +49,5 @@ func TestAnnotate_FmtWrapped(t *testing.T) {
 	}
 	if !strings.Contains(got.Error(), Hint) {
 		t.Errorf("missing hint in %q", got)
-	}
-}
-
-func TestFetchAndWrite_WritesVerifiablePEM(t *testing.T) {
-	url, _ := testutil.CASignedServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	host := strings.TrimPrefix(url, "https://")
-	out := filepath.Join(t.TempDir(), "controller.pem")
-	n, err := FetchAndWrite(FetchOptions{Host: host, Out: out})
-	if err != nil {
-		t.Fatalf("FetchAndWrite: %v", err)
-	}
-	if n < 1 {
-		t.Fatalf("wrote %d certs, want at least the leaf", n)
-	}
-	pemData, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatalf("reading written PEM: %v", err)
-	}
-	var der []byte
-	rest := pemData
-	for {
-		var block *pem.Block
-		block, rest = pem.Decode(rest)
-		if block == nil {
-			break
-		}
-		der = append(der, block.Bytes...)
-	}
-	certs, err := x509.ParseCertificates(der)
-	if err != nil {
-		t.Fatalf("ParseCertificates: %v", err)
-	}
-	if len(certs) < 1 {
-		t.Fatal("no certs in written PEM")
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pemData) {
-		t.Fatal("written PEM did not parse as a CA pool")
-	}
-}
-
-func TestFetchAndWrite_RefusesOverwrite(t *testing.T) {
-	url, _ := testutil.CASignedServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	host := strings.TrimPrefix(url, "https://")
-	out := filepath.Join(t.TempDir(), "exists.pem")
-	if err := os.WriteFile(out, []byte("keep"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := FetchAndWrite(FetchOptions{Host: host, Out: out})
-	if err == nil || !strings.Contains(err.Error(), "--force") {
-		t.Fatalf("error = %v, want --force overwrite refusal", err)
-	}
-	got, _ := os.ReadFile(out)
-	if string(got) != "keep" {
-		t.Error("file was overwritten without --force")
-	}
-	n, err := FetchAndWrite(FetchOptions{Host: host, Out: out, Force: true})
-	if err != nil {
-		t.Fatalf("force overwrite: %v", err)
-	}
-	if n < 1 {
-		t.Fatalf("force wrote %d certs", n)
-	}
-}
-
-func TestFetchAndWrite_AcceptsHTTPSPrefix(t *testing.T) {
-	url, _ := testutil.CASignedServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	out := filepath.Join(t.TempDir(), "from-url.pem")
-	n, err := FetchAndWrite(FetchOptions{Host: url, Out: out})
-	if err != nil {
-		t.Fatalf("FetchAndWrite with https URL: %v", err)
-	}
-	if n < 1 {
-		t.Fatalf("wrote %d certs", n)
-	}
-}
-
-func TestFetchAndWrite_DialFailure(t *testing.T) {
-	_, err := FetchAndWrite(FetchOptions{Host: "127.0.0.1:1", Out: filepath.Join(t.TempDir(), "x.pem")})
-	if err == nil || !strings.Contains(err.Error(), "fetching certificate chain") {
-		t.Fatalf("error = %v, want dial failure", err)
-	}
-}
-
-func TestParsePresentedCerts(t *testing.T) {
-	if _, err := parsePresentedCerts(nil); err == nil || !strings.Contains(err.Error(), "no certificates") {
-		t.Errorf("empty chain: %v", err)
-	}
-	if _, err := parsePresentedCerts([][]byte{[]byte("not-a-cert")}); err == nil || !strings.Contains(err.Error(), "parsing presented certificate") {
-		t.Errorf("bad DER: %v", err)
-	}
-	url, _ := testutil.CASignedServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	out := filepath.Join(t.TempDir(), "ok.pem")
-	if _, err := FetchAndWrite(FetchOptions{Host: url, Out: out}); err != nil {
-		t.Fatalf("seed fetch: %v", err)
-	}
-	pemData, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var ders [][]byte
-	rest := pemData
-	for {
-		var block *pem.Block
-		block, rest = pem.Decode(rest)
-		if block == nil {
-			break
-		}
-		ders = append(ders, block.Bytes)
-	}
-	certs, err := parsePresentedCerts(ders)
-	if err != nil || len(certs) != len(ders) {
-		t.Fatalf("parsePresentedCerts = %d, %v", len(certs), err)
-	}
-}
-
-func TestFetchAndWrite_WriteFailure(t *testing.T) {
-	url, _ := testutil.CASignedServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	dir := t.TempDir()
-	_, err := FetchAndWrite(FetchOptions{Host: strings.TrimPrefix(url, "https://"), Out: dir, Force: true})
-	if err == nil || !strings.Contains(err.Error(), "writing PEM") {
-		t.Fatalf("error = %v, want writing PEM", err)
-	}
-}
-
-func TestFetchAndWrite_MissingArgs(t *testing.T) {
-	if _, err := FetchAndWrite(FetchOptions{Out: "x.pem"}); err == nil || !strings.Contains(err.Error(), "host is required") {
-		t.Errorf("missing host: %v", err)
-	}
-	if _, err := FetchAndWrite(FetchOptions{Host: "127.0.0.1"}); err == nil || !strings.Contains(err.Error(), "--out is required") {
-		t.Errorf("missing out: %v", err)
 	}
 }

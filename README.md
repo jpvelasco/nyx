@@ -331,12 +331,7 @@ Port profile **writes** (plan + apply, dry-run by default) are available as MCP 
 
 Credentials can be passed via flags, env vars (`OMADA_HOST`, `OMADA_CLIENT_ID`, `OMADA_CLIENT_SECRET`), the Windows Credential Manager (entry `nyx-omada-<host>`, created with `cmdkey /generic:nyx-omada-<host> /user:<client-id> /pass:<client-secret>`), or the encrypted store (`nyx credentials set omada`).
 
-If the controller presents a privately-issued certificate, pin it instead of skipping verification:
-
-```bash
-nyx omada fetch-cert --host 10.0.11.20 --out ca.pem
-nyx omada info --host 10.0.11.20 --ca-cert ca.pem
-```
+If the controller presents a privately-issued certificate, pin it with `--ca-cert <pem>` instead of `--skip-tls-verify`.
 
 ### OPNsense
 
@@ -354,10 +349,6 @@ nyx opnsense check --host 10.0.11.1 --api-key <key> --api-secret <secret> --spec
 
 # Point-in-time inventory (interfaces, firewall rules, DHCP clients)
 nyx opnsense inventory --host 10.0.11.1 --api-key <key> --api-secret <secret>
-
-# Pin a privately-issued controller CA (preferred over --skip-tls-verify)
-nyx opnsense fetch-cert --host 10.0.11.1 --out ca.pem
-nyx opnsense info --host 10.0.11.1 --ca-cert ca.pem
 ```
 
 ## Project Structure

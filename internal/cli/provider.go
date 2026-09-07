@@ -102,15 +102,14 @@ func BuildProviderSubcommands(root *cobra.Command) {
 			vendorCmd.AddCommand(buildInventoryCmd(p))
 		}
 
-		// Extra (non-capability) surface: Omada observation subcommands
-		// and the shared fetch-cert helper. Neither is advertised via
-		// Capabilities() — adding them there would trip the parity gate.
+		// Extra (non-capability) surface: Omada observation subcommands.
+		// They are not advertised via Capabilities() — adding them
+		// there would trip the parity gate.
 		if p.Name() == "omada" {
 			for _, extra := range buildOmadaExtraCommands() {
 				vendorCmd.AddCommand(extra)
 			}
 		}
-		vendorCmd.AddCommand(buildFetchCertCmd(p.Name()))
 
 		root.AddCommand(vendorCmd)
 	}
