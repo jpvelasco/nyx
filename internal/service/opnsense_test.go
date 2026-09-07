@@ -216,6 +216,37 @@ func TestFlattenReconNil(t *testing.T) {
 	}
 }
 
+func TestOpnsenseServiceListKea(t *testing.T) {
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "search_subnet"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"s1","subnet":"10.0.10.0/24"}]}`)
+		case strings.Contains(r.URL.Path, "search_reservation"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"r1","ip":"10.0.10.20","mac":"aa:bb:cc:dd:ee:01"}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	opts := opnsenseOptions(ts)
+	subs, err := NewOpnsenseService().ListKeaSubnets(context.Background(), opts)
+	if err != nil || len(subs) != 1 || subs[0].Subnet != "10.0.10.0/24" {
+		t.Fatalf("subnets = %+v, %v", subs, err)
+	}
+	res, err := NewOpnsenseService().ListKeaReservations(context.Background(), opts)
+	if err != nil || len(res) != 1 || res[0].IP != "10.0.10.20" {
+		t.Fatalf("resv = %+v, %v", res, err)
+	}
+	ts2 := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	if _, err := NewOpnsenseService().ListKeaSubnets(context.Background(), opnsenseOptions(ts2)); err == nil {
+		t.Fatal("expected subnet error")
+	}
+	if _, err := NewOpnsenseService().ListKeaReservations(context.Background(), opnsenseOptions(ts2)); err == nil {
+		t.Fatal("expected reservation error")
+	}
+}
+
 func TestOpnsenseServiceListFirewallRules(t *testing.T) {
 	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/firewall/filter/search_rule" {

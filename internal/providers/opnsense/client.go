@@ -484,7 +484,7 @@ func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
 // a missing route (404, skip and try the next) from a present route the API
 // user lacks the page privilege for (403, stable — the actionable
 // permission-denied error is returned, never retried or masked).
-var leaseRoutes = []string{"/dnsmasq/leases/search", "/dhcpd/leases"}
+var leaseRoutes = []string{"/dnsmasq/leases/search", "/kea/leases/search", "/dhcpd/leases"}
 
 // GetDHCPLeases returns all DHCP leases from OPNsense. The active DHCP
 // backend's route is probed in order (see leaseRoutes); a 404 falls through

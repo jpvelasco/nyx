@@ -157,6 +157,8 @@ type opnsenseSurface interface {
 	GetDnsmasqSettings(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseDnsmasqSettings, error)
 	GetPfStatistics(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsensePfStatistics, error)
 	ListKernelRoutes(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKernelRoute, error)
+	ListKeaSubnets(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKeaSubnet, error)
+	ListKeaReservations(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKeaReservation, error)
 	GetOutboundNatMode(ctx context.Context, opts service.OpnsenseOptions) (string, error)
 	GetNAT(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseNatSummary, error)
 	Inventory(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseInventory, error)
@@ -737,6 +739,16 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		{
 			Name:        "opnsense_list_kernel_routes",
 			Description: "List the OPNsense kernel routing table (GET diagnostics/interface/get_routes). A 403 means the API user lacks the Diagnostics: Interfaces page privilege.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_kea_subnets",
+			Description: "List Kea DHCPv4 subnets (observe). A 404 means Kea is not installed; a 403 is a page-privilege miss.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_kea_reservations",
+			Description: "List Kea DHCPv4 reservations (observe). A 404 means Kea is not installed; a 403 is a page-privilege miss.",
 			InputSchema: opnsenseToolSchema(),
 		},
 		{

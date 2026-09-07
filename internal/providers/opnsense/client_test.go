@@ -462,7 +462,7 @@ func TestGetDHCPLeases(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			hits = append(hits, r.URL.Path)
 			switch r.URL.Path {
-			case "/api/dnsmasq/leases/search":
+			case "/api/dnsmasq/leases/search", "/api/kea/leases/search":
 				w.WriteHeader(http.StatusNotFound)
 			case "/api/dhcpd/leases":
 				testutil.WriteBody(w, `{"leases":[
@@ -476,8 +476,8 @@ func TestGetDHCPLeases(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetDHCPLeases: %v", err)
 		}
-		if len(hits) != 2 || hits[0] != "/api/dnsmasq/leases/search" || hits[1] != "/api/dhcpd/leases" {
-			t.Errorf("requests = %v, want dnsmasq then dhcpd in order", hits)
+		if len(hits) != 3 || hits[0] != "/api/dnsmasq/leases/search" || hits[1] != "/api/kea/leases/search" || hits[2] != "/api/dhcpd/leases" {
+			t.Errorf("requests = %v, want dnsmasq then kea then dhcpd", hits)
 		}
 		if len(leases) != 1 || leases[0].IP != "10.0.0.10" {
 			t.Errorf("leases = %+v", leases)
