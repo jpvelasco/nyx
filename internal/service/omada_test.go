@@ -1853,6 +1853,23 @@ func TestOmadaServiceApplyLAN_Mutations(t *testing.T) {
 	}
 }
 
+func TestOmadaServicePlanApplyLAN_Errors(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/openapi/authorize/token" {
+			writeOmadaEnvelope(w, 0, `{"accessToken":"t"}`)
+			return
+		}
+		writeOmadaEnvelope(w, -33004, `null`)
+	})
+	opts := omadaPortOpts(ts.URL)
+	if _, err := NewOmadaService().PlanLAN(context.Background(), opts, OmadaLANRequest{Name: "iot"}); err == nil {
+		t.Fatal("expected PlanLAN fetch error")
+	}
+	if _, err := NewOmadaService().ApplyLAN(context.Background(), opts, OmadaLANRequest{Name: "iot"}, false); err == nil {
+		t.Fatal("expected ApplyLAN fetch error")
+	}
+}
+
 func TestOmadaServicePlanPort(t *testing.T) {
 	st := omadaPortStateFresh()
 	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))

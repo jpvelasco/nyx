@@ -2045,6 +2045,11 @@ func TestDispatchOmadaPlanApplyLAN(t *testing.T) {
 	if text, isErr := serverWithOmadaStub(errStub).DispatchToolForTest(context.Background(), "omada_apply_lan", args); !isErr || !strings.Contains(text, "omada lan apply failed") {
 		t.Errorf("apply err = (%q, %v)", text, isErr)
 	}
+	if text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_apply_lan", map[string]interface{}{
+		"client_id": "a", "client_secret": "b", "name": "iot",
+	}); !isErr || !strings.Contains(text, "host") {
+		t.Errorf("missing host apply = (%q, %v)", text, isErr)
+	}
 }
 
 func (s *stubOmadaSvc) ApplyLAN(_ context.Context, opts service.OmadaOptions, req service.OmadaLANRequest, dryRun bool) (*service.OmadaLANApplyResult, error) {
