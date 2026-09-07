@@ -838,7 +838,8 @@ func (s *OpnsenseService) PlanVLAN(ctx context.Context, opts OpnsenseOptions, re
 		plan.Action = "update"
 		return plan, nil
 	}
-	if !(req.Delete && req.UUID != "") && (req.Parent == "" || req.Tag <= 0) {
+	identifiedByUUID := req.Delete && req.UUID != ""
+	if !identifiedByUUID && (req.Parent == "" || req.Tag <= 0) {
 		return nil, fmt.Errorf("parent and tag are required (or uuid for delete)")
 	}
 	vlans, err := client.GetVLANs(ctx)
