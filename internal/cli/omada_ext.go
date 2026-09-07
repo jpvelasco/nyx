@@ -77,6 +77,8 @@ func buildOmadaUplinkInfoCmd() *cobra.Command {
 			fmt.Printf("MAC         : %s\n", r.MAC)
 			fmt.Printf("Uplink device: %s (%s)\n", r.UplinkDeviceName, r.UplinkDeviceMAC)
 			fmt.Printf("Uplink port : %s\n", r.UplinkDevicePort)
+			fmt.Printf("Link speed  : %s (configured; negotiated speed is not on the Open API)\n",
+				formatConfiguredLinkSpeed(r.LinkSpeed, r.Duplex))
 			return nil
 		},
 	}
@@ -122,6 +124,7 @@ func buildOmadaSwitchPortsCmd() *cobra.Command {
 				fmt.Printf("%-6d %-14s %-8s %-7s %-14s %s\n",
 					p.Port, shortMAC(p.SwitchMAC), mode, p.NativeNetwork, p.ProfileName, joinOrDash(p.Tagged))
 			}
+			fmt.Println("Note: overview linkSpeed/duplex are configured settings (0=Auto), not negotiated link state.")
 			return nil
 		},
 	}
@@ -200,4 +203,28 @@ func joinOrDash(names []string) string {
 		out += "+" + n
 	}
 	return out
+}
+
+// configuredLinkSpeeds / configuredDuplexes are the Open API configured
+// setting enums (not negotiated link state). 0 is Auto on both.
+var configuredLinkSpeeds = map[int]string{
+	0: "Auto", 1: "10M", 2: "100M", 3: "1000M", 4: "2500M", 5: "10G",
+}
+var configuredDuplexes = map[int]string{
+	0: "Auto", 1: "Half", 2: "Full",
+}
+
+// formatConfiguredLinkSpeed renders the overview's configured speed/duplex
+// pair. Unknown enum values fall back to the raw integer so a future
+// controller code is still visible.
+func formatConfiguredLinkSpeed(speed, duplex int) string {
+	s, ok := configuredLinkSpeeds[speed]
+	if !ok {
+		s = fmt.Sprintf("%d", speed)
+	}
+	d, ok := configuredDuplexes[duplex]
+	if !ok {
+		d = fmt.Sprintf("%d", duplex)
+	}
+	return s + "/" + d
 }

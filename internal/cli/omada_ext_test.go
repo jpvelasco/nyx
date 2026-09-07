@@ -109,7 +109,7 @@ func TestOmadaUplinkInfoCmd_JSON(t *testing.T) {
 			t.Fatalf("uplink-info: %v", err)
 		}
 	})
-	for _, want := range []string{`"uplink_device_port": "8"`, "SW-CORE"} {
+	for _, want := range []string{`"uplink_device_port": "8"`, "SW-CORE", `"link_speed_source": "configured"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("JSON output missing %q:\n%s", want, out)
 		}
@@ -148,9 +148,26 @@ func TestOmadaUplinkInfoCmd_Text(t *testing.T) {
 			t.Fatalf("uplink-info (text): %v", err)
 		}
 	})
-	for _, want := range []string{"Uplink device: SW-CORE", "Uplink port : 8"} {
+	for _, want := range []string{"Uplink device: SW-CORE", "Uplink port : 8", "1000M/Full", "configured"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestFormatConfiguredLinkSpeed(t *testing.T) {
+	cases := []struct {
+		speed, duplex int
+		want          string
+	}{
+		{0, 0, "Auto/Auto"},
+		{3, 2, "1000M/Full"},
+		{2, 1, "100M/Half"},
+		{99, 7, "99/7"},
+	}
+	for _, tc := range cases {
+		if got := formatConfiguredLinkSpeed(tc.speed, tc.duplex); got != tc.want {
+			t.Errorf("formatConfiguredLinkSpeed(%d, %d) = %q, want %q", tc.speed, tc.duplex, got, tc.want)
 		}
 	}
 }
@@ -187,6 +204,7 @@ func TestOmadaSwitchPortsCmd_Text(t *testing.T) {
 		"PORT", "SWITCH", "MODE", "NATIVE", "PROFILE", "TAGGED",
 		"...4455", "trunk", "trusted", // port 8: short MAC, trunk mode, native trusted
 		"...ee01", "access", // port 9: access mode
+		"configured settings", "0=Auto",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text output missing %q:\n%s", want, out)

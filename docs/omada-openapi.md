@@ -90,6 +90,27 @@ inventory records a `rule_count` per scope (a listed scope is active), and the
 recommendation engine explains that the gateway scope has no enable surface via
 any API; rule CRUD remains stored but inert at the gateway when unsupported.
 
+## Port speed (configured, not negotiated)
+
+`GET sites/{siteId}/switches/ports/overview` and
+`POST sites/{siteId}/devices/uplink-info` both carry `linkSpeed` /
+`duplex`. Those fields are the port's **configured** speed setting
+(`0` Auto, `1` 10M, `2` 100M, `3` 1000M, `4` 2500M, `5` 10G; duplex
+`0` Auto / `1` Half / `2` Full), not the negotiated link state.
+
+Live 6.2.14 observation: connected copper ports left on Auto report
+`linkSpeed: 0` / `duplex: 0` even when the far end is 1G full-duplex;
+down SFP ports report `linkSpeed: 3` while down. Per-port follow-ups
+(`ports/{n}`, `ports/{n}/status`, `ports/{n}/stat`) all return
+`errorCode -1600: Unsupported request path`. There is no LLDP-neighbor
+endpoint on the wrapped 6.2.14 surface.
+
+Consequence for nyx: do not treat `linkSpeed: 0` as link-down or
+unknown. Service types stamp `link_speed_source: "configured"`.
+Negotiated speed is unobservable from the controller; the
+`client-link-topology` node is the fallback signal for the
+managed→unmanaged hop.
+
 ## TLS quirk (Windows)
 
 The controller requests a **TLS renegotiation** mid-connection on some
