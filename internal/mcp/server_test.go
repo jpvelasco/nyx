@@ -2943,6 +2943,8 @@ func TestDispatchNatReads_MissingHost(t *testing.T) {
 		"opnsense_list_vlans",
 		"opnsense_plan_vlan",
 		"opnsense_apply_vlan",
+		"opnsense_plan_filter",
+		"opnsense_apply_filter",
 	}
 	for _, tool := range opnsenseTools {
 		t.Run(tool, func(t *testing.T) {

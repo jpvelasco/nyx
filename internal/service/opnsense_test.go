@@ -656,4 +656,52 @@ func TestOpnsenseServicePlanApplyFilter(t *testing.T) {
 	if _, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{}); err == nil {
 		t.Fatal("expected source/destination required")
 	}
+	upd, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Name: "isolate", Action: "reject", Source: "lan", Destination: "iot", Enabled: true})
+	if err != nil || upd.Action != "update" {
+		t.Fatalf("update = %+v %v", upd, err)
+	}
+	updated, err := svc.ApplyFilter(ctx, opts, OpnsenseFilterRequest{Name: "isolate", Action: "reject", Source: "lan", Destination: "iot", Enabled: true}, false)
+	if err != nil || updated.Outcome != "updated" {
+		t.Fatalf("updated apply = %+v %v", updated, err)
+	}
+	del, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Name: "isolate", Delete: true})
+	if err != nil || del.Action != "delete" {
+		t.Fatalf("delete = %+v %v", del, err)
+	}
+	deleted, err := svc.ApplyFilter(ctx, opts, OpnsenseFilterRequest{Name: "isolate", Delete: true}, false)
+	if err != nil || deleted.Outcome != "deleted" {
+		t.Fatalf("deleted apply = %+v %v", deleted, err)
+	}
+	aliasSame, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Kind: "alias", Name: "iot_net", AliasType: "network", Addresses: []string{"10.0.60.0/24"}, Enabled: true})
+	if err != nil || aliasSame.Action != "unchanged" {
+		t.Fatalf("alias unchanged = %+v %v", aliasSame, err)
+	}
+	aliasUpd, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Kind: "alias", Name: "iot_net", Addresses: []string{"10.0.60.0/24", "10.0.61.0/24"}, Enabled: true})
+	if err != nil || aliasUpd.Action != "update" {
+		t.Fatalf("alias update = %+v %v", aliasUpd, err)
+	}
+	aliasUpdated, err := svc.ApplyFilter(ctx, opts, OpnsenseFilterRequest{Kind: "alias", Name: "iot_net", Addresses: []string{"10.0.60.0/24", "10.0.61.0/24"}, Enabled: true}, false)
+	if err != nil || aliasUpdated.Outcome != "updated" {
+		t.Fatalf("alias updated apply = %+v %v", aliasUpdated, err)
+	}
+	aliasDel, err := svc.ApplyFilter(ctx, opts, OpnsenseFilterRequest{Kind: "alias", Name: "iot_net", Delete: true}, false)
+	if err != nil || aliasDel.Outcome != "deleted" {
+		t.Fatalf("alias delete = %+v %v", aliasDel, err)
+	}
+	if _, err := svc.PlanFilter(ctx, opts, OpnsenseFilterRequest{Kind: "alias"}); err == nil {
+		t.Fatal("expected alias name required")
+	}
+}
+
+func TestOpnsenseServiceFilter_Errors(t *testing.T) {
+	fail := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	opts := opnsenseOptions(fail)
+	if _, err := NewOpnsenseService().PlanFilter(context.Background(), opts, OpnsenseFilterRequest{Source: "lan", Destination: "iot"}); err == nil {
+		t.Fatal("expected filter list error")
+	}
+	if _, err := NewOpnsenseService().PlanFilter(context.Background(), opts, OpnsenseFilterRequest{Kind: "alias", Name: "x"}); err == nil {
+		t.Fatal("expected alias list error")
+	}
 }
