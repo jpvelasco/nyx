@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/models"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/testutil"
 )
@@ -844,7 +845,7 @@ func TestProviderInventory(t *testing.T) {
 	})
 }
 
-func TestProviderCheckACL(t *testing.T) {
+func TestProviderCheckACL_MissingHost(t *testing.T) {
 	p := &Provider{}
 	res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{PolicyName: "x"}, providers.ImportOptions{})
 	if err != nil {
@@ -853,8 +854,55 @@ func TestProviderCheckACL(t *testing.T) {
 	if res.Status != "error" {
 		t.Errorf("status = %s, want error", res.Status)
 	}
-	if res.Summary != "CheckACL is not yet implemented for the OPNsense provider" {
-		t.Errorf("summary = %q", res.Summary)
+}
+
+func TestProviderCheckACL_AgainstRules(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"interfaces":{
+				"lan":{"description":"LAN","ipv4":"10.0.10.1/24"},
+				"iot":{"description":"IoT","ipv4":"10.0.60.1/24"}
+			}}`)
+		case "/api/firewall/alias/search_item":
+			testutil.WriteBody(w, `{"total":2,"rows":[
+				{"uuid":"a1","name":"trusted_net","type":"net","address":"10.0.10.0/24","enabled":"1"},
+				{"uuid":"a2","name":"iot_net","type":"net","address":"10.0.60.0/24","enabled":"1"}
+			]}`)
+		case "/api/firewall/filter/search_rule":
+			testutil.WriteBody(w, `{"total":2,"rows":[
+				{"uuid":"deny1","enabled":"1","action":"block","description":"isolate-iot","interface":["lan"],"source_net":"trusted_net","destination_net":"iot_net","destination_port":"any","direction":"in","ipprotocol":"inet"},
+				{"uuid":"pass1","enabled":"1","action":"pass","description":"allow-dns","interface":["lan"],"source_net":"trusted_net","destination_net":"any"}
+			]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	p := &Provider{}
+	opts := providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true}
+	res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{
+		PolicyName: "isolate-iot", From: "trusted", To: "iot", Action: "deny", ExpectEnforced: true,
+	}, opts)
+	if err != nil {
+		t.Fatalf("CheckACL: %v", err)
+	}
+	if res.Status != models.StatusPass {
+		t.Errorf("status = %s summary=%q, want pass", res.Status, res.Summary)
+	}
+}
+
+func TestResolveEndpointZone_Alias(t *testing.T) {
+	networks := []intent.Network{
+		{Name: "lan", CIDR: "10.0.10.0/24", Zone: "trusted"},
+		{Name: "iot", CIDR: "10.0.60.0/24", Zone: "iot"},
+	}
+	aliases := []Alias{{Name: "trusted_net", Addresses: []string{"10.0.10.0/24"}}}
+	if got := resolveEndpointZone("trusted_net", networks, aliases); got != "trusted" {
+		t.Errorf("alias resolve = %q, want trusted", got)
+	}
+	if got := resolveEndpointZone("lan", networks, nil); got != "trusted" {
+		t.Errorf("name resolve = %q, want trusted", got)
 	}
 }
 

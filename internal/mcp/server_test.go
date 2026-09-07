@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -298,8 +299,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 58 {
-		t.Fatalf("expected 58 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 59 {
+		t.Fatalf("expected 59 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -308,7 +309,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_plan_port", "omada_apply_port_profile", "omada_plan_lan", "omada_apply_lan", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_list_kea_subnets", "opnsense_list_kea_reservations", "opnsense_inventory", "topology"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_plan_port", "omada_apply_port_profile", "omada_plan_lan", "omada_apply_lan", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_get_firewall_rule", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_list_kea_subnets", "opnsense_list_kea_reservations", "opnsense_inventory", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -373,6 +374,7 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 		"opnsense_list_kea_subnets":        {"host"},
 		"opnsense_list_kea_reservations":   {"host"},
 		"opnsense_list_firewall_rules":     {"host"},
+		"opnsense_get_firewall_rule":       {"host", "uuid"},
 		"opnsense_list_clients":            {"host"},
 		"opnsense_list_port_forward_rules": {"host"},
 		"opnsense_list_one_to_one_rules":   {"host"},
@@ -1450,6 +1452,23 @@ func TestDispatchOpnsenseListFirewallRules(t *testing.T) {
 	}
 }
 
+func TestDispatchOpnsenseGetFirewallRule(t *testing.T) {
+	stub := &stubOpnsenseSvc{rules: []service.OpnsenseFirewallRule{
+		{UUID: "u1", Action: "block", DestPort: "53", Direction: "in", IPProtocol: "inet"},
+	}}
+	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_get_firewall_rule", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1", "uuid": "u1",
+	})
+	if isErr || !strings.Contains(text, `"uuid": "u1"`) || !strings.Contains(text, `"destination_port": "53"`) {
+		t.Fatalf("get rule = (%q, %v)", text, isErr)
+	}
+	if text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_get_firewall_rule", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
+	}); !isErr || !strings.Contains(text, "uuid parameter is required") {
+		t.Errorf("missing uuid = (%q, %v)", text, isErr)
+	}
+}
+
 func TestDispatchOpnsenseListClients(t *testing.T) {
 	stub := &stubOpnsenseSvc{clients: []service.OpnsenseClient{
 		{MAC: "aa:bb:cc:dd:ee:ff", IP: "10.0.10.5", Hostname: "nas"},
@@ -2148,6 +2167,22 @@ func (s *stubOpnsenseSvc) ListFirewallRules(_ context.Context, opts service.Opns
 	return s.rules, s.err
 }
 
+func (s *stubOpnsenseSvc) GetFirewallRule(_ context.Context, opts service.OpnsenseOptions, uuid string) (*service.OpnsenseFirewallRule, error) {
+	s.lastOpts = opts
+	if s.err != nil {
+		return nil, s.err
+	}
+	for i := range s.rules {
+		if s.rules[i].UUID == uuid {
+			return &s.rules[i], nil
+		}
+	}
+	if len(s.rules) > 0 {
+		return &s.rules[0], nil
+	}
+	return nil, fmt.Errorf("firewall rule %q not found", uuid)
+}
+
 func (s *stubOpnsenseSvc) ListClients(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseClient, error) {
 	s.lastOpts = opts
 	return s.clients, s.err
@@ -2733,6 +2768,7 @@ func TestDispatchNatReads_MissingHost(t *testing.T) {
 		"opnsense_list_source_nat_rules",
 		"opnsense_list_aliases",
 		"opnsense_get_nat",
+		"opnsense_get_firewall_rule",
 		"opnsense_list_services",
 		"opnsense_list_gateways",
 		"opnsense_list_bridges",

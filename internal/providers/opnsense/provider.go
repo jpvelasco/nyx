@@ -30,6 +30,11 @@ func isPermissionDenied(err error) bool {
 	return errors.As(err, &se) && strings.Contains(err.Error(), "permission denied")
 }
 
+func isNotFound(err error) bool {
+	var se *stableError
+	return errors.As(err, &se) && strings.Contains(err.Error(), "resource not found")
+}
+
 // Provider implements providers.Provider for OPNsense firewalls.
 type Provider struct{}
 
@@ -204,37 +209,50 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		})
 	}
 
-	// Build policies from deny firewall rules
+	aliases, aliasesErr := client.GetAliases(ctx)
+	if aliasesErr != nil && !isPermissionDenied(aliasesErr) && !isNotFound(aliasesErr) {
+		return nil, fmt.Errorf("fetching aliases: %w", aliasesErr)
+	}
+	if isPermissionDenied(aliasesErr) {
+		warnings = append(warnings,
+			"firewall aliases unavailable: "+aliasesErr.Error()+
+				" — alias-named src/dst cannot be resolved; grant the Firewall: Aliases page privilege")
+	}
+
+	// Build policies from pass and deny/reject rules. Alias names in
+	// src/dst resolve via the alias list onto imported networks.
 	var policies []intent.Policy
 	for _, rule := range rules {
-		if rule.Action != "block" && rule.Action != "reject" {
-			continue
-		}
 		if rule.Disabled {
 			continue
 		}
-
-		from := inferZoneFromAddress(rule.Source, networks)
-		to := inferZoneFromAddress(rule.Destination, networks)
+		action := policyAction(rule.Action)
+		if action == "" {
+			continue
+		}
+		from := resolveEndpointZone(rule.Source, networks, aliases)
+		to := resolveEndpointZone(rule.Destination, networks, aliases)
 		if from == "" || to == "" {
 			continue
 		}
-
 		name := rule.Label
 		if name == "" {
-			name = fmt.Sprintf("deny-%s-to-%s", from, to)
+			name = fmt.Sprintf("%s-%s-to-%s", action, from, to)
 		}
-
 		policies = append(policies, intent.Policy{
 			Name:   strings.ToLower(name),
 			From:   from,
 			To:     to,
-			Action: "deny",
+			Action: action,
 		})
 	}
 
-	// Add isolation assertions for deny policies
+	// Isolation assertions only for deny policies. Allow/pass rules stay
+	// as policies so the spec records them, but they are not isolation.
 	for _, p := range policies {
+		if p.Action != "deny" {
+			continue
+		}
 		assertions = append(assertions, intent.Assertion{
 			Type:   "isolation",
 			From:   p.From,
@@ -303,13 +321,195 @@ func (o *Provider) Check(ctx context.Context, opts providers.ImportOptions) (*pr
 	}, nil
 }
 
-// CheckACL is not yet implemented for OPNsense.
-func (o *Provider) CheckACL(_ context.Context, req providers.ACLCheckRequest, _ providers.ImportOptions) (*models.CheckResult, error) {
+// CheckACL evaluates a from/to pair against listed filter rules (and
+// aliases). A covering block/reject is isolated; a covering pass is not.
+func (o *Provider) CheckACL(ctx context.Context, req providers.ACLCheckRequest, opts providers.ImportOptions) (*models.CheckResult, error) {
 	result := models.NewCheckResult("opnsense", "acl_check", "opnsense", req.PolicyName)
-	result.Status = models.StatusError
-	result.Summary = "CheckACL is not yet implemented for the OPNsense provider"
+	result.Expected["policy"] = req.PolicyName
+	result.Expected["from"] = req.From
+	result.Expected["to"] = req.To
+	result.Expected["action"] = req.Action
+	if err := requireHost(opts); err != nil {
+		return aclCheckError(result, "%v", err), nil
+	}
+	client := newProviderClient(opts)
+	ifaces, err := client.GetInterfaces(ctx)
+	if err != nil {
+		return aclCheckError(result, "fetching interfaces: %v", err), nil
+	}
+	var networks []intent.Network
+	for _, iface := range ifaces {
+		if iface.IP == "" {
+			continue
+		}
+		networks = append(networks, intent.Network{
+			Name: strings.ToLower(strings.TrimSpace(iface.Name)),
+			CIDR: fmt.Sprintf("%s/%d", iface.IP, iface.Subnet),
+			Zone: inferZone(iface.Name, iface.Description),
+		})
+	}
+	aliases, err := client.GetAliases(ctx)
+	if err != nil && !isPermissionDenied(err) {
+		return aclCheckError(result, "fetching aliases: %v", err), nil
+	}
+	rules, err := client.GetFirewallRules(ctx)
+	if err != nil {
+		return aclCheckError(result, "fetching firewall rules: %v", err), nil
+	}
+	match := matchACLRule(rules, networks, aliases, req)
+	result.Observed["rule_count"] = len(rules)
+	if match != nil {
+		result.Observed["matched_uuid"] = match.RuleUUID
+		result.Observed["matched_action"] = match.Action
+		result.Observed["matched_label"] = match.Label
+	}
+	wantDeny := req.Action == "deny" || req.ExpectEnforced
+	switch {
+	case match == nil && wantDeny:
+		result.Status = models.StatusFail
+		result.Summary = fmt.Sprintf("no covering filter rule for %s → %s", req.From, req.To)
+	case match == nil:
+		result.Status = models.StatusFail
+		result.Summary = fmt.Sprintf("no covering pass rule for %s → %s", req.From, req.To)
+	case isDenyAction(match.Action) && wantDeny:
+		result.Status = models.StatusPass
+		result.Summary = fmt.Sprintf("isolation enforced by %s (%s)", match.RuleUUID, match.Action)
+	case isDenyAction(match.Action) && !wantDeny:
+		result.Status = models.StatusFail
+		result.Summary = fmt.Sprintf("expected allow but %s is %s", match.RuleUUID, match.Action)
+	case !isDenyAction(match.Action) && wantDeny:
+		result.Status = models.StatusFail
+		result.Summary = fmt.Sprintf("expected deny but %s is %s", match.RuleUUID, match.Action)
+	default:
+		result.Status = models.StatusPass
+		result.Summary = fmt.Sprintf("pass rule %s covers %s → %s", match.RuleUUID, req.From, req.To)
+	}
 	result.Finish()
 	return result, nil
+}
+
+func aclCheckError(result *models.CheckResult, format string, args ...interface{}) *models.CheckResult {
+	result.Status = models.StatusError
+	result.Summary = fmt.Sprintf(format, args...)
+	result.Finish()
+	return result
+}
+
+func policyAction(action string) string {
+	switch strings.ToLower(action) {
+	case "block", "reject":
+		return "deny"
+	case "pass":
+		return "allow"
+	default:
+		return ""
+	}
+}
+
+func isDenyAction(action string) bool {
+	a := strings.ToLower(action)
+	return a == "block" || a == "reject" || a == "deny"
+}
+
+func matchACLRule(rules []FirewallRule, networks []intent.Network, aliases []Alias, req providers.ACLCheckRequest) *FirewallRule {
+	from := strings.ToLower(strings.TrimSpace(req.From))
+	to := strings.ToLower(strings.TrimSpace(req.To))
+	if req.PolicyName != "" {
+		want := strings.ToLower(req.PolicyName)
+		for i := range rules {
+			if rules[i].Disabled {
+				continue
+			}
+			if strings.ToLower(rules[i].Label) == want || strings.ToLower(rules[i].RuleUUID) == want {
+				return &rules[i]
+			}
+		}
+	}
+	for i := range rules {
+		r := &rules[i]
+		if r.Disabled {
+			continue
+		}
+		src := resolveEndpointZone(r.Source, networks, aliases)
+		dst := resolveEndpointZone(r.Destination, networks, aliases)
+		if endpointMatches(src, r.Source, from, networks, aliases) &&
+			endpointMatches(dst, r.Destination, to, networks, aliases) {
+			return r
+		}
+	}
+	return nil
+}
+
+func endpointMatches(resolved, raw, want string, networks []intent.Network, aliases []Alias) bool {
+	if want == "" {
+		return false
+	}
+	want = strings.ToLower(want)
+	if strings.EqualFold(resolved, want) || strings.EqualFold(raw, want) {
+		return true
+	}
+	for _, n := range networks {
+		if strings.EqualFold(n.Name, want) || strings.EqualFold(n.Zone, want) {
+			if strings.EqualFold(resolved, n.Zone) || strings.EqualFold(resolved, n.Name) {
+				return true
+			}
+			if n.CIDR != "" && (raw == n.CIDR || strings.HasPrefix(raw, strings.Split(n.CIDR, "/")[0])) {
+				return true
+			}
+		}
+	}
+	for _, a := range aliases {
+		if strings.EqualFold(a.Name, want) && strings.EqualFold(raw, a.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveEndpointZone(address string, networks []intent.Network, aliases []Alias) string {
+	if z := inferZoneFromAddress(address, networks); z != "" {
+		return z
+	}
+	if address == "" || strings.EqualFold(address, "any") {
+		return ""
+	}
+	for _, a := range aliases {
+		if a.Disabled || !strings.EqualFold(a.Name, address) {
+			continue
+		}
+		for _, member := range a.Addresses {
+			member = strings.TrimSpace(member)
+			if z := inferZoneFromAddress(member, networks); z != "" {
+				return z
+			}
+			for _, n := range networks {
+				if strings.EqualFold(n.Name, member) || strings.EqualFold(n.CIDR, member) {
+					if n.Zone != "" {
+						return n.Zone
+					}
+					return n.Name
+				}
+			}
+		}
+		// Alias name matches a network name even with empty content.
+		for _, n := range networks {
+			if strings.EqualFold(n.Name, a.Name) || strings.EqualFold(n.Zone, a.Name) {
+				if n.Zone != "" {
+					return n.Zone
+				}
+				return n.Name
+			}
+		}
+	}
+	for _, n := range networks {
+		if strings.EqualFold(n.Name, address) || strings.EqualFold(n.Zone, address) {
+			if n.Zone != "" {
+				return n.Zone
+			}
+			return n.Name
+		}
+	}
+	return ""
 }
 
 // NatCheck reads the firewall's NAT posture (outbound NAT mode plus the
