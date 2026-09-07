@@ -1603,6 +1603,9 @@ func TestOmadaServiceGetUplinkInfo(t *testing.T) {
 	if r.MAC != "aa:bb:cc:dd:ee:01" || r.UplinkDevicePort != "8" || r.UplinkDeviceName != "SW-CORE" || r.LinkSpeed != 3 || r.Duplex != 2 {
 		t.Errorf("row = %+v", r)
 	}
+	if r.LinkSpeedSource != omadabackend.LinkSpeedConfigured {
+		t.Errorf("link_speed_source = %q, want %q (configured, not negotiated)", r.LinkSpeedSource, omadabackend.LinkSpeedConfigured)
+	}
 }
 
 func TestOmadaServiceGetUplinkInfo_FetchFails(t *testing.T) {
@@ -1643,6 +1646,9 @@ func TestOmadaServiceListSwitchPorts(t *testing.T) {
 	p := filtered[0]
 	if p.Port != 8 || p.NetworkMode != 0 || p.NativeNetwork != "trusted" {
 		t.Errorf("port = %+v", p)
+	}
+	if p.LinkSpeedSource != omadabackend.LinkSpeedConfigured {
+		t.Errorf("link_speed_source = %q, want %q", p.LinkSpeedSource, omadabackend.LinkSpeedConfigured)
 	}
 	if len(p.Tagged) != 0 {
 		t.Errorf("port 8 tagged = %v, want empty (profile P1)", p.Tagged)

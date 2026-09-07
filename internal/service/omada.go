@@ -423,6 +423,7 @@ type OmadaUplinkInfo struct {
 	UplinkDevicePort string `json:"uplink_device_port,omitempty"`
 	LinkSpeed        int    `json:"link_speed"`
 	Duplex           int    `json:"duplex"`
+	LinkSpeedSource  string `json:"link_speed_source"` // always "configured"; negotiated speed is not on the Open API
 }
 
 // OmadaSwitchPort is one switch port row with its VLAN membership resolved:
@@ -444,6 +445,9 @@ type OmadaSwitchPort struct {
 	ProfileName        string   `json:"profile_name,omitempty"`
 	ProfileOverride    bool     `json:"profile_override,omitempty"`
 	Tagged             []string `json:"tagged"`
+	LinkSpeed          int      `json:"link_speed"`
+	Duplex             int      `json:"duplex"`
+	LinkSpeedSource    string   `json:"link_speed_source"` // always "configured"; negotiated speed is not on the Open API
 }
 
 // OmadaLanProfile is a site-wide LAN profile with resolved network names:
@@ -529,6 +533,7 @@ func (s *OmadaService) GetUplinkInfo(ctx context.Context, opts OmadaOptions, mac
 			UplinkDevicePort: r.UplinkDevicePort,
 			LinkSpeed:        r.LinkSpeed,
 			Duplex:           r.Duplex,
+			LinkSpeedSource:  omadabackend.LinkSpeedConfigured,
 		})
 	}
 	return out, nil
@@ -839,6 +844,9 @@ func portObservation(p omadabackend.SwitchPort, profiles []omadabackend.LanProfi
 		ProfileName:        p.ProfileName,
 		ProfileOverride:    p.ProfileOverride,
 		Tagged:             []string{},
+		LinkSpeed:          p.LinkSpeed,
+		Duplex:             p.Duplex,
+		LinkSpeedSource:    omadabackend.LinkSpeedConfigured,
 	}
 	if prof := findProfileByID(profiles, p.ProfileID); prof != nil {
 		sp.Tagged = resolveNetworkIDs(prof.TagNetworkIDs, netName)

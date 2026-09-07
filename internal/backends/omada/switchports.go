@@ -26,8 +26,8 @@ type SwitchPort struct {
 	Disable            bool   `json:"disable"`
 	Type               int    `json:"type"` // 1 Copper, 2 Combo, 3 SFP
 	Operation          string `json:"operation"`
-	LinkSpeed          int    `json:"linkSpeed"`
-	Duplex             int    `json:"duplex"`
+	LinkSpeed          int    `json:"linkSpeed"`   // configured setting: 0 Auto, 1 10M, 2 100M, 3 1000M, 4 2500M, 5 10G — not negotiated
+	Duplex             int    `json:"duplex"`      // configured setting: 0 Auto, 1 Half, 2 Full — not negotiated
 	NetworkMode        int    `json:"networkMode"` // 0 Trunk, 1 Access
 	NativeNetworkID    string `json:"nativeNetworkId"`
 	NativeBridgeVLAN   int    `json:"nativeBridgeVlan"`
@@ -45,8 +45,8 @@ type UplinkInfo struct {
 	UplinkDeviceMAC  string `json:"uplinkDeviceMac"`
 	UplinkDeviceName string `json:"uplinkDeviceName"`
 	UplinkDevicePort string `json:"uplinkDevicePort"` // controller sends the port as a string, e.g. "8"
-	LinkSpeed        int    `json:"linkSpeed"`        // 0 Auto, 1 10M, 2 100M, 3 1000M, 4 2500M, 5 10G
-	Duplex           int    `json:"duplex"`           // 0 Auto, 1 Half, 2 Full
+	LinkSpeed        int    `json:"linkSpeed"`        // configured setting: 0 Auto, 1 10M, 2 100M, 3 1000M, 4 2500M, 5 10G — not negotiated
+	Duplex           int    `json:"duplex"`           // configured setting: 0 Auto, 1 Half, 2 Full — not negotiated
 }
 
 // LanProfile is a site-wide LAN profile (the VLAN membership set bound to
@@ -79,6 +79,14 @@ const Dot1xAuto = 2
 
 // BandWidthCtrlOff is the create-payload bandwidth-control sentinel.
 const BandWidthCtrlOff = 0
+
+// LinkSpeedConfigured is the only speed source the Open API exposes on
+// switch-port overview and uplink-info rows. A connected copper port left
+// on Auto reports linkSpeed 0; that is the configured setting, not
+// "unknown" or "down". Negotiated link state is not on this surface —
+// per-port detail/stat paths return errorCode -1600. Client-link-topology
+// is the fallback signal for the managed→unmanaged hop.
+const LinkSpeedConfigured = "configured"
 
 // GetUplinkInfo posts the device MAC list to the uplink-info endpoint. The
 // result is a direct (unpaged) array, one row per queried MAC; unknown MACs

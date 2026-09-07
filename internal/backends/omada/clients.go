@@ -96,7 +96,7 @@ type ClientTopologyNode struct {
 	// Uplink AP radio (client node) when the client is wireless.
 	APMAC     string
 	APName    string
-	LinkSpeed int
+	LinkSpeed int // configured setting from upOswInfo; negotiated speed is not on the Open API
 	RSSI      int
 }
 
