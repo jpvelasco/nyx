@@ -906,6 +906,65 @@ func TestResolveEndpointZone_Alias(t *testing.T) {
 	}
 }
 
+func TestMatchACLRuleAndPolicyAction(t *testing.T) {
+	if policyAction("block") != "deny" || policyAction("pass") != "allow" || policyAction("foo") != "" {
+		t.Fatal("policyAction mapping")
+	}
+	if !isDenyAction("reject") || isDenyAction("pass") {
+		t.Fatal("isDenyAction")
+	}
+	rules := []FirewallRule{
+		{RuleUUID: "x", Label: "isolate-iot", Action: "block", Source: "trusted_net", Destination: "iot_net"},
+		{RuleUUID: "y", Action: "pass", Source: "lan", Destination: "any", Disabled: true},
+	}
+	networks := []intent.Network{
+		{Name: "lan", CIDR: "10.0.10.0/24", Zone: "trusted"},
+		{Name: "iot", CIDR: "10.0.60.0/24", Zone: "iot"},
+	}
+	aliases := []Alias{
+		{Name: "trusted_net", Addresses: []string{"10.0.10.0/24"}},
+		{Name: "iot_net", Addresses: []string{"10.0.60.0/24"}},
+	}
+	if got := matchACLRule(rules, networks, aliases, providers.ACLCheckRequest{PolicyName: "isolate-iot"}); got == nil || got.RuleUUID != "x" {
+		t.Fatalf("name match = %+v", got)
+	}
+	if got := matchACLRule(rules, networks, aliases, providers.ACLCheckRequest{From: "trusted", To: "iot"}); got == nil {
+		t.Fatal("endpoint match")
+	}
+}
+
+func TestProviderCheckACL_PassVsDeny(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"interfaces":{"lan":{"description":"LAN","ipv4":"10.0.10.1/24"}}}`)
+		case "/api/firewall/alias/search_item":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/firewall/filter/search_rule":
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"p1","enabled":"1","action":"pass","description":"allow-all","source_net":"lan","destination_net":"any"}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	p := &Provider{}
+	opts := providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true}
+	res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{From: "lan", To: "iot", Action: "deny", ExpectEnforced: true}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != models.StatusFail {
+		t.Errorf("deny expect against pass = %s %q", res.Status, res.Summary)
+	}
+	res, err = p.CheckACL(context.Background(), providers.ACLCheckRequest{From: "nope", To: "nope", Action: "deny", ExpectEnforced: true}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != models.StatusFail {
+		t.Errorf("no match = %s", res.Status)
+	}
+}
+
 func TestInferZone(t *testing.T) {
 	cases := []struct {
 		name, desc string
