@@ -223,6 +223,8 @@ nyx includes a Model Context Protocol server for AI agent integration:
 nyx mcp serve --transport stdio
 ```
 
+HTTP transport is not implemented; the auth, binding, and session design is in [docs/mcp-http.md](docs/mcp-http.md).
+
 ### Harness Config
 
 Generate a ready-to-paste config block for your agent harness:
