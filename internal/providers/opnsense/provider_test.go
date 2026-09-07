@@ -965,6 +965,82 @@ func TestProviderCheckACL_PassVsDeny(t *testing.T) {
 	}
 }
 
+func TestProviderCheckACL_FetchErrors(t *testing.T) {
+	t.Run("interfaces fail", func(t *testing.T) {
+		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer ts.Close()
+		res, err := (&Provider{}).CheckACL(context.Background(), providers.ACLCheckRequest{From: "a", To: "b"}, providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err != nil || res.Status != models.StatusError {
+			t.Fatalf("got %+v %v", res, err)
+		}
+	})
+	t.Run("rules fail", func(t *testing.T) {
+		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/interfaces/overview/interfaces_info" {
+				testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.10.1/24"}}}`)
+				return
+			}
+			if r.URL.Path == "/api/firewall/alias/search_item" {
+				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer ts.Close()
+		res, err := (&Provider{}).CheckACL(context.Background(), providers.ACLCheckRequest{From: "lan", To: "iot"}, providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+		if err != nil || res.Status != models.StatusError || !strings.Contains(res.Summary, "firewall rules") {
+			t.Fatalf("got %+v %v", res, err)
+		}
+	})
+}
+
+func TestImportSpec_AliasNamedPolicies(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/diagnostics/system/system_information":
+			testutil.WriteBody(w, systemInfoJSON)
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"interfaces":{
+				"lan":{"description":"LAN","ipv4":"10.0.10.1/24","ipv4_gateway":"10.0.10.1"},
+				"iot":{"description":"IoT","ipv4":"10.0.60.1/24","ipv4_gateway":"10.0.60.1"}
+			}}`)
+		case "/api/firewall/filter/search_rule":
+			testutil.WriteBody(w, `{"total":2,"rows":[
+				{"uuid":"d1","enabled":"1","action":"block","description":"isolate-iot","source_net":"trusted_net","destination_net":"iot_net"},
+				{"uuid":"p1","enabled":"1","action":"pass","description":"allow-dns","source_net":"trusted_net","destination_net":"iot_net"}
+			]}`)
+		case "/api/firewall/alias/search_item":
+			testutil.WriteBody(w, `{"total":2,"rows":[
+				{"name":"trusted_net","type":"net","address":"10.0.10.0/24","enabled":"1"},
+				{"name":"iot_net","type":"net","address":"10.0.60.0/24","enabled":"1"}
+			]}`)
+		case "/api/dnsmasq/leases/search":
+			testutil.WriteBody(w, `{"leases":[]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	res, err := (&Provider{}).ImportSpec(context.Background(), providers.ImportOptions{Host: ts.URL, ClientID: "k", ClientSecret: "s", SkipTLSVerify: true})
+	if err != nil {
+		t.Fatalf("ImportSpec: %v", err)
+	}
+	var sawDeny, sawAllow bool
+	for _, p := range res.Spec.Policies {
+		if p.Action == "deny" && p.To == "iot" {
+			sawDeny = true
+		}
+		if p.Action == "allow" && p.To == "iot" {
+			sawAllow = true
+		}
+	}
+	if !sawDeny || !sawAllow {
+		t.Fatalf("policies = %+v, want alias-resolved deny and allow", res.Spec.Policies)
+	}
+}
+
 func TestInferZone(t *testing.T) {
 	cases := []struct {
 		name, desc string

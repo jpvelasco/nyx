@@ -995,6 +995,13 @@ func inferZoneFromAddress(address string, networks []intent.Network) string {
 		return ""
 	}
 	ip := net.ParseIP(address)
+	var addrNet *net.IPNet
+	if ip == nil {
+		if _, n, err := net.ParseCIDR(address); err == nil {
+			addrNet = n
+			ip = n.IP
+		}
+	}
 	if ip == nil {
 		return ""
 	}
@@ -1003,7 +1010,7 @@ func inferZoneFromAddress(address string, networks []intent.Network) string {
 		if err != nil {
 			continue
 		}
-		if netw.Contains(ip) {
+		if netw.Contains(ip) || (addrNet != nil && addrNet.Contains(netw.IP)) {
 			return n.Zone
 		}
 	}
