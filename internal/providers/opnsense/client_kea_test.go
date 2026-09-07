@@ -76,3 +76,70 @@ func TestGetKeaServiceStatus(t *testing.T) {
 		t.Fatalf("status = %v, %v", ok, err)
 	}
 }
+
+func TestGetKeaSubnetsAndReservations_SkipBadRows(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "search_subnet"):
+			testutil.WriteBody(w, `{"total":2,"rows":["x",{"uuid":""},{"uuid":"ok","subnet":"10.0.10.0/24"}]}`)
+		case strings.Contains(r.URL.Path, "search_reservation"):
+			testutil.WriteBody(w, `{"total":2,"rows":["x",{"uuid":""},{"uuid":"r2","ip":"10.0.10.9","mac":"aa:bb:cc:dd:ee:09"}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	subs, err := c.GetKeaSubnets(context.Background())
+	if err != nil || len(subs) != 1 || subs[0].UUID != "ok" {
+		t.Fatalf("subnets = %+v, %v", subs, err)
+	}
+	res, err := c.GetKeaReservations(context.Background())
+	if err != nil || len(res) != 1 || res[0].IP != "10.0.10.9" || res[0].MAC != "aa:bb:cc:dd:ee:09" {
+		t.Fatalf("reservations = %+v, %v", res, err)
+	}
+}
+
+func TestGetKeaServiceStatus_Shapes(t *testing.T) {
+	t.Run("status string", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"kea":"running"}`)
+		}))
+		ok, err := c.GetKeaServiceStatus(context.Background())
+		if err != nil || !ok {
+			t.Fatalf("got %v %v", ok, err)
+		}
+	})
+	t.Run("ok string", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"status":"OK"}`)
+		}))
+		ok, err := c.GetKeaServiceStatus(context.Background())
+		if err != nil || !ok {
+			t.Fatalf("got %v %v", ok, err)
+		}
+	})
+	t.Run("stopped", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `{"running":false}`)
+		}))
+		ok, err := c.GetKeaServiceStatus(context.Background())
+		if err != nil || ok {
+			t.Fatalf("got %v %v", ok, err)
+		}
+	})
+	t.Run("bad json", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `not json`)
+		}))
+		if _, err := c.GetKeaServiceStatus(context.Background()); err == nil || !strings.Contains(err.Error(), "decoding kea service status") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("404", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		if _, err := c.GetKeaServiceStatus(context.Background()); err == nil {
+			t.Fatal("expected 404")
+		}
+	})
+}
