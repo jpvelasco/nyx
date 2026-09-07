@@ -1793,6 +1793,64 @@ func TestOmadaServicePlanApplyLAN(t *testing.T) {
 	if !dry.DryRun || dry.Outcome != "create" && dry.Outcome != "created" {
 		t.Errorf("dry = %+v", dry)
 	}
+	del, err := svc.PlanLAN(ctx, opts, OmadaLANRequest{Name: "trusted", Delete: true})
+	if err != nil {
+		t.Fatalf("PlanLAN delete: %v", err)
+	}
+	if del.Action != "delete" && del.Action != "unchanged" {
+		t.Errorf("delete action = %q", del.Action)
+	}
+	missing, err := svc.PlanLAN(ctx, opts, OmadaLANRequest{Name: "no-such-lan", Delete: true})
+	if err != nil || missing.Action != "unchanged" {
+		t.Fatalf("delete missing = %+v, %v", missing, err)
+	}
+}
+
+func TestOmadaServiceApplyLAN_Mutations(t *testing.T) {
+	st := omadaPortStateFresh()
+	created := false
+	h := omadaPortBaseHandler(t, st)
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/lan-networks") && r.Method == http.MethodPost {
+			created = true
+			writeOmadaEnvelope(w, 0, `{"id":"n-new"}`)
+			return
+		}
+		if strings.Contains(r.URL.Path, "/lan-networks/") && r.Method == http.MethodPut {
+			writeOmadaEnvelope(w, 0, `{}`)
+			return
+		}
+		if strings.Contains(r.URL.Path, "/lan-networks/") && r.Method == http.MethodDelete {
+			writeOmadaEnvelope(w, 0, `{}`)
+			return
+		}
+		h(w, r)
+	})
+	svc := NewOmadaService()
+	ctx := context.Background()
+	opts := omadaPortOpts(ts.URL)
+	res, err := svc.ApplyLAN(ctx, opts, OmadaLANRequest{Name: "newlan", VLAN: 99, GatewaySubnet: "10.0.99.1/24"}, false)
+	if err != nil {
+		t.Fatalf("create apply: %v", err)
+	}
+	if res.Outcome != "created" || !created {
+		t.Errorf("create = %+v created=%v", res, created)
+	}
+	// existing trusted network should update or stay unchanged
+	res, err = svc.ApplyLAN(ctx, opts, OmadaLANRequest{Name: "trusted", VLAN: 1, Isolated: true}, false)
+	if err != nil {
+		t.Fatalf("update apply: %v", err)
+	}
+	if res.Outcome != "updated" && res.Outcome != "unchanged" {
+		t.Errorf("update = %+v", res)
+	}
+	res, err = svc.ApplyLAN(ctx, opts, OmadaLANRequest{Name: "trusted", Delete: true}, false)
+	if err != nil {
+		t.Fatalf("delete apply: %v", err)
+	}
+	if res.Outcome != "deleted" && res.Outcome != "unchanged" {
+		t.Errorf("delete = %+v", res)
+	}
 }
 
 func TestOmadaServicePlanPort(t *testing.T) {

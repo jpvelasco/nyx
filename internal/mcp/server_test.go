@@ -2022,6 +2022,31 @@ func (s *stubOmadaSvc) PlanLAN(_ context.Context, opts service.OmadaOptions, req
 	return &service.OmadaLANPlan{Action: "create", Network: req.Name}, nil
 }
 
+func TestDispatchOmadaPlanApplyLAN(t *testing.T) {
+	stub := &stubOmadaSvc{}
+	args := map[string]interface{}{"host": "omada.local", "client_id": "a", "client_secret": "b", "name": "iot"}
+	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_plan_lan", args)
+	if isErr || !strings.Contains(text, `"action": "create"`) {
+		t.Fatalf("plan = (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_apply_lan", args)
+	if isErr || !strings.Contains(text, `"dry_run": true`) {
+		t.Fatalf("apply dry = (%q, %v)", text, isErr)
+	}
+	if text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_plan_lan", map[string]interface{}{
+		"host": "omada.local", "client_id": "a", "client_secret": "b",
+	}); !isErr || !strings.Contains(text, "name parameter is required") {
+		t.Errorf("missing name = (%q, %v)", text, isErr)
+	}
+	errStub := &stubOmadaSvc{err: errors.New("boom")}
+	if text, isErr := serverWithOmadaStub(errStub).DispatchToolForTest(context.Background(), "omada_plan_lan", args); !isErr || !strings.Contains(text, "omada lan plan request failed") {
+		t.Errorf("plan err = (%q, %v)", text, isErr)
+	}
+	if text, isErr := serverWithOmadaStub(errStub).DispatchToolForTest(context.Background(), "omada_apply_lan", args); !isErr || !strings.Contains(text, "omada lan apply failed") {
+		t.Errorf("apply err = (%q, %v)", text, isErr)
+	}
+}
+
 func (s *stubOmadaSvc) ApplyLAN(_ context.Context, opts service.OmadaOptions, req service.OmadaLANRequest, dryRun bool) (*service.OmadaLANApplyResult, error) {
 	s.lastOpts = opts
 	if s.err != nil {

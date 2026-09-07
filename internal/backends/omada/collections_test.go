@@ -171,6 +171,27 @@ func TestLANMatchesWrite(t *testing.T) {
 	}
 }
 
+func TestCreateLANNetwork_Errors(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, -1001, "bad", "null")
+	}))
+	if _, err := c.CreateLANNetwork(context.Background(), "s1", LANWrite{Name: "x"}); err == nil {
+		t.Fatal("want create error")
+	}
+	if err := c.UpdateLANNetwork(context.Background(), "s1", "n1", LANWrite{Name: "x"}); err == nil {
+		t.Fatal("want update error")
+	}
+	if err := c.DeleteLANNetwork(context.Background(), "s1", "n1"); err == nil {
+		t.Fatal("want delete error")
+	}
+	c2, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 0, "", `{}`)
+	}))
+	if _, err := c2.CreateLANNetwork(context.Background(), "s1", LANWrite{Name: "x"}); err == nil || !strings.Contains(err.Error(), "no network id") {
+		t.Fatalf("noid = %v", err)
+	}
+}
+
 func TestGetNetworksResponseShapes(t *testing.T) {
 	t.Run("direct array", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
