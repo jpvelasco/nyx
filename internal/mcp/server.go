@@ -181,6 +181,8 @@ type opnsenseSurface interface {
 	ApplyFilter(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseFilterRequest, dryRun bool) (*service.OpnsenseFilterApplyResult, error)
 	PlanUnboundOverride(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseUnboundOverrideRequest) (*service.OpnsenseUnboundOverridePlan, error)
 	ApplyUnboundOverride(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseUnboundOverrideRequest, dryRun bool) (*service.OpnsenseUnboundOverrideApplyResult, error)
+	PlanDHCP(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseDHCPRequest) (*service.OpnsenseDHCPPlan, error)
+	ApplyDHCP(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseDHCPRequest, dryRun bool) (*service.OpnsenseDHCPApplyResult, error)
 }
 
 // topologySurface is the cross-provider topology assessment exposed to
@@ -954,6 +956,39 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"description": {Type: "string", Description: "Optional description"},
 				"delete":      {Type: "boolean", Description: "Delete the override"},
 				"dry_run":     {Type: "boolean", Description: "Preview only. Default true."},
+			}, []string{"host"}),
+		},
+		{
+			Name:        "opnsense_plan_dhcp",
+			Description: "Preview creating, updating, or deleting a DHCP range, static host, or Kea reservation. Detects the running backend (Dnsmasq or Kea) first. Read-only.",
+			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
+				"backend":   {Type: "string", Description: "auto (default), dnsmasq, or kea"},
+				"kind":      {Type: "string", Description: "range (default), host, or reservation"},
+				"interface": {Type: "string", Description: "Dnsmasq range interface"},
+				"start":     {Type: "string", Description: "Range start or Kea subnet CIDR"},
+				"end":       {Type: "string", Description: "Range end"},
+				"ip":        {Type: "string", Description: "Static host / reservation IP"},
+				"mac":       {Type: "string", Description: "Reservation MAC"},
+				"hostname":  {Type: "string", Description: "Static host / reservation hostname"},
+				"uuid":      {Type: "string", Description: "Existing item uuid"},
+				"delete":    {Type: "boolean", Description: "Preview a delete"},
+			}, []string{"host"}),
+		},
+		{
+			Name:        "opnsense_apply_dhcp",
+			Description: "Create, update, or delete a DHCP range, static host, or Kea reservation, then reconfigure the running backend. Dry-run default. Refuses to write when neither Dnsmasq nor Kea is running.",
+			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
+				"backend":   {Type: "string", Description: "auto (default), dnsmasq, or kea"},
+				"kind":      {Type: "string", Description: "range (default), host, or reservation"},
+				"interface": {Type: "string", Description: "Dnsmasq range interface"},
+				"start":     {Type: "string", Description: "Range start or Kea subnet CIDR"},
+				"end":       {Type: "string", Description: "Range end"},
+				"ip":        {Type: "string", Description: "Static host / reservation IP"},
+				"mac":       {Type: "string", Description: "Reservation MAC"},
+				"hostname":  {Type: "string", Description: "Static host / reservation hostname"},
+				"uuid":      {Type: "string", Description: "Existing item uuid"},
+				"delete":    {Type: "boolean", Description: "Delete the item"},
+				"dry_run":   {Type: "boolean", Description: "Preview only. Default true."},
 			}, []string{"host"}),
 		},
 		{
