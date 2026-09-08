@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -236,5 +237,69 @@ func TestMCPToolCallsOpnsenseCredentialsMissingEverywhere(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("error = %q, want it to contain %q", text, want)
 		}
+	}
+}
+
+// BDD S4.1 — credentials_status reports store completeness and env-var
+// presence, never values, and never reaches a controller.
+func TestCredentialsStatusEmptyStore(t *testing.T) {
+	resetEnv(t, append(omadaEnvKeys(), opnsenseEnvKeys()...)...)
+	openTestStore(t)
+
+	text := requireToolOK(t, newTestServer(), "credentials_status", nil)
+	if !strings.Contains(text, `"store": []`) && !strings.Contains(text, `"store":[]`) {
+		t.Errorf("empty store status = %s", text)
+	}
+	for _, key := range []string{"OMADA_HOST", "OMADA_CLIENT_ID", "OMADA_CLIENT_SECRET", "OMADA_SITE", "OPNSENSE_HOST", "OPNSENSE_API_KEY", "OPNSENSE_API_SECRET"} {
+		if !strings.Contains(text, `"`+key+`": false`) && !strings.Contains(text, `"`+key+`":false`) {
+			t.Errorf("env %s should be false, got %s", key, text)
+		}
+	}
+}
+
+func TestCredentialsStatusReportsCompletenessAndEnvPresence(t *testing.T) {
+	resetEnv(t, append(omadaEnvKeys(), opnsenseEnvKeys()...)...)
+	storePath := openTestStore(t)
+	setStoreEntry(t, storePath, "omada", credentials.Entry{
+		"host":          "stored.omada",
+		"client_id":     "store-cid",
+		"client_secret": "store-secret",
+	})
+	setStoreEntry(t, storePath, "opnsense", credentials.Entry{
+		"host":    "stored.fw",
+		"api_key": "store-key",
+	})
+	t.Setenv("OMADA_CLIENT_ID", "env-cid")
+
+	text := requireToolOK(t, newTestServer(), "credentials_status", nil)
+	if strings.Contains(text, "store-secret") || strings.Contains(text, "store-cid") ||
+		strings.Contains(text, "env-cid") || strings.Contains(text, "stored.omada") {
+		t.Errorf("credentials_status leaked a value: %s", text)
+	}
+	if !strings.Contains(text, `"provider": "omada"`) || !strings.Contains(text, `"complete": true`) {
+		t.Errorf("omada completeness missing: %s", text)
+	}
+	if !strings.Contains(text, `"provider": "opnsense"`) || !strings.Contains(text, `"api_secret"`) {
+		t.Errorf("opnsense missing_fields missing: %s", text)
+	}
+	if !strings.Contains(text, `"OMADA_CLIENT_ID": true`) && !strings.Contains(text, `"OMADA_CLIENT_ID":true`) {
+		t.Errorf("OMADA_CLIENT_ID presence missing: %s", text)
+	}
+	if !strings.Contains(text, `"OMADA_HOST": false`) && !strings.Contains(text, `"OMADA_HOST":false`) {
+		t.Errorf("OMADA_HOST should be unset: %s", text)
+	}
+}
+
+func TestCredentialsStatusStoreOpenError(t *testing.T) {
+	resetEnv(t, omadaEnvKeys()...)
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	t.Setenv("NYX_CREDENTIALS_FILE", filepath.Join(blocker, "credentials.json"))
+
+	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "credentials_status", nil)
+	if !isErr || !strings.Contains(text, "opening credential store") {
+		t.Errorf("store error = %q isErr=%v", text, isErr)
 	}
 }

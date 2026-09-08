@@ -484,6 +484,14 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			},
 		},
 		{
+			Name:        "credentials_status",
+			Description: "Report which providers have stored credential entries and whether required fields and credential env vars are present. Never returns values.",
+			InputSchema: inputSchema{
+				Type:       "object",
+				Properties: map[string]propSchema{},
+			},
+		},
+		{
 			Name:        "omada_get_info",
 			Description: "Fetch metadata (version, API version, omada CID) from an Omada SDN controller without authentication.",
 			InputSchema: inputSchema{

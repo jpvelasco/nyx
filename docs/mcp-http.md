@@ -217,7 +217,7 @@ vault, not bypass it.
   that override already exists on stdio and is an operator escape
   hatch, not an HTTP feature. The HTTP design does not add new places
   to put those values (headers, cookies, URL, session bootstrap).
-- A future `credentials_status` tool (#2) reports which providers are
+- The `credentials_status` tool (#2) reports which providers are
   provisioned. It never returns secrets. HTTP does not grow a
   "submit credentials" endpoint that would make the listener a vault
   write API.

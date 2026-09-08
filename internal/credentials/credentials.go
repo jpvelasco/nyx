@@ -1,10 +1,13 @@
 // Package credentials implements a minimal credential store under ~/.nyx.
-// Scoped MVP of the nyx credential vault: interactive prompts and
-// per-provider live verification are tracked follow-ups. OS keyring
-// support exists on Windows for Omada and OPNsense: credmanager reads
-// the Windows Credential Manager entry nyx-omada-<host> or
-// nyx-opnsense-<host> between the env-var and store layers (see
-// docs/bdd/mcp-credentials.md).
+// Interactive TTY prompts live on `nyx credentials set`; live
+// per-provider verification is `nyx credentials verify --live`; MCP
+// credentials_status reports store completeness and env-var presence
+// without values. OS keyring support exists on Windows for Omada and
+// OPNsense: credmanager reads the Windows Credential Manager entry
+// nyx-omada-<host> or nyx-opnsense-<host> between the env-var and
+// store layers (see docs/bdd/mcp-credentials.md). Omada Open API
+// client-credentials cover the OAuth surface — there is no separate
+// OAuth flow.
 //
 // Security posture: entries are encrypted with AES-256-GCM before being
 // written to disk, but the key is stored beside the ciphertext
@@ -32,11 +35,82 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Entry is a single credential record: a set of string fields whose keys
 // are provider-defined (e.g. host, client_id, client_secret for omada).
 type Entry map[string]string
+
+// Requirements lists the fields each known provider must carry in an
+// entry. Unknown providers have no required fields.
+var Requirements = map[string][]string{
+	"omada":    {"host", "client_id", "client_secret"},
+	"opnsense": {"host", "api_key", "api_secret"},
+	"probe":    {"host", "username", "key"},
+}
+
+// OptionalFields are prompted when `nyx credentials set` runs with no
+// --set flags on a TTY. They are never required for verify / status.
+var OptionalFields = map[string][]string{
+	"omada": {"site"},
+}
+
+// secretFields are never echoed on a TTY prompt and never printed.
+var secretFields = map[string]bool{
+	"client_secret": true,
+	"api_secret":    true,
+}
+
+// IsSecret reports whether field is a secret (no-echo prompt).
+func IsSecret(field string) bool {
+	return secretFields[field]
+}
+
+// MissingRequired returns the required fields that are empty on entry.
+// Unknown providers return nil.
+func MissingRequired(provider string, entry Entry) []string {
+	var missing []string
+	for _, field := range Requirements[provider] {
+		if strings.TrimSpace(entry[field]) == "" {
+			missing = append(missing, field)
+		}
+	}
+	return missing
+}
+
+// EntryStatus is a value-free completeness report for one stored entry.
+type EntryStatus struct {
+	Provider      string   `json:"provider"`
+	Name          string   `json:"name"`
+	Complete      bool     `json:"complete"`
+	MissingFields []string `json:"missing_fields,omitempty"`
+}
+
+// Status reports completeness for every stored entry. It never includes
+// field values.
+func (s *Store) Status() []EntryStatus {
+	var out []EntryStatus
+	for _, provider := range s.Providers() {
+		for _, name := range s.List(provider) {
+			entry, _ := s.Get(provider, name)
+			missing := MissingRequired(provider, entry)
+			st := EntryStatus{
+				Provider: provider,
+				Name:     name,
+				Complete: len(missing) == 0,
+			}
+			if len(missing) > 0 {
+				st.MissingFields = missing
+			}
+			out = append(out, st)
+		}
+	}
+	if out == nil {
+		return []EntryStatus{}
+	}
+	return out
+}
 
 // Store is an encrypted-at-rest credential store rooted at a single file.
 type Store struct {

@@ -77,6 +77,55 @@ func TestOverlayFillsEmptyKeysOnly(t *testing.T) {
 
 // BDD S2.1 (docs/bdd/mcp-credentials.md) store step: the typed overlay
 // target carries the OPNsense key/secret pair via its own fields.
+func TestMissingRequiredAndIsSecret(t *testing.T) {
+	if !IsSecret("client_secret") || !IsSecret("api_secret") {
+		t.Error("client_secret and api_secret must be secrets")
+	}
+	if IsSecret("host") || IsSecret("client_id") || IsSecret("api_key") || IsSecret("key") {
+		t.Error("non-secret fields must not be treated as secrets")
+	}
+	got := MissingRequired("omada", Entry{"host": "h"})
+	if strings.Join(got, ",") != "client_id,client_secret" {
+		t.Errorf("MissingRequired(omada) = %v", got)
+	}
+	if got := MissingRequired("custom", Entry{"token": "x"}); got != nil {
+		t.Errorf("unknown provider missing = %v, want nil", got)
+	}
+}
+
+func TestStoreStatus(t *testing.T) {
+	s, _ := newTestStore(t)
+	if got := s.Status(); len(got) != 0 {
+		t.Errorf("empty Status = %v, want empty slice", got)
+	}
+	if err := s.Set("omada", "default", Entry{"host": "h"}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := s.Set("opnsense", "default", Entry{
+		"host": "fw", "api_key": "k", "api_secret": "s",
+	}); err != nil {
+		t.Fatalf("Set opnsense: %v", err)
+	}
+	st := s.Status()
+	if len(st) != 2 {
+		t.Fatalf("Status len = %d, want 2", len(st))
+	}
+	byProv := map[string]EntryStatus{}
+	for _, e := range st {
+		byProv[e.Provider] = e
+		blob := strings.Join(append([]string{e.Provider, e.Name}, e.MissingFields...), " ")
+		if strings.Contains(blob, "fw") || strings.Contains(blob, "api_secret") {
+			t.Errorf("status leaked a value: %+v", e)
+		}
+	}
+	if byProv["omada"].Complete || strings.Join(byProv["omada"].MissingFields, ",") != "client_id,client_secret" {
+		t.Errorf("omada status = %+v", byProv["omada"])
+	}
+	if !byProv["opnsense"].Complete || len(byProv["opnsense"].MissingFields) != 0 {
+		t.Errorf("opnsense status = %+v", byProv["opnsense"])
+	}
+}
+
 func TestOverlayOpnsenseFields(t *testing.T) {
 	s, path := newTestStore(t)
 	if err := s.Set("opnsense", "default", Entry{
