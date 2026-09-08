@@ -159,6 +159,9 @@ type opnsenseSurface interface {
 	ListBridges(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseBridge, error)
 	ListInterfaceSettings(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseIfSetting, error)
 	GetDnsmasqSettings(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseDnsmasqSettings, error)
+	GetUnboundSettings(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseUnboundSettings, error)
+	ListUnboundOverrides(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseUnboundHostOverride, error)
+	GetUnboundStatus(ctx context.Context, opts service.OpnsenseOptions) (bool, error)
 	GetPfStatistics(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsensePfStatistics, error)
 	ListKernelRoutes(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKernelRoute, error)
 	ListKeaSubnets(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKeaSubnet, error)
@@ -176,6 +179,8 @@ type opnsenseSurface interface {
 	ApplyVLAN(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseVLANRequest, dryRun bool) (*service.OpnsenseVLANApplyResult, error)
 	PlanFilter(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseFilterRequest) (*service.OpnsenseFilterPlan, error)
 	ApplyFilter(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseFilterRequest, dryRun bool) (*service.OpnsenseFilterApplyResult, error)
+	PlanUnboundOverride(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseUnboundOverrideRequest) (*service.OpnsenseUnboundOverridePlan, error)
+	ApplyUnboundOverride(ctx context.Context, opts service.OpnsenseOptions, req service.OpnsenseUnboundOverrideRequest, dryRun bool) (*service.OpnsenseUnboundOverrideApplyResult, error)
 }
 
 // topologySurface is the cross-provider topology assessment exposed to
@@ -785,6 +790,21 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: opnsenseToolSchema(),
 		},
 		{
+			Name:        "opnsense_get_unbound_settings",
+			Description: "Read OPNsense Unbound DNS settings: enabled, listening interfaces, and host overrides. A 403 means the API user lacks the Unbound page privilege.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_unbound_overrides",
+			Description: "List OPNsense Unbound host overrides (hostname, domain, IP). A 403 is a page-privilege miss.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_get_unbound_status",
+			Description: "Read whether the OPNsense Unbound service reports as running. A 403 is a page-privilege miss.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
 			Name:        "opnsense_get_pf_statistics",
 			Description: "Read OPNsense pf state-table summary (current states / limit). A 403 means the API user lacks the Diagnostics: Firewall page privilege.",
 			InputSchema: opnsenseToolSchema(),
@@ -900,6 +920,31 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"description": {Type: "string", Description: "Optional description"},
 				"enabled":     {Type: "boolean", Description: "Whether the rule or alias is enabled"},
 				"delete":      {Type: "boolean", Description: "Delete the rule or alias"},
+				"dry_run":     {Type: "boolean", Description: "Preview only. Default true."},
+			}, []string{"host"}),
+		},
+		{
+			Name:        "opnsense_plan_unbound_override",
+			Description: "Preview creating, updating, or deleting an OPNsense Unbound host override. Matching hostname+domain+ip is unchanged. Read-only.",
+			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
+				"hostname":    {Type: "string", Description: "Host label (e.g. nas)"},
+				"domain":      {Type: "string", Description: "DNS domain (e.g. home.example)"},
+				"ip":          {Type: "string", Description: "IPv4 address for the A record"},
+				"uuid":        {Type: "string", Description: "Existing override uuid"},
+				"description": {Type: "string", Description: "Optional description"},
+				"delete":      {Type: "boolean", Description: "Preview a delete"},
+			}, []string{"host"}),
+		},
+		{
+			Name:        "opnsense_apply_unbound_override",
+			Description: "Create, update, or delete an OPNsense Unbound host override, then reconfigure. Dry-run default.",
+			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
+				"hostname":    {Type: "string", Description: "Host label (e.g. nas)"},
+				"domain":      {Type: "string", Description: "DNS domain (e.g. home.example)"},
+				"ip":          {Type: "string", Description: "IPv4 address for the A record"},
+				"uuid":        {Type: "string", Description: "Existing override uuid"},
+				"description": {Type: "string", Description: "Optional description"},
+				"delete":      {Type: "boolean", Description: "Delete the override"},
 				"dry_run":     {Type: "boolean", Description: "Preview only. Default true."},
 			}, []string{"host"}),
 		},

@@ -159,6 +159,23 @@ Then enabled, selected listening interfaces, DHCP ranges, and static hosts are r
 And a 403 is the stable page-privilege error (inventory degrades)
 And the test: `TestGetDnsmasqSettings`
 
+### S2.18 Unbound DNS settings and host overrides
+Given `GET /api/unbound/settings/get` → `{"unbound":{"enable":"1","active_interface":{"lan":{"selected":1}},"hosts":{...}}}`
+When `GetUnboundSettings` is called
+Then enabled, selected listening interfaces, and host overrides are returned (decode is lenient across `enable`/`enabled` and `general` wrappers)
+And a 403 is the stable page-privilege error (inventory degrades)
+And `GET /api/unbound/settings/searchHostOverride` is tried first for the override list; a 404 falls through to `search_host_override`; any other fetch error degrades inventory (WireGuard silent-404 is not on this branch)
+And `GET /api/unbound/service/status` reports running from a loose bool or `"running"`/`"OK"`
+And the tests: `TestGetUnboundSettings` / `TestGetUnboundHostOverrides` / `TestGetUnboundServiceStatus` / `TestFetchInventory_UnboundDegrade`
+
+### S3.11 Unbound host-override plan/apply
+Given a host override identified by `hostname`+`domain` (and optional `uuid`)
+When `PlanUnboundOverride` / `ApplyUnboundOverride` is called
+Then matching hostname+domain+ip is `unchanged`; missing creates; a different IP updates; delete of a missing override is `unchanged`
+And MCP `opnsense_apply_unbound_override` is dry-run by default (zero POSTs)
+And a real apply POSTs add/set/del (camelCase first, snake_case fallback) then `POST /api/unbound/service/reconfigure`
+And the tests: `TestOpnsenseServicePlanApplyUnboundOverride` / `TestUnboundWrites`
+
 ### S2.16 pf statistics
 Given `GET /api/diagnostics/firewall/pf_statistics` → nested `states.current` / `limit`
 When `GetPfStatistics` is called

@@ -74,6 +74,9 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_list_bridges":            (*Server).toolOpnsenseListBridges,
 	"opnsense_list_interface_settings": (*Server).toolOpnsenseListInterfaceSettings,
 	"opnsense_get_dnsmasq_settings":    (*Server).toolOpnsenseGetDnsmasqSettings,
+	"opnsense_get_unbound_settings":    (*Server).toolOpnsenseGetUnboundSettings,
+	"opnsense_list_unbound_overrides":  (*Server).toolOpnsenseListUnboundOverrides,
+	"opnsense_get_unbound_status":      (*Server).toolOpnsenseGetUnboundStatus,
 	"opnsense_get_pf_statistics":       (*Server).toolOpnsenseGetPfStatistics,
 	"opnsense_list_kernel_routes":      (*Server).toolOpnsenseListKernelRoutes,
 	"opnsense_list_kea_subnets":        (*Server).toolOpnsenseListKeaSubnets,
@@ -90,6 +93,8 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_apply_vlan":              (*Server).toolOpnsenseApplyVLAN,
 	"opnsense_plan_filter":             (*Server).toolOpnsensePlanFilter,
 	"opnsense_apply_filter":            (*Server).toolOpnsenseApplyFilter,
+	"opnsense_plan_unbound_override":   (*Server).toolOpnsensePlanUnboundOverride,
+	"opnsense_apply_unbound_override":  (*Server).toolOpnsenseApplyUnboundOverride,
 	"topology":                         (*Server).toolTopology,
 }
 
@@ -811,6 +816,28 @@ func (s *Server) toolOpnsenseGetDnsmasqSettings(ctx context.Context, args map[st
 	})
 }
 
+func (s *Server) toolOpnsenseGetUnboundSettings(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "opnsense unbound settings request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.GetUnboundSettings(ctx, opts)
+	})
+}
+
+func (s *Server) toolOpnsenseListUnboundOverrides(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "opnsense unbound overrides request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.ListUnboundOverrides(ctx, opts)
+	})
+}
+
+func (s *Server) toolOpnsenseGetUnboundStatus(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "opnsense unbound status request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		running, err := s.opnsenseSvc.GetUnboundStatus(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]bool{"running": running}, nil
+	})
+}
+
 func (s *Server) toolOpnsenseGetPfStatistics(ctx context.Context, args map[string]interface{}) toolDispatchResult {
 	return s.opnsenseReadJSON(ctx, args, "opnsense pf statistics request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 		return s.opnsenseSvc.GetPfStatistics(ctx, opts)
@@ -1131,6 +1158,41 @@ func (s *Server) toolOpnsenseApplyFilter(ctx context.Context, args map[string]in
 	res, err := s.opnsenseSvc.ApplyFilter(ctx, opts, filterRequestFromArgs(args), argBoolDefault(args, "dry_run", true))
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense filter apply failed: %v", err))
+	}
+	return okResult(toJSON(res))
+}
+
+func unboundOverrideRequestFromArgs(args map[string]interface{}) service.OpnsenseUnboundOverrideRequest {
+	return service.OpnsenseUnboundOverrideRequest{
+		Hostname:    argString(args, "hostname"),
+		Domain:      argString(args, "domain"),
+		IP:          argString(args, "ip"),
+		UUID:        argString(args, "uuid"),
+		Description: argString(args, "description"),
+		Delete:      argBoolDefault(args, "delete", false),
+	}
+}
+
+func (s *Server) toolOpnsensePlanUnboundOverride(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	plan, err := s.opnsenseSvc.PlanUnboundOverride(ctx, opts, unboundOverrideRequestFromArgs(args))
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense unbound override plan request failed: %v", err))
+	}
+	return okResult(toJSON(plan))
+}
+
+func (s *Server) toolOpnsenseApplyUnboundOverride(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	res, err := s.opnsenseSvc.ApplyUnboundOverride(ctx, opts, unboundOverrideRequestFromArgs(args), argBoolDefault(args, "dry_run", true))
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense unbound override apply failed: %v", err))
 	}
 	return okResult(toJSON(res))
 }

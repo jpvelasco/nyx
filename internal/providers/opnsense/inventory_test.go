@@ -1,8 +1,12 @@
 package opnsense
 
 import (
+	"context"
+	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
 func TestRenderInventory(t *testing.T) {
@@ -33,6 +37,7 @@ func TestRenderInventory(t *testing.T) {
 		"== Bridges ==",
 		"== Interface settings ==",
 		"== Dnsmasq ==",
+		"== Unbound ==",
 		"== pf statistics ==",
 		"== Kernel routes ==",
 		"== WireGuard ==",
@@ -57,6 +62,8 @@ func TestRenderInventoryReconOK(t *testing.T) {
 		IfSettingsOK:     true,
 		Dnsmasq:          &DnsmasqSettings{Enabled: true, Ranges: []DnsmasqRange{{Start: "10.0.10.100"}}, Hosts: []DnsmasqHost{{Host: "printer"}}},
 		DnsmasqOK:        true,
+		Unbound:          &UnboundSettings{Enabled: true, Running: true, Hosts: []UnboundHostOverride{{Hostname: "nas", IP: "10.0.40.10"}}},
+		UnboundOK:        true,
 		PfStats:          &PfStatistics{StateCount: 4},
 		PfStatsOK:        true,
 		KernelRoutes:     []KernelRoute{{Destination: "default"}},
@@ -71,6 +78,7 @@ func TestRenderInventoryReconOK(t *testing.T) {
 		"== Bridges (1) ==", "lan-br", "members:igb0",
 		"== Interface settings (1) ==", "1 configured",
 		"== Dnsmasq ==", "on, 1 range, 1 host",
+		"== Unbound ==", "on, running, 1 host override",
 		"== pf statistics ==", "4 states",
 		"== Kernel routes (1) ==", "1 route",
 		"== WireGuard ==", "on, 1 server, 1 peer",
@@ -155,6 +163,35 @@ func TestBuildSpecInventoryNoSystem(t *testing.T) {
 	inv := BuildSpecInventory(snap)
 	if inv.ControllerVersion != "" {
 		t.Errorf("ControllerVersion = %q, want empty when system info is absent", inv.ControllerVersion)
+	}
+}
+
+func TestFetchInventory_UnboundDegrade(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.10.1/24"}}}`)
+		case "/api/unbound/settings/get", "/api/unbound/settings/searchHostOverride", "/api/unbound/service/status":
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			testutil.WriteBody(w, `{"total":0,"rows":[],"leases":[],"items":[],"interface":{},"dnsmasq":{"enable":"0"},"states":{"current":0}}`)
+		}
+	}))
+	snap, err := c.FetchInventory(context.Background())
+	if err != nil {
+		t.Fatalf("FetchInventory: %v", err)
+	}
+	if snap.UnboundOK {
+		t.Fatal("UnboundOK = true, want false after 403")
+	}
+	found := false
+	for _, w := range snap.Warnings {
+		if strings.Contains(w, "unbound settings unavailable") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %v, want unbound degrade", snap.Warnings)
 	}
 }
 

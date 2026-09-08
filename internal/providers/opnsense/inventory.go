@@ -39,6 +39,8 @@ type InventorySnapshot struct {
 	IfSettingsOK     bool
 	Dnsmasq          *DnsmasqSettings
 	DnsmasqOK        bool
+	Unbound          *UnboundSettings
+	UnboundOK        bool
 	PfStats          *PfStatistics
 	PfStatsOK        bool
 	KernelRoutes     []KernelRoute
@@ -126,6 +128,16 @@ func (c *Client) FetchInventory(ctx context.Context) (*InventorySnapshot, error)
 	} else {
 		snap.Dnsmasq = dns
 		snap.DnsmasqOK = true
+	}
+
+	unbound, err := c.GetUnboundObserve(ctx)
+	if err != nil {
+		// Follow Dnsmasq: any fetch error degrades to a warning. WireGuard's
+		// silent-404-plugin-absent pattern is not on this branch.
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("unbound settings unavailable: %v", err))
+	} else {
+		snap.Unbound = unbound
+		snap.UnboundOK = true
 	}
 
 	pf, err := c.GetPfStatistics(ctx)
@@ -318,6 +330,22 @@ func RenderInventory(snap *InventorySnapshot, site string) string {
 		fmt.Fprintf(&b, "  %s, %d range%s, %d host%s\n", on, len(snap.Dnsmasq.Ranges), plural(len(snap.Dnsmasq.Ranges)), len(snap.Dnsmasq.Hosts), plural(len(snap.Dnsmasq.Hosts)))
 	} else {
 		fmt.Fprintf(&b, "\n== Dnsmasq ==\n")
+		fmt.Fprintf(&b, "  unknown (fetch failed)\n")
+	}
+
+	if snap.UnboundOK && snap.Unbound != nil {
+		on := "off"
+		if snap.Unbound.Enabled {
+			on = "on"
+		}
+		run := "stopped"
+		if snap.Unbound.Running {
+			run = "running"
+		}
+		fmt.Fprintf(&b, "\n== Unbound ==\n")
+		fmt.Fprintf(&b, "  %s, %s, %d host override%s\n", on, run, len(snap.Unbound.Hosts), plural(len(snap.Unbound.Hosts)))
+	} else {
+		fmt.Fprintf(&b, "\n== Unbound ==\n")
 		fmt.Fprintf(&b, "  unknown (fetch failed)\n")
 	}
 
