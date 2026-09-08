@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jpvelasco/nyx/internal/audit"
@@ -99,6 +100,16 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_plan_unbound_override":   (*Server).toolOpnsensePlanUnboundOverride,
 	"opnsense_apply_unbound_override":  (*Server).toolOpnsenseApplyUnboundOverride,
 	"topology":                         (*Server).toolTopology,
+}
+
+// ToolNames returns the registered MCP tool names in sorted order.
+func ToolNames() []string {
+	names := make([]string, 0, len(toolHandlers))
+	for name := range toolHandlers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (s *Server) toolDiscoverSubnet(ctx context.Context, args map[string]interface{}) toolDispatchResult {
