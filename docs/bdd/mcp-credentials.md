@@ -1,15 +1,14 @@
 # MCP Provider Credentials — Behavioral Specification
 
 BDD acceptance contract for credential fallback in the MCP server's Omada and
-OPNsense tools (issue #44). The MCP server resolves Omada provider credentials
-with the **same order the CLI uses** — explicit `tools/call` arguments →
-environment variables → Windows Credential Manager (entry
-`nyx-omada-<host>`, Windows only, no-op elsewhere) → encrypted credential
-store — so an agent session with verified store credentials never has to paste
-secrets into tool calls. OPNsense keeps the three-layer order (arguments → env
-→ store; the Credential Manager fallback is Omada-only, tracked follow-up).
-Scenarios marked **Implemented** are mirrored 1:1 by tests in `internal/mcp`
-and `internal/cli`; each test name is listed under its scenario.
+OPNsense tools (issue #44, OPNsense WM layer #121). The MCP server resolves
+provider credentials with the **same order the CLI uses** — explicit
+`tools/call` arguments → environment variables → Windows Credential Manager
+(entry `nyx-omada-<host>` or `nyx-opnsense-<host>`, Windows only, no-op
+elsewhere) → encrypted credential store — so an agent session with verified
+store credentials never has to paste secrets into tool calls. Scenarios
+marked **Implemented** are mirrored 1:1 by tests in `internal/mcp` and
+`internal/cli`; each test name is listed under its scenario.
 
 ## 0. Scope
 
@@ -35,9 +34,9 @@ and `internal/cli`; each test name is listed under its scenario.
 | Omada client ID | `client_id` | `OMADA_CLIENT_ID` | `nyx-omada-<host>` user name | `client_id` |
 | Omada client secret | `client_secret` | `OMADA_CLIENT_SECRET` | `nyx-omada-<host>` password/blob | `client_secret` |
 | Omada site | `site` | `OMADA_SITE` | — | `site` |
-| OPNsense host | `host` | `OPNSENSE_HOST` | — | `host` |
-| OPNsense API key | `api_key` | `OPNSENSE_API_KEY` | — | `api_key` |
-| OPNsense API secret | `api_secret` | `OPNSENSE_API_SECRET` | — | `api_secret` |
+| OPNsense host | `host` | `OPNSENSE_HOST` | — (host never comes from WM) | `host` |
+| OPNsense API key | `api_key` | `OPNSENSE_API_KEY` | `nyx-opnsense-<host>` user name | `api_key` |
+| OPNsense API secret | `api_secret` | `OPNSENSE_API_SECRET` | `nyx-opnsense-<host>` password/blob | `api_secret` |
 
 An explicitly supplied value at any level always wins over every lower level.
 Store read failures are silently ignored (the same posture as
@@ -48,8 +47,9 @@ non-Windows platforms, which report
 to the store layer. The entry is named after the **resolved** host, so a WM
 entry can supply credentials but never the host itself. Entry creation is an
 operator action via `cmdkey /generic:nyx-omada-<host> /user:<client-id>
-/pass:<client-secret>`; the secret is never logged, written to evidence, or
-returned in tool output.
+/pass:<client-secret>` or `cmdkey /generic:nyx-opnsense-<host>
+/user:<api-key> /pass:<api-secret>`; the secret is never logged, written
+to evidence, or returned in tool output.
 
 ## 1. Omada credential resolution
 
@@ -115,7 +115,8 @@ returned in tool output.
 - **When** the agent calls any OPNsense tool with no credential arguments
 - **Then** the tool succeeds and the service receives those credentials
 - **And** the tests: `TestMCPToolCallsOpnsenseCredentialsFromEnv`,
-  `TestMCPToolCallsOpnsenseCredentialsFromStore`
+  `TestMCPToolCallsOpnsenseCredentialsFromStore`,
+  `TestMCPToolCallsOpnsenseCredentialsFromWM`
 
 ### S2.2 Missing OPNsense credentials keep the actionable error — **Implemented**
 
@@ -123,9 +124,13 @@ returned in tool output.
 - **When** the agent calls an OPNsense tool with only `host`
 - **Then** the tool errors with
   `api_key and api_secret parameters are required: set the
-  OPNSENSE_API_KEY / OPNSENSE_API_SECRET environment variables or run
-  `nyx credentials set opnsense``
-- **And** the test: `TestMCPToolCallsOpnsenseCredentialsMissingEverywhere`
+  OPNSENSE_API_KEY / OPNSENSE_API_SECRET environment variables or use a
+  Windows Credential Manager entry nyx-opnsense-<host> (cmdkey
+  /generic:nyx-opnsense-<host> /user:<api-key> /pass:<api-secret>) or
+  run `nyx credentials set opnsense`` (the WM clause names the entry for
+  the resolved host)
+- **And** the tests: `TestMCPToolCallsOpnsenseCredentialsMissingEverywhere`,
+  `TestMCPToolCallsOpnsenseCredentialsFromWM`
 
 ## 3. Schema and store-path contract
 

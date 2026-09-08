@@ -7,9 +7,10 @@
 // last fallback and the missing-credentials error stays actionable.
 //
 // Entry naming: `nyx-omada-<host>` carries the client ID in the entry
-// user name (CRED_USERNAME) and the client secret in the password/blob
-// (cmdkey /generic /user /pass). Secrets are never logged or written
-// to evidence.
+// user name (CRED_USERNAME) and the client secret in the password/blob;
+// `nyx-opnsense-<host>` carries the API key in the user name and the
+// API secret in the password/blob (cmdkey /generic /user /pass). Secrets
+// are never logged or written to evidence.
 package credmanager
 
 import "errors"

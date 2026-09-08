@@ -20,13 +20,19 @@ func (f *fakeReader) Read(target string) (Cred, bool, error) {
 	return f.cred, f.found, f.err
 }
 
-func TestOverlayOmadaPrecedence(t *testing.T) {
-	restore := func() { t.Cleanup(func() { SetReader(nil) }) }
+// useReader installs r for the duration of this test (or subtest). Cleanup
+// is registered on the provided t so a parent-scoped restore cannot leak
+// a fake across sibling subtests.
+func useReader(t *testing.T, r Reader) {
+	t.Helper()
+	SetReader(r)
+	t.Cleanup(func() { SetReader(nil) })
+}
 
+func TestOverlayOmadaPrecedence(t *testing.T) {
 	t.Run("WM fills empty id and secret", func(t *testing.T) {
-		restore()
 		f := &fakeReader{cred: Cred{ClientID: "wm-id", ClientSecret: "wm-secret"}, found: true}
-		SetReader(f)
+		useReader(t, f)
 		id, secret := OverlayOmada("omada.local", "", "")
 		if id != "wm-id" || secret != "wm-secret" {
 			t.Fatalf("got (%q, %q), want (wm-id, wm-secret)", id, secret)
@@ -37,9 +43,8 @@ func TestOverlayOmadaPrecedence(t *testing.T) {
 	})
 
 	t.Run("flags and env win over WM", func(t *testing.T) {
-		restore()
 		f := &fakeReader{cred: Cred{ClientID: "wm-id", ClientSecret: "wm-secret"}, found: true}
-		SetReader(f)
+		useReader(t, f)
 		// Flag/env-resolved id present, secret empty: only the empty slot
 		// may be filled.
 		id, secret := OverlayOmada("omada.local", "flag-id", "")
@@ -53,8 +58,7 @@ func TestOverlayOmadaPrecedence(t *testing.T) {
 	})
 
 	t.Run("miss and read error are silent no-ops", func(t *testing.T) {
-		restore()
-		SetReader(&fakeReader{found: false})
+		useReader(t, &fakeReader{found: false})
 		id, secret := OverlayOmada("omada.local", "env-id", "env-secret")
 		if id != "env-id" || secret != "env-secret" {
 			t.Fatalf("got (%q, %q), want unchanged", id, secret)
@@ -67,9 +71,8 @@ func TestOverlayOmadaPrecedence(t *testing.T) {
 	})
 
 	t.Run("partial WM entry only fills the empty slot", func(t *testing.T) {
-		restore()
 		f := &fakeReader{cred: Cred{ClientID: ""}, found: true} // empty user name
-		SetReader(f)
+		useReader(t, f)
 		id, secret := OverlayOmada("omada.local", "", "env-secret")
 		if id != "" || secret != "env-secret" {
 			t.Fatalf("got (%q, %q), want (, env-secret)", id, secret)
@@ -77,9 +80,8 @@ func TestOverlayOmadaPrecedence(t *testing.T) {
 	})
 
 	t.Run("empty host never consults WM", func(t *testing.T) {
-		restore()
 		f := &fakeReader{cred: Cred{ClientID: "wm-id"}, found: true}
-		SetReader(f)
+		useReader(t, f)
 		id, secret := OverlayOmada("", "", "")
 		if id != "" || secret != "" {
 			t.Fatalf("got (%q, %q), want empty", id, secret)
@@ -95,10 +97,85 @@ func TestOverlayOmadaPrecedence(t *testing.T) {
 // reader errors with ErrUnsupported, which the overlay must swallow
 // silently, leaving the inputs untouched.
 func TestOverlayOmadaDefaultReaderOffWindows(t *testing.T) {
-	t.Cleanup(func() { SetReader(nil) })
+	useReader(t, nil)
 	id, secret := OverlayOmada("omada.local", "", "")
 	if id != "" || secret != "" {
 		t.Fatalf("got (%q, %q), want untouched empty inputs", id, secret)
+	}
+}
+
+func TestOverlayOpnsensePrecedence(t *testing.T) {
+	t.Run("WM fills empty key and secret", func(t *testing.T) {
+		f := &fakeReader{cred: Cred{ClientID: "wm-key", ClientSecret: "wm-secret"}, found: true}
+		useReader(t, f)
+		key, secret := OverlayOpnsense("fw.example", "", "")
+		if key != "wm-key" || secret != "wm-secret" {
+			t.Fatalf("got (%q, %q), want (wm-key, wm-secret)", key, secret)
+		}
+		if f.target != "nyx-opnsense-fw.example" {
+			t.Fatalf("target = %q, want nyx-opnsense-fw.example", f.target)
+		}
+	})
+
+	t.Run("flags and env win over WM", func(t *testing.T) {
+		f := &fakeReader{cred: Cred{ClientID: "wm-key", ClientSecret: "wm-secret"}, found: true}
+		useReader(t, f)
+		// Flag/env-resolved key present, secret empty: only the empty slot
+		// may be filled.
+		key, secret := OverlayOpnsense("fw.example", "flag-key", "")
+		if key != "flag-key" || secret != "wm-secret" {
+			t.Fatalf("got (%q, %q), want (flag-key, wm-secret)", key, secret)
+		}
+		key, secret = OverlayOpnsense("fw.example", "flag-key", "flag-secret")
+		if key != "flag-key" || secret != "flag-secret" {
+			t.Fatalf("got (%q, %q), want (flag-key, flag-secret)", key, secret)
+		}
+	})
+
+	t.Run("miss and read error are silent no-ops", func(t *testing.T) {
+		useReader(t, &fakeReader{found: false})
+		key, secret := OverlayOpnsense("fw.example", "env-key", "env-secret")
+		if key != "env-key" || secret != "env-secret" {
+			t.Fatalf("got (%q, %q), want unchanged", key, secret)
+		}
+		SetReader(&fakeReader{err: errors.New("boom")})
+		key, secret = OverlayOpnsense("fw.example", "env-key", "env-secret")
+		if key != "env-key" || secret != "env-secret" {
+			t.Fatalf("got (%q, %q), want unchanged", key, secret)
+		}
+	})
+
+	t.Run("partial WM entry only fills the empty slot", func(t *testing.T) {
+		f := &fakeReader{cred: Cred{ClientID: ""}, found: true} // empty user name
+		useReader(t, f)
+		key, secret := OverlayOpnsense("fw.example", "", "env-secret")
+		if key != "" || secret != "env-secret" {
+			t.Fatalf("got (%q, %q), want (, env-secret)", key, secret)
+		}
+	})
+
+	t.Run("empty host never consults WM", func(t *testing.T) {
+		f := &fakeReader{cred: Cred{ClientID: "wm-key"}, found: true}
+		useReader(t, f)
+		key, secret := OverlayOpnsense("", "", "")
+		if key != "" || secret != "" {
+			t.Fatalf("got (%q, %q), want empty", key, secret)
+		}
+		if f.readCall != 0 {
+			t.Fatalf("readCall = %d, want 0 (WM must never supply the host)", f.readCall)
+		}
+	})
+}
+
+// TestOverlayOpnsenseDefaultReaderOffWindows covers the default-reader path
+// (platformReader, not an injected fake) on non-Windows legs: the stub
+// reader errors with ErrUnsupported, which the overlay must swallow
+// silently, leaving the inputs untouched.
+func TestOverlayOpnsenseDefaultReaderOffWindows(t *testing.T) {
+	useReader(t, nil)
+	key, secret := OverlayOpnsense("fw.example", "", "")
+	if key != "" || secret != "" {
+		t.Fatalf("got (%q, %q), want untouched empty inputs", key, secret)
 	}
 }
 
@@ -112,5 +189,15 @@ func TestEntryNameAndHint(t *testing.T) {
 	want := " or use a Windows Credential Manager entry nyx-omada-omada.local (cmdkey /generic:nyx-omada-omada.local /user:<client-id> /pass:<client-secret>)"
 	if got := Hint("omada.local"); got != want {
 		t.Fatalf("Hint = %q, want %q", got, want)
+	}
+}
+
+func TestHintOpnsense(t *testing.T) {
+	if got := HintOpnsense(""); got != "" {
+		t.Fatalf("HintOpnsense(\"\") = %q, want empty", got)
+	}
+	want := " or use a Windows Credential Manager entry nyx-opnsense-fw.example (cmdkey /generic:nyx-opnsense-fw.example /user:<api-key> /pass:<api-secret>)"
+	if got := HintOpnsense("fw.example"); got != want {
+		t.Fatalf("HintOpnsense = %q, want %q", got, want)
 	}
 }

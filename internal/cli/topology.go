@@ -37,10 +37,11 @@ posture. For each observed device the command reports its NAT role
 then a site-level double-NAT risk verdict.
 
 The command is read-only: it issues only GETs. Configure credentials for
-omada and/or opnsense (flags, environment variables, or the credential
-store) to observe that provider; a provider with no resolvable host is
-skipped. A host that is present but whose credentials are incomplete is a
-hard error — a partial picture would produce a confidently wrong verdict.`,
+omada and/or opnsense (flags, environment variables, Windows Credential
+Manager, or the credential store) to observe that provider; a provider
+with no resolvable host is skipped. A host that is present but whose
+credentials are incomplete is a hard error — a partial picture would
+produce a confidently wrong verdict.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		dur, err := parseTimeoutFlag(timeout)
 		if err != nil {
@@ -93,7 +94,7 @@ hard error — a partial picture would produce a confidently wrong verdict.`,
 
 // resolveOmadaTopologyOpts returns the Omada options for the topology
 // report, or nil when the host cannot be resolved after the flags ->
-// env -> Credential Manager (omada only, Windows) -> store chain
+// env -> Credential Manager (nyx-omada-<host>, Windows) -> store chain
 // (meaning: skip Omada). It returns a non-nil error when a host is
 // present but the credentials are incomplete after all four layers.
 func resolveOmadaTopologyOpts() (*service.OmadaOptions, error) {
@@ -131,8 +132,9 @@ func resolveOmadaTopologyOpts() (*service.OmadaOptions, error) {
 
 // resolveOpnsenseTopologyOpts returns the OPNsense options for the topology
 // report, or nil when the host cannot be resolved after the flags -> env ->
-// store chain (meaning: skip OPNsense). It returns a non-nil error when a
-// host is present but the credentials are incomplete after all three layers.
+// Credential Manager (nyx-opnsense-<host>, Windows) -> store chain
+// (meaning: skip OPNsense). It returns a non-nil error when a host is
+// present but the credentials are incomplete after all four layers.
 func resolveOpnsenseTopologyOpts() (*service.OpnsenseOptions, error) {
 	opts := service.OpnsenseOptions{
 		Host:          storepath.FirstNonEmpty(topoOpnsenseHost, os.Getenv("OPNSENSE_HOST")),
@@ -141,6 +143,9 @@ func resolveOpnsenseTopologyOpts() (*service.OpnsenseOptions, error) {
 		SkipTLSVerify: topoSkipTLSVerify,
 		CACertPath:    topoCACertPath,
 	}
+	// Windows Credential Manager layer, between env vars and the store
+	// (no-op off Windows — see credmanager).
+	opts.APIKey, opts.APISecret = credmanager.OverlayOpnsense(opts.Host, opts.APIKey, opts.APISecret)
 	if opts.Host == "" || opts.APIKey == "" || opts.APISecret == "" {
 		fields := credentials.Fields{
 			Host:      opts.Host,
@@ -154,8 +159,9 @@ func resolveOpnsenseTopologyOpts() (*service.OpnsenseOptions, error) {
 		return nil, nil
 	}
 	if opts.APIKey == "" || opts.APISecret == "" {
-		return nil, fmt.Errorf("opnsense credentials incomplete: set --opnsense-api-key/--opnsense-api-secret, " +
-			"OPNSENSE_API_KEY / OPNSENSE_API_SECRET, or run `nyx credentials set opnsense`")
+		return nil, errors.New("opnsense credentials incomplete: set --opnsense-api-key/--opnsense-api-secret, " +
+			"OPNSENSE_API_KEY / OPNSENSE_API_SECRET" + credmanager.HintOpnsense(opts.Host) +
+			", or run `nyx credentials set opnsense`")
 	}
 	return &opts, nil
 }

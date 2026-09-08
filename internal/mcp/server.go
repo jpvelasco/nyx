@@ -1241,10 +1241,11 @@ func portProfileRequestFromArgs(args map[string]interface{}) (service.OmadaPortP
 }
 
 // opnsenseOptionsFromArgs extracts OPNsense connection options from tool
-// arguments, falling back to env vars and then the encrypted credential
-// store (entry opnsense/default) for any value left empty — the same
-// resolution order as the CLI. The returned message is non-empty when a
-// required parameter is missing after all three layers.
+// arguments, falling back to env vars, then the Windows Credential
+// Manager (entry nyx-opnsense-<host>; no-op off Windows), and then the
+// encrypted credential store (entry opnsense/default) for any value left
+// empty — the same resolution order as the CLI. The returned message is
+// non-empty when a required parameter is missing after all four layers.
 func (s *Server) opnsenseOptionsFromArgs(args map[string]interface{}, needCredentials bool) (service.OpnsenseOptions, string) {
 	var opts service.OpnsenseOptions
 	opts.Host = storepath.FirstNonEmpty(argString(args, "host"), s.env("OPNSENSE_HOST"))
@@ -1265,6 +1266,9 @@ func (s *Server) opnsenseOptionsFromArgs(args map[string]interface{}, needCreden
 		APIKey:    storepath.FirstNonEmpty(argString(args, "api_key"), s.env("OPNSENSE_API_KEY")),
 		APISecret: storepath.FirstNonEmpty(argString(args, "api_secret"), s.env("OPNSENSE_API_SECRET")),
 	}
+	// Windows Credential Manager layer, between env vars and the store
+	// (no-op off Windows — see credmanager).
+	fields.APIKey, fields.APISecret = credmanager.OverlayOpnsense(fields.Host, fields.APIKey, fields.APISecret)
 	credentials.Overlay(storepath.StoreFile(), "opnsense", "default", &fields)
 	opts.Host, opts.APIKey, opts.APISecret = fields.Host, fields.APIKey, fields.APISecret
 	if opts.Host == "" {
@@ -1272,7 +1276,8 @@ func (s *Server) opnsenseOptionsFromArgs(args map[string]interface{}, needCreden
 	}
 	if opts.APIKey == "" || opts.APISecret == "" {
 		return opts, "api_key and api_secret parameters are required: " +
-			"set the OPNSENSE_API_KEY / OPNSENSE_API_SECRET environment variables or run `nyx credentials set opnsense`"
+			"set the OPNSENSE_API_KEY / OPNSENSE_API_SECRET environment variables" +
+			credmanager.HintOpnsense(opts.Host) + " or run `nyx credentials set opnsense`"
 	}
 	return opts, ""
 }

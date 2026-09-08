@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
+	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
 	"github.com/jpvelasco/nyx/internal/service"
 )
 
@@ -169,6 +170,36 @@ func TestMCPToolCallsOpnsenseCredentialsFromEnv(t *testing.T) {
 	}
 }
 
+func TestMCPToolCallsOpnsenseCredentialsFromWM(t *testing.T) {
+	resetEnv(t, opnsenseEnvKeys()...)
+	openTestStore(t) // empty store: only WM can fill
+	t.Cleanup(func() { credmanager.SetReader(nil) })
+	credmanager.SetReader(fakeMCPWMReader{
+		cred:  credmanager.Cred{ClientID: "wm-key", ClientSecret: "wm-secret"},
+		found: true,
+	})
+
+	stub := &stubOpnsenseSvc{info: &service.OpnsenseInfo{Provider: "opnsense", Version: "24.7.11"}}
+	requireToolOK(t, serverWithOpnsenseStub(stub), "opnsense_get_info", map[string]interface{}{
+		"host": "fw.example",
+	})
+	if stub.lastOpts.APIKey != "wm-key" || stub.lastOpts.APISecret != "wm-secret" {
+		t.Errorf("options = %+v, want WM credentials", stub.lastOpts)
+	}
+	if stub.lastOpts.Host != "fw.example" {
+		t.Errorf("Host = %q, want arg host (WM must never supply the host)", stub.lastOpts.Host)
+	}
+}
+
+type fakeMCPWMReader struct {
+	cred  credmanager.Cred
+	found bool
+}
+
+func (f fakeMCPWMReader) Read(string) (credmanager.Cred, bool, error) {
+	return f.cred, f.found, nil
+}
+
 func TestMCPToolCallsOpnsenseCredentialsFromStore(t *testing.T) {
 	resetEnv(t, opnsenseEnvKeys()...)
 	setStoreEntry(t, openTestStore(t), "opnsense", credentials.Entry{
@@ -199,6 +230,7 @@ func TestMCPToolCallsOpnsenseCredentialsMissingEverywhere(t *testing.T) {
 	for _, want := range []string{
 		"api_key and api_secret parameters are required",
 		"OPNSENSE_API_KEY",
+		"nyx-opnsense-fw.local",
 		"nyx credentials set opnsense",
 	} {
 		if !strings.Contains(text, want) {

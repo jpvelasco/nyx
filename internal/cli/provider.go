@@ -313,11 +313,12 @@ var providerEnvNames = map[string][4]string{
 }
 
 // providerImportOptions builds ImportOptions from flags, then per-provider
-// env vars, then the Windows Credential Manager (omada; entry
-// nyx-omada-<host>, no-op off Windows), then the encrypted credential
-// store. Flags win over env; env wins over the Credential Manager; the
-// store wins over nothing. Missing host after all four is left empty so
-// the provider surfaces its own connection error.
+// env vars, then the Windows Credential Manager (omada:
+// nyx-omada-<host>; opnsense: nyx-opnsense-<host>; no-op off Windows),
+// then the encrypted credential store. Flags win over env; env wins
+// over the Credential Manager; the store wins over nothing. Missing
+// host after all four is left empty so the provider surfaces its own
+// connection error.
 func providerImportOptions(providerName string) providers.ImportOptions {
 	names, ok := providerEnvNames[providerName]
 	// Unknown providers keep the historical omada env names.
@@ -334,9 +335,13 @@ func providerImportOptions(providerName string) providers.ImportOptions {
 		Logger:        slogLog,
 	}
 	// Windows Credential Manager layer, between env vars and the store
-	// (omada only; no-op off Windows — see credmanager).
-	if providerName == "omada" {
+	// (no-op off Windows — see credmanager). Fill-only: never overwrite
+	// flags/env and never supply the host from WM.
+	switch providerName {
+	case "omada":
 		opts.ClientID, opts.ClientSecret = credmanager.OverlayOmada(opts.Host, opts.ClientID, opts.ClientSecret)
+	case "opnsense":
+		opts.ClientID, opts.ClientSecret = credmanager.OverlayOpnsense(opts.Host, opts.ClientID, opts.ClientSecret)
 	}
 	// Overlay is fill-only: a partial store entry must never clear values
 	// already resolved from flags or env vars.
