@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/probe"
@@ -405,4 +406,37 @@ func restoreLiveSeams(t *testing.T) {
 	t.Cleanup(func() {
 		liveOmada, liveOpnsense, liveProbe = origO, origP, origR
 	})
+}
+
+func TestLiveVerifyDefaultAndSanitizeNil(t *testing.T) {
+	if err := liveVerify(context.Background(), "custom", credentials.Entry{"token": "x"}); err != nil {
+		t.Fatalf("unknown provider liveVerify = %v", err)
+	}
+	if got := sanitizeLiveError(nil, credentials.Entry{"client_secret": "s"}); got != "" {
+		t.Fatalf("nil sanitize = %q", got)
+	}
+}
+
+func TestCredentialsVerifyLiveZeroTimeout(t *testing.T) {
+	t.Setenv("NYX_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+	restoreLiveSeams(t)
+	var sawDeadline bool
+	liveOmada = func(ctx context.Context, _ service.OmadaOptions) error {
+		dl, ok := ctx.Deadline()
+		sawDeadline = ok && time.Until(dl) > 20*time.Second
+		return nil
+	}
+	if err := runCredentialsCmd(t, "credentials", "set", "omada",
+		"--set", "host=10.0.11.20", "--set", "client_id=cid", "--set", "client_secret=sec"); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	orig := timeout
+	t.Cleanup(func() { timeout = orig })
+	timeout = "0"
+	if err := runCredentialsCmd(t, "credentials", "verify", "omada", "--live"); err != nil {
+		t.Fatalf("verify --live timeout=0: %v", err)
+	}
+	if !sawDeadline {
+		t.Fatal("expected a ~30s live deadline when --timeout is 0")
+	}
 }
