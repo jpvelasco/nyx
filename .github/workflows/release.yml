@@ -98,6 +98,12 @@ jobs:
           curl -fsSL "$URL" -o dist/checksums.txt
           echo "embedded checksums synced to published asset"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
       - name: Embed binary checksums into npm package
         run: node scripts/embed-checksums.js dist/checksums.txt npm/package.json
 

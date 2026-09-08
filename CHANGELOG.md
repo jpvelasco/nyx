@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-08
+
+**Patch release.** Restores npm publish for the 0.5.0 feature set.
+
+### Fixed
+
+- **npm publish auth.** The v0.5.0 release workflow dropped `actions/setup-node` (registry-url + trusted-publisher OIDC), so `npm publish` failed with `ENEEDAUTH` after GitHub assets were already uploaded. This release restores that step and publishes `nyx-audit-cli@0.5.1` against the new tag. GitHub binaries for v0.5.0 remain valid; install from npm with `0.5.1`.
+
 ## [0.5.0] - 2026-09-08
 
 **Feature release.** OPNsense grows a full observe + write loop (VLAN, filter, Unbound, WireGuard, DHCP); Omada adds LAN/SSID/DHCP surfaces; the CLI now exposes every MCP mutation (dry-run default); the credential vault finishes interactive set, live verify, and `credentials_status`.
@@ -306,7 +314,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.1
 [0.5.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.0
 [0.4.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.4.1
 [0.4.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.4.0
