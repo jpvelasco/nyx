@@ -451,6 +451,47 @@ func TestOpnsenseServiceApplyKeaDeletes(t *testing.T) {
 	}
 }
 
+func TestOpnsenseServiceApplyKeaCreatesAndHostCreate(t *testing.T) {
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "dnsmasq/settings/get"):
+			testutil.WriteBody(w, `{"dnsmasq":{"enable":"1","dhcp":{"range":{},"host":{}}}}`)
+		case strings.Contains(r.URL.Path, "kea/service/status"):
+			testutil.WriteBody(w, `{"running":false}`)
+		case strings.Contains(r.URL.Path, "add_host"), strings.Contains(r.URL.Path, "reconfigure"):
+			testutil.WriteBody(w, `{"result":"saved","uuid":"h-new"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	opts := opnsenseOptions(ts)
+	svc := NewOpnsenseService()
+	live, err := svc.ApplyDHCP(context.Background(), opts, OpnsenseDHCPRequest{Kind: "host", Hostname: "nas", IP: "10.0.10.30"}, false)
+	if err != nil || live.Outcome != "created" {
+		t.Fatalf("create host = %+v %v", live, err)
+	}
+	ts2 := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "dnsmasq/settings/get"):
+			testutil.WriteBody(w, `{"dnsmasq":{"enable":"0"}}`)
+		case strings.Contains(r.URL.Path, "kea/service/status"):
+			testutil.WriteBody(w, `{"running":true}`)
+		case strings.Contains(r.URL.Path, "search_subnet"):
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case strings.Contains(r.URL.Path, "search_reservation"):
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case strings.Contains(r.URL.Path, "add_subnet"), strings.Contains(r.URL.Path, "reconfigure"):
+			testutil.WriteBody(w, `{"result":"saved","uuid":"s-new"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	sub, err := NewOpnsenseService().ApplyDHCP(context.Background(), opnsenseOptions(ts2), OpnsenseDHCPRequest{Kind: "range", Start: "10.0.20.0/24"}, false)
+	if err != nil || sub.Outcome != "created" {
+		t.Fatalf("create subnet = %+v %v", sub, err)
+	}
+}
+
 func TestOpnsenseServiceListWireGuard(t *testing.T) {
 	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
