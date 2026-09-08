@@ -10,11 +10,8 @@ import (
 
 	"github.com/jpvelasco/nyx/internal/mcp"
 	"github.com/jpvelasco/nyx/internal/providers"
-
-	// Blank imports trigger provider init() so the parity guard sees the
-	// real providers in tests (same pattern as cli_test.go).
-	_ "github.com/jpvelasco/nyx/internal/providers/omada"
-	_ "github.com/jpvelasco/nyx/internal/providers/opnsense"
+	omadaprov "github.com/jpvelasco/nyx/internal/providers/omada"
+	opnsenseprov "github.com/jpvelasco/nyx/internal/providers/opnsense"
 )
 
 // mcpCapabilityTools maps each provider to the MCP tools that cover every
@@ -25,9 +22,8 @@ import (
 //   - The CLI is the bundled user surface: every advertised capability is
 //     one `nyx <vendor> <capability>` subcommand (info/import/check/inventory).
 //   - The MCP is the fine-grained agent surface: per-collection observation
-//     tools plus the generic run_audit / load_spec audit tools, and the
-//     mutation plan/apply pairs (omada_plan / omada_apply_acl,
-//     opnsense_plan_nat / opnsense_apply_nat) that have no CLI command.
+//     tools plus the generic run_audit / load_spec audit tools. Mutation
+//     plan/apply pairs are also on the CLI as extras (not Capabilities).
 //
 // `check` is covered by composition for both providers (import + run_audit);
 // OPNsense `import` is covered by composition (the observation reads plus
@@ -83,7 +79,19 @@ var mcpCapabilityTools = map[string]map[string][]string{
 // and the encrypted store are neutralized, so a registered tool answers
 // with its early credential/argument validation error instead of
 // `unknown tool`.
+func ensureProviderRegistered(t *testing.T, name string, p providers.Provider) {
+	t.Helper()
+	if providers.Get(name) != nil {
+		return
+	}
+	if err := providers.Register(p); err != nil {
+		t.Fatalf("re-register %s: %v", name, err)
+	}
+}
+
 func TestProviderCapabilitySurfaceParity(t *testing.T) {
+	ensureProviderRegistered(t, "omada", &omadaprov.OmadaProvider{})
+	ensureProviderRegistered(t, "opnsense", &opnsenseprov.Provider{})
 	// Neutralize every credential source so dispatched tools fail at
 	// argument validation (host missing) before any controller contact.
 	for _, env := range []string{
@@ -140,5 +148,93 @@ func TestProviderCapabilitySurfaceParity(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// mcpMutationCLI maps every Omada/OPNsense MCP mutation tool to the CLI
+// extra subcommand that wraps the same service method. A documented
+// equivalent can live here when the names cannot match 1:1 (underscores
+// become hyphens; omada_plan stays `plan` to match the existing extra
+// style). Reads that already have extras are listed so a new mutation
+// cannot ship MCP-only without failing this test.
+var mcpMutationCLI = map[string]string{
+	"omada_plan":                      "plan",
+	"omada_apply_acl":                 "apply-acl",
+	"omada_plan_port":                 "plan-port",
+	"omada_apply_port_profile":        "apply-port-profile",
+	"omada_plan_lan":                  "plan-lan",
+	"omada_apply_lan":                 "apply-lan",
+	"omada_plan_ssid":                 "plan-ssid",
+	"omada_apply_ssid":                "apply-ssid",
+	"opnsense_plan_nat":               "plan-nat",
+	"opnsense_apply_nat":              "apply-nat",
+	"opnsense_plan_vlan":              "plan-vlan",
+	"opnsense_apply_vlan":             "apply-vlan",
+	"opnsense_plan_filter":            "plan-filter",
+	"opnsense_apply_filter":           "apply-filter",
+	"opnsense_plan_unbound_override":  "plan-unbound-override",
+	"opnsense_apply_unbound_override": "apply-unbound-override",
+}
+
+func vendorOfTool(name string) string {
+	switch {
+	case strings.HasPrefix(name, "omada_"):
+		return "omada"
+	case strings.HasPrefix(name, "opnsense_"):
+		return "opnsense"
+	default:
+		return ""
+	}
+}
+
+func isMutationTool(name string) bool {
+	rest := name
+	if i := strings.Index(name, "_"); i >= 0 {
+		rest = name[i+1:]
+	}
+	return strings.HasPrefix(rest, "plan") || strings.HasPrefix(rest, "apply")
+}
+
+// TestNamedToolCLIParity is the #95 guard: every MCP omada_* / opnsense_*
+// mutation tool must have a CLI extra subcommand (or a documented
+// equivalent in mcpMutationCLI). Capability parity stays in
+// TestProviderCapabilitySurfaceParity; extras stay off Capabilities().
+func TestNamedToolCLIParity(t *testing.T) {
+	// coverage_test.go Reset()s the registry after fake-provider tests.
+	ensureProviderRegistered(t, "omada", &omadaprov.OmadaProvider{})
+	ensureProviderRegistered(t, "opnsense", &opnsenseprov.Provider{})
+	fresh := &cobra.Command{Use: "nyx"}
+	BuildProviderSubcommands(fresh)
+	vendorCmds := map[string]*cobra.Command{}
+	for _, c := range fresh.Commands() {
+		vendorCmds[c.Name()] = c
+		vendorCmds[c.Use] = c
+	}
+
+	for _, tool := range mcp.ToolNames() {
+		vendor := vendorOfTool(tool)
+		if vendor == "" || !isMutationTool(tool) {
+			continue
+		}
+		t.Run(tool, func(t *testing.T) {
+			cliName, ok := mcpMutationCLI[tool]
+			if !ok || cliName == "" {
+				t.Fatalf("MCP mutation tool %q has no CLI mapping — add it to mcpMutationCLI (or implement the extra subcommand)", tool)
+			}
+			vendorCmd := vendorCmds[vendor]
+			if vendorCmd == nil {
+				t.Fatalf("no %q vendor command after BuildProviderSubcommands", vendor)
+			}
+			found := false
+			for _, c := range vendorCmd.Commands() {
+				if c.Name() == cliName {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("MCP tool %q maps to CLI %q %s, but that extra is not registered", tool, vendor, cliName)
+			}
+		})
 	}
 }

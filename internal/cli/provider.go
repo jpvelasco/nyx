@@ -102,11 +102,16 @@ func BuildProviderSubcommands(root *cobra.Command) {
 			vendorCmd.AddCommand(buildInventoryCmd(p))
 		}
 
-		// Extra (non-capability) surface: Omada observation subcommands.
-		// They are not advertised via Capabilities() — adding them
-		// there would trip the parity gate.
-		if p.Name() == "omada" {
+		// Extra (non-capability) surface: observation + plan/apply
+		// mutations. They are not advertised via Capabilities() —
+		// adding them there would trip the capability parity gate.
+		switch p.Name() {
+		case "omada":
 			for _, extra := range buildOmadaExtraCommands() {
+				vendorCmd.AddCommand(extra)
+			}
+		case "opnsense":
+			for _, extra := range buildOpnsenseExtraCommands() {
 				vendorCmd.AddCommand(extra)
 			}
 		}

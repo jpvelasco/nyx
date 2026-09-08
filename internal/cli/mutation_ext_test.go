@@ -1,0 +1,285 @@
+package cli
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	omadaprov "github.com/jpvelasco/nyx/internal/providers/omada"
+	opnsenseprov "github.com/jpvelasco/nyx/internal/providers/opnsense"
+	"github.com/jpvelasco/nyx/internal/service"
+	"github.com/spf13/cobra"
+)
+
+func TestMutationExtrasRegistered(t *testing.T) {
+	ensureProviderRegistered(t, "omada", &omadaprov.OmadaProvider{})
+	ensureProviderRegistered(t, "opnsense", &opnsenseprov.Provider{})
+	fresh := &cobra.Command{Use: "nyx"}
+	BuildProviderSubcommands(fresh)
+	want := map[string][]string{
+		"omada":    {"plan", "apply-acl", "plan-port", "apply-port-profile", "plan-lan", "apply-lan", "plan-ssid", "apply-ssid", "ssids"},
+		"opnsense": {"plan-nat", "apply-nat", "plan-vlan", "apply-vlan", "plan-filter", "apply-filter", "plan-unbound-override", "apply-unbound-override", "list-vlans"},
+	}
+	for vendor, cmds := range want {
+		var v *cobra.Command
+		for _, c := range fresh.Commands() {
+			if c.Name() == vendor || c.Use == vendor {
+				v = c
+			}
+		}
+		if v == nil {
+			t.Fatalf("missing vendor %s", vendor)
+		}
+		have := map[string]bool{}
+		for _, c := range v.Commands() {
+			have[c.Name()] = true
+		}
+		for _, name := range cmds {
+			if !have[name] {
+				t.Errorf("%s missing extra %s", vendor, name)
+			}
+		}
+	}
+}
+
+func TestOmadaApplyACLFlagsRequired(t *testing.T) {
+	cmd := buildOmadaApplyACLCmd()
+	if err := cmd.RunE(cmd, nil); err == nil || !strings.Contains(err.Error(), "--from is required") {
+		t.Fatalf("err = %v", err)
+	}
+	cmd = buildOmadaApplyACLCmd()
+	_ = cmd.Flags().Set("from", "trusted")
+	if err := cmd.RunE(cmd, nil); err == nil || !strings.Contains(err.Error(), "--to is required") {
+		t.Fatalf("err = %v", err)
+	}
+	cmd = buildOmadaApplyACLCmd()
+	_ = cmd.Flags().Set("from", "trusted")
+	_ = cmd.Flags().Set("to", "iot")
+	if err := cmd.RunE(cmd, nil); err == nil || !strings.Contains(err.Error(), "--action is required") {
+		t.Fatalf("err = %v", err)
+	}
+	cmd = buildOmadaApplyACLCmd()
+	_ = cmd.Flags().Set("from", "trusted")
+	_ = cmd.Flags().Set("to", "iot")
+	_ = cmd.Flags().Set("action", "deny")
+	_ = cmd.Flags().Set("protocols", "tcp")
+	if err := cmd.RunE(cmd, nil); err == nil || !strings.Contains(err.Error(), "protocol numbers") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestOmadaPortAndLANFlagValidation(t *testing.T) {
+	if _, err := (omadaPortFlags{}).request(); err == nil || !strings.Contains(err.Error(), "--switch-mac") {
+		t.Fatalf("port empty = %v", err)
+	}
+	if _, err := (omadaPortFlags{switchMAC: "aa:bb"}).request(); err == nil || !strings.Contains(err.Error(), "--port") {
+		t.Fatalf("port missing = %v", err)
+	}
+	if _, err := (omadaPortFlags{switchMAC: "aa:bb", port: 1}).request(); err == nil || !strings.Contains(err.Error(), "--native") {
+		t.Fatalf("native missing = %v", err)
+	}
+	req, err := (omadaPortFlags{switchMAC: "aa:bb", port: 2, native: "trusted", tagged: "iot,guest"}).request()
+	if err != nil || req.Port != 2 || len(req.Tagged) != 2 {
+		t.Fatalf("port req = %+v %v", req, err)
+	}
+	if _, err := (omadaLANFlags{}).request(); err == nil || !strings.Contains(err.Error(), "--name") {
+		t.Fatalf("lan empty = %v", err)
+	}
+	lan, err := (omadaLANFlags{name: "iot", vlan: 60}).request()
+	if err != nil || lan.Name != "iot" || lan.VLAN != 60 {
+		t.Fatalf("lan = %+v %v", lan, err)
+	}
+}
+
+func TestOmadaPlanRequiresSpec(t *testing.T) {
+	saveRestoreGlobals(t)
+	specFile = ""
+	cmd := buildOmadaPlanCmd()
+	if err := cmd.RunE(cmd, nil); err == nil || !strings.Contains(err.Error(), "--spec is required") {
+		t.Fatalf("plan = %v", err)
+	}
+}
+
+func TestOpnsenseNatFlagValidation(t *testing.T) {
+	if _, err := (opnsenseNatFlags{}).request(); err == nil || !strings.Contains(err.Error(), "--operation") {
+		t.Fatalf("nat empty = %v", err)
+	}
+	if _, err := (opnsenseNatFlags{operation: "port_forward", action: "delete"}).request(); err == nil || !strings.Contains(err.Error(), "--rule-uuid") {
+		t.Fatalf("nat delete = %v", err)
+	}
+	req, err := (opnsenseNatFlags{operation: "port_forward", interfaces: "wan", source: "any", destination: "10.0.10.20"}).request()
+	if err != nil || req.Operation != "port_forward" {
+		t.Fatalf("nat req = %+v %v", req, err)
+	}
+}
+
+func TestOpnsenseVLANFilterUnboundRequests(t *testing.T) {
+	v := (opnsenseVLANFlags{parent: "igb0", tag: 60, members: "igb0,igb1"}).request()
+	if v.Parent != "igb0" || v.Tag != 60 || len(v.Members) != 2 {
+		t.Fatalf("vlan = %+v", v)
+	}
+	f := (opnsenseFilterFlags{source: "lan", destination: "iot", action: "block"}).request()
+	if f.Source != "lan" || f.Action != "block" {
+		t.Fatalf("filter = %+v", f)
+	}
+	u := (opnsenseUnboundFlags{hostname: "nas", domain: "home.example", ip: "10.0.40.10"}).request()
+	if u.Hostname != "nas" || u.IP != "10.0.40.10" {
+		t.Fatalf("unbound = %+v", u)
+	}
+}
+
+func TestApplyCommandsDefaultDryRun(t *testing.T) {
+	for _, cmd := range []*cobra.Command{
+		buildOmadaApplyACLCmd(),
+		buildOmadaApplyPortProfileCmd(),
+		buildOmadaApplyLANCmd(),
+		buildOmadaApplySSIDCmd(),
+		buildOpnsenseApplyNatCmd(),
+		buildOpnsenseApplyVLANCmd(),
+		buildOpnsenseApplyFilterCmd(),
+		buildOpnsenseApplyUnboundCmd(),
+	} {
+		f := cmd.Flags().Lookup("dry-run")
+		if f == nil {
+			t.Errorf("%s missing --dry-run", cmd.Name())
+			continue
+		}
+		if f.DefValue != "true" {
+			t.Errorf("%s dry-run default = %q, want true", cmd.Name(), f.DefValue)
+		}
+	}
+}
+
+func TestMutationCommandsReachSessionWithoutHost(t *testing.T) {
+	saveRestoreOmadaExtGlobals(t)
+	providerHost, providerClientID, providerClientSecret = "", "", ""
+	cases := []struct {
+		name string
+		cmd  *cobra.Command
+		set  func(*cobra.Command)
+	}{
+		{"plan-port", buildOmadaPlanPortCmd(), func(c *cobra.Command) {
+			_ = c.Flags().Set("switch-mac", "aa:bb:cc:dd:ee:ff")
+			_ = c.Flags().Set("port", "1")
+			_ = c.Flags().Set("native", "trusted")
+		}},
+		{"apply-port", buildOmadaApplyPortProfileCmd(), func(c *cobra.Command) {
+			_ = c.Flags().Set("switch-mac", "aa:bb:cc:dd:ee:ff")
+			_ = c.Flags().Set("port", "1")
+			_ = c.Flags().Set("native", "trusted")
+		}},
+		{"plan-lan", buildOmadaPlanLANCmd(), func(c *cobra.Command) { _ = c.Flags().Set("name", "iot") }},
+		{"apply-lan", buildOmadaApplyLANCmd(), func(c *cobra.Command) { _ = c.Flags().Set("name", "iot") }},
+		{"plan-ssid", buildOmadaPlanSSIDCmd(), func(c *cobra.Command) { _ = c.Flags().Set("ssid", "guest") }},
+		{"apply-ssid", buildOmadaApplySSIDCmd(), func(c *cobra.Command) { _ = c.Flags().Set("ssid", "guest") }},
+		{"ssids", buildOmadaListSSIDsCmd(), func(*cobra.Command) {}},
+		{"apply-acl", buildOmadaApplyACLCmd(), func(c *cobra.Command) {
+			_ = c.Flags().Set("from", "trusted")
+			_ = c.Flags().Set("to", "iot")
+			_ = c.Flags().Set("action", "deny")
+		}},
+		{"plan-nat", buildOpnsensePlanNatCmd(), func(c *cobra.Command) { _ = c.Flags().Set("operation", "port_forward") }},
+		{"apply-nat", buildOpnsenseApplyNatCmd(), func(c *cobra.Command) { _ = c.Flags().Set("operation", "port_forward") }},
+		{"plan-vlan", buildOpnsensePlanVLANCmd(), func(*cobra.Command) {}},
+		{"apply-vlan", buildOpnsenseApplyVLANCmd(), func(*cobra.Command) {}},
+		{"plan-filter", buildOpnsensePlanFilterCmd(), func(*cobra.Command) {}},
+		{"apply-filter", buildOpnsenseApplyFilterCmd(), func(*cobra.Command) {}},
+		{"plan-unbound", buildOpnsensePlanUnboundCmd(), func(*cobra.Command) {}},
+		{"apply-unbound", buildOpnsenseApplyUnboundCmd(), func(*cobra.Command) {}},
+		{"list-vlans", buildOpnsenseListCmd("list-vlans", "x", func(context.Context, service.OpnsenseOptions) (any, error) { return nil, nil }), func(*cobra.Command) {}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.set(tc.cmd)
+			err := tc.cmd.RunE(tc.cmd, nil)
+			if err == nil || !strings.Contains(err.Error(), "host") {
+				t.Fatalf("%s err = %v, want host-required", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestMutationCommandsReachServiceWithDummyHost(t *testing.T) {
+	saveRestoreOmadaExtGlobals(t)
+	providerHost = "127.0.0.1:1"
+	providerClientID = "k"
+	providerClientSecret = "s"
+	providerSkipTLS = true
+	cases := []struct {
+		name string
+		cmd  *cobra.Command
+		set  func(*cobra.Command)
+	}{
+		{"plan-port", buildOmadaPlanPortCmd(), func(c *cobra.Command) {
+			_ = c.Flags().Set("switch-mac", "aa:bb:cc:dd:ee:ff")
+			_ = c.Flags().Set("port", "1")
+			_ = c.Flags().Set("native", "trusted")
+		}},
+		{"apply-acl", buildOmadaApplyACLCmd(), func(c *cobra.Command) {
+			_ = c.Flags().Set("from", "trusted")
+			_ = c.Flags().Set("to", "iot")
+			_ = c.Flags().Set("action", "deny")
+		}},
+		{"plan-lan", buildOmadaPlanLANCmd(), func(c *cobra.Command) { _ = c.Flags().Set("name", "iot") }},
+		{"apply-lan", buildOmadaApplyLANCmd(), func(c *cobra.Command) { _ = c.Flags().Set("name", "iot") }},
+		{"plan-ssid", buildOmadaPlanSSIDCmd(), func(c *cobra.Command) { _ = c.Flags().Set("ssid", "guest") }},
+		{"apply-ssid", buildOmadaApplySSIDCmd(), func(c *cobra.Command) { _ = c.Flags().Set("ssid", "guest") }},
+		{"ssids", buildOmadaListSSIDsCmd(), func(*cobra.Command) {}},
+		{"plan-nat", buildOpnsensePlanNatCmd(), func(c *cobra.Command) { _ = c.Flags().Set("operation", "port_forward") }},
+		{"apply-nat", buildOpnsenseApplyNatCmd(), func(c *cobra.Command) { _ = c.Flags().Set("operation", "port_forward") }},
+		{"plan-vlan", buildOpnsensePlanVLANCmd(), func(c *cobra.Command) {
+			_ = c.Flags().Set("parent", "igb0")
+			_ = c.Flags().Set("tag", "60")
+		}},
+		{"apply-vlan", buildOpnsenseApplyVLANCmd(), func(c *cobra.Command) {
+			_ = c.Flags().Set("parent", "igb0")
+			_ = c.Flags().Set("tag", "60")
+		}},
+		{"plan-filter", buildOpnsensePlanFilterCmd(), func(c *cobra.Command) {
+			_ = c.Flags().Set("source", "lan")
+			_ = c.Flags().Set("destination", "iot")
+		}},
+		{"apply-filter", buildOpnsenseApplyFilterCmd(), func(c *cobra.Command) {
+			_ = c.Flags().Set("source", "lan")
+			_ = c.Flags().Set("destination", "iot")
+		}},
+		{"plan-unbound", buildOpnsensePlanUnboundCmd(), func(c *cobra.Command) {
+			_ = c.Flags().Set("hostname", "nas")
+			_ = c.Flags().Set("ip", "10.0.40.10")
+		}},
+		{"apply-unbound", buildOpnsenseApplyUnboundCmd(), func(c *cobra.Command) {
+			_ = c.Flags().Set("hostname", "nas")
+			_ = c.Flags().Set("ip", "10.0.40.10")
+		}},
+		{"list-vlans", buildOpnsenseListCmd("list-vlans", "x", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+			return service.NewOpnsenseService().ListVLANs(ctx, opts)
+		}), func(*cobra.Command) {}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.set(tc.cmd)
+			if err := tc.cmd.RunE(tc.cmd, nil); err == nil {
+				t.Fatalf("%s: expected a transport/service error against dummy host", tc.name)
+			}
+		})
+	}
+}
+
+func TestMutationCommandBuildersHaveRunE(t *testing.T) {
+	for _, cmd := range []*cobra.Command{
+		buildOpnsensePlanNatCmd(),
+		buildOpnsensePlanVLANCmd(),
+		buildOpnsensePlanFilterCmd(),
+		buildOpnsensePlanUnboundCmd(),
+		buildOmadaPlanPortCmd(),
+		buildOmadaPlanLANCmd(),
+		buildOmadaPlanSSIDCmd(),
+		buildOmadaListSSIDsCmd(),
+		buildOmadaApplyACLCmd(),
+		buildOpnsenseApplyNatCmd(),
+	} {
+		if cmd.RunE == nil {
+			t.Errorf("%s has no RunE", cmd.Use)
+		}
+	}
+}
