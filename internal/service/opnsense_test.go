@@ -247,6 +247,47 @@ func TestOpnsenseServiceListKea(t *testing.T) {
 	}
 }
 
+func TestOpnsenseServiceListWireGuard(t *testing.T) {
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "search_server"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"s1","name":"home-wg","enabled":"1","listenport":"51820"}]}`)
+		case strings.Contains(r.URL.Path, "search_client"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"p1","name":"laptop","pubkey":"pub1"}]}`)
+		case strings.Contains(r.URL.Path, "service/status"):
+			testutil.WriteBody(w, `{"running":true}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	opts := opnsenseOptions(ts)
+	svc := NewOpnsenseService()
+	servers, err := svc.ListWireGuardServers(context.Background(), opts)
+	if err != nil || len(servers) != 1 || servers[0].Name != "home-wg" {
+		t.Fatalf("servers = %+v, %v", servers, err)
+	}
+	clients, err := svc.ListWireGuardClients(context.Background(), opts)
+	if err != nil || len(clients) != 1 || clients[0].Pubkey != "pub1" {
+		t.Fatalf("clients = %+v, %v", clients, err)
+	}
+	st, err := svc.GetWireGuardStatus(context.Background(), opts)
+	if err != nil || st == nil || !st.Running {
+		t.Fatalf("status = %+v, %v", st, err)
+	}
+	ts2 := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	if _, err := NewOpnsenseService().ListWireGuardServers(context.Background(), opnsenseOptions(ts2)); err == nil {
+		t.Fatal("expected server error")
+	}
+	if _, err := NewOpnsenseService().ListWireGuardClients(context.Background(), opnsenseOptions(ts2)); err == nil {
+		t.Fatal("expected client error")
+	}
+	if _, err := NewOpnsenseService().GetWireGuardStatus(context.Background(), opnsenseOptions(ts2)); err == nil {
+		t.Fatal("expected status error")
+	}
+}
+
 func TestOpnsenseServiceListFirewallRules(t *testing.T) {
 	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/firewall/filter/search_rule" {

@@ -173,6 +173,28 @@ Then each destination/gateway/netif/flags row is returned
 And a 403 is the stable page-privilege error (inventory degrades)
 And the test: `TestGetKernelRoutes`
 
+### S2.18 WireGuard servers — **Implemented**
+Given `GET /api/wireguard/server/search_server` → paged rows with uuid, name/descr, enabled, tunneladdress, listenport, peers
+When `GetWireGuardServers` is called
+Then each named row is returned; rows missing uuid are skipped
+And a 403 is the stable page-privilege error (inventory degrades)
+And a 404 means the plugin is not installed (inventory degrades)
+And the test: `TestGetWireGuardObserve`
+
+### S2.19 WireGuard clients — **Implemented**
+Given `GET /api/wireguard/client/search_client` → paged rows with uuid, name, pubkey/publickey, tunneladdress, server, allowedips
+When `GetWireGuardClients` is called
+Then each named row is returned and any `privkey` field is ignored
+And a 403/404 degrades inventory
+And the test: `TestGetWireGuardObserve`
+
+### S2.20 WireGuard service status — **Implemented**
+Given `GET /api/wireguard/service/status` → `{"running":true}` or a loose-bool / `"running"` envelope
+When `GetWireGuardStatus` is called
+Then Running is true when any known running signal is present
+And a 403/404 degrades inventory
+And the tests: `TestGetWireGuardStatusShapes`, `TestFetchInventoryWireGuardDegrades`
+
 ### S2.3 Firewall rules
 Given `GET /api/firewall/filter/search_rule` → `{"total":N,"rows":[{...}]}`
 When `GetFirewallRules` is called

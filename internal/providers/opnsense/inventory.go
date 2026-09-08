@@ -23,27 +23,31 @@ const emptyTopologyWarning = "no networks found on the controller — the interf
 // inventory — so a failure there fails the whole call; system info, rules,
 // and leases are best-effort and degrade into Warnings.
 type InventorySnapshot struct {
-	System         *SystemInformation
-	Interfaces     []Interface
-	Rules          []FirewallRule
-	RulesOK        bool
-	Leases         []DHCPLease
-	LeasesOK       bool
-	Services       []Service
-	ServicesOK     bool
-	Gateways       []GatewayStatus
-	GatewaysOK     bool
-	Bridges        []Bridge
-	BridgesOK      bool
-	IfSettings     []InterfaceSetting
-	IfSettingsOK   bool
-	Dnsmasq        *DnsmasqSettings
-	DnsmasqOK      bool
-	PfStats        *PfStatistics
-	PfStatsOK      bool
-	KernelRoutes   []KernelRoute
-	KernelRoutesOK bool
-	Warnings       []string
+	System           *SystemInformation
+	Interfaces       []Interface
+	Rules            []FirewallRule
+	RulesOK          bool
+	Leases           []DHCPLease
+	LeasesOK         bool
+	Services         []Service
+	ServicesOK       bool
+	Gateways         []GatewayStatus
+	GatewaysOK       bool
+	Bridges          []Bridge
+	BridgesOK        bool
+	IfSettings       []InterfaceSetting
+	IfSettingsOK     bool
+	Dnsmasq          *DnsmasqSettings
+	DnsmasqOK        bool
+	PfStats          *PfStatistics
+	PfStatsOK        bool
+	KernelRoutes     []KernelRoute
+	KernelRoutesOK   bool
+	WireGuardServers []WireGuardServer
+	WireGuardClients []WireGuardClient
+	WireGuardStatus  *WireGuardStatus
+	WireGuardOK      bool
+	Warnings         []string
 }
 
 // FetchInventory loads the firewall's full observation in one pass. The
@@ -140,7 +144,40 @@ func (c *Client) FetchInventory(ctx context.Context) (*InventorySnapshot, error)
 		snap.KernelRoutesOK = true
 	}
 
+	observeWireGuard(ctx, c, snap)
+
 	return snap, nil
+}
+
+func observeWireGuard(ctx context.Context, c *Client, snap *InventorySnapshot) {
+	servers, err := c.GetWireGuardServers(ctx)
+	if warnWireGuard(snap, err, "servers") {
+		return
+	}
+	clients, err := c.GetWireGuardClients(ctx)
+	if warnWireGuard(snap, err, "clients") {
+		return
+	}
+	st, err := c.GetWireGuardStatus(ctx)
+	if warnWireGuard(snap, err, "status") {
+		return
+	}
+	snap.WireGuardServers = servers
+	snap.WireGuardClients = clients
+	snap.WireGuardStatus = st
+	snap.WireGuardOK = true
+}
+
+// warnWireGuard records a warning unless the plugin is simply not
+// installed (404). A missing plugin is not a degraded fetch.
+func warnWireGuard(snap *InventorySnapshot, err error, what string) bool {
+	if err == nil {
+		return false
+	}
+	if !isNotFound(err) {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("wireguard %s unavailable: %v", what, err))
+	}
+	return true
 }
 
 // BuildSpecInventory converts the snapshot into the spec's optional
@@ -297,6 +334,17 @@ func RenderInventory(snap *InventorySnapshot, site string) string {
 		fmt.Fprintf(&b, "  %d route%s\n", len(snap.KernelRoutes), plural(len(snap.KernelRoutes)))
 	} else {
 		fmt.Fprintf(&b, "\n== Kernel routes ==\n")
+		fmt.Fprintf(&b, "  unknown (fetch failed)\n")
+	}
+
+	fmt.Fprintf(&b, "\n== WireGuard ==\n")
+	if snap.WireGuardOK && snap.WireGuardStatus != nil {
+		on := "off"
+		if snap.WireGuardStatus.Running {
+			on = "on"
+		}
+		fmt.Fprintf(&b, "  %s, %d server%s, %d peer%s\n", on, len(snap.WireGuardServers), plural(len(snap.WireGuardServers)), len(snap.WireGuardClients), plural(len(snap.WireGuardClients)))
+	} else {
 		fmt.Fprintf(&b, "  unknown (fetch failed)\n")
 	}
 	return b.String()

@@ -35,6 +35,7 @@ func TestRenderInventory(t *testing.T) {
 		"== Dnsmasq ==",
 		"== pf statistics ==",
 		"== Kernel routes ==",
+		"== WireGuard ==",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render output missing %q:\n%s", want, out)
@@ -49,17 +50,21 @@ func TestRenderInventory(t *testing.T) {
 
 func TestRenderInventoryReconOK(t *testing.T) {
 	snap := &InventorySnapshot{
-		Interfaces:     []Interface{{Name: "lan", IP: "10.0.10.1", Subnet: 24}},
-		Bridges:        []Bridge{{UUID: "b1", Description: "lan-br", Members: []string{"igb0"}}},
-		BridgesOK:      true,
-		IfSettings:     []InterfaceSetting{{Name: "lan"}},
-		IfSettingsOK:   true,
-		Dnsmasq:        &DnsmasqSettings{Enabled: true, Ranges: []DnsmasqRange{{Start: "10.0.10.100"}}, Hosts: []DnsmasqHost{{Host: "printer"}}},
-		DnsmasqOK:      true,
-		PfStats:        &PfStatistics{StateCount: 4},
-		PfStatsOK:      true,
-		KernelRoutes:   []KernelRoute{{Destination: "default"}},
-		KernelRoutesOK: true,
+		Interfaces:       []Interface{{Name: "lan", IP: "10.0.10.1", Subnet: 24}},
+		Bridges:          []Bridge{{UUID: "b1", Description: "lan-br", Members: []string{"igb0"}}},
+		BridgesOK:        true,
+		IfSettings:       []InterfaceSetting{{Name: "lan"}},
+		IfSettingsOK:     true,
+		Dnsmasq:          &DnsmasqSettings{Enabled: true, Ranges: []DnsmasqRange{{Start: "10.0.10.100"}}, Hosts: []DnsmasqHost{{Host: "printer"}}},
+		DnsmasqOK:        true,
+		PfStats:          &PfStatistics{StateCount: 4},
+		PfStatsOK:        true,
+		KernelRoutes:     []KernelRoute{{Destination: "default"}},
+		KernelRoutesOK:   true,
+		WireGuardServers: []WireGuardServer{{UUID: "s1"}},
+		WireGuardClients: []WireGuardClient{{UUID: "p1"}},
+		WireGuardStatus:  &WireGuardStatus{Running: true},
+		WireGuardOK:      true,
 	}
 	out := RenderInventory(snap, "opnsense-firewall")
 	for _, want := range []string{
@@ -68,6 +73,7 @@ func TestRenderInventoryReconOK(t *testing.T) {
 		"== Dnsmasq ==", "on, 1 range, 1 host",
 		"== pf statistics ==", "4 states",
 		"== Kernel routes (1) ==", "1 route",
+		"== WireGuard ==", "on, 1 server, 1 peer",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render missing %q:\n%s", want, out)
