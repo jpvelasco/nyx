@@ -29,29 +29,33 @@ npm install -g nyx-audit-cli
 # Or build from source (requires the Go version in go.mod, currently 1.26.8)
 git clone https://github.com/jpvelasco/nyx.git && cd nyx && make build
 
-# Discover hosts on a subnet
+# Discover hosts on a subnet (sudo recommended for complete nmap ping sweeps)
 sudo nyx discover --subnet 10.0.10.0/24
 
-# Run a full audit from a spec file
+# Run a full audit from a spec file (sudo recommended when the spec includes subnet_discovery)
 sudo nyx audit --spec examples/homelab.yaml
 
-# Check environment health
+# Check environment health — never needs elevation
 nyx doctor
 ```
+
+Elevation is recommended for nmap subnet scans, not required to run nyx. See [Privileges](#privileges).
 
 ### Longer-Term Confidence
 
 Once you've verified your network is behaving correctly, lock in that baseline. Future drift checks will show you exactly what changed — new failures, degradations, or fixes — so you can sleep at night knowing your segmentation and policies are still holding.
 
 ```bash
-# After a clean audit, save the baseline from the persisted snapshot
+# After a clean audit, lock in the latest saved snapshot as the baseline
 sudo nyx audit --spec examples/homelab.yaml
-nyx snapshot list
-nyx snapshot baseline ~/.nyx/snapshots/snapshot-YYYYMMDD-HHMMSS.json
+nyx snapshot baseline          # uses the latest saved snapshot from that audit
+# optional: nyx snapshot list
 
 # Days or weeks later, re-audit and check drift
 sudo nyx audit --spec examples/homelab.yaml && nyx drift status
 ```
+
+`nyx snapshot baseline` with no path is enough after a fresh audit — including in a new process. Pass an explicit snapshot file only to restore a specific older snapshot. See [Snapshot & Drift Detection](#snapshot--drift-detection).
 
 For the full story of what this feels like on a real multi-VLAN homelab (including when things go wrong and drift catches it), see [docs/walkthrough.md](docs/walkthrough.md).
 
@@ -72,7 +76,31 @@ For the full story of what this feels like on a real multi-VLAN homelab (includi
 
   If nmap is missing, `nyx doctor` will show the exact install command for your system.
 
-- Root/sudo — required for nmap subnet scans on some platforms
+- **Privileges** — nyx itself does not need root. Elevation is recommended only for complete nmap subnet scans on some platforms. See the [privilege matrix](#privileges).
+
+## Privileges
+
+`nyx doctor` does not need root or admin. Its nmap check says "no root/admin needed to run nyx" — that means the binary and most commands run as a normal user. A few scan types produce more complete results with elevation.
+
+| Command | Elevation |
+|---------|-----------|
+| `discover` | **Recommended** on Linux/macOS for complete `nmap -sn` ping sweeps. Unprivileged nmap often cannot send raw ICMP/SYN and may miss hosts. On Windows, nmap typically needs Npcap; some scan types may need admin. |
+| `init` | **Recommended** for complete host counts — `init` requires nmap on PATH and runs polite `nmap -sn` sweeps. Elevation is not required to generate a spec. |
+| `audit` | **Depends on the spec.** Recommended when the spec includes `subnet_discovery`. Other assertion types usually run unprivileged. |
+| `verify-isolation`, MCP `ping_target` | **Sometimes.** These use ICMP ping. Many modern systems allow unprivileged ICMP sockets; older Linux setups may need `CAP_NET_RAW` or root. Ping does not always need root. |
+| `doctor` | **Never.** |
+| `check-routes`, `check-vpn` | **Never.** |
+| `omada`, `opnsense`, `provider` | **Never.** |
+| `credentials`, `snapshot`, `drift`, `mcp`, `logs`, `interfaces` | **Never.** |
+
+| Assertion type | Elevation |
+|----------------|-----------|
+| `subnet_discovery` | **Recommended** — same `nmap -sn` ping sweep as `nyx discover`. |
+| `isolation`, `network_health` | **Sometimes** — ICMP ping, same caveats as above. |
+| `port_check` | **Usually never.** Local scans use nmap `-sT` (TCP connect), which typically works unprivileged. SYN scans (`-sS`) need root; nyx does not use them. |
+| `dns_check`, `route_check`, `vpn_route`, `acl_check` | **Never.** |
+
+Probe-backed assertions (`runner: <probe>`) execute remotely over SSH (`ping`, `nc -z`, or `nslookup` on the probe). The local nyx process needs no elevation.
 
 ## Commands
 
@@ -183,7 +211,7 @@ See `docs/walkthrough.md` for the full narrative — what it actually feels like
 
 ## Snapshot & Drift Detection
 
-After a clean audit, save the result as a baseline:
+After a clean audit, save the result as a baseline. With no path, `nyx snapshot baseline` uses this process's audit if one just ran; otherwise it loads the most recent snapshot from `~/.nyx/snapshots/` (same fallback as `nyx drift status`). After a fresh audit in a new process you do not need to copy a timestamped path:
 
 ```bash
 nyx snapshot baseline
@@ -195,7 +223,7 @@ Later, after re-running an audit, check what changed:
 nyx drift status
 ```
 
-The drift report shows new failures, degradations, fixes, and improvements with a clear net change summary. You can also restore a previous baseline from a saved snapshot:
+The drift report shows new failures, degradations, fixes, and improvements with a clear net change summary. Pass an explicit file only to restore a specific older snapshot:
 
 ```bash
 nyx snapshot baseline ~/.nyx/snapshots/snapshot-20250601-140000.json
@@ -205,8 +233,8 @@ nyx snapshot baseline ~/.nyx/snapshots/snapshot-20250601-140000.json
 
 | Command | Description |
 |---------|-------------|
-| `nyx snapshot baseline` | Set current audit as baseline |
-| `nyx snapshot baseline <file>` | Restore baseline from saved snapshot |
+| `nyx snapshot baseline` | Set baseline from this process's audit, or the latest saved snapshot |
+| `nyx snapshot baseline <file>` | Restore baseline from a specific saved snapshot |
 | `nyx snapshot list` | List all saved snapshots |
 | `nyx snapshot delete [name]` | Delete a snapshot (or all if no name given) |
 | `nyx snapshot clear-baseline` | Remove the current baseline |
