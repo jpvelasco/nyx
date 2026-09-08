@@ -155,3 +155,22 @@ to evidence, or returned in tool output.
 - **And** the tests: `TestStoreFileDefault`,
   `TestStoreFileHonorsEnvOverride` (internal/cli, updated from
   `TestStorePathDefault`)
+
+## 4. credentials_status (read-only)
+
+### S4.1 Store completeness and env-var presence — **Implemented**
+
+- **Given** the store holds an `omada/default` entry with every required
+  field and an `opnsense/default` entry missing `api_secret`
+- **And** `OMADA_CLIENT_ID` is set and the other credential env vars are
+  unset
+- **When** the agent calls `credentials_status` with no arguments
+- **Then** the tool returns JSON with `store` entries that name the
+  provider and entry, whether required fields are present, and any
+  missing field names — never field values
+- **And** `env` is a map of `OMADA_*` / `OPNSENSE_*` names to booleans
+  (set / unset), never values
+- **And** the tool does not reach a controller
+- **And** the tests: `TestCredentialsStatusEmptyStore`,
+  `TestCredentialsStatusReportsCompletenessAndEnvPresence`,
+  `TestCredentialsStatusStoreOpenError`

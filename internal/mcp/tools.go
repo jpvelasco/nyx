@@ -8,10 +8,12 @@ import (
 	"github.com/jpvelasco/nyx/internal/audit"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/backends/system"
+	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/service"
+	"github.com/jpvelasco/nyx/internal/storepath"
 )
 
 // toolHandler invokes one registered MCP tool. Handlers return the response
@@ -31,6 +33,7 @@ var toolHandlers = map[string]toolHandler{
 	"ping_target":                      (*Server).toolPingTarget,
 	"run_doctor":                       (*Server).toolRunDoctor,
 	"provider_list":                    (*Server).toolProviderList,
+	"credentials_status":               (*Server).toolCredentialsStatus,
 	"omada_get_info":                   (*Server).toolOmadaGetInfo,
 	"omada_list_networks":              (*Server).toolOmadaListNetworks,
 	"omada_list_acls":                  (*Server).toolOmadaListACLs,
@@ -286,6 +289,28 @@ func (s *Server) toolProviderList(_ context.Context, _ map[string]interface{}) t
 	out := make([]entry, len(list))
 	for i, p := range list {
 		out[i] = entry{Name: p.Name(), Capabilities: p.Capabilities()}
+	}
+	return okResult(toJSON(out))
+}
+
+func (s *Server) toolCredentialsStatus(_ context.Context, _ map[string]interface{}) toolDispatchResult {
+	store, err := credentials.Open(storepath.StoreFile())
+	if err != nil {
+		return errResult(fmt.Sprintf("opening credential store: %v", err))
+	}
+	env := map[string]bool{}
+	for _, name := range OmadaCredEnvVars {
+		env[name] = strings.TrimSpace(s.env(name)) != ""
+	}
+	for _, name := range OpnsenseCredEnvVars {
+		env[name] = strings.TrimSpace(s.env(name)) != ""
+	}
+	out := struct {
+		Store []credentials.EntryStatus `json:"store"`
+		Env   map[string]bool           `json:"env"`
+	}{
+		Store: store.Status(),
+		Env:   env,
 	}
 	return okResult(toJSON(out))
 }
