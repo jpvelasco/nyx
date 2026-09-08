@@ -1174,6 +1174,331 @@ func (s *OpnsenseService) ApplyUnboundOverride(ctx context.Context, opts Opnsens
 	return res, nil
 }
 
+// OpnsenseDHCPRequest is a plan/apply DHCP range/host/reservation mutation.
+type OpnsenseDHCPRequest struct {
+	Backend   string // auto (default), dnsmasq, kea
+	Kind      string // range, host, reservation
+	Interface string
+	Start     string
+	End       string
+	IP        string
+	MAC       string
+	Hostname  string
+	UUID      string
+	Delete    bool
+}
+
+// OpnsenseDHCPPlan previews a DHCP mutation.
+type OpnsenseDHCPPlan struct {
+	Action  string `json:"action"`
+	Backend string `json:"backend"`
+	Kind    string `json:"kind"`
+	UUID    string `json:"uuid,omitempty"`
+}
+
+// OpnsenseDHCPApplyResult is the apply outcome.
+type OpnsenseDHCPApplyResult struct {
+	Outcome string `json:"outcome"`
+	Backend string `json:"backend"`
+	Kind    string `json:"kind"`
+	UUID    string `json:"uuid,omitempty"`
+	DryRun  bool   `json:"dry_run"`
+}
+
+func dhcpKind(kind string) string {
+	switch strings.ToLower(kind) {
+	case "host", "reservation":
+		return strings.ToLower(kind)
+	default:
+		return "range"
+	}
+}
+
+func (s *OpnsenseService) resolveDHCPBackend(ctx context.Context, opts OpnsenseOptions, want string) (string, error) {
+	client := s.client(opts)
+	detected, err := client.DetectDHCPBackend(ctx)
+	if err != nil {
+		return "", err
+	}
+	want = strings.ToLower(want)
+	if want == "" || want == "auto" {
+		return detected, nil
+	}
+	if want != "dnsmasq" && want != "kea" {
+		return "", fmt.Errorf("backend must be auto, dnsmasq, or kea")
+	}
+	if want != detected {
+		return "", fmt.Errorf("requested backend %s but the running backend is %s", want, detected)
+	}
+	return detected, nil
+}
+
+// PlanDHCP previews a Dnsmasq range/host or Kea subnet/reservation mutation.
+func (s *OpnsenseService) PlanDHCP(ctx context.Context, opts OpnsenseOptions, req OpnsenseDHCPRequest) (*OpnsenseDHCPPlan, error) {
+	backend, err := s.resolveDHCPBackend(ctx, opts, req.Backend)
+	if err != nil {
+		return nil, err
+	}
+	kind := dhcpKind(req.Kind)
+	if backend == "kea" && kind == "host" {
+		kind = "reservation"
+	}
+	if backend == "dnsmasq" && kind == "reservation" {
+		kind = "host"
+	}
+	plan := &OpnsenseDHCPPlan{Backend: backend, Kind: kind, UUID: req.UUID}
+	client := s.client(opts)
+	if backend == "dnsmasq" {
+		return planDnsmasq(ctx, client, plan, req)
+	}
+	return planKea(ctx, client, plan, req)
+}
+
+func planDnsmasq(ctx context.Context, client *opnsensebackend.Client, plan *OpnsenseDHCPPlan, req OpnsenseDHCPRequest) (*OpnsenseDHCPPlan, error) {
+	settings, err := client.GetDnsmasqSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if plan.Kind == "host" {
+		if !req.Delete && req.Hostname == "" && req.IP == "" && req.UUID == "" {
+			return nil, fmt.Errorf("hostname and ip are required to create a static host")
+		}
+		cur, ok := opnsensebackend.FindDnsmasqHost(settings.Hosts, req.UUID, req.Hostname, req.IP)
+		if req.Delete {
+			if !ok {
+				plan.Action = "unchanged"
+				return plan, nil
+			}
+			plan.Action = "delete"
+			plan.UUID = cur.UUID
+			return plan, nil
+		}
+		if !ok {
+			plan.Action = "create"
+			return plan, nil
+		}
+		plan.UUID = cur.UUID
+		if cur.IP == req.IP && strings.EqualFold(cur.Host, firstNonEmptySvc(req.Hostname, cur.Host)) {
+			plan.Action = "unchanged"
+			return plan, nil
+		}
+		plan.Action = "update"
+		return plan, nil
+	}
+	if !req.Delete && (req.Start == "" || req.End == "") && req.UUID == "" {
+		return nil, fmt.Errorf("start and end are required to create a DHCP range")
+	}
+	cur, ok := opnsensebackend.FindDnsmasqRange(settings.Ranges, req.UUID, req.Interface, req.Start, req.End)
+	if req.Delete {
+		if !ok {
+			plan.Action = "unchanged"
+			return plan, nil
+		}
+		plan.Action = "delete"
+		plan.UUID = cur.UUID
+		return plan, nil
+	}
+	if !ok {
+		plan.Action = "create"
+		return plan, nil
+	}
+	plan.UUID = cur.UUID
+	if cur.Start == req.Start && cur.End == req.End && strings.EqualFold(cur.Interface, firstNonEmptySvc(req.Interface, cur.Interface)) {
+		plan.Action = "unchanged"
+		return plan, nil
+	}
+	plan.Action = "update"
+	return plan, nil
+}
+
+func planKea(ctx context.Context, client *opnsensebackend.Client, plan *OpnsenseDHCPPlan, req OpnsenseDHCPRequest) (*OpnsenseDHCPPlan, error) {
+	if plan.Kind == "reservation" {
+		if !req.Delete && (req.IP == "" || req.MAC == "") && req.UUID == "" {
+			return nil, fmt.Errorf("ip and mac are required to create a Kea reservation")
+		}
+		rows, err := client.GetKeaReservations(ctx)
+		if err != nil {
+			return nil, err
+		}
+		cur, ok := opnsensebackend.FindKeaReservation(rows, req.UUID, req.IP, req.MAC)
+		if req.Delete {
+			if !ok {
+				plan.Action = "unchanged"
+				return plan, nil
+			}
+			plan.Action = "delete"
+			plan.UUID = cur.UUID
+			return plan, nil
+		}
+		if !ok {
+			plan.Action = "create"
+			return plan, nil
+		}
+		plan.UUID = cur.UUID
+		if cur.IP == req.IP && strings.EqualFold(cur.MAC, req.MAC) {
+			plan.Action = "unchanged"
+			return plan, nil
+		}
+		plan.Action = "update"
+		return plan, nil
+	}
+	subnet := req.Start
+	if req.End != "" && !strings.Contains(subnet, "/") {
+		subnet = req.End
+	}
+	if subnet == "" {
+		subnet = req.Interface
+	}
+	if !req.Delete && subnet == "" && req.UUID == "" {
+		return nil, fmt.Errorf("subnet CIDR is required to create a Kea subnet (pass it as start)")
+	}
+	rows, err := client.GetKeaSubnets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cur, ok := opnsensebackend.FindKeaSubnet(rows, req.UUID, subnet)
+	if req.Delete {
+		if !ok {
+			plan.Action = "unchanged"
+			return plan, nil
+		}
+		plan.Action = "delete"
+		plan.UUID = cur.UUID
+		return plan, nil
+	}
+	if !ok {
+		plan.Action = "create"
+		return plan, nil
+	}
+	plan.UUID = cur.UUID
+	if cur.Subnet == subnet {
+		plan.Action = "unchanged"
+		return plan, nil
+	}
+	plan.Action = "update"
+	return plan, nil
+}
+
+// ApplyDHCP creates/updates/deletes a DHCP range, host, or reservation.
+// Dry-run issues zero POSTs. A real apply reconfigures the active backend.
+func (s *OpnsenseService) ApplyDHCP(ctx context.Context, opts OpnsenseOptions, req OpnsenseDHCPRequest, dryRun bool) (*OpnsenseDHCPApplyResult, error) {
+	plan, err := s.PlanDHCP(ctx, opts, req)
+	if err != nil {
+		return nil, err
+	}
+	res := &OpnsenseDHCPApplyResult{Outcome: plan.Action, Backend: plan.Backend, Kind: plan.Kind, UUID: plan.UUID, DryRun: dryRun}
+	if dryRun || plan.Action == "unchanged" {
+		return res, nil
+	}
+	client := s.client(opts)
+	if plan.Backend == "dnsmasq" {
+		if err := applyDnsmasq(ctx, client, plan, req, res); err != nil {
+			return nil, err
+		}
+		if err := client.ReconfigureDnsmasq(ctx); err != nil {
+			return nil, err
+		}
+		return res, nil
+	}
+	if err := applyKea(ctx, client, plan, req, res); err != nil {
+		return nil, err
+	}
+	if err := client.ReconfigureKea(ctx); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func applyDnsmasq(ctx context.Context, client *opnsensebackend.Client, plan *OpnsenseDHCPPlan, req OpnsenseDHCPRequest, res *OpnsenseDHCPApplyResult) error {
+	if plan.Kind == "host" {
+		w := opnsensebackend.DnsmasqHostWrite{Host: req.Hostname, IP: req.IP, MAC: req.MAC}
+		switch plan.Action {
+		case "create":
+			id, err := client.CreateDnsmasqHost(ctx, w)
+			if err != nil {
+				return err
+			}
+			res.UUID, res.Outcome = id, "created"
+		case "update":
+			if err := client.SetDnsmasqHost(ctx, plan.UUID, w); err != nil {
+				return err
+			}
+			res.Outcome = "updated"
+		case "delete":
+			if err := client.DeleteDnsmasqHost(ctx, plan.UUID); err != nil {
+				return err
+			}
+			res.Outcome = "deleted"
+		}
+		return nil
+	}
+	w := opnsensebackend.DnsmasqRangeWrite{Interface: req.Interface, Start: req.Start, End: req.End}
+	switch plan.Action {
+	case "create":
+		id, err := client.CreateDnsmasqRange(ctx, w)
+		if err != nil {
+			return err
+		}
+		res.UUID, res.Outcome = id, "created"
+	case "update":
+		if err := client.SetDnsmasqRange(ctx, plan.UUID, w); err != nil {
+			return err
+		}
+		res.Outcome = "updated"
+	case "delete":
+		if err := client.DeleteDnsmasqRange(ctx, plan.UUID); err != nil {
+			return err
+		}
+		res.Outcome = "deleted"
+	}
+	return nil
+}
+
+func applyKea(ctx context.Context, client *opnsensebackend.Client, plan *OpnsenseDHCPPlan, req OpnsenseDHCPRequest, res *OpnsenseDHCPApplyResult) error {
+	if plan.Kind == "reservation" {
+		w := opnsensebackend.KeaReservationWrite{IP: req.IP, MAC: req.MAC, Hostname: req.Hostname}
+		switch plan.Action {
+		case "create":
+			id, err := client.CreateKeaReservation(ctx, w)
+			if err != nil {
+				return err
+			}
+			res.UUID, res.Outcome = id, "created"
+		case "update":
+			if err := client.SetKeaReservation(ctx, plan.UUID, w); err != nil {
+				return err
+			}
+			res.Outcome = "updated"
+		case "delete":
+			if err := client.DeleteKeaReservation(ctx, plan.UUID); err != nil {
+				return err
+			}
+			res.Outcome = "deleted"
+		}
+		return nil
+	}
+	w := opnsensebackend.KeaSubnetWrite{Subnet: firstNonEmptySvc(req.Start, req.Interface)}
+	switch plan.Action {
+	case "create":
+		id, err := client.CreateKeaSubnet(ctx, w)
+		if err != nil {
+			return err
+		}
+		res.UUID, res.Outcome = id, "created"
+	case "update":
+		if err := client.SetKeaSubnet(ctx, plan.UUID, w); err != nil {
+			return err
+		}
+		res.Outcome = "updated"
+	case "delete":
+		if err := client.DeleteKeaSubnet(ctx, plan.UUID); err != nil {
+			return err
+		}
+		res.Outcome = "deleted"
+	}
+	return nil
+}
+
 // OpnsenseFilterRequest is a plan/apply filter-rule or alias mutation.
 type OpnsenseFilterRequest struct {
 	Kind        string // filter (default) | alias

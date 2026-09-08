@@ -277,6 +277,36 @@ func TestOpnsenseServiceListKea(t *testing.T) {
 	}
 }
 
+func TestOpnsenseServicePlanApplyDHCP(t *testing.T) {
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "dnsmasq/settings/get"):
+			testutil.WriteBody(w, `{"dnsmasq":{"enable":"1","dhcp":{"range":{}}}}`)
+		case strings.Contains(r.URL.Path, "kea/service/status"):
+			testutil.WriteBody(w, `{"running":false}`)
+		case strings.Contains(r.URL.Path, "add_range"), strings.Contains(r.URL.Path, "reconfigure"):
+			testutil.WriteBody(w, `{"result":"saved","uuid":"r1"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	opts := opnsenseOptions(ts)
+	svc := NewOpnsenseService()
+	req := OpnsenseDHCPRequest{Kind: "range", Interface: "lan", Start: "10.0.10.100", End: "10.0.10.200"}
+	plan, err := svc.PlanDHCP(context.Background(), opts, req)
+	if err != nil || plan.Action != "create" || plan.Backend != "dnsmasq" {
+		t.Fatalf("plan = %+v, %v", plan, err)
+	}
+	dry, err := svc.ApplyDHCP(context.Background(), opts, req, true)
+	if err != nil || !dry.DryRun || dry.Outcome != "create" {
+		t.Fatalf("dry = %+v, %v", dry, err)
+	}
+	live, err := svc.ApplyDHCP(context.Background(), opts, req, false)
+	if err != nil || live.Outcome != "created" {
+		t.Fatalf("live = %+v, %v", live, err)
+	}
+}
+
 func TestOpnsenseServiceListWireGuard(t *testing.T) {
 	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {

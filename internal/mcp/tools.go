@@ -99,6 +99,8 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_apply_filter":            (*Server).toolOpnsenseApplyFilter,
 	"opnsense_plan_unbound_override":   (*Server).toolOpnsensePlanUnboundOverride,
 	"opnsense_apply_unbound_override":  (*Server).toolOpnsenseApplyUnboundOverride,
+	"opnsense_plan_dhcp":               (*Server).toolOpnsensePlanDHCP,
+	"opnsense_apply_dhcp":              (*Server).toolOpnsenseApplyDHCP,
 	"topology":                         (*Server).toolTopology,
 }
 
@@ -1229,6 +1231,45 @@ func (s *Server) toolOpnsenseApplyUnboundOverride(ctx context.Context, args map[
 	res, err := s.opnsenseSvc.ApplyUnboundOverride(ctx, opts, unboundOverrideRequestFromArgs(args), argBoolDefault(args, "dry_run", true))
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense unbound override apply failed: %v", err))
+	}
+	return okResult(toJSON(res))
+}
+
+func dhcpRequestFromArgs(args map[string]interface{}) service.OpnsenseDHCPRequest {
+	return service.OpnsenseDHCPRequest{
+		Backend:   argString(args, "backend"),
+		Kind:      argString(args, "kind"),
+		Interface: argString(args, "interface"),
+		Start:     argString(args, "start"),
+		End:       argString(args, "end"),
+		IP:        argString(args, "ip"),
+		MAC:       argString(args, "mac"),
+		Hostname:  argString(args, "hostname"),
+		UUID:      argString(args, "uuid"),
+		Delete:    argBoolDefault(args, "delete", false),
+	}
+}
+
+func (s *Server) toolOpnsensePlanDHCP(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	plan, err := s.opnsenseSvc.PlanDHCP(ctx, opts, dhcpRequestFromArgs(args))
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense dhcp plan request failed: %v", err))
+	}
+	return okResult(toJSON(plan))
+}
+
+func (s *Server) toolOpnsenseApplyDHCP(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	res, err := s.opnsenseSvc.ApplyDHCP(ctx, opts, dhcpRequestFromArgs(args), argBoolDefault(args, "dry_run", true))
+	if err != nil {
+		return errResult(fmt.Sprintf("opnsense dhcp apply failed: %v", err))
 	}
 	return okResult(toJSON(res))
 }

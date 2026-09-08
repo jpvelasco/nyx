@@ -503,3 +503,10 @@ Then it fails with a hard error naming the incomplete credentials — never a pa
 Given the JSON output of `nyx topology` (or the MCP `topology` tool)
 When an outbound NAT mode was not readable
 Then the rendered mode is `unknown` — never guessed
+
+### S2.21 DHCP write (Dnsmasq + Kea) — **Implemented**
+Given Dnsmasq is enabled (`GET /dnsmasq/settings/get` enable=1) and Kea is not running
+When `PlanDHCP` / `ApplyDHCP` is called with kind=range
+Then the backend is `dnsmasq`, a missing range is `create`, dry-run issues zero POSTs, and a real apply POSTs add_range then `dnsmasq/service/reconfigure`
+And if neither backend is running the write errors with `no running DHCP backend`
+And the tests: `TestDetectDHCPBackend`, `TestOpnsenseServicePlanApplyDHCP`
