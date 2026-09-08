@@ -143,6 +143,12 @@ func opnsenseServer(t *testing.T, leases string) *httptest.Server {
 			testutil.WriteBody(w, `{"interface":{}}`)
 		case "/api/dnsmasq/settings/get":
 			testutil.WriteBody(w, `{"dnsmasq":{"enable":"0"}}`)
+		case "/api/unbound/settings/get":
+			testutil.WriteBody(w, `{"unbound":{"enable":"1","active_interface":{"lan":{"selected":1}}}}`)
+		case "/api/unbound/settings/searchHostOverride":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/unbound/service/status":
+			testutil.WriteBody(w, `{"running":true}`)
 		case "/api/diagnostics/firewall/pf_statistics":
 			testutil.WriteBody(w, `{"states":{"current":0}}`)
 		case "/api/diagnostics/interface/get_routes":
@@ -741,8 +747,8 @@ func TestProviderInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Inventory: %v (only interfaces is fatal)", err)
 		}
-		if len(res.Warnings) != 10 {
-			t.Errorf("Warnings = %v, want 10 (system, rules, leases, services, gateways + 5 recon reads)", res.Warnings)
+		if len(res.Warnings) != 11 {
+			t.Errorf("Warnings = %v, want 11 (system, rules, leases, services, gateways + 6 recon reads)", res.Warnings)
 		}
 		if len(res.Inventory.Devices) != 1 {
 			t.Errorf("Devices = %+v, want 1 (interfaces still fetched)", res.Inventory.Devices)

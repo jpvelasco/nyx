@@ -151,6 +151,12 @@ func TestOpnsenseServiceReconReads(t *testing.T) {
 			testutil.WriteBody(w, `{"interface":{"lan":{"enable":"1","if":"bridge0"}}}`)
 		case "/api/dnsmasq/settings/get":
 			testutil.WriteBody(w, `{"dnsmasq":{"enable":"1"}}`)
+		case "/api/unbound/settings/get":
+			testutil.WriteBody(w, `{"unbound":{"enable":"1"}}`)
+		case "/api/unbound/settings/searchHostOverride":
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"h1","hostname":"nas","domain":"home.example","server":"10.0.40.10"}]}`)
+		case "/api/unbound/service/status":
+			testutil.WriteBody(w, `{"running":true}`)
 		case "/api/diagnostics/firewall/pf_statistics":
 			testutil.WriteBody(w, `{"states":{"current":9}}`)
 		case "/api/diagnostics/interface/get_routes":
@@ -182,6 +188,18 @@ func TestOpnsenseServiceReconReads(t *testing.T) {
 	if err != nil || len(rt) != 1 || rt[0].Destination != "default" {
 		t.Fatalf("routes = %+v, %v", rt, err)
 	}
+	unb, err := svc.GetUnboundSettings(context.Background(), opts)
+	if err != nil || unb == nil || !unb.Enabled {
+		t.Fatalf("unbound settings = %+v, %v", unb, err)
+	}
+	hosts, err := svc.ListUnboundOverrides(context.Background(), opts)
+	if err != nil || len(hosts) != 1 || hosts[0].Hostname != "nas" {
+		t.Fatalf("unbound hosts = %+v, %v", hosts, err)
+	}
+	running, err := svc.GetUnboundStatus(context.Background(), opts)
+	if err != nil || !running {
+		t.Fatalf("unbound status = %v, %v", running, err)
+	}
 }
 
 func TestOpnsenseServiceReconReadErrors(t *testing.T) {
@@ -205,14 +223,26 @@ func TestOpnsenseServiceReconReadErrors(t *testing.T) {
 	if _, err := svc.ListKernelRoutes(context.Background(), opts); err == nil {
 		t.Fatal("expected ListKernelRoutes error")
 	}
+	if _, err := svc.GetUnboundSettings(context.Background(), opts); err == nil {
+		t.Fatal("expected GetUnboundSettings error")
+	}
+	if _, err := svc.ListUnboundOverrides(context.Background(), opts); err == nil {
+		t.Fatal("expected ListUnboundOverrides error")
+	}
+	if _, err := svc.GetUnboundStatus(context.Background(), opts); err == nil {
+		t.Fatal("expected GetUnboundStatus error")
+	}
 }
 
 func TestFlattenReconNil(t *testing.T) {
 	if flattenBridges(nil) != nil || flattenIfSettings(nil) != nil || flattenRoutes(nil) != nil {
 		t.Fatal("nil slices should stay nil")
 	}
-	if flattenDnsmasq(nil) != nil || flattenPf(nil) != nil {
+	if flattenDnsmasq(nil) != nil || flattenPf(nil) != nil || flattenUnbound(nil) != nil {
 		t.Fatal("nil pointers should stay nil")
+	}
+	if flattenUnboundHosts(nil) != nil {
+		t.Fatal("nil unbound hosts should stay nil")
 	}
 }
 
@@ -370,6 +400,12 @@ func TestOpnsenseServiceInventory(t *testing.T) {
 				testutil.WriteBody(w, `{"interface":{}}`)
 			case "/api/dnsmasq/settings/get":
 				testutil.WriteBody(w, `{"dnsmasq":{"enable":"0"}}`)
+			case "/api/unbound/settings/get":
+				testutil.WriteBody(w, `{"unbound":{"enable":"1"}}`)
+			case "/api/unbound/settings/searchHostOverride":
+				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/unbound/service/status":
+				testutil.WriteBody(w, `{"running":true}`)
 			case "/api/diagnostics/firewall/pf_statistics":
 				testutil.WriteBody(w, `{"states":{"current":0}}`)
 			case "/api/diagnostics/interface/get_routes":
@@ -403,6 +439,9 @@ func TestOpnsenseServiceInventory(t *testing.T) {
 		}
 		if !inv.GatewaysOK || len(inv.Gateways) != 1 || inv.Gateways[0].Name != "WAN_DHCP" {
 			t.Errorf("gateways = %+v", inv.Gateways)
+		}
+		if !inv.UnboundOK || inv.Unbound == nil || !inv.Unbound.Enabled || !inv.Unbound.Running {
+			t.Errorf("unbound = %+v", inv.Unbound)
 		}
 		if len(inv.Warnings) != 0 {
 			t.Errorf("Warnings = %v, want none", inv.Warnings)
@@ -586,6 +625,122 @@ func TestOpnsenseServicePlanApplyVLAN(t *testing.T) {
 	missingDel, err := svc.PlanVLAN(ctx, opts, OpnsenseVLANRequest{UUID: "nope", Delete: true})
 	if err != nil || missingDel.Action != "unchanged" {
 		t.Fatalf("delete missing = %+v %v", missingDel, err)
+	}
+}
+
+func TestOpnsenseServicePlanApplyUnboundOverride(t *testing.T) {
+	var posts []string
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			posts = append(posts, r.URL.Path)
+		}
+		switch {
+		case strings.Contains(r.URL.Path, "searchHostOverride"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"h1","hostname":"nas","domain":"home.example","server":"10.0.40.10"}]}`)
+		case strings.Contains(r.URL.Path, "addHostOverride"):
+			testutil.WriteBody(w, `{"result":"saved","uuid":"h-new"}`)
+		default:
+			testutil.WriteBody(w, `{"result":"saved"}`)
+		}
+	})
+	svc := NewOpnsenseService()
+	ctx := context.Background()
+	opts := opnsenseOptions(ts)
+
+	unchanged, err := svc.PlanUnboundOverride(ctx, opts, OpnsenseUnboundOverrideRequest{Hostname: "nas", Domain: "home.example", IP: "10.0.40.10"})
+	if err != nil || unchanged.Action != "unchanged" {
+		t.Fatalf("unchanged = %+v %v", unchanged, err)
+	}
+	create, err := svc.PlanUnboundOverride(ctx, opts, OpnsenseUnboundOverrideRequest{Hostname: "printer", Domain: "home.example", IP: "10.0.10.20"})
+	if err != nil || create.Action != "create" {
+		t.Fatalf("create = %+v %v", create, err)
+	}
+	posts = nil
+	dry, err := svc.ApplyUnboundOverride(ctx, opts, OpnsenseUnboundOverrideRequest{Hostname: "printer", Domain: "home.example", IP: "10.0.10.20"}, true)
+	if err != nil || !dry.DryRun || dry.Outcome != "create" {
+		t.Fatalf("dry = %+v %v", dry, err)
+	}
+	if len(posts) != 0 {
+		t.Fatalf("dry-run posted %v", posts)
+	}
+	created, err := svc.ApplyUnboundOverride(ctx, opts, OpnsenseUnboundOverrideRequest{Hostname: "printer", Domain: "home.example", IP: "10.0.10.20"}, false)
+	if err != nil || created.Outcome != "created" || created.UUID != "h-new" {
+		t.Fatalf("created = %+v %v", created, err)
+	}
+	joined := strings.Join(posts, ",")
+	if !strings.Contains(joined, "addHostOverride") || !strings.Contains(joined, "reconfigure") {
+		t.Fatalf("real apply posts = %v, want add + reconfigure", posts)
+	}
+	upd, err := svc.PlanUnboundOverride(ctx, opts, OpnsenseUnboundOverrideRequest{Hostname: "nas", Domain: "home.example", IP: "10.0.40.11"})
+	if err != nil || upd.Action != "update" {
+		t.Fatalf("update plan = %+v %v", upd, err)
+	}
+	updated, err := svc.ApplyUnboundOverride(ctx, opts, OpnsenseUnboundOverrideRequest{Hostname: "nas", Domain: "home.example", IP: "10.0.40.11"}, false)
+	if err != nil || updated.Outcome != "updated" {
+		t.Fatalf("update apply = %+v %v", updated, err)
+	}
+	del, err := svc.PlanUnboundOverride(ctx, opts, OpnsenseUnboundOverrideRequest{UUID: "h1", Delete: true})
+	if err != nil || del.Action != "delete" {
+		t.Fatalf("delete plan = %+v %v", del, err)
+	}
+	deleted, err := svc.ApplyUnboundOverride(ctx, opts, OpnsenseUnboundOverrideRequest{UUID: "h1", Delete: true}, false)
+	if err != nil || deleted.Outcome != "deleted" {
+		t.Fatalf("delete apply = %+v %v", deleted, err)
+	}
+	missingDel, err := svc.PlanUnboundOverride(ctx, opts, OpnsenseUnboundOverrideRequest{Hostname: "missing", Domain: "home.example", Delete: true})
+	if err != nil || missingDel.Action != "unchanged" {
+		t.Fatalf("delete missing = %+v %v", missingDel, err)
+	}
+	if _, err := svc.PlanUnboundOverride(ctx, opts, OpnsenseUnboundOverrideRequest{}); err == nil {
+		t.Fatal("expected hostname/ip required")
+	}
+	if _, err := svc.PlanUnboundOverride(ctx, opts, OpnsenseUnboundOverrideRequest{Delete: true}); err == nil {
+		t.Fatal("expected delete identifier required")
+	}
+}
+
+func TestOpnsenseServiceUnboundOverride_Errors(t *testing.T) {
+	failAll := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	opts := opnsenseOptions(failAll)
+	if _, err := NewOpnsenseService().PlanUnboundOverride(context.Background(), opts, OpnsenseUnboundOverrideRequest{Hostname: "nas", IP: "10.0.40.10"}); err == nil {
+		t.Fatal("expected plan fetch error")
+	}
+	if _, err := NewOpnsenseService().ApplyUnboundOverride(context.Background(), opts, OpnsenseUnboundOverrideRequest{Hostname: "nas", IP: "10.0.40.10"}, false); err == nil {
+		t.Fatal("expected apply plan error")
+	}
+
+	writeFail := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "searchHostOverride") {
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"h1","hostname":"nas","domain":"home.example","server":"10.0.40.10"}]}`)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	wopts := opnsenseOptions(writeFail)
+	if _, err := NewOpnsenseService().ApplyUnboundOverride(context.Background(), wopts, OpnsenseUnboundOverrideRequest{Hostname: "printer", Domain: "home.example", IP: "10.0.10.20"}, false); err == nil {
+		t.Fatal("expected create write error")
+	}
+	if _, err := NewOpnsenseService().ApplyUnboundOverride(context.Background(), wopts, OpnsenseUnboundOverrideRequest{Hostname: "nas", Domain: "home.example", IP: "10.0.40.11"}, false); err == nil {
+		t.Fatal("expected update write error")
+	}
+	if _, err := NewOpnsenseService().ApplyUnboundOverride(context.Background(), wopts, OpnsenseUnboundOverrideRequest{UUID: "h1", Delete: true}, false); err == nil {
+		t.Fatal("expected delete write error")
+	}
+
+	reconfFail := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "searchHostOverride"):
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case strings.Contains(r.URL.Path, "reconfigure"):
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			testutil.WriteBody(w, `{"result":"saved","uuid":"h-new"}`)
+		}
+	})
+	if _, err := NewOpnsenseService().ApplyUnboundOverride(context.Background(), opnsenseOptions(reconfFail), OpnsenseUnboundOverrideRequest{Hostname: "nas", Domain: "home.example", IP: "10.0.40.10"}, false); err == nil {
+		t.Fatal("expected reconfigure error")
 	}
 }
 

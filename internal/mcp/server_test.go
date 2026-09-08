@@ -299,8 +299,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 70 {
-		t.Fatalf("expected 70 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 75 {
+		t.Fatalf("expected 75 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -309,7 +309,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_plan_port", "omada_apply_port_profile", "omada_plan_lan", "omada_apply_lan", "omada_list_ssids", "omada_plan_ssid", "omada_apply_ssid", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_get_firewall_rule", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_vlans", "opnsense_plan_vlan", "opnsense_apply_vlan", "opnsense_plan_filter", "opnsense_apply_filter", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_list_kea_subnets", "opnsense_list_kea_reservations", "opnsense_list_wireguard_servers", "opnsense_list_wireguard_clients", "opnsense_get_wireguard_status", "opnsense_inventory", "topology"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_plan_port", "omada_apply_port_profile", "omada_plan_lan", "omada_apply_lan", "omada_list_ssids", "omada_plan_ssid", "omada_apply_ssid", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_get_firewall_rule", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_vlans", "opnsense_plan_vlan", "opnsense_apply_vlan", "opnsense_plan_filter", "opnsense_apply_filter", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_unbound_settings", "opnsense_list_unbound_overrides", "opnsense_get_unbound_status", "opnsense_plan_unbound_override", "opnsense_apply_unbound_override", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_list_kea_subnets", "opnsense_list_kea_reservations", "opnsense_list_wireguard_servers", "opnsense_list_wireguard_clients", "opnsense_get_wireguard_status", "opnsense_inventory", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -377,6 +377,11 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 		"opnsense_list_bridges":            {"host"},
 		"opnsense_list_interface_settings": {"host"},
 		"opnsense_get_dnsmasq_settings":    {"host"},
+		"opnsense_get_unbound_settings":    {"host"},
+		"opnsense_list_unbound_overrides":  {"host"},
+		"opnsense_get_unbound_status":      {"host"},
+		"opnsense_plan_unbound_override":   {"host"},
+		"opnsense_apply_unbound_override":  {"host"},
 		"opnsense_get_pf_statistics":       {"host"},
 		"opnsense_list_kernel_routes":      {"host"},
 		"opnsense_list_kea_subnets":        {"host"},
@@ -1538,6 +1543,7 @@ func TestDispatchOpnsenseReconReads(t *testing.T) {
 		bridges:    []service.OpnsenseBridge{{UUID: "b1", Members: []string{"igb0"}}},
 		ifSettings: []service.OpnsenseIfSetting{{Name: "lan", Enabled: true}},
 		dnsmasq:    &service.OpnsenseDnsmasqSettings{Enabled: true},
+		unbound:    &service.OpnsenseUnboundSettings{Enabled: true, Running: true, Hosts: []service.OpnsenseUnboundHostOverride{{Hostname: "nas", IP: "10.0.40.10"}}},
 		pfStats:    &service.OpnsensePfStatistics{StateCount: 7},
 		routes:     []service.OpnsenseKernelRoute{{Destination: "default"}},
 	}
@@ -1549,6 +1555,9 @@ func TestDispatchOpnsenseReconReads(t *testing.T) {
 		{"opnsense_list_bridges", `"uuid": "b1"`},
 		{"opnsense_list_interface_settings", `"name": "lan"`},
 		{"opnsense_get_dnsmasq_settings", `"enabled": true`},
+		{"opnsense_get_unbound_settings", `"enabled": true`},
+		{"opnsense_list_unbound_overrides", `"hostname": "nas"`},
+		{"opnsense_get_unbound_status", `"running": true`},
 		{"opnsense_get_pf_statistics", `"state_count": 7`},
 		{"opnsense_list_kernel_routes", `"destination": "default"`},
 	}
@@ -2237,6 +2246,7 @@ type stubOpnsenseSvc struct {
 	bridges      []service.OpnsenseBridge
 	ifSettings   []service.OpnsenseIfSetting
 	dnsmasq      *service.OpnsenseDnsmasqSettings
+	unbound      *service.OpnsenseUnboundSettings
 	pfStats      *service.OpnsensePfStatistics
 	routes       []service.OpnsenseKernelRoute
 	natMode      string
@@ -2328,6 +2338,33 @@ func (s *stubOpnsenseSvc) ListInterfaceSettings(_ context.Context, opts service.
 func (s *stubOpnsenseSvc) GetDnsmasqSettings(_ context.Context, opts service.OpnsenseOptions) (*service.OpnsenseDnsmasqSettings, error) {
 	s.lastOpts = opts
 	return s.dnsmasq, s.err
+}
+
+func (s *stubOpnsenseSvc) GetUnboundSettings(_ context.Context, opts service.OpnsenseOptions) (*service.OpnsenseUnboundSettings, error) {
+	s.lastOpts = opts
+	return s.unbound, s.err
+}
+
+func (s *stubOpnsenseSvc) ListUnboundOverrides(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseUnboundHostOverride, error) {
+	s.lastOpts = opts
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.unbound != nil {
+		return s.unbound.Hosts, nil
+	}
+	return []service.OpnsenseUnboundHostOverride{{Hostname: "nas", IP: "10.0.40.10"}}, nil
+}
+
+func (s *stubOpnsenseSvc) GetUnboundStatus(_ context.Context, opts service.OpnsenseOptions) (bool, error) {
+	s.lastOpts = opts
+	if s.err != nil {
+		return false, s.err
+	}
+	if s.unbound != nil {
+		return s.unbound.Running, nil
+	}
+	return true, nil
 }
 
 func (s *stubOpnsenseSvc) GetPfStatistics(_ context.Context, opts service.OpnsenseOptions) (*service.OpnsensePfStatistics, error) {
@@ -2446,6 +2483,22 @@ func (s *stubOpnsenseSvc) ApplyFilter(_ context.Context, opts service.OpnsenseOp
 	return &service.OpnsenseFilterApplyResult{Outcome: "create", Kind: "filter", DryRun: dryRun}, nil
 }
 
+func (s *stubOpnsenseSvc) PlanUnboundOverride(_ context.Context, opts service.OpnsenseOptions, req service.OpnsenseUnboundOverrideRequest) (*service.OpnsenseUnboundOverridePlan, error) {
+	s.lastOpts = opts
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &service.OpnsenseUnboundOverridePlan{Action: "create", Hostname: req.Hostname, Domain: req.Domain, IP: req.IP}, nil
+}
+
+func (s *stubOpnsenseSvc) ApplyUnboundOverride(_ context.Context, opts service.OpnsenseOptions, req service.OpnsenseUnboundOverrideRequest, dryRun bool) (*service.OpnsenseUnboundOverrideApplyResult, error) {
+	s.lastOpts = opts
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &service.OpnsenseUnboundOverrideApplyResult{Outcome: "create", Hostname: req.Hostname, Domain: req.Domain, IP: req.IP, DryRun: dryRun}, nil
+}
+
 func TestDispatchOpnsenseFilter(t *testing.T) {
 	stub := &stubOpnsenseSvc{}
 	args := map[string]interface{}{"host": "fw.local", "api_key": "k", "api_secret": "s", "source": "lan", "destination": "iot", "action": "block"}
@@ -2462,6 +2515,47 @@ func TestDispatchOpnsenseFilter(t *testing.T) {
 		t.Errorf("plan err = (%q, %v)", text, isErr)
 	}
 	if text, isErr := serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_apply_filter", args); !isErr || !strings.Contains(text, "opnsense filter apply failed") {
+		t.Errorf("apply err = (%q, %v)", text, isErr)
+	}
+}
+
+func TestDispatchOpnsenseUnbound(t *testing.T) {
+	stub := &stubOpnsenseSvc{unbound: &service.OpnsenseUnboundSettings{Enabled: true, Running: true, Hosts: []service.OpnsenseUnboundHostOverride{{Hostname: "nas", IP: "10.0.40.10"}}}}
+	args := map[string]interface{}{"host": "fw.local", "api_key": "k", "api_secret": "s", "hostname": "printer", "domain": "home.example", "ip": "10.0.10.20"}
+	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_get_unbound_settings", args)
+	if isErr || !strings.Contains(text, `"enabled": true`) {
+		t.Fatalf("settings = (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_list_unbound_overrides", args)
+	if isErr || !strings.Contains(text, `"hostname": "nas"`) {
+		t.Fatalf("list = (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_get_unbound_status", args)
+	if isErr || !strings.Contains(text, `"running": true`) {
+		t.Fatalf("status = (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_plan_unbound_override", args)
+	if isErr || !strings.Contains(text, `"action": "create"`) {
+		t.Fatalf("plan = (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_apply_unbound_override", args)
+	if isErr || !strings.Contains(text, `"dry_run": true`) {
+		t.Fatalf("apply = (%q, %v)", text, isErr)
+	}
+	errStub := &stubOpnsenseSvc{err: errors.New("boom")}
+	if text, isErr := serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_get_unbound_settings", args); !isErr || !strings.Contains(text, "opnsense unbound settings request failed") {
+		t.Errorf("settings err = (%q, %v)", text, isErr)
+	}
+	if text, isErr := serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_list_unbound_overrides", args); !isErr || !strings.Contains(text, "opnsense unbound overrides request failed") {
+		t.Errorf("list err = (%q, %v)", text, isErr)
+	}
+	if text, isErr := serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_get_unbound_status", args); !isErr || !strings.Contains(text, "opnsense unbound status request failed") {
+		t.Errorf("status err = (%q, %v)", text, isErr)
+	}
+	if text, isErr := serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_plan_unbound_override", args); !isErr || !strings.Contains(text, "opnsense unbound override plan request failed") {
+		t.Errorf("plan err = (%q, %v)", text, isErr)
+	}
+	if text, isErr := serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_apply_unbound_override", args); !isErr || !strings.Contains(text, "opnsense unbound override apply failed") {
 		t.Errorf("apply err = (%q, %v)", text, isErr)
 	}
 }
@@ -2985,6 +3079,9 @@ func TestDispatchNatReads_MissingHost(t *testing.T) {
 		"opnsense_list_bridges",
 		"opnsense_list_interface_settings",
 		"opnsense_get_dnsmasq_settings",
+		"opnsense_get_unbound_settings",
+		"opnsense_list_unbound_overrides",
+		"opnsense_get_unbound_status",
 		"opnsense_get_pf_statistics",
 		"opnsense_list_kernel_routes",
 		"opnsense_list_wireguard_servers",
@@ -2996,6 +3093,8 @@ func TestDispatchNatReads_MissingHost(t *testing.T) {
 		"opnsense_apply_vlan",
 		"opnsense_plan_filter",
 		"opnsense_apply_filter",
+		"opnsense_plan_unbound_override",
+		"opnsense_apply_unbound_override",
 	}
 	for _, tool := range opnsenseTools {
 		t.Run(tool, func(t *testing.T) {
