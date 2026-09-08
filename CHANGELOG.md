@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-08
+
+**Feature release.** OPNsense grows a full observe + write loop (VLAN, filter, Unbound, WireGuard, DHCP); Omada adds LAN/SSID/DHCP surfaces; the CLI now exposes every MCP mutation (dry-run default); the credential vault finishes interactive set, live verify, and `credentials_status`.
+
+### New Features
+
+- **CLI extras for every MCP mutation.** `nyx omada` / `nyx opnsense` gain plan/apply subcommands for ACL, port profiles, LAN, SSIDs, NAT, VLANs, filter/aliases, Unbound overrides, and DHCP. Writes stay dry-run by default. Named-tool parity is a CI gate.
+- **OPNsense DHCP plan/apply.** Detects the running backend (Dnsmasq or Kea) before write; plan/apply ranges, static hosts, and reservations; reconfigure on real apply; refuse when neither backend is running.
+- **OPNsense Unbound observe + host-override write.** Settings, listening interfaces, overrides, and service status, plus idempotent plan/apply (dry-run default, reconfigure on apply).
+- **OPNsense WireGuard observe.** Server list, peers, and service status. Private keys are never stored. A missing plugin is silent; a 403 degrades inventory.
+- **OPNsense VLAN + bridge-member plan/apply.** Create/update/delete VLAN devices and update bridge members, then reconfigure. Always states the assign/IP gap (the public API cannot assign optN or set addressing).
+- **OPNsense MVC filter + alias plan/apply.** Create/update/delete filter rules and aliases, then apply/reconfigure. Isolation writes stay alias-aware.
+- **OPNsense observe: bridges, interface settings, Dnsmasq, pf, routes, services, gateways, Kea.** Inventory and MCP tools for the remaining 26.x observe surface. Lease fallback is now Dnsmasq → Kea → ISC dhcpd.
+- **Omada LAN network plan/apply.** Create/update/delete site LAN networks including DHCP posture (`omada_plan_lan` / `omada_apply_lan`, dry-run default).
+- **Omada WLAN groups + SSIDs.** Observe groups/SSIDs; plan/apply SSID create, update, or delete (VLAN rebind, enable, security). Dry-run default.
+- **Omada DHCP + client-path observation.** Gateway leases, pool/posture, snooping, multicast, POST-only client link topology, and a composed DHCP/VLAN path detective.
+- **Credential vault remainder.** Interactive `nyx credentials set` on a TTY (secrets un-echoed), `nyx credentials verify --live` for omada/opnsense/probe, and MCP `credentials_status` (presence + completeness, never values).
+- **OPNsense Windows Credential Manager overlay.** Same fill-only layer as Omada (`nyx-opnsense-<host>`), between env vars and the encrypted store.
+- **`--ca-cert` hint on unknown-authority TLS failures.** CLI points at pinning instead of only `--skip-tls-verify`.
+
+### Changed
+
+- **CLI/MCP surface split now includes mutations.** Capability parity remains; a second gate requires every `omada_*` / `opnsense_*` plan/apply tool to have a CLI extra.
+
+### Fixed
+
+- **OPNsense isolation observe.** Import keeps pass and block, resolves alias names onto imported networks, and CheckACL matches listed rules instead of a stub.
+- **OPNsense NAT apply actually hits the dataplane.** Mutations commit via `firewall/filter/apply`.
+- **OPNsense paged searches.** Filter, NAT, and alias reads walk the 26.x page envelope.
+- **Double-NAT verdict counts only the egress path.** Per-device NAT config that is not on the actual egress no longer inflates `double_nat`.
+- **Omada switch-port linkSpeed is configured, not negotiated.** Overview speed/duplex are Auto/enum settings; negotiated link state is not on the Open API.
+- **OPNsense CLI `--api-key` / `--api-secret` flags.** Match `nyx topology` and the env-var names.
+
+### Documentation
+
+- Privilege matrix for commands and assertion types; snapshot baseline with no path uses the latest saved snapshot.
+- README Go version aligned with `go.mod` 1.26.8.
+- MCP HTTP transport design (auth, binding, session). Omada research note on reducing gateway client-discovery SYN traffic.
+
+### Other
+
+- Release workflow refuses to re-cut an already-published npm version.
+
 ## [0.4.1] - 2026-09-04
 
 **Patch release.** No user-facing behavior changes from 0.4.0.
@@ -263,7 +306,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.0
 [0.4.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.4.1
 [0.4.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.4.0
 [0.3.2]: https://github.com/jpvelasco/nyx/releases/tag/v0.3.2
