@@ -380,6 +380,77 @@ func TestOpnsenseServicePlanApplyKeaReservation(t *testing.T) {
 	}
 }
 
+func TestOpnsenseServiceApplyDHCPDeletesAndUpdates(t *testing.T) {
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "dnsmasq/settings/get"):
+			testutil.WriteBody(w, `{"dnsmasq":{"enable":"1","dhcp":{"range":{"r1":{"interface":"lan","start":"10.0.10.100","end":"10.0.10.200"}},"host":{"h1":{"host":"printer","ip":"10.0.10.20"}}}}}`)
+		case strings.Contains(r.URL.Path, "kea/service/status"):
+			testutil.WriteBody(w, `{"running":false}`)
+		case strings.Contains(r.URL.Path, "set_range"), strings.Contains(r.URL.Path, "del_range"),
+			strings.Contains(r.URL.Path, "set_host"), strings.Contains(r.URL.Path, "del_host"),
+			strings.Contains(r.URL.Path, "reconfigure"):
+			testutil.WriteBody(w, `{"result":"saved"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	opts := opnsenseOptions(ts)
+	svc := NewOpnsenseService()
+	upd, err := svc.ApplyDHCP(context.Background(), opts, OpnsenseDHCPRequest{Kind: "range", UUID: "r1", Interface: "lan", Start: "10.0.10.100", End: "10.0.10.220"}, false)
+	if err != nil || upd.Outcome != "updated" {
+		t.Fatalf("update range = %+v %v", upd, err)
+	}
+	del, err := svc.ApplyDHCP(context.Background(), opts, OpnsenseDHCPRequest{Kind: "range", UUID: "r1", Delete: true}, false)
+	if err != nil || del.Outcome != "deleted" {
+		t.Fatalf("delete range = %+v %v", del, err)
+	}
+	hostUpd, err := svc.ApplyDHCP(context.Background(), opts, OpnsenseDHCPRequest{Kind: "host", UUID: "h1", Hostname: "printer", IP: "10.0.10.21"}, false)
+	if err != nil || hostUpd.Outcome != "updated" {
+		t.Fatalf("update host = %+v %v", hostUpd, err)
+	}
+	hostDel, err := svc.ApplyDHCP(context.Background(), opts, OpnsenseDHCPRequest{Kind: "host", UUID: "h1", Delete: true}, false)
+	if err != nil || hostDel.Outcome != "deleted" {
+		t.Fatalf("delete host = %+v %v", hostDel, err)
+	}
+}
+
+func TestOpnsenseServiceApplyKeaDeletes(t *testing.T) {
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "dnsmasq/settings/get"):
+			testutil.WriteBody(w, `{"dnsmasq":{"enable":"0"}}`)
+		case strings.Contains(r.URL.Path, "kea/service/status"):
+			testutil.WriteBody(w, `{"running":true}`)
+		case strings.Contains(r.URL.Path, "search_reservation"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"k1","ip":"10.0.10.20","mac":"aa:bb:cc:dd:ee:01"}]}`)
+		case strings.Contains(r.URL.Path, "search_subnet"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"s1","subnet":"10.0.10.0/24"}]}`)
+		case strings.Contains(r.URL.Path, "del_reservation"), strings.Contains(r.URL.Path, "del_subnet"),
+			strings.Contains(r.URL.Path, "set_subnet"), strings.Contains(r.URL.Path, "reconfigure"):
+			testutil.WriteBody(w, `{"result":"saved"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	opts := opnsenseOptions(ts)
+	svc := NewOpnsenseService()
+	delR, err := svc.ApplyDHCP(context.Background(), opts, OpnsenseDHCPRequest{Kind: "reservation", UUID: "k1", Delete: true}, false)
+	if err != nil || delR.Outcome != "deleted" {
+		t.Fatalf("delete resv = %+v %v", delR, err)
+	}
+	delS, err := svc.ApplyDHCP(context.Background(), opts, OpnsenseDHCPRequest{Kind: "range", UUID: "s1", Delete: true}, false)
+	if err != nil || delS.Outcome != "deleted" {
+		t.Fatalf("delete subnet = %+v %v", delS, err)
+	}
+	if _, err := svc.PlanDHCP(context.Background(), opts, OpnsenseDHCPRequest{Kind: "reservation"}); err == nil {
+		t.Fatal("expected ip/mac required")
+	}
+	if _, err := svc.PlanDHCP(context.Background(), opts, OpnsenseDHCPRequest{Kind: "range"}); err == nil {
+		t.Fatal("expected subnet required")
+	}
+}
+
 func TestOpnsenseServiceListWireGuard(t *testing.T) {
 	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
