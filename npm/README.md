@@ -49,15 +49,17 @@ nyx doctor
 nyx init --output my-network.yaml
 
 # 4. Run a full audit against declared intent
+#    sudo is recommended when the spec includes subnet_discovery
 sudo nyx audit --spec my-network.yaml
 ```
 
-After a clean audit, lock in a baseline from the saved snapshot (each audit writes to `~/.nyx/snapshots/`):
+After a clean audit, lock in a baseline. With no path, `nyx snapshot baseline` uses the latest saved snapshot from that audit (each audit writes to `~/.nyx/snapshots/`):
 
 ```bash
 sudo nyx audit --spec my-network.yaml
-nyx snapshot list
-nyx snapshot baseline ~/.nyx/snapshots/snapshot-YYYYMMDD-HHMMSS.json
+nyx snapshot baseline          # uses the latest saved snapshot from that audit
+# optional: nyx snapshot list
+# restore an older snapshot: nyx snapshot baseline ~/.nyx/snapshots/snapshot-YYYYMMDD-HHMMSS.json
 ```
 
 Compare later when something feels off:
@@ -145,7 +147,7 @@ claude mcp add nyx -- npx -y nyx-audit-cli mcp serve --transport stdio
 ## Prerequisites
 
 - **nmap** — required for discovery (`nyx doctor` prints the install command for your OS)
-- **sudo** — needed for some subnet scans on Linux/macOS
+- **Privileges** — nyx itself does not need root. Elevation is recommended for complete nmap subnet scans (`discover`, `init`, `subnet_discovery`) on Linux/macOS; unprivileged nmap may miss hosts. `doctor`, routes, VPN, DNS, ACL, providers, snapshot, drift, and MCP never need elevation. ICMP ping (`isolation`, `network_health`) sometimes needs `CAP_NET_RAW` on older Linux. See the privilege matrix in the [main README](https://github.com/jpvelasco/nyx#privileges).
 
 ## Commands
 
