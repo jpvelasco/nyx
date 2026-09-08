@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
+	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/testutil"
 	topology "github.com/jpvelasco/nyx/internal/topology"
@@ -132,6 +133,9 @@ func TestResolveTopologyOpts_IncompleteCredentialsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "incomplete") {
 		t.Errorf("error %q should name the incomplete credentials", err)
 	}
+	if !strings.Contains(err.Error(), "nyx-opnsense-10.0.0.9") {
+		t.Errorf("error %q should name the nyx-opnsense WM hint", err)
+	}
 }
 
 func TestResolveTopologyOpts_StoreFallback(t *testing.T) {
@@ -172,6 +176,29 @@ func TestResolveTopologyOpts_StoreFallback(t *testing.T) {
 	}
 	if opns == nil || opns.Host != "10.0.0.9" || opns.APIKey != "vault-k" {
 		t.Errorf("opnsense = %+v, want store values", opns)
+	}
+}
+
+// WM fills empty OPNsense key/secret when flags and env are empty.
+func TestResolveOpnsenseTopologyOpts_WMOverlay(t *testing.T) {
+	topoFlagsRestore(t)
+	clearTopoEnv(t)
+	topoOpnsenseHost = "fw.example"
+	t.Cleanup(func() { credmanager.SetReader(nil) })
+
+	credmanager.SetReader(&fakeWMReader{
+		cred:  credmanager.Cred{ClientID: "wm-key", ClientSecret: "wm-secret"},
+		found: true,
+	})
+	opts, err := resolveOpnsenseTopologyOpts()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts == nil || opts.APIKey != "wm-key" || opts.APISecret != "wm-secret" {
+		t.Fatalf("opts = %+v, want WM credentials", opts)
+	}
+	if opts.Host != "fw.example" {
+		t.Fatalf("Host = %q, want flag host (WM must never supply the host)", opts.Host)
 	}
 }
 

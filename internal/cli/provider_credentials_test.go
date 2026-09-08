@@ -6,10 +6,26 @@ import (
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
+	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
 	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
+
+// fakeWMReader is a controllable Credential Manager reader for
+// providerImportOptions overlay tests.
+type fakeWMReader struct {
+	cred     credmanager.Cred
+	found    bool
+	target   string
+	readCall int
+}
+
+func (f *fakeWMReader) Read(target string) (credmanager.Cred, bool, error) {
+	f.readCall++
+	f.target = target
+	return f.cred, f.found, nil
+}
 
 // clearProviderEnv clears the env var names of both known providers so the
 // tests exercise the store/flag layers even when the machine happens to have
@@ -97,6 +113,46 @@ func TestProviderImportOptions_OpnsenseStore(t *testing.T) {
 	}
 	if opts.ClientSecret != "store-secret" {
 		t.Errorf("ClientSecret = %q, want store api_secret", opts.ClientSecret)
+	}
+}
+
+func TestProviderImportOptions_OpnsenseWMOverlay(t *testing.T) {
+	saveRestoreGlobals(t)
+	clearProviderEnv(t)
+	writeCredentialStore(t, "opnsense", nil) // empty store: only WM can fill
+	providerHost = "fw.example"
+	t.Cleanup(func() { credmanager.SetReader(nil) })
+
+	f := &fakeWMReader{cred: credmanager.Cred{ClientID: "wm-key", ClientSecret: "wm-secret"}, found: true}
+	credmanager.SetReader(f)
+
+	opts := providerImportOptions("opnsense")
+	if opts.ClientID != "wm-key" || opts.ClientSecret != "wm-secret" {
+		t.Fatalf("creds = %q/%q, want WM values", opts.ClientID, opts.ClientSecret)
+	}
+	if f.target != "nyx-opnsense-fw.example" {
+		t.Fatalf("target = %q, want nyx-opnsense-fw.example", f.target)
+	}
+	if opts.Host != "fw.example" {
+		t.Fatalf("Host = %q, want flag host (WM must never supply the host)", opts.Host)
+	}
+}
+
+func TestProviderImportOptions_OpnsenseEnvWinsOverWM(t *testing.T) {
+	saveRestoreGlobals(t)
+	clearProviderEnv(t)
+	writeCredentialStore(t, "opnsense", nil)
+	providerHost = "fw.example"
+	t.Setenv("OPNSENSE_API_KEY", "env-key")
+	t.Setenv("OPNSENSE_API_SECRET", "env-secret")
+	t.Cleanup(func() { credmanager.SetReader(nil) })
+
+	f := &fakeWMReader{cred: credmanager.Cred{ClientID: "wm-key", ClientSecret: "wm-secret"}, found: true}
+	credmanager.SetReader(f)
+
+	opts := providerImportOptions("opnsense")
+	if opts.ClientID != "env-key" || opts.ClientSecret != "env-secret" {
+		t.Fatalf("creds = %q/%q, want env values over WM", opts.ClientID, opts.ClientSecret)
 	}
 }
 
