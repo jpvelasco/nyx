@@ -78,6 +78,9 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_list_kernel_routes":      (*Server).toolOpnsenseListKernelRoutes,
 	"opnsense_list_kea_subnets":        (*Server).toolOpnsenseListKeaSubnets,
 	"opnsense_list_kea_reservations":   (*Server).toolOpnsenseListKeaReservations,
+	"opnsense_list_wireguard_servers":  (*Server).toolOpnsenseListWireGuardServers,
+	"opnsense_list_wireguard_clients":  (*Server).toolOpnsenseListWireGuardClients,
+	"opnsense_get_wireguard_status":    (*Server).toolOpnsenseGetWireGuardStatus,
 	"opnsense_get_nat":                 (*Server).toolOpnsenseGetNAT,
 	"opnsense_inventory":               (*Server).toolOpnsenseInventory,
 	"opnsense_plan_nat":                (*Server).toolOpnsensePlanNat,
@@ -823,6 +826,24 @@ func (s *Server) toolOpnsenseListKeaSubnets(ctx context.Context, args map[string
 func (s *Server) toolOpnsenseListKeaReservations(ctx context.Context, args map[string]interface{}) toolDispatchResult {
 	return s.opnsenseReadJSON(ctx, args, "opnsense kea reservations request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 		return s.opnsenseSvc.ListKeaReservations(ctx, opts)
+	})
+}
+
+func (s *Server) toolOpnsenseListWireGuardServers(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "opnsense wireguard servers request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.ListWireGuardServers(ctx, opts)
+	})
+}
+
+func (s *Server) toolOpnsenseListWireGuardClients(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "opnsense wireguard clients request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.ListWireGuardClients(ctx, opts)
+	})
+}
+
+func (s *Server) toolOpnsenseGetWireGuardStatus(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "opnsense wireguard status request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.GetWireGuardStatus(ctx, opts)
 	})
 }
 

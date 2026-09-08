@@ -299,8 +299,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 67 {
-		t.Fatalf("expected 67 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 70 {
+		t.Fatalf("expected 70 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -309,7 +309,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_plan_port", "omada_apply_port_profile", "omada_plan_lan", "omada_apply_lan", "omada_list_ssids", "omada_plan_ssid", "omada_apply_ssid", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_get_firewall_rule", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_vlans", "opnsense_plan_vlan", "opnsense_apply_vlan", "opnsense_plan_filter", "opnsense_apply_filter", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_list_kea_subnets", "opnsense_list_kea_reservations", "opnsense_inventory", "topology"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_plan_port", "omada_apply_port_profile", "omada_plan_lan", "omada_apply_lan", "omada_list_ssids", "omada_plan_ssid", "omada_apply_ssid", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_get_firewall_rule", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_vlans", "opnsense_plan_vlan", "opnsense_apply_vlan", "opnsense_plan_filter", "opnsense_apply_filter", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_list_kea_subnets", "opnsense_list_kea_reservations", "opnsense_list_wireguard_servers", "opnsense_list_wireguard_clients", "opnsense_get_wireguard_status", "opnsense_inventory", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -381,6 +381,9 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 		"opnsense_list_kernel_routes":      {"host"},
 		"opnsense_list_kea_subnets":        {"host"},
 		"opnsense_list_kea_reservations":   {"host"},
+		"opnsense_list_wireguard_servers":  {"host"},
+		"opnsense_list_wireguard_clients":  {"host"},
+		"opnsense_get_wireguard_status":    {"host"},
 		"opnsense_list_firewall_rules":     {"host"},
 		"opnsense_get_firewall_rule":       {"host", "uuid"},
 		"opnsense_list_clients":            {"host"},
@@ -1582,6 +1585,27 @@ func TestDispatchOpnsenseKea(t *testing.T) {
 	}
 }
 
+func TestDispatchOpnsenseWireGuard(t *testing.T) {
+	stub := &stubOpnsenseSvc{}
+	args := map[string]interface{}{"host": "fw.local", "api_key": "k", "api_secret": "s"}
+	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_list_wireguard_servers", args)
+	if isErr || !strings.Contains(text, "home-wg") {
+		t.Fatalf("servers = (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_list_wireguard_clients", args)
+	if isErr || !strings.Contains(text, "pub1") {
+		t.Fatalf("clients = (%q, %v)", text, isErr)
+	}
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_get_wireguard_status", args)
+	if isErr || !strings.Contains(text, `"running": true`) {
+		t.Fatalf("status = (%q, %v)", text, isErr)
+	}
+	errStub := &stubOpnsenseSvc{err: errors.New("boom")}
+	if text, isErr := serverWithOpnsenseStub(errStub).DispatchToolForTest(context.Background(), "opnsense_list_wireguard_servers", args); !isErr || !strings.Contains(text, "wireguard servers") {
+		t.Errorf("server err = (%q, %v)", text, isErr)
+	}
+}
+
 func TestDispatchOpnsenseInventory(t *testing.T) {
 	stub := &stubOpnsenseSvc{inventory: &service.OpnsenseInventory{
 		Host:              "fw.local",
@@ -2332,6 +2356,30 @@ func (s *stubOpnsenseSvc) ListKeaReservations(_ context.Context, opts service.Op
 	return []service.OpnsenseKeaReservation{{UUID: "r1", IP: "10.0.10.20"}}, nil
 }
 
+func (s *stubOpnsenseSvc) ListWireGuardServers(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseWireGuardServer, error) {
+	s.lastOpts = opts
+	if s.err != nil {
+		return nil, s.err
+	}
+	return []service.OpnsenseWireGuardServer{{UUID: "s1", Name: "home-wg"}}, nil
+}
+
+func (s *stubOpnsenseSvc) ListWireGuardClients(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseWireGuardClient, error) {
+	s.lastOpts = opts
+	if s.err != nil {
+		return nil, s.err
+	}
+	return []service.OpnsenseWireGuardClient{{UUID: "p1", Pubkey: "pub1"}}, nil
+}
+
+func (s *stubOpnsenseSvc) GetWireGuardStatus(_ context.Context, opts service.OpnsenseOptions) (*service.OpnsenseWireGuardStatus, error) {
+	s.lastOpts = opts
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &service.OpnsenseWireGuardStatus{Running: true}, nil
+}
+
 func (s *stubOpnsenseSvc) GetOutboundNatMode(_ context.Context, opts service.OpnsenseOptions) (string, error) {
 	s.lastOpts = opts
 	return s.natMode, s.err
@@ -2939,6 +2987,9 @@ func TestDispatchNatReads_MissingHost(t *testing.T) {
 		"opnsense_get_dnsmasq_settings",
 		"opnsense_get_pf_statistics",
 		"opnsense_list_kernel_routes",
+		"opnsense_list_wireguard_servers",
+		"opnsense_list_wireguard_clients",
+		"opnsense_get_wireguard_status",
 		"opnsense_inventory",
 		"opnsense_list_vlans",
 		"opnsense_plan_vlan",

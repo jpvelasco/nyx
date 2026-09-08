@@ -163,6 +163,9 @@ type opnsenseSurface interface {
 	ListKernelRoutes(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKernelRoute, error)
 	ListKeaSubnets(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKeaSubnet, error)
 	ListKeaReservations(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKeaReservation, error)
+	ListWireGuardServers(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseWireGuardServer, error)
+	ListWireGuardClients(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseWireGuardClient, error)
+	GetWireGuardStatus(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseWireGuardStatus, error)
 	GetOutboundNatMode(ctx context.Context, opts service.OpnsenseOptions) (string, error)
 	GetNAT(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseNatSummary, error)
 	Inventory(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsenseInventory, error)
@@ -799,6 +802,21 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		{
 			Name:        "opnsense_list_kea_reservations",
 			Description: "List Kea DHCPv4 reservations (observe). A 404 means Kea is not installed; a 403 is a page-privilege miss.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_wireguard_servers",
+			Description: "List OPNsense WireGuard server instances (observe). A 404 means the plugin is not installed; a 403 is a page-privilege miss.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_wireguard_clients",
+			Description: "List OPNsense WireGuard peers (observe). Private keys are never returned. A 404 means the plugin is not installed; a 403 is a page-privilege miss.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_get_wireguard_status",
+			Description: "Read whether the OPNsense WireGuard service reports as running. A 404 means the plugin is not installed; a 403 is a page-privilege miss.",
 			InputSchema: opnsenseToolSchema(),
 		},
 		{
