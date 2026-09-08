@@ -52,6 +52,8 @@ func buildOpnsenseExtraCommands() []*cobra.Command {
 		buildOpnsenseApplyFilterCmd(),
 		buildOpnsensePlanUnboundCmd(),
 		buildOpnsenseApplyUnboundCmd(),
+		buildOpnsensePlanDHCPCmd(),
+		buildOpnsenseApplyDHCPCmd(),
 	}
 }
 
@@ -393,6 +395,80 @@ func buildOpnsenseApplyUnboundCmd() *cobra.Command {
 		},
 	}
 	bindOpnsenseUnboundFlags(cmd, &f)
+	addDryRunFlag(cmd, &dryRun)
+	return cmd
+}
+
+type opnsenseDHCPFlags struct {
+	backend, kind, iface, start, end, ip, mac, hostname, uuid string
+	delete                                                    bool
+}
+
+func (f opnsenseDHCPFlags) request() service.OpnsenseDHCPRequest {
+	return service.OpnsenseDHCPRequest{
+		Backend:   f.backend,
+		Kind:      f.kind,
+		Interface: f.iface,
+		Start:     f.start,
+		End:       f.end,
+		IP:        f.ip,
+		MAC:       f.mac,
+		Hostname:  f.hostname,
+		UUID:      f.uuid,
+		Delete:    f.delete,
+	}
+}
+
+func bindOpnsenseDHCPFlags(cmd *cobra.Command, f *opnsenseDHCPFlags) {
+	cmd.Flags().StringVar(&f.backend, "backend", "", "auto (default), dnsmasq, or kea")
+	cmd.Flags().StringVar(&f.kind, "kind", "", "range (default), host, or reservation")
+	cmd.Flags().StringVar(&f.iface, "interface", "", "Dnsmasq range interface")
+	cmd.Flags().StringVar(&f.start, "start", "", "Range start or Kea subnet CIDR")
+	cmd.Flags().StringVar(&f.end, "end", "", "Range end")
+	cmd.Flags().StringVar(&f.ip, "ip", "", "Static host / reservation IP")
+	cmd.Flags().StringVar(&f.mac, "mac", "", "Reservation MAC")
+	cmd.Flags().StringVar(&f.hostname, "hostname", "", "Static host / reservation hostname")
+	cmd.Flags().StringVar(&f.uuid, "uuid", "", "Existing item UUID")
+	cmd.Flags().BoolVar(&f.delete, "delete", false, "Delete the item")
+	addProviderFlags(cmd, "opnsense")
+}
+
+func buildOpnsensePlanDHCPCmd() *cobra.Command {
+	var f opnsenseDHCPFlags
+	cmd := &cobra.Command{
+		Use:   "plan-dhcp",
+		Short: "Preview a DHCP range, host, or reservation change (read-only)",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return withProviderSession("opnsense", func(ctx context.Context, opts providers.ImportOptions) error {
+				plan, err := service.NewOpnsenseService().PlanDHCP(ctx, toOpnsenseOptions(opts), f.request())
+				if err != nil {
+					return err
+				}
+				return printPlan(plan, plan.Action)
+			})
+		},
+	}
+	bindOpnsenseDHCPFlags(cmd, &f)
+	return cmd
+}
+
+func buildOpnsenseApplyDHCPCmd() *cobra.Command {
+	var f opnsenseDHCPFlags
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "apply-dhcp",
+		Short: "Create, update, or delete a DHCP range, host, or reservation. Dry-run by default",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return withProviderSession("opnsense", func(ctx context.Context, opts providers.ImportOptions) error {
+				res, err := service.NewOpnsenseService().ApplyDHCP(ctx, toOpnsenseOptions(opts), f.request(), dryRun)
+				if err != nil {
+					return err
+				}
+				return printApply(res, res.Outcome, res.DryRun)
+			})
+		},
+	}
+	bindOpnsenseDHCPFlags(cmd, &f)
 	addDryRunFlag(cmd, &dryRun)
 	return cmd
 }

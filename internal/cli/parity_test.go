@@ -174,6 +174,8 @@ var mcpMutationCLI = map[string]string{
 	"opnsense_apply_filter":           "apply-filter",
 	"opnsense_plan_unbound_override":  "plan-unbound-override",
 	"opnsense_apply_unbound_override": "apply-unbound-override",
+	"opnsense_plan_dhcp":              "plan-dhcp",
+	"opnsense_apply_dhcp":             "apply-dhcp",
 }
 
 func vendorOfTool(name string) string {
