@@ -63,3 +63,14 @@ func TestTraceroute(t *testing.T) {
 		}
 	})
 }
+
+// TestUnixPingRejectsOptionTargets proves the checkPingTarget guard fires at
+// the unix Ping entry point (linux and darwin both compile this). The guard
+// rejects before any ping spawn, so no binary is required.
+func TestUnixPingRejectsOptionTargets(t *testing.T) {
+	for _, bad := range []string{"", "-n 5", "/etc/passwd", "10.0.0.1 -c 3"} {
+		if _, err := Ping(context.Background(), bad); err == nil {
+			t.Errorf("Ping(%q) should have been rejected by checkPingTarget", bad)
+		}
+	}
+}

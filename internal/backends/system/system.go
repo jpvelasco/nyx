@@ -6,6 +6,7 @@ package system
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 )
@@ -45,6 +46,32 @@ type TracerouteHop struct {
 // -----------------------------------------------------------------------
 // Shared helpers
 // -----------------------------------------------------------------------
+
+// checkPingTarget rejects ping targets that would be interpreted as command
+// options by the platform's ping binary. It rejects the empty string,
+// targets leading with '-' (option, e.g. "-n 5") or '/' (a path), any
+// embedded whitespace (argument injection), and NUL bytes. IPv6 zone targets
+// ("fe80::1%eth0") stay valid: they carry no leading option character and no
+// whitespace.
+//
+// A leading "--" separator is deliberately not accepted as an escape: the
+// Windows ping.exe does not support it, so the defense has to hold on its
+// own.
+func checkPingTarget(target string) error {
+	if target == "" {
+		return fmt.Errorf("ping target must not be empty")
+	}
+	if strings.HasPrefix(target, "-") {
+		return fmt.Errorf("ping target %q must not start with '-'", target)
+	}
+	if strings.HasPrefix(target, "/") {
+		return fmt.Errorf("ping target %q must not start with '/'", target)
+	}
+	if strings.ContainsAny(target, " \t\n\r\x00") {
+		return fmt.Errorf("ping target %q must not contain whitespace or NUL", target)
+	}
+	return nil
+}
 
 // runCmd executes a command with the supplied context and returns stdout.
 // #nosec G204 — internal helper; callers pass hardcoded system commands

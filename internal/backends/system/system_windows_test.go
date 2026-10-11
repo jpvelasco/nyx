@@ -205,6 +205,17 @@ func TestPing(t *testing.T) {
 			t.Fatal("expected error for cancelled context")
 		}
 	})
+
+	t.Run("rejects option-shaped targets", func(t *testing.T) {
+		// The guard must reject before any ping.exe spawn, so this needs no
+		// binary. Covers the case where a "--" separator is NOT an escape
+		// (ping.exe lacks it) and option-shaped / path-shaped values.
+		for _, bad := range []string{"", "-n 5", "/etc/passwd", "10.0.0.1 -c 3"} {
+			if _, err := Ping(context.Background(), bad); err == nil {
+				t.Errorf("Ping(%q) should have been rejected by checkPingTarget", bad)
+			}
+		}
+	})
 }
 
 func TestTraceroute(t *testing.T) {

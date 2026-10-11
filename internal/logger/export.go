@@ -296,7 +296,9 @@ func formatTextLine(e *LogEntry) string {
 		b.WriteByte(' ')
 	}
 	b.WriteString(strings.ToUpper(e.Level.Text()))
-	fmt.Fprintf(&b, " [%s] %s", e.Cmd, e.Msg)
+	// msg and field values are quoted so a log line carrying embedded newlines
+	// or "=" cannot forge a new line or an extra field in the text artifact.
+	fmt.Fprintf(&b, " [%s] %q", e.Cmd, e.Msg)
 	keys := make([]string, 0, len(e.fields))
 	for k := range e.fields {
 		switch k {
@@ -307,7 +309,7 @@ func formatTextLine(e *LogEntry) string {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		fmt.Fprintf(&b, " %s=%s", k, e.fields[k])
+		fmt.Fprintf(&b, " %s=%q", k, e.fields[k])
 	}
 	b.WriteByte('\n')
 	return b.String()
