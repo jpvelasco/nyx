@@ -337,12 +337,23 @@ func validateDNSCheckAssertion(i int, a *Assertion) error {
 	if a.Query == "" {
 		return fmt.Errorf("assertion[%d]: dns_check requires 'query'", i)
 	}
+	if err := ValidateTarget(a.Query); err != nil {
+		return fmt.Errorf("assertion[%d]: dns_check: %w", i, err)
+	}
+	if a.Server != "" {
+		if err := ValidateServer(a.Server); err != nil {
+			return fmt.Errorf("assertion[%d]: dns_check: %w", i, err)
+		}
+	}
 	return nil
 }
 
 func validateNetworkHealthAssertion(i int, a *Assertion) error {
 	if a.Target == "" {
 		return fmt.Errorf("assertion[%d]: network_health requires 'target'", i)
+	}
+	if err := ValidateTarget(a.Target); err != nil {
+		return fmt.Errorf("assertion[%d]: network_health: %w", i, err)
 	}
 	return nil
 }

@@ -5,10 +5,6 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: write
-  id-token: write
-
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
@@ -17,9 +13,14 @@ jobs:
   release:
     name: Build & Publish Release
     runs-on: ubuntu-latest
+    # contents:write for GoReleaser pushing release assets; id-token:write for
+    # npm trusted publishing (OIDC, SLSA provenance).
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -49,7 +50,7 @@ jobs:
           esac
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -99,7 +100,7 @@ jobs:
           echo "embedded checksums synced to published asset"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"

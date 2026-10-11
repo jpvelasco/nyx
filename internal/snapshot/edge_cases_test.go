@@ -164,13 +164,22 @@ func TestSave_WriteError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("write permission error test skipped on Windows")
 	}
-	// Make the snapshots directory read-only
+	// Make the snapshots directory read-only. 0444 is used to force the
+	// write-failure path; the 0700 dir setup matches the owner-only default.
 	tmpDir := t.TempDir()
 	snapDir := filepath.Join(tmpDir, ".nyx", "snapshots")
-	os.MkdirAll(snapDir, 0700)
+	if err := os.MkdirAll(snapDir, 0700); err != nil { // nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission — dir requires execute for traversal
+		t.Fatalf("could not create snapshots dir: %v", err)
+	}
 	// Make the directory read-only so WriteFile fails
-	os.Chmod(snapDir, 0444)
-	t.Cleanup(func() { os.Chmod(snapDir, 0700) })
+	if err := os.Chmod(snapDir, 0444); err != nil {
+		t.Fatalf("could not make snapshots dir read-only: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(snapDir, 0700); err != nil { // nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission — dir requires execute for traversal
+			t.Logf("restoring snapshot dir perms: %v", err)
+		}
+	})
 
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("USERPROFILE", tmpDir)
@@ -206,7 +215,9 @@ func TestListSnapshots_NotADirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	// Create a FILE where the snapshots dir would be
 	snapDir := filepath.Join(tmpDir, ".nyx", "snapshots")
-	os.MkdirAll(filepath.Dir(snapDir), 0700)
+	if err := os.MkdirAll(filepath.Dir(snapDir), 0700); err != nil { // nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission — dir requires execute for traversal
+		t.Fatalf("could not create snapshots parent dir: %v", err)
+	}
 	if err := os.WriteFile(snapDir, []byte("blocker"), 0600); err != nil {
 		t.Fatalf("could not create blocker file: %v", err)
 	}

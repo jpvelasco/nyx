@@ -434,9 +434,11 @@ example.com.		300	IN	DNSKEY	257 3 8 abcdef
 // =====================================================================
 
 func TestResolve_EmptyQuery(t *testing.T) {
+	// An empty query is rejected by input validation before any resolver is
+	// consulted, which returns an error.
 	result, ips, err := resolve(dnsCtx(), "", "")
-	if err != nil {
-		t.Fatalf("resolve returned error: %v", err)
+	if err == nil {
+		t.Fatal("expected validation error for empty query")
 	}
 	// Empty query will fail resolution
 	if result.Status != models.StatusError {
