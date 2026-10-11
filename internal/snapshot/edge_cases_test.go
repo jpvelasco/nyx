@@ -176,7 +176,7 @@ func TestSave_WriteError(t *testing.T) {
 		t.Fatalf("could not make snapshots dir read-only: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := os.Chmod(snapDir, 0700); err != nil { // nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission — dir requires execute for traversal
+		if err := os.Chmod(snapDir, 0700); err != nil { // nosemgrep: go_file-permissions_rule-fileperm, go.lang.correctness.permissions.file_permission.incorrect-default-permission — dir requires execute bit for traversal
 			t.Logf("restoring snapshot dir perms: %v", err)
 		}
 	})
