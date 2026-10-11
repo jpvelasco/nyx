@@ -1,0 +1,15 @@
+# gitleaks configuration for the nyx repository.
+#
+# The generated Codacy semgrep ruleset (.codacy/tools-configs/semgrep.yaml)
+# embeds gitleaks-derived secret-detection rules whose examples contain
+# synthetic secret-shaped literals (AWS keys, API tokens, etc.). Those are
+# rule documentation, not real credentials, so the path is allowlisted.
+title = "nyx gitleaks config"
+
+[allowlist]
+description = "Known false positives"
+paths = [
+  # Generated ruleset containing gitleaks-derived secret rules and their
+  # synthetic example secrets.
+  '''\.codacy/tools-configs/semgrep\.yaml''',
+]

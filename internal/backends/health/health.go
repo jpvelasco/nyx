@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 )
 
@@ -49,6 +50,14 @@ var (
 // execution error.
 func PingCheck(ctx context.Context, target string, count int) (*models.CheckResult, *PingStats, error) {
 	result := models.NewCheckResult("ping", "network_health", "system", target)
+
+	if err := intent.ValidateTarget(target); err != nil {
+		result.Status = models.StatusError
+		result.Summary = err.Error()
+		result.Evidence = append(result.Evidence, result.Summary)
+		result.Finish()
+		return result, nil, err
+	}
 
 	out, err := runPing(ctx, target, count)
 	result.Evidence = []string{out}
@@ -167,6 +176,14 @@ func classifyLatencyLoss(stats *PingStats, maxLatencyMs float64, maxLossPct floa
 // Returns StatusPass if discovered >= expected, StatusWarn if within 10%, StatusFail otherwise.
 func ProbeMTU(ctx context.Context, target string, expectedMTU int) (*models.CheckResult, error) {
 	result := models.NewCheckResult("ping", "network_health", "system", target)
+
+	if err := intent.ValidateTarget(target); err != nil {
+		result.Status = models.StatusError
+		result.Summary = err.Error()
+		result.Evidence = append(result.Evidence, result.Summary)
+		result.Finish()
+		return result, err
+	}
 
 	discoveredMTU, evidence := probeMTUBinarySearch(ctx, target)
 	result.Evidence = evidence

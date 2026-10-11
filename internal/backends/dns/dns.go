@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 )
 
@@ -32,9 +33,31 @@ func dialAddr(server string) string {
 	return net.JoinHostPort(server, "53")
 }
 
+// validateDNSInputs rejects query/server values that are not valid hosts/
+// IPs or that are shaped like dig options ("@server", "+short"), preventing
+// option injection from spec, CLI, or MCP input.
+func validateDNSInputs(query, server string) error {
+	if err := intent.ValidateTarget(query); err != nil {
+		return err
+	}
+	if server != "" {
+		return intent.ValidateServer(server)
+	}
+	return nil
+}
+
 // resolve is the internal implementation, does not call Finish.
 // Returns the CheckResult, list of resolved IPs, and any error.
 func resolve(ctx context.Context, query, server string) (*models.CheckResult, []string, error) {
+	if err := validateDNSInputs(query, server); err != nil {
+		// No Finish() here: like the error paths below, the caller
+		// (Resolve/ResolveExpect) calls Finish before rendering.
+		result := models.NewCheckResult("dns", "dns_check", "dns", query)
+		result.Status = models.StatusError
+		result.Summary = err.Error()
+		result.Evidence = append(result.Evidence, result.Summary)
+		return result, nil, err
+	}
 	result := models.NewCheckResult("dns", "dns_check", "dns", query)
 
 	var ips []string
@@ -96,12 +119,12 @@ func Resolve(ctx context.Context, query, server string) (*models.CheckResult, er
 // ResolveExpect resolves a hostname and checks if the expected IP is in the results.
 // Returns a CheckResult indicating pass if found, fail if not, or error if resolution failed.
 func ResolveExpect(ctx context.Context, query, server, expectIP string) (*models.CheckResult, error) {
-	result, ips, _ := resolve(ctx, query, server)
+	result, ips, err := resolve(ctx, query, server)
 
 	// If resolution failed, return as-is
 	if result.Status == models.StatusError {
 		result.Finish()
-		return result, nil
+		return result, err
 	}
 
 	// Check if expectIP is in the resolved IPs
@@ -166,6 +189,14 @@ func dnssecStatus(output string) (models.Status, string) {
 // CheckDNSSEC validates the DNSSEC chain for a hostname.
 // Uses dig +dnssec +sigchase to check DNSSEC validation.
 func CheckDNSSEC(ctx context.Context, query, server string) (*models.CheckResult, error) {
+	if err := validateDNSInputs(query, server); err != nil {
+		result := models.NewCheckResult("dig", "dns_check", "dns", query)
+		result.Status = models.StatusError
+		result.Summary = err.Error()
+		result.Evidence = append(result.Evidence, result.Summary)
+		result.Finish()
+		return result, err
+	}
 	result := models.NewCheckResult("dig", "dns_check", "dns", query)
 
 	// Check if dig is available
