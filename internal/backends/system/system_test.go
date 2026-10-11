@@ -130,3 +130,35 @@ func lookup(t *testing.T, name string) {
 		t.Skipf("%s not available in PATH", name)
 	}
 }
+
+func TestCheckPingTarget(t *testing.T) {
+	tests := []struct {
+		name    string
+		target  string
+		wantErr bool
+	}{
+		{"empty", "", true},
+		{"leading dash option", "-n 5", true},
+		{"leading dash alone", "-w", true},
+		{"leading slash path", "/etc/passwd", true},
+		{"slash root", "/", true},
+		{"embedded space", "10.0.0.1 -c 3", true},
+		{"tab", "10.0.0.1\t-c 3", true},
+		{"newline", "10.0.0.1\n-c 3", true},
+		{"nul byte", "10.0.0.1\x00-c 3", true},
+		{"valid IPv4", "192.168.1.1", false},
+		{"valid hostname", "nas.example", false},
+		{"valid IPv6", "fe80::1", false},
+		{"IPv6 zone target", "fe80::1%eth0", false},
+		{"IPv6 zone windows suffix", "fe80::1%Ethernet2", false},
+		{"double dash is an option", "--help", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkPingTarget(tt.target)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("checkPingTarget(%q) error = %v, wantErr %v", tt.target, err, tt.wantErr)
+			}
+		})
+	}
+}
