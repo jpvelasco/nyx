@@ -649,10 +649,10 @@ func TestLoad_NoHomeDirError(t *testing.T) {
 func TestLoad_LoadFromError(t *testing.T) {
 	dir := t.TempDir()
 	nyxDir := filepath.Join(dir, ".nyx")
-	if err := os.MkdirAll(nyxDir, 0700); err != nil {
+	if err := os.MkdirAll(nyxDir, 0700); err != nil { // nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission — dir requires execute for traversal
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(nyxDir, "seen.json"), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Join(nyxDir, "seen.json"), 0700); err != nil { // nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission — test creates seen.json as a dir to make LoadFrom fail; dir requires execute for traversal
 		t.Fatalf("mkdir seen.json: %v", err)
 	}
 	t.Setenv("USERPROFILE", dir)
