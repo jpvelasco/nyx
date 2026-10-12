@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-11
+
+**Patch release.** Security hardening: input-validation guards on probe/DNS/ping targets, hardened text log export, and CI/dependency pinning.
+
+### Changed
+
+- **Rejection of command-option-shaped probe and DNS targets.** A shared validator (`internal/intent/host.go`) rejects targets, queries, and servers that are option-shaped (leading `-`/`+`/`@`) or not a valid IP/hostname — wired into spec validation (`dns_check` query+server, `network_health` target) and backend entry points (health `PingCheck`/`ProbeMTU`, dns resolve/CheckDNSSEC).
+- **Release workflow hardening.** `release.yml` SHA-pins checkout/setup-go/setup-node; `contents:write` and `id-token:write` move from workflow level into the release job.
+- **Toolchain and dependency bumps.** Go 1.26.9; otel v1.47.0, otelslog v0.21.0, x/crypto v0.58.0, x/net v0.61.0, x/sys v0.49.0, x/term v0.47.0. govulncheck: 0 reachable vulnerabilities.
+
+### Fixed
+
+- **Ad-hoc ping targets rejected before reaching the binary.** A `checkPingTarget` guard (shared, called at the top of each platform `Ping` on Windows/Linux/Darwin) rejects empty targets, option- or path-shaped prefixes (leading `-` or `/`), embedded whitespace, and NUL bytes — covering `nyx ping`, `verify-isolation --to/--from`, and MCP `ping_target`/`verify_isolation`. The guard holds on its own (no `--` separator; Windows `ping.exe` lacks one); IPv6 zone targets (`fe80::1%eth0`) stay valid.
+- **Text log export can't forge lines.** `nyx logs export --format text` now quotes the message and every field value, so an entry carrying an embedded newline or `=` can no longer forge an extra line or `k=v` field in the artifact (CodeQL `go/log-injection`).
+
+### Other
+
+- codecov-action 7.0.0 → 7.1.1; codeql-action 4.37.9 → 4.38.3 (init/autobuild/analyze bumped together — the three steps must share one version; supersedes the single-action dependabot PRs).
+- Suppressed Codacy least-privilege false positives on test-only 0700 dir creation (seendb + snapshot tests); allowlisted the generated `.codacy` semgrep ruleset in `.gitleaks.toml`.
+
 ## [0.5.1] - 2026-09-08
 
 **Patch release.** Restores npm publish for the 0.5.0 feature set.
@@ -314,7 +334,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.2
 [0.5.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.1
 [0.5.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.0
 [0.4.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.4.1
