@@ -137,6 +137,9 @@ var (
 
 // Ping performs an ICMP ping to the target and returns results (Linux uses ping -c -W).
 func Ping(ctx context.Context, target string) (*PingResult, error) {
+	if err := checkPingTarget(target); err != nil {
+		return nil, err
+	}
 	out, err := runCmd(ctx, "ping", "-c", "3", "-W", "2", target)
 	if err != nil && ctx.Err() != nil {
 		return nil, fmt.Errorf("ping cancelled: %w", ctx.Err())
