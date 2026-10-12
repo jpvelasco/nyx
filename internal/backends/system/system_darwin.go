@@ -103,6 +103,9 @@ var (
 )
 
 func Ping(ctx context.Context, target string) (*PingResult, error) {
+	if err := checkPingTarget(target); err != nil {
+		return nil, err
+	}
 	// macOS uses -t for timeout (seconds), not -W
 	out, err := runCmd(ctx, "ping", "-c", "3", "-t", "2", target)
 	if err != nil && ctx.Err() != nil {

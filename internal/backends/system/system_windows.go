@@ -175,6 +175,9 @@ func whatLoss(out string, reachable bool) float64 {
 }
 
 func Ping(ctx context.Context, target string) (*PingResult, error) {
+	if err := checkPingTarget(target); err != nil {
+		return nil, err
+	}
 	out, err := runCmd(ctx, "ping", "-n", "3", "-w", "2000", target)
 	if err != nil && ctx.Err() != nil {
 		return nil, fmt.Errorf("ping cancelled: %w", ctx.Err())
