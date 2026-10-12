@@ -265,10 +265,10 @@ func TestWriteArtifact(t *testing.T) {
 		t.Fatalf("reading text artifact: %v", err)
 	}
 	ts := string(tb)
-	if !strings.Contains(ts, "2026-09-01T08:30:00.000Z WARN [nyx] omada attempt=2 error=session expired event=retry") {
+	if !strings.Contains(ts, "2026-09-01T08:30:00.000Z WARN [nyx] \"omada\" attempt=\"2\" error=\"session expired\" event=\"retry\"") {
 		t.Errorf("text artifact missing/incorrect scrubbed omada line:\n%s", ts)
 	}
-	if !strings.Contains(ts, "2026-09-01T07:00:00.000Z INFO [nyx] audit") {
+	if !strings.Contains(ts, "2026-09-01T07:00:00.000Z INFO [nyx] \"audit\"") {
 		t.Errorf("text artifact missing scrubbed audit line:\n%s", ts)
 	}
 }
@@ -465,7 +465,7 @@ func TestWriteArtifactTextNoFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading artifact: %v", err)
 	}
-	if !strings.Contains(string(b), "INFO [nyx] bare note") {
+	if !strings.Contains(string(b), "INFO [nyx] \"bare note\"") {
 		t.Errorf("text artifact missing entry:\n%s", b)
 	}
 }
@@ -487,8 +487,40 @@ func TestWriteArtifactTextScrubSensitiveKey(t *testing.T) {
 		t.Fatalf("reading artifact: %v", err)
 	}
 	s := string(b)
-	if strings.Contains(s, "abc") || !strings.Contains(s, "api_key=[redacted]") || !strings.Contains(s, "note=ok") {
+	if strings.Contains(s, "abc") || !strings.Contains(s, "api_key=\"[redacted]\"") || !strings.Contains(s, "note=\"ok\"") {
 		t.Errorf("sensitive key must be redacted in text artifact, got:\n%s", s)
+	}
+}
+
+// TestFormatTextLineNoForgedLines: msg and field values are quoted so a log
+// entry carrying an embedded newline or an "=" cannot forge a second line or
+// an extra field in the text artifact (CodeQL go/log-injection at the
+// formatTextLine sink).
+func TestFormatTextLineNoForgedLines(t *testing.T) {
+	e := LogEntry{
+		TS:     mustParseTime(t, "2026-09-01T07:00:00Z"),
+		Level:  LevelInfo,
+		Msg:    "audit\nstatus=forged",
+		Cmd:    "nyx",
+		fields: map[string]string{"target": "10.0.10.1\n event=injected", "event": "retry"},
+	}
+	got := formatTextLine(&e)
+
+	// Exactly one trailing newline — the embedded newlines must be escaped
+	// into the quoted values, not emitted as real line breaks.
+	if n := strings.Count(got, "\n"); n != 1 {
+		t.Fatalf("expected exactly one (trailing) newline, got %d:\n%q", n, got)
+	}
+	// The injected tokens stay inside their quotes, with the newline escaped:
+	if !strings.Contains(got, `audit\nstatus=forged`) {
+		t.Errorf("msg must keep the injected newline escaped and quoted:\n%q", got)
+	}
+	if !strings.Contains(got, `target="10.0.10.1\n event=injected"`) {
+		t.Errorf("field value must keep the injected newline/field escaped and quoted:\n%q", got)
+	}
+	// The forged field must not appear as its own unquoted k=v pair.
+	if strings.Contains(got, " event=injected \n") {
+		t.Errorf("injected token leaked as a separate field:\n%q", got)
 	}
 }
 
