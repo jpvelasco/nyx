@@ -108,6 +108,9 @@ jobs:
       - name: Embed binary checksums into npm package
         run: node scripts/embed-checksums.js dist/checksums.txt npm/package.json
 
+      - name: Pin npm (trusted publishing needs >=11.5.1)
+        run: npm install -g npm@11.21.0
+
       - name: Publish npm package
         working-directory: npm
         run: |
