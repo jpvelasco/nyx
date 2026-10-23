@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-10-23
+
+**Patch release.** Updates the Go toolchain and release tooling; no application source changes.
+
+### Fixed
+
+- **Certificate verification.** Builds now use Go 1.26.10, which includes the standard-library fix for distrusting compromised intermediate certificates (GO-2026-6809).
+- **Trusted npm publishing.** The release workflow pins npm 11.21.0 to satisfy trusted-publishing requirements.
+
+### Other
+
+- **CI and release dependencies.** Updates CodeQL actions to 4.39.0, GoReleaser action to 7.3.0, upload-artifact to 7.0.2, and download-artifact to 8.0.2.
+
 ## [Unreleased]
 
 ## [0.5.2] - 2026-10-11
@@ -334,7 +347,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.3
 [0.5.2]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.2
 [0.5.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.1
 [0.5.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.0
