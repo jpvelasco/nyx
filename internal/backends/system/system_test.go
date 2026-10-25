@@ -2,10 +2,12 @@ package system
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func TestClassifyInterface(t *testing.T) {
@@ -160,5 +162,35 @@ func TestCheckPingTarget(t *testing.T) {
 				t.Fatalf("checkPingTarget(%q) error = %v, wantErr %v", tt.target, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestPing_CommandErrorIsNotUnreachable pins that a ping usage/command
+// failure (exit code 2, unparseable output) is reported as an error, not
+// fabricated as 100% packet loss — a target/command error must never read
+// as evidence of an unreachable host (#189). The ping binary is shimmed
+// on PATH so the test is hermetic.
+func TestPing_CommandErrorIsNotUnreachable(t *testing.T) {
+	dir := t.TempDir()
+	name := "ping"
+	script := "#!/bin/sh\nusage: bad invocation\nexit 2\n"
+	if runtime.GOOS == "windows" {
+		name = "ping.bat"
+		script = "@echo off\r\necho usage: bad invocation\r\nexit /b 2\r\n"
+	}
+	shim := filepath.Join(dir, name)
+	if err := os.WriteFile(shim, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing ping shim: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	pr, err := Ping(ctx, "10.0.60.0/24")
+	if err == nil {
+		t.Fatalf("command failure must surface as an error, got %+v", pr)
+	}
+	if pr != nil && pr.Reachable == false && pr.PacketLoss == 100 {
+		t.Error("command failure was fabricated as 100% packet loss")
 	}
 }
