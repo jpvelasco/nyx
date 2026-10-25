@@ -160,10 +160,15 @@ func (c *Client) postOK(ctx context.Context, path string) error {
 
 // FindVLAN matches by uuid or parent+tag.
 func FindVLAN(rows []VLAN, uuid, parent string, tag int) (VLAN, bool) {
-	for _, v := range rows {
-		if uuid != "" && strings.EqualFold(v.UUID, uuid) {
-			return v, true
+	if uuid != "" {
+		for _, v := range rows {
+			if strings.EqualFold(v.UUID, uuid) {
+				return v, true
+			}
 		}
+		return VLAN{}, false
+	}
+	for _, v := range rows {
 		if parent != "" && tag > 0 && strings.EqualFold(v.Parent, parent) && v.Tag == tag {
 			return v, true
 		}
