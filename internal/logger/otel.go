@@ -173,7 +173,8 @@ func flattenValue(key string, v attribute.Value, out map[string]any) {
 
 // nyxProvider is the process-wide log pipeline: one OTel LoggerProvider
 // (PII-safe resource, simple synchronous processor) feeding the file
-// exporter.
+// exporter, plus a batch processor for the OTLP log exporter when OTLP
+// is configured (#137).
 type nyxProvider struct {
 	provider *sdklog.LoggerProvider
 	exporter *fileExporter
@@ -184,10 +185,17 @@ func newNyxProvider(path string, maxSize int64, maxFiles int) (*nyxProvider, err
 	if err != nil {
 		return nil, err
 	}
-	provider := sdklog.NewLoggerProvider(
+	opts := []sdklog.LoggerProviderOption{
 		sdklog.WithResource(exporter.res),
 		sdklog.WithProcessor(sdklog.NewSimpleProcessor(exporter)),
-	)
+	}
+	if otlpLog := TelemetryLogExporter(); otlpLog != nil {
+		// OTLP telemetry is initialized before the log pipeline: the same
+		// records stream to the configured collector (batched, best-effort)
+		// alongside the synchronous file write (#137).
+		opts = append(opts, sdklog.WithProcessor(sdklog.NewBatchProcessor(otlpLog)))
+	}
+	provider := sdklog.NewLoggerProvider(opts...)
 	return &nyxProvider{provider: provider, exporter: exporter}, nil
 }
 
@@ -205,9 +213,11 @@ var registeredProviders = new(sync.Map) // *nyxProvider -> struct{}
 
 func registerProvider(p *nyxProvider) { registeredProviders.Store(p, struct{}{}) }
 
-// Shutdown closes every pipeline created in this process. Safe to call more
-// than once.
+// Shutdown closes every pipeline created in this process — the OTLP
+// telemetry first (so its log exporter flushes before it closes), then
+// the log providers. Safe to call more than once.
 func Shutdown() {
+	telemetryShutdown()
 	registeredProviders.Range(func(k, _ any) bool {
 		registeredProviders.Delete(k)
 		_ = k.(*nyxProvider).Shutdown(context.Background())
