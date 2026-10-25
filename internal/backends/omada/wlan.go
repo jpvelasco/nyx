@@ -101,10 +101,17 @@ func FindSSID(rows []SSID, name string) (SSID, bool) {
 
 // SSIDMatchesWrite reports whether an existing SSID already has the
 // requested broadcast name, enable, VLAN, and security.
+// SSIDMatchesWrite reports whether an existing SSID already carries the
+// requested configuration. The broadcast SSID and band are compared as
+// exact bytes — SSIDs are case-sensitive on the air and band wire values
+// are canonical; the security mode is case-insensitive controller
+// vocabulary. The administrative name is compared too.
 func SSIDMatchesWrite(s SSID, w SSIDWrite) bool {
-	return strings.EqualFold(s.SSID, w.SSID) &&
+	return s.SSID == w.SSID &&
+		s.Name == w.Name &&
 		s.Enabled == w.Enabled &&
 		s.VLANID == w.VLANID &&
+		s.Band == w.Band &&
 		strings.EqualFold(s.Security, w.Security) &&
 		(w.WLANGroupID == "" || s.WLANGroupID == w.WLANGroupID)
 }
