@@ -1076,6 +1076,12 @@ type OpnsenseUnboundOverridePlan struct {
 	Hostname string `json:"hostname,omitempty"`
 	Domain   string `json:"domain,omitempty"`
 	IP       string `json:"ip,omitempty"`
+
+	// effective is the resolved update payload: requested fields overlay
+	// the existing record so a partial UUID update preserves hostname and
+	// domain instead of clearing them. Plan and apply share it, so the
+	// dry-run surfaces exactly what a real apply would send.
+	effective *opnsensebackend.UnboundHostWrite
 }
 
 // OpnsenseUnboundOverrideApplyResult is the apply outcome.
@@ -1118,10 +1124,27 @@ func (s *OpnsenseService) PlanUnboundOverride(ctx context.Context, opts Opnsense
 	}
 	if !ok {
 		plan.Action = "create"
+		plan.effective = &opnsensebackend.UnboundHostWrite{Hostname: req.Hostname, Domain: req.Domain, IP: req.IP, Description: req.Description}
 		return plan, nil
 	}
+	// Resolve one effective update payload from the existing record and the
+	// requested fields: omitted fields preserve the existing hostname,
+	// domain, IP, and description, so a partial UUID update cannot clear
+	// the record's identity. Plan and apply share this payload.
 	plan.UUID = cur.UUID
-	if opnsensebackend.UnboundOverrideMatches(cur, firstNonEmptySvc(req.Hostname, cur.Hostname), firstNonEmptySvc(req.Domain, cur.Domain), req.IP) {
+	eff := &opnsensebackend.UnboundHostWrite{
+		Hostname:    firstNonEmptySvc(req.Hostname, cur.Hostname),
+		Domain:      firstNonEmptySvc(req.Domain, cur.Domain),
+		IP:          firstNonEmptySvc(req.IP, cur.IP),
+		Description: firstNonEmptySvc(req.Description, cur.Description),
+	}
+	plan.effective = eff
+	// The plan surfaces the effective identity — the dry-run shows exactly
+	// what a real apply would send.
+	plan.Hostname = eff.Hostname
+	plan.Domain = eff.Domain
+	plan.IP = eff.IP
+	if opnsensebackend.UnboundOverrideMatches(cur, eff.Hostname, eff.Domain, eff.IP) {
 		plan.Action = "unchanged"
 		return plan, nil
 	}
@@ -1148,17 +1171,19 @@ func (s *OpnsenseService) ApplyUnboundOverride(ctx context.Context, opts Opnsens
 		return res, nil
 	}
 	client := s.client(opts)
-	w := opnsensebackend.UnboundHostWrite{Hostname: req.Hostname, Domain: req.Domain, IP: req.IP, Description: req.Description}
 	switch plan.Action {
 	case "create":
-		id, err := client.CreateUnboundOverride(ctx, w)
+		// The effective payload resolved during planning drives the write:
+		// omitted fields preserve the existing record's identity instead
+		// of sending empty strings (#182). Deletes carry no payload.
+		id, err := client.CreateUnboundOverride(ctx, *plan.effective)
 		if err != nil {
 			return nil, err
 		}
 		res.UUID = id
 		res.Outcome = "created"
 	case "update":
-		if err := client.SetUnboundOverride(ctx, plan.UUID, w); err != nil {
+		if err := client.SetUnboundOverride(ctx, plan.UUID, *plan.effective); err != nil {
 			return nil, err
 		}
 		res.Outcome = "updated"
@@ -1194,6 +1219,14 @@ type OpnsenseDHCPPlan struct {
 	Backend string `json:"backend"`
 	Kind    string `json:"kind"`
 	UUID    string `json:"uuid,omitempty"`
+
+	// effHost/effRange/effReservation carry the effective update payload
+	// resolved during planning: requested fields overlay the existing
+	// record so omitted fields preserve it, and the apply sends exactly
+	// what the plan compared — never empty strings for preserved fields.
+	effHost        *opnsensebackend.DnsmasqHostWrite
+	effRange       *opnsensebackend.DnsmasqRangeWrite
+	effReservation *opnsensebackend.KeaReservationWrite
 }
 
 // OpnsenseDHCPApplyResult is the apply outcome.
@@ -1275,10 +1308,22 @@ func planDnsmasq(ctx context.Context, client *opnsensebackend.Client, plan *Opns
 		}
 		if !ok {
 			plan.Action = "create"
+			plan.effHost = &opnsensebackend.DnsmasqHostWrite{Host: req.Hostname, IP: req.IP, MAC: req.MAC}
 			return plan, nil
 		}
 		plan.UUID = cur.UUID
-		if cur.IP == req.IP && strings.EqualFold(cur.Host, firstNonEmptySvc(req.Hostname, cur.Host)) {
+		// Resolve the effective requested values: omitted fields preserve
+		// the existing record, and every writable field participates in the
+		// comparison. A MAC-only change plans as an update; MAC comparison
+		// is normalized (case- and spacing-insensitive) so the stored form
+		// cannot mask a real change.
+		eff := &opnsensebackend.DnsmasqHostWrite{
+			Host: firstNonEmptySvc(req.Hostname, cur.Host),
+			IP:   firstNonEmptySvc(req.IP, cur.IP),
+			MAC:  firstNonEmptySvc(req.MAC, cur.MAC),
+		}
+		plan.effHost = eff
+		if strings.EqualFold(cur.Host, eff.Host) && cur.IP == eff.IP && sameMAC(cur.MAC, eff.MAC) {
 			plan.Action = "unchanged"
 			return plan, nil
 		}
@@ -1300,10 +1345,17 @@ func planDnsmasq(ctx context.Context, client *opnsensebackend.Client, plan *Opns
 	}
 	if !ok {
 		plan.Action = "create"
+		plan.effRange = &opnsensebackend.DnsmasqRangeWrite{Interface: req.Interface, Start: req.Start, End: req.End}
 		return plan, nil
 	}
 	plan.UUID = cur.UUID
-	if cur.Start == req.Start && cur.End == req.End && strings.EqualFold(cur.Interface, firstNonEmptySvc(req.Interface, cur.Interface)) {
+	effRange := &opnsensebackend.DnsmasqRangeWrite{
+		Interface: firstNonEmptySvc(req.Interface, cur.Interface),
+		Start:     firstNonEmptySvc(req.Start, cur.Start),
+		End:       firstNonEmptySvc(req.End, cur.End),
+	}
+	plan.effRange = effRange
+	if strings.EqualFold(cur.Interface, effRange.Interface) && cur.Start == effRange.Start && cur.End == effRange.End {
 		plan.Action = "unchanged"
 		return plan, nil
 	}
@@ -1332,10 +1384,20 @@ func planKea(ctx context.Context, client *opnsensebackend.Client, plan *Opnsense
 		}
 		if !ok {
 			plan.Action = "create"
+			plan.effReservation = &opnsensebackend.KeaReservationWrite{IP: req.IP, MAC: req.MAC, Hostname: req.Hostname}
 			return plan, nil
 		}
 		plan.UUID = cur.UUID
-		if cur.IP == req.IP && strings.EqualFold(cur.MAC, req.MAC) {
+		// Effective requested values: omitted fields preserve the existing
+		// reservation; hostname changes participate in the comparison so a
+		// hostname-only change plans as an update.
+		eff := &opnsensebackend.KeaReservationWrite{
+			IP:       firstNonEmptySvc(req.IP, cur.IP),
+			MAC:      firstNonEmptySvc(req.MAC, cur.MAC),
+			Hostname: firstNonEmptySvc(req.Hostname, cur.Hostname),
+		}
+		plan.effReservation = eff
+		if cur.IP == eff.IP && sameMAC(cur.MAC, eff.MAC) && strings.EqualFold(cur.Hostname, eff.Hostname) {
 			plan.Action = "unchanged"
 			return plan, nil
 		}
@@ -1409,18 +1471,28 @@ func (s *OpnsenseService) ApplyDHCP(ctx context.Context, opts OpnsenseOptions, r
 	return res, nil
 }
 
+// sameMAC compares two hardware addresses with controller-aware
+// normalization: case and surrounding whitespace are insignificant, so a
+// stored "02:00:00:00:00:01" and a requested "02:00:00:00:00:01" cannot
+// mask a real change.
+func sameMAC(a, b string) bool {
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+}
+
 func applyDnsmasq(ctx context.Context, client *opnsensebackend.Client, plan *OpnsenseDHCPPlan, req OpnsenseDHCPRequest, res *OpnsenseDHCPApplyResult) error {
 	if plan.Kind == "host" {
-		w := opnsensebackend.DnsmasqHostWrite{Host: req.Hostname, IP: req.IP, MAC: req.MAC}
 		switch plan.Action {
 		case "create":
-			id, err := client.CreateDnsmasqHost(ctx, w)
+			// The effective payload resolved during planning drives the
+			// write: omitted fields preserve the existing record's values
+			// (#183). Deletes carry no payload.
+			id, err := client.CreateDnsmasqHost(ctx, *plan.effHost)
 			if err != nil {
 				return err
 			}
 			res.UUID, res.Outcome = id, "created"
 		case "update":
-			if err := client.SetDnsmasqHost(ctx, plan.UUID, w); err != nil {
+			if err := client.SetDnsmasqHost(ctx, plan.UUID, *plan.effHost); err != nil {
 				return err
 			}
 			res.Outcome = "updated"
@@ -1432,16 +1504,15 @@ func applyDnsmasq(ctx context.Context, client *opnsensebackend.Client, plan *Opn
 		}
 		return nil
 	}
-	w := opnsensebackend.DnsmasqRangeWrite{Interface: req.Interface, Start: req.Start, End: req.End}
 	switch plan.Action {
 	case "create":
-		id, err := client.CreateDnsmasqRange(ctx, w)
+		id, err := client.CreateDnsmasqRange(ctx, *plan.effRange)
 		if err != nil {
 			return err
 		}
 		res.UUID, res.Outcome = id, "created"
 	case "update":
-		if err := client.SetDnsmasqRange(ctx, plan.UUID, w); err != nil {
+		if err := client.SetDnsmasqRange(ctx, plan.UUID, *plan.effRange); err != nil {
 			return err
 		}
 		res.Outcome = "updated"
@@ -1456,16 +1527,18 @@ func applyDnsmasq(ctx context.Context, client *opnsensebackend.Client, plan *Opn
 
 func applyKea(ctx context.Context, client *opnsensebackend.Client, plan *OpnsenseDHCPPlan, req OpnsenseDHCPRequest, res *OpnsenseDHCPApplyResult) error {
 	if plan.Kind == "reservation" {
-		w := opnsensebackend.KeaReservationWrite{IP: req.IP, MAC: req.MAC, Hostname: req.Hostname}
 		switch plan.Action {
 		case "create":
-			id, err := client.CreateKeaReservation(ctx, w)
+			// The effective payload resolved during planning drives the
+			// write: omitted fields preserve the existing reservation
+			// (#183). Deletes carry no payload.
+			id, err := client.CreateKeaReservation(ctx, *plan.effReservation)
 			if err != nil {
 				return err
 			}
 			res.UUID, res.Outcome = id, "created"
 		case "update":
-			if err := client.SetKeaReservation(ctx, plan.UUID, w); err != nil {
+			if err := client.SetKeaReservation(ctx, plan.UUID, *plan.effReservation); err != nil {
 				return err
 			}
 			res.Outcome = "updated"
