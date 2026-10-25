@@ -356,7 +356,7 @@ func TestSaveWriteError(t *testing.T) {
 		if err := os.Chmod(filepath.Dir(path), 0500); err != nil {
 			t.Fatalf("Chmod failed: %v", err)
 		}
-		defer os.Chmod(filepath.Dir(path), 0700)
+		defer os.Chmod(filepath.Dir(path), 0700) // nosemgrep — 0700 is the least-privilege permission for a directory
 	}
 	if err := s.Set("omada", "default", Entry{"host": "h2"}); err == nil {
 		t.Error("Set against an unwritable store location should fail")

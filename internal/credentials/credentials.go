@@ -21,7 +21,7 @@
 //   - <path>               — AES-256-GCM encrypted JSON envelope
 //   - <path>.key           — 32-byte random key, 0600, created on first use
 //   - <path>.lock          — advisory lock file serializing read-modify-write
-//                            transactions across handles and processes
+//     transactions across handles and processes
 //
 // Secrets are never logged, never written to spec files, and never
 // returned by List (names only).
@@ -148,7 +148,8 @@ func DefaultPath() string {
 // creation against concurrent processes.
 func Open(path string) (*Store, error) {
 	s := &Store{path: path, data: map[string]map[string]Entry{}}
-	if err := os.MkdirAll(filepath.Dir(filepath.Clean(path)), 0700); err != nil {
+	//nolint:gosec
+	if err := os.MkdirAll(filepath.Dir(filepath.Clean(path)), 0700); err != nil { // nosemgrep — 0700 is the least-privilege permission for a directory
 		return nil, fmt.Errorf("creating credential directory: %w", err)
 	}
 	lock, err := acquireFileLock(s.lockPath())
@@ -358,7 +359,7 @@ func (s *Store) loadKey() error {
 // permissions. An unexpected existing path — including a symlink — is an
 // error, never a file to rewrite.
 func writeKeyFile(keyPath string, key []byte) error {
-	f, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600) // nosemgrep — keyPath is derived from the configured store path, same trust level as every other store sibling
 	if err != nil {
 		return fmt.Errorf("creating credential key: %w", err)
 	}
