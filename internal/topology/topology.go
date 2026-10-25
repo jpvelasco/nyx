@@ -241,8 +241,9 @@ type DeviceReport struct {
 // gateway points at the managed gateway is a LAN client and is excluded from
 // the path count; extra NAT-configured devices off the path yield
 // "multiple_nat_configured" instead of a path-claiming double_nat. An
-// on-path indeterminate device still counts as a potential second NAT point
-// (conservative); two unknowns alone only yield "indeterminate".
+// on-path indeterminate or unobserved (unknown) device still counts as a
+// potential second NAT point (conservative); unknowns alone yield
+// "indeterminate" — missing facts never read as a confirmed non-NAT device.
 func BuildReport(facts []DeviceFacts) *Report {
 	rep := &Report{Devices: make([]DeviceReport, 0, len(facts))}
 	var path, off natCounts
@@ -259,13 +260,13 @@ func BuildReport(facts []DeviceFacts) *Report {
 	case path.nats >= 2:
 		rep.Risk = RiskDouble
 		rep.Reason = strconv.Itoa(path.nats) + " observed devices on the egress path perform source NAT; outbound traffic will be rewritten more than once"
-	case path.nats == 1 && path.indets > 0:
+	case path.nats == 1 && (path.indets > 0 || path.unknowns > 0):
 		rep.Risk = RiskDouble
-		rep.Reason = "one device on the egress path performs source NAT and at least one other on the path is indeterminate; verify the " +
-			"indeterminate device is not source-NATing (double NAT risk)"
-	case path.nats == 0 && path.indets >= 1:
+		rep.Reason = "one device on the egress path performs source NAT and at least one other on the path is " +
+			"indeterminate or unobserved; verify that device is not source-NATing (double NAT risk)"
+	case path.nats == 0 && (path.indets >= 1 || path.unknowns >= 1):
 		rep.Risk = RiskIndeterminate
-		rep.Reason = "no confirmed source-NAT device on the egress path, but the NAT posture of at least one on-path device is indeterminate"
+		rep.Reason = "no confirmed source-NAT device on the egress path, but the NAT posture of at least one on-path device is indeterminate or unobserved"
 	case off.total() > 0 && path.total()+off.total() >= 2:
 		rep.Risk = RiskMultipleConfigured
 		rep.Reason = strconv.Itoa(path.nats+off.nats) + " devices have source-NAT configured, but they are not on the same egress path; " +
@@ -277,9 +278,13 @@ func BuildReport(facts []DeviceFacts) *Report {
 	return rep
 }
 
-// natCounts tallies source-NAT and indeterminate devices for one path bucket.
+// natCounts tallies source-NAT, indeterminate, and unobserved devices for
+// one path bucket. Unknown devices are tracked separately: they carry no
+// NAT configuration facts, so they never count toward the configured
+// totals, but their presence keeps the verdict indeterminate instead of
+// treating an unmeasured device as a confirmed non-NAT device.
 type natCounts struct {
-	nats, indets int
+	nats, indets, unknowns int
 }
 
 func (c *natCounts) add(role NatRole) {
@@ -288,7 +293,11 @@ func (c *natCounts) add(role NatRole) {
 		c.nats++
 	case RoleIndeterminate:
 		c.indets++
+	case RoleUnknown:
+		c.unknowns++
 	}
 }
 
+// total counts devices with observed (or conflicting) NAT configuration
+// facts. Unknowns are excluded: they have no configuration to report.
 func (c natCounts) total() int { return c.nats + c.indets }
