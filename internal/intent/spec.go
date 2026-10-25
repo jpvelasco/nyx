@@ -371,6 +371,12 @@ func validateNetworkHealthAssertion(i int, a *Assertion) error {
 	if err := ValidateTarget(a.Target); err != nil {
 		return fmt.Errorf("assertion[%d]: network_health: %w", i, err)
 	}
+	if a.Runner != "" && a.Runner != "local" && a.ExpectMTU > 0 {
+		// The probe network_health command measures reachability, latency,
+		// and loss only — a declared MTU expectation would be silently
+		// unevaluated on the remote path, so reject it up front.
+		return fmt.Errorf("assertion[%d]: network_health: expect_mtu is not supported by probe runners — the probe measures reachability, latency, and loss only", i)
+	}
 	return nil
 }
 

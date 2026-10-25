@@ -2664,3 +2664,87 @@ func TestLocalRunnerContext_BestIfaceFound(t *testing.T) {
 	ctx := localRunnerContext(spec, "")
 	_ = ctx
 }
+
+// --- parseProbeOutput: network_health thresholds (#187) ---
+
+const probeHealthPingOutput = `PING 10.0.40.1 (10.0.40.1) 56(84) bytes of data.
+64 bytes from 10.0.40.1: icmp_seq=1 ttl=64 time=480.1 ms
+64 bytes from 10.0.40.1: icmp_seq=2 ttl=64 time=500.2 ms
+64 bytes from 10.0.40.1: icmp_seq=3 ttl=64 time=520.3 ms
+
+--- 10.0.40.1 ping statistics ---
+3 packets transmitted, 2 received, 33% packet loss, time 2003ms
+rtt min/avg/max/mdev = 480.1/500.2/520.3/16.7 ms`
+
+func TestParseProbeOutput_HealthThresholdsExceededIsFail(t *testing.T) {
+	// A probe-backed network_health assertion with declared latency/loss
+	// limits must evaluate them against the remote measurement: 500ms avg
+	// against a 1ms limit and 33% loss against a 1% limit can never pass.
+	result := models.NewCheckResult("probe", "network_health", "probe1", "10.0.40.1")
+	a := intent.Assertion{Type: "network_health", Target: "10.0.40.1", Runner: "probe1",
+		ExpectLatencyMs: 1, ExpectLossPct: 1}
+	got := parseProbeOutput(result, a, probeHealthPingOutput, false)
+	if got.Status != models.StatusFail {
+		t.Errorf("expected fail for exceeded thresholds, got %s: %s", got.Status, got.Summary)
+	}
+	joined := strings.Join(got.Violations, "; ")
+	if !strings.Contains(joined, "latency") || !strings.Contains(joined, "loss") {
+		t.Errorf("violations should name both exceeded limits, got %v", got.Violations)
+	}
+}
+
+func TestParseProbeOutput_HealthWithinThresholdsIsPass(t *testing.T) {
+	const healthyOutput = `PING 10.0.40.1 (10.0.40.1) 56(84) bytes of data.
+64 bytes from 10.0.40.1: icmp_seq=1 ttl=64 time=0.2 ms
+64 bytes from 10.0.40.1: icmp_seq=2 ttl=64 time=0.3 ms
+64 bytes from 10.0.40.1: icmp_seq=3 ttl=64 time=0.4 ms
+
+--- 10.0.40.1 ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2003ms
+rtt min/avg/max/mdev = 0.2/0.3/0.4/0.1 ms`
+	result := models.NewCheckResult("probe", "network_health", "probe1", "10.0.40.1")
+	a := intent.Assertion{Type: "network_health", Target: "10.0.40.1", Runner: "probe1",
+		ExpectLatencyMs: 5, ExpectLossPct: 5}
+	got := parseProbeOutput(result, a, healthyOutput, false)
+	if got.Status != models.StatusPass {
+		t.Errorf("expected pass within thresholds, got %s: %s", got.Status, got.Summary)
+	}
+}
+
+func TestParseProbeOutput_HealthWithoutThresholdsKeepsReachabilityVerdict(t *testing.T) {
+	// No declared thresholds: the remote path keeps its basic reachability
+	// semantics (unchanged behavior).
+	result := models.NewCheckResult("probe", "network_health", "probe1", "10.0.40.1")
+	a := intent.Assertion{Type: "network_health", Target: "10.0.40.1", Runner: "probe1"}
+	got := parseProbeOutput(result, a, probeHealthPingOutput, false)
+	if got.Status != models.StatusPass {
+		t.Errorf("expected pass for plain reachability (no thresholds), got %s", got.Status)
+	}
+}
+
+func TestParseProbeOutput_HealthThresholdsWindowsOutput(t *testing.T) {
+	// A probe host may run a different OS than the local machine, so the
+	// threshold evaluation must recognize the output format from content.
+	// Windows ping output reporting 500ms average against a 1ms limit and
+	// 33% loss against a 1% limit must fail on every runner platform.
+	const windowsOutput = `Pinging 10.0.40.1 with 32 bytes of data:
+Reply from 10.0.40.1: bytes=32 time=480ms TTL=64
+Reply from 10.0.40.1: bytes=32 time=500ms TTL=64
+Request timed out.
+
+Ping statistics for 10.0.40.1:
+    Packets: Sent = 3, Received = 2, Lost = 1 (33% loss),
+Approximate round trip times in milli-seconds:
+    Minimum = 480ms, Maximum = 520ms, Average = 500ms`
+	result := models.NewCheckResult("probe", "network_health", "probe1", "10.0.40.1")
+	a := intent.Assertion{Type: "network_health", Target: "10.0.40.1", Runner: "probe1",
+		ExpectLatencyMs: 1, ExpectLossPct: 1}
+	got := parseProbeOutput(result, a, windowsOutput, false)
+	if got.Status != models.StatusFail {
+		t.Errorf("expected fail for exceeded thresholds in Windows-format output, got %s: %s", got.Status, got.Summary)
+	}
+	joined := strings.Join(got.Violations, "; ")
+	if !strings.Contains(joined, "latency") || !strings.Contains(joined, "loss") {
+		t.Errorf("violations should name both exceeded limits, got %v", got.Violations)
+	}
+}
