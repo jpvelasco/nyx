@@ -1,11 +1,14 @@
 package credentials
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -341,12 +344,22 @@ func TestSaveWriteError(t *testing.T) {
 	if err := s.Set("omada", "default", Entry{"host": "h"}); err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
-	if err := os.Chmod(path, 0400); err != nil {
-		t.Fatalf("Chmod failed: %v", err)
+	if runtime.GOOS == "windows" {
+		// Windows refuses to replace a read-only file; POSIX rename
+		// ignores target permissions, so the write barrier there is
+		// the directory.
+		if err := os.Chmod(path, 0400); err != nil {
+			t.Fatalf("Chmod failed: %v", err)
+		}
+		defer os.Chmod(path, 0600)
+	} else {
+		if err := os.Chmod(filepath.Dir(path), 0500); err != nil {
+			t.Fatalf("Chmod failed: %v", err)
+		}
+		defer os.Chmod(filepath.Dir(path), 0700)
 	}
-	defer os.Chmod(path, 0600)
 	if err := s.Set("omada", "default", Entry{"host": "h2"}); err == nil {
-		t.Error("Set against a read-only store should fail")
+		t.Error("Set against an unwritable store location should fail")
 	}
 }
 
@@ -371,5 +384,190 @@ func TestLoadUnmarshalError(t *testing.T) {
 	}
 	if _, err := Open(path); err == nil {
 		t.Error("Open with undecodable plaintext should fail")
+	}
+}
+
+func TestOpenCreatesMissingParentDirectory(t *testing.T) {
+	// A custom store path pointing into a directory that does not exist
+	// yet must initialize the directory, the sibling key, and the store
+	// instead of failing on the first key write.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "new-directory", "credentials.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on missing parent directory: %v", err)
+	}
+	entry := Entry{"host": "iot.example", "username": "probe", "key": "fixture-key"}
+	if err := s.Set("probe", "iot-probe", entry); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen failed: %v", err)
+	}
+	got, ok := reopened.Get("probe", "iot-probe")
+	if !ok {
+		t.Fatal("entry missing after reopen")
+	}
+	if got["host"] != "iot.example" {
+		t.Errorf("entry host = %q, want iot.example", got["host"])
+	}
+}
+
+func TestOverlappingHandlesKeepDistinctWrites(t *testing.T) {
+	// Two independently opened handles must not silently discard each
+	// other's successful writes.
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	a, err := Open(path)
+	if err != nil {
+		t.Fatalf("open A: %v", err)
+	}
+	b, err := Open(path)
+	if err != nil {
+		t.Fatalf("open B: %v", err)
+	}
+	if err := a.Set("probe", "iot-probe", Entry{"host": "iot.example"}); err != nil {
+		t.Fatalf("A.Set: %v", err)
+	}
+	if err := b.Set("probe", "servers-probe", Entry{"host": "servers.example"}); err != nil {
+		t.Fatalf("B.Set: %v", err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	for _, name := range []string{"iot-probe", "servers-probe"} {
+		if _, ok := reopened.Get("probe", name); !ok {
+			t.Errorf("entry %q missing after overlapping writes", name)
+		}
+	}
+}
+
+func TestOverlappingHandleRemoveKeepsNewerAdditions(t *testing.T) {
+	// A stale handle's removal must not discard entries another handle
+	// added after this handle last read the store.
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	a, err := Open(path)
+	if err != nil {
+		t.Fatalf("open A: %v", err)
+	}
+	if err := a.Set("probe", "old-probe", Entry{"host": "iot.example"}); err != nil {
+		t.Fatalf("A.Set old-probe: %v", err)
+	}
+	b, err := Open(path)
+	if err != nil {
+		t.Fatalf("open B: %v", err)
+	}
+	if err := b.Set("probe", "servers-probe", Entry{"host": "servers.example"}); err != nil {
+		t.Fatalf("B.Set: %v", err)
+	}
+	if err := a.Remove("probe", "old-probe"); err != nil {
+		t.Fatalf("A.Remove old-probe: %v", err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if _, ok := reopened.Get("probe", "old-probe"); ok {
+		t.Error("old-probe still present after removal")
+	}
+	if _, ok := reopened.Get("probe", "servers-probe"); !ok {
+		t.Error("servers-probe lost by stale handle removal")
+	}
+}
+
+func TestConcurrentSetAllPersist(t *testing.T) {
+	// Concurrent writers (independent handles in separate goroutines,
+	// exercising the same cross-process lock path) must all persist.
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	const writers = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, writers*2)
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			s, err := Open(path)
+			if err != nil {
+				errs <- err
+				return
+			}
+			name := fmt.Sprintf("probe-%d", i)
+			errs <- s.Set("probe", name, Entry{"host": "iot.example"})
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent writer: %v", err)
+		}
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	for i := 0; i < writers; i++ {
+		name := fmt.Sprintf("probe-%d", i)
+		if _, ok := reopened.Get("probe", name); !ok {
+			t.Errorf("entry %q lost to concurrent writers", name)
+		}
+	}
+}
+
+func TestKeyReadFailurePreservesOriginalKey(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Symlink requires developer mode on Windows")
+	}
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	if err := s.Set("probe", "iot-probe", Entry{"host": "iot.example"}); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+	original, err := os.ReadFile(path + ".key") // nosemgrep: go_filesystem_rule-fileread
+	if err != nil {
+		t.Fatalf("read key: %v", err)
+	}
+
+	// Replace the key with a symlink escaping the store directory. The
+	// store must reject the unreadable key without overwriting the
+	// original key bytes.
+	elsewhere := filepath.Join(t.TempDir(), "escaped.key")
+	if err := os.WriteFile(elsewhere, original, 0600); err != nil {
+		t.Fatalf("write escaped key: %v", err)
+	}
+	if err := os.Remove(path + ".key"); err != nil {
+		t.Fatalf("remove key: %v", err)
+	}
+	if err := os.Symlink(elsewhere, path+".key"); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, err := Open(path); err == nil {
+		t.Fatal("Open with escaping key symlink should fail")
+	}
+	current, err := os.ReadFile(elsewhere) // nosemgrep: go_filesystem_rule-fileread
+	if err != nil {
+		t.Fatalf("read original key: %v", err)
+	}
+	if !bytes.Equal(original, current) {
+		t.Error("original key bytes were overwritten after a failed read")
+	}
+
+	// The ciphertext must still decrypt with the untouched original key.
+	if err := os.Remove(path + ".key"); err != nil {
+		t.Fatalf("remove symlink: %v", err)
+	}
+	if err := os.WriteFile(path+".key", original, 0600); err != nil {
+		t.Fatalf("restore key: %v", err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen after key restore: %v", err)
+	}
+	if _, ok := reopened.Get("probe", "iot-probe"); !ok {
+		t.Error("entry lost after key read failure")
 	}
 }

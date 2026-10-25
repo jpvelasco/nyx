@@ -20,6 +20,8 @@
 // Storage layout:
 //   - <path>               — AES-256-GCM encrypted JSON envelope
 //   - <path>.key           — 32-byte random key, 0600, created on first use
+//   - <path>.lock          — advisory lock file serializing read-modify-write
+//                            transactions across handles and processes
 //
 // Secrets are never logged, never written to spec files, and never
 // returned by List (names only).
@@ -32,10 +34,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Entry is a single credential record: a set of string fields whose keys
@@ -117,6 +121,11 @@ type Store struct {
 	path string
 	key  []byte
 	data map[string]map[string]Entry // provider → name → entry
+
+	// mu guards the in-memory data map within this handle. The sibling
+	// lock file serializes read-modify-write transactions across handles
+	// and processes.
+	mu sync.Mutex
 }
 
 // ErrNotFound is returned when a provider/name combination has no entry.
@@ -133,8 +142,20 @@ func DefaultPath() string {
 
 // Open loads (or initializes) the store at path. The encryption key is
 // read from a sibling <path>.key file, created on first use.
+//
+// The store directory is created when missing so a custom store path can
+// initialize cleanly, and the sibling lock file serializes first-use key
+// creation against concurrent processes.
 func Open(path string) (*Store, error) {
 	s := &Store{path: path, data: map[string]map[string]Entry{}}
+	if err := os.MkdirAll(filepath.Dir(filepath.Clean(path)), 0700); err != nil {
+		return nil, fmt.Errorf("creating credential directory: %w", err)
+	}
+	lock, err := acquireFileLock(s.lockPath())
+	if err != nil {
+		return nil, fmt.Errorf("locking credential store: %w", err)
+	}
+	defer lock.release()
 	if err := s.loadKey(); err != nil {
 		return nil, err
 	}
@@ -152,11 +173,13 @@ func (s *Store) Set(provider, name string, entry Entry) error {
 	if len(entry) == 0 {
 		return errors.New("entry must contain at least one field")
 	}
-	if s.data[provider] == nil {
-		s.data[provider] = map[string]Entry{}
-	}
-	s.data[provider][name] = entry
-	return s.save()
+	return s.mutate(func(data map[string]map[string]Entry) error {
+		if data[provider] == nil {
+			data[provider] = map[string]Entry{}
+		}
+		data[provider][name] = entry
+		return nil
+	})
 }
 
 // Fields is the typed overlay target for provider credentials. A struct
@@ -213,6 +236,8 @@ func Overlay(path, provider, name string, dest *Fields) {
 
 // Get returns the stored entry. ok is false when the entry does not exist.
 func (s *Store) Get(provider, name string) (Entry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.data[provider] == nil {
 		return nil, false
 	}
@@ -230,6 +255,8 @@ func (s *Store) Get(provider, name string) (Entry, bool) {
 // List returns the entry names for a provider, sorted. It never returns
 // stored values.
 func (s *Store) List(provider string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	names := make([]string, 0, len(s.data[provider]))
 	for name := range s.data[provider] {
 		names = append(names, name)
@@ -240,21 +267,55 @@ func (s *Store) List(provider string) []string {
 
 // Remove deletes an entry. Returns ErrNotFound when it does not exist.
 func (s *Store) Remove(provider, name string) error {
-	if s.data[provider] == nil {
-		return ErrNotFound
+	return s.mutate(func(data map[string]map[string]Entry) error {
+		providerEntries, ok := data[provider]
+		if !ok {
+			return ErrNotFound
+		}
+		if _, ok := providerEntries[name]; !ok {
+			return ErrNotFound
+		}
+		delete(providerEntries, name)
+		if len(providerEntries) == 0 {
+			delete(data, provider)
+		}
+		return nil
+	})
+}
+
+// mutate runs a read-modify-write transaction against the store file: it
+// takes the sibling lock file, reloads the latest content so concurrent
+// handles and processes merge instead of overwriting each other, applies
+// fn, and atomically replaces the file. The lock also keeps first-use key
+// creation races from producing divergent keys.
+func (s *Store) mutate(fn func(data map[string]map[string]Entry) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	lock, err := acquireFileLock(s.lockPath())
+	if err != nil {
+		return fmt.Errorf("locking credential store: %w", err)
 	}
-	if _, ok := s.data[provider][name]; !ok {
-		return ErrNotFound
+	defer lock.release()
+
+	data, err := readStore(s.path, s.key)
+	if err != nil {
+		return err
 	}
-	delete(s.data[provider], name)
-	if len(s.data[provider]) == 0 {
-		delete(s.data, provider)
+	if err := fn(data); err != nil {
+		return err
 	}
-	return s.save()
+	if err := writeStore(s.path, data, s.key); err != nil {
+		return err
+	}
+	s.data = data
+	return nil
 }
 
 // Providers returns the sorted set of providers that have at least one entry.
 func (s *Store) Providers() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	providers := make([]string, 0, len(s.data))
 	for p := range s.data {
 		providers = append(providers, p)
@@ -263,26 +324,53 @@ func (s *Store) Providers() []string {
 	return providers
 }
 
-// loadKey reads the 32-byte AES key, generating and persisting it on first use.
+// loadKey reads the 32-byte AES key, generating and persisting it on first
+// use. Only a genuinely missing key file starts first-use creation; every
+// other read failure is propagated so an unreadable key (an escaping
+// symlink, a permission problem) can never be treated as first use and
+// overwritten, which would destroy the existing ciphertext.
 func (s *Store) loadKey() error {
 	keyPath := s.keyPath()
-	if data, err := s.readKey(); err == nil {
-		if len(data) == 32 {
-			s.key = data
-			return nil
+	data, err := s.readKey()
+	switch {
+	case err == nil:
+		if len(data) != 32 {
+			return fmt.Errorf("credential key %s has invalid length %d", keyPath, len(data))
 		}
-		return fmt.Errorf("credential key %s has invalid length %d", keyPath, len(data))
+		s.key = data
+		return nil
+	case errors.Is(err, fs.ErrNotExist):
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return fmt.Errorf("generating credential key: %w", err)
+		}
+		if err := writeKeyFile(keyPath, key); err != nil {
+			return err
+		}
+		s.key = key
+		return nil
+	default:
+		return fmt.Errorf("reading credential key: %w", err)
 	}
+}
 
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		return fmt.Errorf("generating credential key: %w", err)
+// writeKeyFile creates the key file exclusively with owner-only
+// permissions. An unexpected existing path — including a symlink — is an
+// error, never a file to rewrite.
+func writeKeyFile(keyPath string, key []byte) error {
+	f, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return fmt.Errorf("creating credential key: %w", err)
 	}
-	//nolint:gosec
-	if err := os.WriteFile(keyPath, key, 0600); err != nil { // nosemgrep
+	if _, err := f.Write(key); err != nil {
+		f.Close()
+		os.Remove(keyPath)
 		return fmt.Errorf("writing credential key: %w", err)
 	}
-	s.key = key
+	if err := f.Close(); err != nil {
+		os.Remove(keyPath)
+		return fmt.Errorf("writing credential key: %w", err)
+	}
 	return nil
 }
 
@@ -308,42 +396,77 @@ func (s *Store) keyPath() string {
 	return filepath.Join(filepath.Dir(cleanPath), filepath.Base(cleanPath)+".key")
 }
 
-// load reads and decrypts the store file. A missing file means an empty store.
-func (s *Store) load() error {
-	raw, err := os.ReadFile(s.path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("reading credential store: %w", err)
-	}
-	plain, err := decrypt(raw, s.key)
-	if err != nil {
-		return fmt.Errorf("decrypting credential store (was it tampered with or re-created?): %w", err)
-	}
-	if err := json.Unmarshal(plain, &s.data); err != nil {
-		return fmt.Errorf("decoding credential store: %w", err)
-	}
-	return nil
+// lockPath returns the advisory lock file beside the configured store file.
+// It serializes read-modify-write transactions across handles and processes.
+func (s *Store) lockPath() string {
+	cleanPath := filepath.Clean(s.path)
+	return filepath.Join(filepath.Dir(cleanPath), filepath.Base(cleanPath)+".lock")
 }
 
-// save encrypts and writes the store file with owner-only permissions.
-func (s *Store) save() error {
-	plain, err := json.Marshal(s.data)
-	if err != nil {
-		return fmt.Errorf("encoding credential store: %w", err)
-	}
-	sealed, err := encrypt(plain, s.key)
+// load reads and decrypts the store file into the handle.
+func (s *Store) load() error {
+	data, err := readStore(s.path, s.key)
 	if err != nil {
 		return err
 	}
-	//nolint:gosec
-	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil { // nosemgrep
-		return fmt.Errorf("creating credential directory: %w", err)
+	s.data = data
+	return nil
+}
+
+// readStore decrypts and decodes the store file at path. A missing file
+// means an empty store.
+func readStore(path string, key []byte) (map[string]map[string]Entry, error) {
+	data := map[string]map[string]Entry{}
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return data, nil
 	}
-	//nolint:gosec
-	if err := os.WriteFile(s.path, sealed, 0600); err != nil { // nosemgrep
+	if err != nil {
+		return nil, fmt.Errorf("reading credential store: %w", err)
+	}
+	plain, err := decrypt(raw, key)
+	if err != nil {
+		return nil, fmt.Errorf("decrypting credential store (was it tampered with or re-created?): %w", err)
+	}
+	if err := json.Unmarshal(plain, &data); err != nil {
+		return nil, fmt.Errorf("decoding credential store: %w", err)
+	}
+	if data == nil {
+		data = map[string]map[string]Entry{}
+	}
+	return data, nil
+}
+
+// writeStore encrypts data and atomically replaces the store file so a
+// crash or a concurrent reader never observes a partial store.
+func writeStore(path string, data map[string]map[string]Entry, key []byte) error {
+	plain, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("encoding credential store: %w", err)
+	}
+	sealed, err := encrypt(plain, key)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(filepath.Clean(path))
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-")
+	if err != nil {
 		return fmt.Errorf("writing credential store: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the file has been renamed
+	if _, err := tmp.Write(sealed); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing credential store: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("writing credential store: %w", err)
+	}
+	if err := os.Chmod(tmpName, 0600); err != nil {
+		return fmt.Errorf("writing credential store: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("replacing credential store: %w", err)
 	}
 	return nil
 }
