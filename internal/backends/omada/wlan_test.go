@@ -90,12 +90,44 @@ func TestFindSSIDAndMatch(t *testing.T) {
 	if !ok || got.ID != "s1" {
 		t.Fatalf("FindSSID = %+v %v", got, ok)
 	}
-	w := SSIDWrite{SSID: "iot", Enabled: true, VLANID: 60, Security: "wpa2"}
+	// The service conversion always derives Name (from the request's name
+	// or ssid), so a real write payload always carries it.
+	w := SSIDWrite{Name: "iot-wifi", SSID: "iot", Enabled: true, VLANID: 60, Security: "wpa2"}
 	if !SSIDMatchesWrite(got, w) {
 		t.Fatal("want match")
 	}
 	w.VLANID = 1
 	if SSIDMatchesWrite(got, w) {
 		t.Fatal("want mismatch")
+	}
+}
+
+// TestSSIDMatchesWrite_BandAndCaseChangesCount reproduces #181: band-only
+// and broadcast-SSID case-only changes must produce an update, not a
+// false no-op. Broadcast SSIDs are case-sensitive on the air.
+func TestSSIDMatchesWrite_BandAndCaseChangesCount(t *testing.T) {
+	s := SSID{Name: "iot-wifi", SSID: "iot", Enabled: true, VLANID: 60, Security: "wpa2", Band: "2.4GHz"}
+	base := SSIDWrite{Name: "iot-wifi", SSID: "iot", Enabled: true, VLANID: 60, Security: "wpa2", Band: "2.4GHz"}
+
+	if !SSIDMatchesWrite(s, base) {
+		t.Fatal("identical write must match")
+	}
+
+	bandChanged := base
+	bandChanged.Band = "5GHz"
+	if SSIDMatchesWrite(s, bandChanged) {
+		t.Error("band-only change must not be a no-op")
+	}
+
+	caseChanged := base
+	caseChanged.SSID = "IOT"
+	if SSIDMatchesWrite(s, caseChanged) {
+		t.Error("broadcast-SSID case change must not be a no-op (SSIDs are case-sensitive)")
+	}
+
+	nameChanged := base
+	nameChanged.Name = "iot-admin-renamed"
+	if SSIDMatchesWrite(s, nameChanged) {
+		t.Error("administrative-name change must not be a no-op")
 	}
 }
