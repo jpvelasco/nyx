@@ -321,8 +321,12 @@ func TestHandleToolsList_Shape(t *testing.T) {
 }
 
 // BDD S3.1 — credential arguments are optional in the input schemas: the
-// tools/list Required lists carry only the arguments that have no env/store
-// fallback, so an agent with configured credentials need not pass them.
+// tools/list Required lists carry only the arguments that have no
+// env/credential-store fallback. The host argument resolves from
+// OMADA_HOST / OPNSENSE_HOST (and the store for credential-bearing
+// calls), so it is never required; an agent with configured credentials
+// need not pass any connection argument. Runtime validation reports the
+// actionable error when every supported source is empty (#170).
 func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 	server := newTestServer()
 	server.handleInitialize(&jsonRPCRequest{ID: json.RawMessage(`1`)})
@@ -336,71 +340,21 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 		byName[tl.Name] = tl
 	}
 
+	// Operation-specific requirements survive; host never appears.
 	want := map[string][]string{
-		"omada_list_networks":              {"host"},
-		"omada_list_acls":                  {"host"},
-		"omada_list_clients":               {"host"},
-		"omada_inventory":                  {"host"},
-		"omada_import":                     {"host"},
-		"omada_plan":                       {"host", "spec"},
-		"omada_apply_acl":                  {"host", "from", "to", "action"},
-		"omada_list_port_forwardings":      {"host"},
-		"omada_list_one_to_one_nat":        {"host"},
-		"omada_get_nat_settings":           {"host"},
-		"omada_nat_facts":                  {"host"},
-		"omada_get_uplink_info":            {"host", "device_mac"},
-		"omada_list_switch_ports":          {"host"},
-		"omada_list_lan_profiles":          {"host"},
-		"omada_list_gateway_dhcp_users":    {"host", "gateway_mac"},
-		"omada_get_client_topology":        {"host", "client_mac"},
-		"omada_dhcp_path":                  {"host"},
-		"omada_get_dhcp_server_info":       {"host", "network_id"},
-		"omada_get_dhcp_snoop_status":      {"host"},
-		"omada_list_dhcp_snoops":           {"host"},
-		"omada_list_lan_multicasts":        {"host"},
-		"omada_plan_port":                  {"host", "switch_mac", "port", "native"},
-		"omada_apply_port_profile":         {"host", "switch_mac", "port", "native"},
-		"omada_plan_lan":                   {"host", "name"},
-		"omada_apply_lan":                  {"host", "name"},
-		"omada_list_ssids":                 {"host"},
-		"omada_plan_ssid":                  {"host"},
-		"omada_apply_ssid":                 {"host"},
-		"opnsense_list_vlans":              {"host"},
-		"opnsense_plan_vlan":               {"host"},
-		"opnsense_apply_vlan":              {"host"},
-		"opnsense_plan_filter":             {"host"},
-		"opnsense_apply_filter":            {"host"},
-		"opnsense_get_info":                {"host"},
-		"opnsense_list_interfaces":         {"host"},
-		"opnsense_list_services":           {"host"},
-		"opnsense_list_gateways":           {"host"},
-		"opnsense_list_bridges":            {"host"},
-		"opnsense_list_interface_settings": {"host"},
-		"opnsense_get_dnsmasq_settings":    {"host"},
-		"opnsense_get_unbound_settings":    {"host"},
-		"opnsense_list_unbound_overrides":  {"host"},
-		"opnsense_get_unbound_status":      {"host"},
-		"opnsense_plan_unbound_override":   {"host"},
-		"opnsense_plan_dhcp":               {"host"},
-		"opnsense_apply_dhcp":              {"host"},
-		"opnsense_apply_unbound_override":  {"host"},
-		"opnsense_get_pf_statistics":       {"host"},
-		"opnsense_list_kernel_routes":      {"host"},
-		"opnsense_list_kea_subnets":        {"host"},
-		"opnsense_list_kea_reservations":   {"host"},
-		"opnsense_list_wireguard_servers":  {"host"},
-		"opnsense_list_wireguard_clients":  {"host"},
-		"opnsense_get_wireguard_status":    {"host"},
-		"opnsense_list_firewall_rules":     {"host"},
-		"opnsense_get_firewall_rule":       {"host", "uuid"},
-		"opnsense_list_clients":            {"host"},
-		"opnsense_list_port_forward_rules": {"host"},
-		"opnsense_list_one_to_one_rules":   {"host"},
-		"opnsense_list_source_nat_rules":   {"host"},
-		"opnsense_list_aliases":            {"host"},
-		"opnsense_get_nat":                 {"host"},
-		"opnsense_plan_nat":                {"host", "operation"},
-		"opnsense_apply_nat":               {"host", "operation"},
+		"omada_plan":                    {"spec"},
+		"omada_apply_acl":               {"from", "to", "action"},
+		"omada_get_uplink_info":         {"device_mac"},
+		"omada_list_gateway_dhcp_users": {"gateway_mac"},
+		"omada_get_client_topology":     {"client_mac"},
+		"omada_get_dhcp_server_info":    {"network_id"},
+		"omada_plan_port":               {"switch_mac", "port", "native"},
+		"omada_apply_port_profile":      {"switch_mac", "port", "native"},
+		"omada_plan_lan":                {"name"},
+		"omada_apply_lan":               {"name"},
+		"opnsense_get_firewall_rule":    {"uuid"},
+		"opnsense_plan_nat":             {"operation"},
+		"opnsense_apply_nat":            {"operation"},
 	}
 	for name, wantReq := range want {
 		tl, ok := byName[name]
@@ -411,6 +365,51 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 		if got := tl.InputSchema.Required; !equalStrings(got, wantReq) {
 			t.Errorf("%s required = %v, want %v", name, got, wantReq)
 		}
+	}
+
+	// No provider tool may require host: every provider connection argument
+	// has a runtime fallback (args → env → credential store), and the
+	// options builders report missing configuration when every supported
+	// source is empty.
+	for name, tl := range byName {
+		for _, req := range tl.InputSchema.Required {
+			if req == "host" {
+				t.Errorf("%s requires host — connection arguments are resolvable at runtime", name)
+			}
+		}
+	}
+}
+
+// BDD S3.9 — the NAT mutation schema advertises every argument the request
+// parser supports, including the toggle direction control (#171).
+func TestHandleToolsList_NatSchemaAdvertisesToggleDisable(t *testing.T) {
+	server := newTestServer()
+	server.handleInitialize(&jsonRPCRequest{ID: json.RawMessage(`1`)})
+	resp := server.handleToolsList(&jsonRPCRequest{ID: json.RawMessage(`2`)})
+	list, ok := resp.Result.(toolsListResult)
+	if !ok {
+		t.Fatalf("expected toolsListResult, got %T", resp.Result)
+	}
+	found := 0
+	for _, tl := range list.Tools {
+		if tl.Name != "opnsense_plan_nat" && tl.Name != "opnsense_apply_nat" {
+			continue
+		}
+		found++
+		prop, ok := tl.InputSchema.Properties["toggle_disable"]
+		if !ok {
+			t.Errorf("%s schema omits toggle_disable", tl.Name)
+			continue
+		}
+		if prop.Type != "boolean" {
+			t.Errorf("%s toggle_disable type = %q, want boolean", tl.Name, prop.Type)
+		}
+		if prop.Description == "" {
+			t.Errorf("%s toggle_disable should document its default and applicability", tl.Name)
+		}
+	}
+	if found != 2 {
+		t.Errorf("expected both NAT tools in the list, found %d", found)
 	}
 }
 

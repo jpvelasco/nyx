@@ -15,12 +15,15 @@ marked **Implemented** are mirrored 1:1 by tests in `internal/mcp` and
 - Only credential **resolution** changes, inside `tools/call` handling. Tool
   names, argument names, and result shapes are unchanged.
 - The `tools/list` input schemas for the Omada and OPNsense tools relax their
-  `Required` lists to the truly mandatory arguments — `host` plus each tool's
-  non-credential required inputs (`spec` for `omada_plan`; `device_mac` for
+  `Required` lists to the truly mandatory arguments — only each tool's
+  operation-specific inputs (`spec` for `omada_plan`; `device_mac` for
   `omada_get_uplink_info`; `switch_mac`/`port`/`native` for
-  `omada_plan_port`/`omada_apply_port_profile`) — never the credential
-  arguments. Credential arguments remain in `Properties` as optional
-  overrides.
+  `omada_plan_port`/`omada_apply_port_profile`; `operation` for the NAT
+  mutation pair) — never the connection or credential arguments. `host` and
+  the credential arguments resolve at runtime (args → env → Credential
+  Manager → store) and stay in `Properties` as optional overrides; the
+  options builders report the actionable error when every supported source
+  is empty.
 - `omada_get_info` is unauthenticated and keeps stripping credentials from
   its output (existing test coverage is retained).
 - Nothing in this change writes credentials into tool output, logs, or
@@ -134,16 +137,19 @@ to evidence, or returned in tool output.
 
 ## 3. Schema and store-path contract
 
-### S3.1 Input schemas mark credentials optional — **Implemented**
+### S3.1 Input schemas mark connection and credential arguments optional — **Implemented**
 
 - **When** the client reads `tools/list`
-- **Then** every Omada tool requires `host` plus its non-credential required
-  arguments (`spec` for `omada_plan`, `device_mac` for
-  `omada_get_uplink_info`, `switch_mac`/`port`/`native` for
+- **Then** every Omada tool requires only its operation-specific arguments
+  (`spec` for `omada_plan`, `device_mac` for `omada_get_uplink_info`,
+  `switch_mac`/`port`/`native` for
   `omada_plan_port`/`omada_apply_port_profile`) and every OPNsense tool
-  requires `host` plus its operation inputs — and no tool requires a
-  credential argument in `Required`
-- **And** the test: `TestHandleToolsList_SchemaCredentialsOptional`
+  only its operation inputs (`uuid`, `operation`, …) — and no tool requires
+  `host` or any credential argument in `Required`, because every
+  connection argument resolves at runtime (args → env → Credential
+  Manager → store) and the options builders report the actionable error
+  when every supported source is empty
+- **And** the tests: `TestHandleToolsList_SchemaCredentialsOptional`
 
 ### S3.2 Store path honors `NYX_CREDENTIALS_FILE` — **Implemented**
 
