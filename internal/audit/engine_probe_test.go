@@ -2203,6 +2203,9 @@ func TestRunVPNRoute_RouteError(t *testing.T) {
 // --- runDNSCheck: DNSSEC error path ---
 
 func TestRunDNSCheck_DNSSECError(t *testing.T) {
+	// A requested DNSSEC validation that could not run must not read as a
+	// validated pass: the finding escalates to error (still non-fatal to
+	// the run) and names the validator failure (#173).
 	spec := &intent.Spec{
 		Version: 1, Site: "test",
 		Assertions: []intent.Assertion{
@@ -2222,8 +2225,105 @@ func TestRunDNSCheck_DNSSECError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Status != models.StatusPass {
-		t.Errorf("expected pass (DNSSEC error is non-fatal), got %s", result.Status)
+	if result.Status != models.StatusError {
+		t.Errorf("expected error when the DNSSEC validator cannot run, got %s", result.Status)
+	}
+	if !strings.Contains(result.Summary, "dnssec validation error") {
+		t.Errorf("summary should preserve the validator explanation, got %q", result.Summary)
+	}
+}
+
+// --- runDNSCheck: DNSSEC indeterminate and unavailable statuses ---
+
+func TestRunDNSCheck_DNSSECWarnIsVisible(t *testing.T) {
+	// An indeterminate DNSSEC verdict (WARN, e.g. status could not be
+	// determined) must surface on the finding instead of being swallowed
+	// by a passing resolution (#173).
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Assertions: []intent.Assertion{
+			{Type: "dns_check", Query: "example.com", DNSSEC: true},
+		},
+	}
+	r := &models.CheckResult{Status: models.StatusPass}
+	r.Summary = "resolved example.com"
+	r.Finish()
+	dnssecR := models.NewCheckResult("dig", "dns_check", "dns", "example.com")
+	dnssecR.Status = models.StatusWarn
+	dnssecR.Summary = "DNSSEC status could not be determined from dig output"
+	dnssecR.Finish()
+	mock := &backends.MockBackend{ResolveResult: r, DNSSECResult: dnssecR}
+	eng := NewEngine(spec)
+	eng.Backend = mock
+	result, err := eng.runDNSCheck(context.Background(), spec.Assertions[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusWarn {
+		t.Errorf("expected warn for an indeterminate DNSSEC verdict, got %s", result.Status)
+	}
+	if !strings.Contains(result.Summary, "could not be determined") {
+		t.Errorf("summary should preserve the validator explanation, got %q", result.Summary)
+	}
+}
+
+func TestRunDNSCheck_DNSSECUnavailableIsError(t *testing.T) {
+	// The real backend reports the missing-dig case as an ERROR result
+	// with no Go error; the requested validation must not silently read
+	// as a validated pass (#173).
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Assertions: []intent.Assertion{
+			{Type: "dns_check", Query: "example.com", DNSSEC: true},
+		},
+	}
+	r := &models.CheckResult{Status: models.StatusPass}
+	r.Summary = "resolved example.com"
+	r.Finish()
+	dnssecR := models.NewCheckResult("dig", "dns_check", "dns", "example.com")
+	dnssecR.Status = models.StatusError
+	dnssecR.Summary = "dig is not installed or not in PATH"
+	dnssecR.Finish()
+	mock := &backends.MockBackend{ResolveResult: r, DNSSECResult: dnssecR}
+	eng := NewEngine(spec)
+	eng.Backend = mock
+	result, err := eng.runDNSCheck(context.Background(), spec.Assertions[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusError {
+		t.Errorf("expected error when the DNSSEC validator is unavailable, got %s", result.Status)
+	}
+	if !strings.Contains(result.Summary, "dig is not installed") {
+		t.Errorf("summary should preserve the validator explanation, got %q", result.Summary)
+	}
+}
+
+func TestRunDNSCheck_DNSSECDoesNotDowngradeFailedResolution(t *testing.T) {
+	// A failed resolution keeps its verdict; DNSSEC evidence is appended
+	// without downgrading the failure.
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Assertions: []intent.Assertion{
+			{Type: "dns_check", Query: "example.com", DNSSEC: true},
+		},
+	}
+	r := &models.CheckResult{Status: models.StatusFail}
+	r.Summary = "no such host"
+	r.Finish()
+	dnssecR := models.NewCheckResult("dig", "dns_check", "dns", "example.com")
+	dnssecR.Status = models.StatusWarn
+	dnssecR.Summary = "DNSSEC status could not be determined from dig output"
+	dnssecR.Finish()
+	mock := &backends.MockBackend{ResolveResult: r, DNSSECResult: dnssecR}
+	eng := NewEngine(spec)
+	eng.Backend = mock
+	result, err := eng.runDNSCheck(context.Background(), spec.Assertions[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusFail {
+		t.Errorf("failed resolution must keep its fail verdict, got %s", result.Status)
 	}
 }
 
