@@ -226,6 +226,63 @@ func TestValidateSpec_IsolationValid(t *testing.T) {
 	}
 }
 
+func TestValidateSpec_IsolationInvalidExpect(t *testing.T) {
+	// A misspelled expectation must be a validation error: runtime
+	// treats any non-"deny" value as allow, so a typo would silently
+	// reverse the assertion's verdict.
+	for _, expect := range []string{"dney", "denied", "allowed", "DENY", ""} {
+		spec := &Spec{Version: 1, Site: "test", Assertions: []Assertion{{Type: "isolation", From: "a", To: "b", Expect: expect}}}
+		err := ValidateSpec(spec)
+		if err == nil {
+			t.Errorf("isolation expect=%q should be rejected", expect)
+		}
+	}
+	for _, expect := range []string{"deny", "allow"} {
+		spec := &Spec{Version: 1, Site: "test", Assertions: []Assertion{{Type: "isolation", From: "a", To: "b", Expect: expect}}}
+		if err := ValidateSpec(spec); err != nil {
+			t.Errorf("isolation expect=%q should be valid: %v", expect, err)
+		}
+	}
+}
+
+func TestValidateSpec_PortCheckInvalidExpect(t *testing.T) {
+	// A misspelled expectation must be a validation error: runtime
+	// treats any non-"open" value as closed, so a typo would silently
+	// reverse the assertion's verdict.
+	for _, expect := range []string{"opne", "opened", "CLOSED", "filtered"} {
+		spec := &Spec{Version: 1, Site: "test", Assertions: []Assertion{{Type: "port_check", Target: "1.2.3.4", Ports: []int{80}, Expect: expect}}}
+		err := ValidateSpec(spec)
+		if err == nil {
+			t.Errorf("port_check expect=%q should be rejected", expect)
+		}
+	}
+	for _, expect := range []string{"open", "closed"} {
+		spec := &Spec{Version: 1, Site: "test", Assertions: []Assertion{{Type: "port_check", Target: "1.2.3.4", Ports: []int{80}, Expect: expect}}}
+		if err := ValidateSpec(spec); err != nil {
+			t.Errorf("port_check expect=%q should be valid: %v", expect, err)
+		}
+	}
+}
+
+func TestValidateSpec_ACLCheckInvalidExpect(t *testing.T) {
+	// A misspelled expectation must be a validation error: runtime
+	// treats any non-"enforced" value as not_enforced, so a typo would
+	// silently reverse the assertion's verdict.
+	for _, expect := range []string{"enfroced", "enforce", "NOT_ENFORCED", "off"} {
+		spec := &Spec{Version: 1, Site: "test", Assertions: []Assertion{{Type: "acl_check", Provider: "omada", Policy: "p", Expect: expect}}}
+		err := ValidateSpec(spec)
+		if err == nil {
+			t.Errorf("acl_check expect=%q should be rejected", expect)
+		}
+	}
+	for _, expect := range []string{"enforced", "not_enforced"} {
+		spec := &Spec{Version: 1, Site: "test", Assertions: []Assertion{{Type: "acl_check", Provider: "omada", Policy: "p", Expect: expect}}}
+		if err := ValidateSpec(spec); err != nil {
+			t.Errorf("acl_check expect=%q should be valid: %v", expect, err)
+		}
+	}
+}
+
 func TestValidateSpec_VPNRouteMissingFields(t *testing.T) {
 	spec := &Spec{Version: 1, Site: "test", Assertions: []Assertion{{Type: "vpn_route"}}}
 	err := ValidateSpec(spec)

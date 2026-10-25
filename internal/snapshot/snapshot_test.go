@@ -1563,3 +1563,154 @@ func TestIntegration_SaveLoadDrift(t *testing.T) {
 		t.Errorf("expected 1 degraded (pass→fail on port_check), got %d", len(dr.Degraded))
 	}
 }
+
+// =====================================================================
+// Chronological ordering (collision suffixes)
+// =====================================================================
+
+// TestListSnapshots_CollisionSuffixOrder reproduces #174: a collision
+// suffix sorts lexicographically BEFORE the un-suffixed base ('-' < '.'),
+// so latest-snapshot selection and rotation used the wrong chronology.
+func TestListSnapshots_CollisionSuffixOrder(t *testing.T) {
+	// Freeze the clock so the second Save collides with the first and
+	// takes the -1 suffix.
+	fixed := time.Date(2025, 6, 1, 14, 0, 0, 0, time.UTC)
+	origNow := filenameNow
+	filenameNow = func() time.Time { return fixed }
+	defer func() { filenameNow = origNow }()
+
+	first, err := Save("test.spec", makeReport(models.StatusPass, 1, 0, 0, 0))
+	if err != nil {
+		t.Fatalf("first Save: %v", err)
+	}
+	second, err := Save("test.spec", makeReport(models.StatusFail, 0, 1, 0, 0))
+	if err != nil {
+		t.Fatalf("second Save: %v", err)
+	}
+
+	list, err := ListSnapshots()
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 snapshots, got %d: %v", len(list), list)
+	}
+	// The failing (newer, suffixed) audit must be the LAST listed entry —
+	// latest-snapshot fallback (drift status) selects it.
+	if want := filepath.Base(second); list[len(list)-1] != want {
+		t.Errorf("latest listed = %q, want %q", list[len(list)-1], want)
+	}
+	if want := filepath.Base(first); list[0] != want {
+		t.Errorf("oldest listed = %q, want %q", list[0], want)
+	}
+
+	// The selected latest snapshot must actually be the newer audit.
+	latest, err := LoadSnapshot(second)
+	if err != nil {
+		t.Fatalf("LoadSnapshot(latest): %v", err)
+	}
+	if latest.Status != models.StatusFail {
+		t.Errorf("latest snapshot status = %q, want fail (the newer audit)", latest.Status)
+	}
+}
+
+// TestListSnapshots_NumericSuffixSortsNumerically pins the numeric
+// suffix ordering: -10 sorts after -2, not between -1 and -2.
+func TestListSnapshots_NumericSuffixSortsNumerically(t *testing.T) {
+	dir, err := Dir()
+	if err != nil {
+		t.Fatalf("Dir(): %v", err)
+	}
+	names := []string{
+		"snapshot-20250601-140000.000.json",
+		"snapshot-20250601-140000.000-2.json",
+		"snapshot-20250601-140000.000-10.json",
+		"snapshot-20250601-140000.000-1.json",
+	}
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("{}"), 0600); err != nil {
+			t.Fatalf("seeding %s: %v", n, err)
+		}
+	}
+	list, err := ListSnapshots()
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	want := []string{
+		"snapshot-20250601-140000.000.json",
+		"snapshot-20250601-140000.000-1.json",
+		"snapshot-20250601-140000.000-2.json",
+		"snapshot-20250601-140000.000-10.json",
+	}
+	if len(list) != len(want) {
+		t.Fatalf("expected %d snapshots, got %d: %v", len(want), len(list), list)
+	}
+	for i := range want {
+		if list[i] != want[i] {
+			t.Errorf("list[%d] = %q, want %q (full order: %v)", i, list[i], want[i], list)
+		}
+	}
+}
+
+// TestRotate_UsesChronologicalOrderWithCollisions pins that rotation
+// deletes the oldest audit first even when collision suffixes exist —
+// the suffixed newer audit must never be rotated before its base.
+func TestRotate_UsesChronologicalOrderWithCollisions(t *testing.T) {
+	dir, err := Dir()
+	if err != nil {
+		t.Fatalf("Dir(): %v", err)
+	}
+	// Tests in this package share the isolated HOME; clear the directory
+	// so this test controls the full rotation input.
+	if err := clearSnapshotDir(dir); err != nil {
+		t.Fatalf("clearing snapshot dir: %v", err)
+	}
+	// Oldest audit and its same-millisecond collision, then a newer audit.
+	files := []string{
+		"snapshot-20250601-140000.000.json",   // oldest base
+		"snapshot-20250601-140000.000-1.json", // its collision (newer)
+		"snapshot-20250602-140000.000.json",   // newest audit
+	}
+	for _, n := range files {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("{}"), 0600); err != nil {
+			t.Fatalf("seeding %s: %v", n, err)
+		}
+	}
+
+	// Limit 2 removes exactly one file; it must be the chronologically
+	// oldest base, not the newer suffixed collision.
+	rotate(dir, 2)
+
+	list, err := ListSnapshots()
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	want := []string{
+		"snapshot-20250601-140000.000-1.json",
+		"snapshot-20250602-140000.000.json",
+	}
+	if len(list) != len(want) {
+		t.Fatalf("after rotation = %v, want %v", list, want)
+	}
+	for i := range want {
+		if list[i] != want[i] {
+			t.Errorf("after rotation = %v, want %v", list, want)
+			break
+		}
+	}
+}
+
+// clearSnapshotDir removes every file in the isolated snapshot directory
+// so a test can control the full listing/rotation input.
+func clearSnapshotDir(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
