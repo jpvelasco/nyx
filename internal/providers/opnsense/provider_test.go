@@ -1350,3 +1350,43 @@ func TestInferZoneFromAddress(t *testing.T) {
 		})
 	}
 }
+
+// TestMatchACLRule_NamedRuleMustCoverRequestedEndpoints reproduces #186: a
+// named rule whose endpoints do not cover the requested from/to must not
+// satisfy the check — the name is a candidate identity, not a free pass.
+func TestMatchACLRule_NamedRuleMustCoverRequestedEndpoints(t *testing.T) {
+	rules := []FirewallRule{
+		{RuleUUID: "r-wrong", Label: "isolate", Action: "block", Source: "personal_net", Destination: "gaming_net"},
+		{RuleUUID: "r-right", Label: "isolate-iot", Action: "block", Source: "iot_net", Destination: "servers_net"},
+	}
+	networks := []intent.Network{
+		{Name: "personal", CIDR: "10.0.20.0/24", Zone: "personal"},
+		{Name: "gaming", CIDR: "10.0.30.0/24", Zone: "gaming"},
+		{Name: "iot", CIDR: "10.0.60.0/24", Zone: "iot"},
+		{Name: "servers", CIDR: "10.0.40.0/24", Zone: "servers"},
+	}
+	aliases := []Alias{
+		{Name: "personal_net", Addresses: []string{"10.0.20.0/24"}},
+		{Name: "gaming_net", Addresses: []string{"10.0.30.0/24"}},
+		{Name: "iot_net", Addresses: []string{"10.0.60.0/24"}},
+		{Name: "servers_net", Addresses: []string{"10.0.40.0/24"}},
+	}
+	// The requested policy iot→servers names "isolate": the wrong-endpoint
+	// personal→gaming rule must not satisfy it. The endpoint-covering rule
+	// may match by name (r-right is named differently, so the endpoint
+	// path serves the verdict here).
+	req := providers.ACLCheckRequest{PolicyName: "isolate", From: "iot", To: "servers", Action: "deny"}
+	got := matchACLRule(rules, networks, aliases, req)
+	if got != nil && got.RuleUUID == "r-wrong" {
+		t.Fatalf("wrong-endpoint rule matched by name: %+v", got)
+	}
+	if got == nil || got.RuleUUID != "r-right" {
+		t.Errorf("expected the endpoint-covering rule, got %+v", got)
+	}
+
+	// A name-only request (no declared endpoints) still matches by name.
+	nameOnly := providers.ACLCheckRequest{PolicyName: "isolate", Action: "deny"}
+	if m := matchACLRule(rules, networks, aliases, nameOnly); m == nil || m.RuleUUID != "r-wrong" {
+		t.Errorf("name-only request should match by name, got %+v", m)
+	}
+}

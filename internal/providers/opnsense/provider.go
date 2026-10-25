@@ -420,7 +420,19 @@ func matchACLRule(rules []FirewallRule, networks []intent.Network, aliases []Ali
 			if rules[i].Disabled {
 				continue
 			}
-			if strings.ToLower(rules[i].Label) == want || strings.ToLower(rules[i].RuleUUID) == want {
+			if strings.ToLower(rules[i].Label) != want && strings.ToLower(rules[i].RuleUUID) != want {
+				continue
+			}
+			// The name is a candidate identity, not a free pass: when the
+			// requested endpoints and the rule's active endpoints are both
+			// interpretable, a provable mismatch rejects the named match
+			// (#186). An endpoint that cannot be interpreted against the
+			// known networks cannot be verified either way, so the named
+			// identity decides.
+			src := resolveEndpointZone(rules[i].Source, networks, aliases)
+			dst := resolveEndpointZone(rules[i].Destination, networks, aliases)
+			if !endpointMismatchProvable(src, rules[i].Source, from, networks) &&
+				!endpointMismatchProvable(dst, rules[i].Destination, to, networks) {
 				return &rules[i]
 			}
 		}
@@ -438,6 +450,35 @@ func matchACLRule(rules []FirewallRule, networks []intent.Network, aliases []Ali
 		}
 	}
 	return nil
+}
+
+// endpointMismatchProvable reports whether a rule endpoint provably fails
+// to cover the requested endpoint: both sides must be interpretable
+// against the known networks. Unmappable endpoints cannot be verified
+// either way, so the caller keeps its named-identity verdict.
+func endpointMismatchProvable(resolved, raw, want string, networks []intent.Network) bool {
+	if want == "" || endpointMatches(resolved, raw, want, networks) {
+		return false
+	}
+	wantKnown := false
+	for _, n := range networks {
+		if strings.EqualFold(n.Name, want) || strings.EqualFold(n.Zone, want) {
+			wantKnown = true
+			break
+		}
+	}
+	if !wantKnown || resolved == "" {
+		return false
+	}
+	for _, n := range networks {
+		if strings.EqualFold(n.Name, resolved) || strings.EqualFold(n.Zone, resolved) {
+			// The request's endpoint maps to a known network and the rule's
+			// endpoint resolves to a different known network: the mismatch
+			// is provable.
+			return true
+		}
+	}
+	return false
 }
 
 func endpointMatches(resolved, raw, want string, networks []intent.Network) bool {

@@ -158,13 +158,23 @@ func (s *Server) toolVerifyIsolation(ctx context.Context, args map[string]interf
 	if to == "" {
 		return errResult("to parameter is required")
 	}
+	// The documented zone: reference form normalizes to the bare
+	// zone/network name before resolution.
+	from = intent.NormalizeZoneRef(from)
+	to = intent.NormalizeZoneRef(to)
 	specFile, _ := args["spec_file"].(string)
 
 	if specFile != "" {
 		return s.isolationViaSpec(ctx, specFile, from, to)
 	}
 
-	// No spec: ping `to` directly as a bare IP/hostname
+	// No spec: ping `to` directly as a bare IP/hostname. A single-host
+	// ping cannot evaluate a CIDR — reject the unsupported form explicitly
+	// instead of letting a ping usage error masquerade as confirmed
+	// isolation.
+	if err := intent.ValidateTarget(to); err != nil {
+		return errResult(fmt.Sprintf("to %q is not a single host (IP or hostname) — without a spec_file, a CIDR or zone target cannot be verified directly", to))
+	}
 	result := models.NewCheckResult("system", "isolation", "local", fmt.Sprintf("%s -> %s", from, to))
 	pingResult, err := system.Ping(ctx, to)
 	if err != nil {

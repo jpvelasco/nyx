@@ -184,10 +184,15 @@ func (c *Client) ReconfigureKea(ctx context.Context) error {
 
 // FindDnsmasqRange matches by uuid or interface+start+end.
 func FindDnsmasqRange(rows []DnsmasqRange, uuid, iface, start, end string) (DnsmasqRange, bool) {
-	for _, r := range rows {
-		if uuid != "" && strings.EqualFold(r.UUID, uuid) {
-			return r, true
+	if uuid != "" {
+		for _, r := range rows {
+			if strings.EqualFold(r.UUID, uuid) {
+				return r, true
+			}
 		}
+		return DnsmasqRange{}, false
+	}
+	for _, r := range rows {
 		if iface != "" && start != "" && strings.EqualFold(r.Interface, iface) && r.Start == start && r.End == end {
 			return r, true
 		}
@@ -197,10 +202,15 @@ func FindDnsmasqRange(rows []DnsmasqRange, uuid, iface, start, end string) (Dnsm
 
 // FindDnsmasqHost matches by uuid or host+ip.
 func FindDnsmasqHost(rows []DnsmasqHost, uuid, host, ip string) (DnsmasqHost, bool) {
-	for _, h := range rows {
-		if uuid != "" && strings.EqualFold(h.UUID, uuid) {
-			return h, true
+	if uuid != "" {
+		for _, h := range rows {
+			if strings.EqualFold(h.UUID, uuid) {
+				return h, true
+			}
 		}
+		return DnsmasqHost{}, false
+	}
+	for _, h := range rows {
 		if host != "" && ip != "" && strings.EqualFold(h.Host, host) && h.IP == ip {
 			return h, true
 		}
@@ -210,10 +220,15 @@ func FindDnsmasqHost(rows []DnsmasqHost, uuid, host, ip string) (DnsmasqHost, bo
 
 // FindKeaSubnet matches by uuid or subnet CIDR.
 func FindKeaSubnet(rows []KeaSubnet, uuid, subnet string) (KeaSubnet, bool) {
-	for _, s := range rows {
-		if uuid != "" && strings.EqualFold(s.UUID, uuid) {
-			return s, true
+	if uuid != "" {
+		for _, s := range rows {
+			if strings.EqualFold(s.UUID, uuid) {
+				return s, true
+			}
 		}
+		return KeaSubnet{}, false
+	}
+	for _, s := range rows {
 		if subnet != "" && s.Subnet == subnet {
 			return s, true
 		}
@@ -223,10 +238,15 @@ func FindKeaSubnet(rows []KeaSubnet, uuid, subnet string) (KeaSubnet, bool) {
 
 // FindKeaReservation matches by uuid or ip+mac.
 func FindKeaReservation(rows []KeaReservation, uuid, ip, mac string) (KeaReservation, bool) {
-	for _, r := range rows {
-		if uuid != "" && strings.EqualFold(r.UUID, uuid) {
-			return r, true
+	if uuid != "" {
+		for _, r := range rows {
+			if strings.EqualFold(r.UUID, uuid) {
+				return r, true
+			}
 		}
+		return KeaReservation{}, false
+	}
+	for _, r := range rows {
 		if ip != "" && mac != "" && r.IP == ip && strings.EqualFold(r.MAC, mac) {
 			return r, true
 		}
