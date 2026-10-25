@@ -64,7 +64,7 @@ func (c *Client) CreateSSID(ctx context.Context, siteID string, w SSIDWrite) (st
 	var res struct {
 		ID string `json:"id"`
 	}
-	if err := c.post(ctx, fmt.Sprintf("sites/%s/ssids", siteID), w, &res); err != nil {
+	if err := c.postCreate(ctx, fmt.Sprintf("sites/%s/ssids", siteID), w, &res); err != nil {
 		return "", fmt.Errorf("creating SSID %q: %w", w.Name, err)
 	}
 	if res.ID == "" {

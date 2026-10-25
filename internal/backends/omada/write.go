@@ -91,7 +91,7 @@ func ruleToWrite(rule ACLRule) aclRuleWrite {
 // response carries no rule id — the caller refetches the list to find the
 // new rule.
 func (c *Client) CreateACLRule(ctx context.Context, siteID string, rule ACLRule) error {
-	if err := c.post(ctx, aclScopePath(siteID, rule.Type), ruleToWrite(rule), nil); err != nil {
+	if err := c.postCreate(ctx, aclScopePath(siteID, rule.Type), ruleToWrite(rule), nil); err != nil {
 		return fmt.Errorf("creating ACL rule: %w", err)
 	}
 	return nil

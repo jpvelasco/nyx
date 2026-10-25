@@ -135,7 +135,7 @@ func (c *Client) CreateLanProfile(ctx context.Context, siteID string, p LanProfi
 	var res struct {
 		ID string `json:"id"`
 	}
-	if err := c.post(ctx, fmt.Sprintf("sites/%s/lan-profiles", siteID), p, &res); err != nil {
+	if err := c.postCreate(ctx, fmt.Sprintf("sites/%s/lan-profiles", siteID), p, &res); err != nil {
 		return "", fmt.Errorf("creating LAN profile %q: %w", p.Name, err)
 	}
 	if res.ID == "" {
