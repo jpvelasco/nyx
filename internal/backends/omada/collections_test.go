@@ -491,3 +491,29 @@ func TestFetchPaged_PageCap(t *testing.T) {
 		t.Errorf("requests = %d, want %d (cap aborts before the next page)", requested, maxPages)
 	}
 }
+
+// TestLANMatchesWrite_DHCPLeaseAndDNSChangesCount reproduces #175: a
+// request that only changes the DHCP lease time or the DHCP DNS server
+// must produce an update, not a false no-op.
+func TestLANMatchesWrite_DHCPLeaseAndDNSChangesCount(t *testing.T) {
+	n := Network{Name: "iot", VLANID: 60, GatewaySubnet: "10.0.60.1/24",
+		DHCPEnabled: true, LeaseTime: 60, DHCPDNS: "10.0.11.1"}
+	base := LANWrite{Name: "iot", VLANID: 60, GatewaySubnet: "10.0.60.1/24",
+		DHCPSettings: DHCPSettingsVO{Enable: true, LeaseTime: 60, DHCPNS: "10.0.11.1"}}
+
+	if !LANMatchesWrite(n, base) {
+		t.Fatal("identical lease time and DNS must match")
+	}
+
+	leaseChanged := base
+	leaseChanged.DHCPSettings.LeaseTime = 120
+	if LANMatchesWrite(n, leaseChanged) {
+		t.Error("lease-time-only change must not be a no-op")
+	}
+
+	dnsChanged := base
+	dnsChanged.DHCPSettings.DHCPNS = "10.0.40.1"
+	if LANMatchesWrite(n, dnsChanged) {
+		t.Error("dhcp-dns-only change must not be a no-op")
+	}
+}
