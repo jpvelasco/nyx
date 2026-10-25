@@ -239,6 +239,16 @@ func WriteArtifact(entries []LogEntry, srcPath string, opts ExportOptions) (n in
 		for i := range entries {
 			e := entries[i] // local copy: the caller's slice is never mutated
 			if opts.Scrub {
+				// Redact sensitive keys BEFORE flattening: when the raw
+				// line is a JSON object, re-parse it through the
+				// structured scrubber so keys nested inside object/array
+				// values are redacted where they still have their
+				// identity, then flatten the clean value (#177). Entries
+				// whose Raw is not a JSON object (e.g. built directly)
+				// keep their fields and take the field-level scrub only.
+				if trimmed := strings.TrimRight(string(e.Raw), "\r\n"); isJSONObject(trimmed) {
+					e = parseLine(ScrubLine(e.Raw))
+				}
 				e = scrubEntry(e)
 			}
 			if _, err := w.WriteString(formatTextLine(&e)); err != nil {
@@ -266,7 +276,9 @@ func WriteArtifact(entries []LogEntry, srcPath string, opts ExportOptions) (n in
 
 // scrubEntry returns a copy of e with PII redacted from every string
 // value (msg, cmd, and each field), so the text format is scrubbed too.
-// Sensitive keys are replaced wholesale; the raw line is left untouched
+// Sensitive keys are replaced wholesale. The nested-object scrub happens
+// upstream, before flattening: the text path re-parses the raw line
+// through the structured scrubber (#177). The raw line is left untouched
 // because only the parsed fields are rendered.
 func scrubEntry(e LogEntry) LogEntry {
 	out := e
@@ -369,4 +381,11 @@ func ParseLevelFlag(s string) (Level, error) {
 	default:
 		return LevelDebug, fmt.Errorf("invalid --level %q: expected debug, info, warn, or error", s)
 	}
+}
+
+// isJSONObject reports whether s decodes as a JSON object — the condition
+// parseLine itself uses to decide whether Raw carries the entry's fields.
+func isJSONObject(s string) bool {
+	_, err := decodeJSONObject(s)
+	return err == nil
 }
