@@ -41,6 +41,10 @@ type DnsmasqHost struct {
 	Host   string `json:"host,omitempty"`
 	Domain string `json:"domain,omitempty"`
 	IP     string `json:"ip,omitempty"`
+	// MAC is the static host's hardware address. The write surface
+	// (DnsmasqHostWrite) can change it, so the observation model retains
+	// it for no-op comparisons.
+	MAC string `json:"mac,omitempty"`
 }
 
 // DnsmasqSettings is the observe subset of GET /api/dnsmasq/settings/get:
@@ -258,11 +262,12 @@ func parseDnsmasqSettings(raw []byte) (*DnsmasqSettings, error) {
 			Host   string `json:"host"`
 			Domain string `json:"domain"`
 			IP     string `json:"ip"`
+			Hwaddr string `json:"hwaddr"`
 		}
 		if json.Unmarshal(row, &h) != nil || (h.Host == "" && h.IP == "") {
 			continue
 		}
-		out.Hosts = append(out.Hosts, DnsmasqHost{UUID: uuid, Host: h.Host, Domain: h.Domain, IP: h.IP})
+		out.Hosts = append(out.Hosts, DnsmasqHost{UUID: uuid, Host: h.Host, Domain: h.Domain, IP: h.IP, MAC: h.Hwaddr})
 	}
 	return out, nil
 }

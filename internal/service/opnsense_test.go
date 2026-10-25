@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1150,5 +1151,139 @@ func TestOpnsenseServiceFilter_Errors(t *testing.T) {
 	}
 	if _, err := svc.ApplyFilter(context.Background(), lopts, OpnsenseFilterRequest{Action: "block", Source: "guest", Destination: "iot", Enabled: true}, false); err == nil {
 		t.Fatal("expected filter create write error")
+	}
+}
+
+// TestOpnsenseServiceUnboundPartialUUIDUpdatePreservesIdentity reproduces
+// #182: a UUID-only update request must resolve its effective payload from
+// the existing record for BOTH plan and apply — the apply payload keeps
+// the existing hostname/domain instead of sending empty strings.
+func TestOpnsenseServiceUnboundPartialUUIDUpdatePreservesIdentity(t *testing.T) {
+	var setBodies []string
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "setHostOverride") {
+			body, _ := io.ReadAll(r.Body)
+			setBodies = append(setBodies, string(body))
+		}
+		switch {
+		case strings.Contains(r.URL.Path, "searchHostOverride"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"override-fixture","hostname":"nas","domain":"home.example","ip":"10.0.40.1"}]}`)
+		default:
+			testutil.WriteBody(w, `{"result":"saved"}`)
+		}
+	})
+	svc := NewOpnsenseService()
+	ctx := context.Background()
+	opts := opnsenseOptions(ts)
+
+	// Plan with only UUID + new IP: the plan must resolve the effective
+	// identity and surface it.
+	plan, err := svc.PlanUnboundOverride(ctx, opts, OpnsenseUnboundOverrideRequest{UUID: "override-fixture", IP: "10.0.50.1"})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if plan.Action != "update" {
+		t.Fatalf("plan action = %q, want update", plan.Action)
+	}
+	if plan.Hostname != "nas" || plan.Domain != "home.example" {
+		t.Errorf("plan surfaced identity = %q/%q, want nas/home.example", plan.Hostname, plan.Domain)
+	}
+
+	// Apply the same partial request: the posted payload must carry the
+	// resolved identity, never empty hostname/domain.
+	if _, err := svc.ApplyUnboundOverride(ctx, opts, OpnsenseUnboundOverrideRequest{UUID: "override-fixture", IP: "10.0.50.1"}, false); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(setBodies) == 0 {
+		t.Fatal("apply issued no setHostOverride")
+	}
+	joined := strings.Join(setBodies, "\n")
+	if !strings.Contains(joined, "\"nas\"") || !strings.Contains(joined, "\"home.example\"") {
+		t.Errorf("apply payload lost the identity fields: %s", joined)
+	}
+	if strings.Contains(joined, `"hostname":""`) || strings.Contains(joined, `"domain":""`) {
+		t.Errorf("apply payload sent an empty identity field: %s", joined)
+	}
+}
+
+// TestOpnsenseServicePlanDHCPMacAndHostnameChanges reproduces #183: a
+// MAC-only dnsmasq host change and a hostname-only Kea reservation change
+// must plan as updates, not unchanged.
+func TestOpnsenseServicePlanDHCPMacAndHostnameChanges(t *testing.T) {
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "dnsmasq/settings/get"):
+			testutil.WriteBody(w, `{"dnsmasq":{"enable":"1","dhcp":{"range":{},"host":{"host-fixture":{"host":"nas","ip":"10.0.40.1","hwaddr":"02:00:00:00:00:01"}}}}}`)
+		case strings.Contains(r.URL.Path, "kea/service/status"):
+			testutil.WriteBody(w, `{"running":true}`)
+		case strings.Contains(r.URL.Path, "kea/dhcpv4/search_reservation"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"res-fixture","ip":"10.0.40.1","mac":"02:00:00:00:00:01","hostname":"nas"}]}`)
+		default:
+			testutil.WriteBody(w, `{"result":"saved"}`)
+		}
+	})
+	opts := opnsenseOptions(ts)
+	svc := NewOpnsenseService()
+
+	// MAC-only dnsmasq host change.
+	macPlan, err := svc.PlanDHCP(context.Background(), opts, OpnsenseDHCPRequest{
+		Kind: "host", UUID: "host-fixture", Hostname: "nas", IP: "10.0.40.1", MAC: "02:00:00:00:00:02",
+	})
+	if err != nil {
+		t.Fatalf("dnsmasq mac plan: %v", err)
+	}
+	if macPlan.Action != "update" {
+		t.Errorf("MAC-only dnsmasq change planned %q, want update", macPlan.Action)
+	}
+
+	// Same MAC with different case must still be unchanged.
+	samePlan, err := svc.PlanDHCP(context.Background(), opts, OpnsenseDHCPRequest{
+		Kind: "host", UUID: "host-fixture", Hostname: "nas", IP: "10.0.40.1", MAC: "02:00:00:00:00:01",
+	})
+	if err != nil {
+		t.Fatalf("dnsmasq same-mac plan: %v", err)
+	}
+	if samePlan.Action != "unchanged" {
+		t.Errorf("identical MAC planned %q, want unchanged (MAC comparison is normalized)", samePlan.Action)
+	}
+
+}
+
+// TestOpnsenseServicePlanKeaHostnameChange covers the Kea reservation
+// side of #183 against a Kea-only fake controller.
+func TestOpnsenseServicePlanKeaHostnameChange(t *testing.T) {
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "kea/service/status"):
+			testutil.WriteBody(w, `{"running":true}`)
+		case strings.Contains(r.URL.Path, "kea/dhcpv4/search_reservation"):
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"res-fixture","ip":"10.0.40.1","mac":"02:00:00:00:00:01","hostname":"nas"}]}`)
+		default:
+			testutil.WriteBody(w, `{"result":"saved"}`)
+		}
+	})
+	opts := opnsenseOptions(ts)
+	svc := NewOpnsenseService()
+
+	// Hostname-only Kea reservation change.
+	namePlan, err := svc.PlanDHCP(context.Background(), opts, OpnsenseDHCPRequest{
+		Kind: "reservation", UUID: "res-fixture", IP: "10.0.40.1", MAC: "02:00:00:00:00:01", Hostname: "backup",
+	})
+	if err != nil {
+		t.Fatalf("kea hostname plan: %v", err)
+	}
+	if namePlan.Action != "update" {
+		t.Errorf("hostname-only Kea change planned %q, want update", namePlan.Action)
+	}
+
+	// Identical hostname keeps unchanged.
+	identical, err := svc.PlanDHCP(context.Background(), opts, OpnsenseDHCPRequest{
+		Kind: "reservation", UUID: "res-fixture", IP: "10.0.40.1", MAC: "02:00:00:00:00:01", Hostname: "nas",
+	})
+	if err != nil {
+		t.Fatalf("kea identical plan: %v", err)
+	}
+	if identical.Action != "unchanged" {
+		t.Errorf("identical Kea reservation planned %q, want unchanged", identical.Action)
 	}
 }
