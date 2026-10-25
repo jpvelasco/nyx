@@ -77,4 +77,8 @@ if (!fs.existsSync(binaryPath)) {
   }
 }
 
-runBinary();
+// npm bin entrypoint: run only when executed directly, so requiring this
+// file (e.g. from node --test) does not spawn the binary.
+if (require.main === module) {
+  runBinary();
+}
