@@ -1011,7 +1011,9 @@ func TestDiagnose_HandshakeStallHonorsContextDeadline(t *testing.T) {
 		stalled <- conn
 	}()
 
-	p := Probe{Name: "iot-probe", Host: "127.0.0.1", User: "testuser", VLAN: "iot", Port: ln.Addr().(*net.TCPAddr).Port}
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+	p := Probe{Name: "iot-probe", Host: "127.0.0.1", User: "testuser", VLAN: "iot", Port: ln.Addr().(*net.TCPAddr).Port, Key: keyPath}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
@@ -1053,7 +1055,9 @@ func TestRun_HandshakeStallHonorsContextDeadline(t *testing.T) {
 		stalled <- conn
 	}()
 
-	p := Probe{Name: "iot-probe", Host: "127.0.0.1", User: "testuser", VLAN: "iot", Port: ln.Addr().(*net.TCPAddr).Port}
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+	p := Probe{Name: "iot-probe", Host: "127.0.0.1", User: "testuser", VLAN: "iot", Port: ln.Addr().(*net.TCPAddr).Port, Key: keyPath}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
