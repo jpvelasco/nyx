@@ -118,9 +118,10 @@ func Ping(ctx context.Context, target string) (*PingResult, error) {
 		pr.PacketLoss = loss
 		pr.Reachable = loss < 100
 	} else if err != nil {
-		pr.Reachable = false
-		pr.PacketLoss = 100
-		return pr, nil
+		// The command failed without reportable loss statistics: that is a
+		// usage or execution error, not evidence of an unreachable host —
+		// report it instead of fabricating 100% packet loss.
+		return nil, fmt.Errorf("ping %s failed: %w", target, err)
 	}
 	if m := reAvgRTTDarwin.FindStringSubmatch(out); m != nil {
 		pr.AvgLatency = m[1]
