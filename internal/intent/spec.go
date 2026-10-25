@@ -300,8 +300,16 @@ func validateIsolationAssertion(i int, a *Assertion) error {
 	if a.Expect == "" {
 		return fmt.Errorf("assertion[%d] (isolation): expect is required (use 'deny' or 'allow')", i)
 	}
+	if !isolationExpects[a.Expect] {
+		return fmt.Errorf("assertion[%d] (isolation): expect must be 'deny' or 'allow', got %q", i, a.Expect)
+	}
 	return nil
 }
+
+// isolationExpects is the accepted set for the isolation expect field.
+// Runtime treats any non-"deny" value as allow, so a misspelling must be
+// rejected here rather than silently reverse the verdict.
+var isolationExpects = map[string]bool{"deny": true, "allow": true}
 
 func validateVPNRouteAssertion(i int, a *Assertion) error {
 	if a.VPN == "" {
@@ -330,8 +338,16 @@ func validatePortCheckAssertion(i int, a *Assertion) error {
 	if a.Expect == "" {
 		return fmt.Errorf("assertion[%d]: port_check requires 'expect' (open or closed)", i)
 	}
+	if !portCheckExpects[a.Expect] {
+		return fmt.Errorf("assertion[%d]: port_check expect must be 'open' or 'closed', got %q", i, a.Expect)
+	}
 	return nil
 }
+
+// portCheckExpects is the accepted set for the port_check expect field.
+// Runtime treats any non-"open" value as closed, so a misspelling must be
+// rejected here rather than silently reverse the verdict.
+var portCheckExpects = map[string]bool{"open": true, "closed": true}
 
 func validateDNSCheckAssertion(i int, a *Assertion) error {
 	if a.Query == "" {
@@ -368,8 +384,17 @@ func validateACLCheckAssertion(i int, a *Assertion) error {
 	if a.Expect == "" {
 		return fmt.Errorf("assertion[%d]: acl_check requires 'expect' (enforced or not_enforced)", i)
 	}
+	if !aclCheckExpects[a.Expect] {
+		return fmt.Errorf("assertion[%d]: acl_check expect must be 'enforced' or 'not_enforced', got %q", i, a.Expect)
+	}
 	return nil
 }
+
+// aclCheckExpects is the accepted set for the acl_check expect field.
+// Runtime treats any non-"enforced" value as not_enforced, so a
+// misspelling must be rejected here rather than silently reverse the
+// verdict.
+var aclCheckExpects = map[string]bool{"enforced": true, "not_enforced": true}
 
 // validateNatCheckAssertion enforces the nat_check field contract: provider
 // (omada|opnsense) and nat_mode (automatic|hybrid|advanced|disabled|
