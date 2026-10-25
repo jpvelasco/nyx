@@ -604,3 +604,57 @@ func TestWriteArtifactStdout(t *testing.T) {
 		t.Errorf("stdout artifact incomplete:\n%s", s)
 	}
 }
+
+// TestWriteArtifactTextScrubNestedSecretKeys reproduces #177: a nested
+// object under a non-sensitive key carries a sensitive key whose short
+// value escapes the text patterns after parseLine flattens the object.
+// Both formats must redact it.
+func TestWriteArtifactTextScrubNestedSecretKeys(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "nyx.log")
+
+	cases := []struct {
+		name  string
+		entry string
+	}{
+		{"nested object", `{"level":"info","msg":"fixture","details":{"password":"fixture-secret"}}`},
+		{"nested array of objects", `{"level":"info","msg":"fixture","details":[{"api_key":"arr-secret"},{"token":"tok-secret"}]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// The JSON artifact must redact (ScrubLine path).
+			outJSON := filepath.Join(dir, "out.json")
+			e := parseLine([]byte(tc.entry))
+			if _, err := WriteArtifact([]LogEntry{e}, src, ExportOptions{Format: "json", Scrub: true, Out: outJSON}); err != nil {
+				t.Fatalf("WriteArtifact json: %v", err)
+			}
+			b, err := os.ReadFile(outJSON) // nosemgrep: go_filesystem_rule-fileread — artifact path built under t.TempDir()
+			if err != nil {
+				t.Fatalf("reading json artifact: %v", err)
+			}
+			if strings.Contains(string(b), "fixture-secret") || strings.Contains(string(b), "arr-secret") || strings.Contains(string(b), "tok-secret") {
+				t.Errorf("json artifact leaked a nested secret:\n%s", b)
+			}
+
+			// The text artifact must redact too (scrubEntry path).
+			outText := filepath.Join(dir, "out.log")
+			e = parseLine([]byte(tc.entry))
+			if _, err := WriteArtifact([]LogEntry{e}, src, ExportOptions{Format: "text", Scrub: true, Out: outText}); err != nil {
+				t.Fatalf("WriteArtifact text: %v", err)
+			}
+			b, err = os.ReadFile(outText) // nosemgrep: go_filesystem_rule-fileread — artifact path built under t.TempDir()
+			if err != nil {
+				t.Fatalf("reading text artifact: %v", err)
+			}
+			s := string(b)
+			for _, secret := range []string{"fixture-secret", "arr-secret", "tok-secret"} {
+				if strings.Contains(s, secret) {
+					t.Errorf("text artifact leaked nested secret %q:\n%s", secret, s)
+				}
+			}
+			if !strings.Contains(s, `[redacted]`) {
+				t.Errorf("text artifact should show the redaction marker:\n%s", s)
+			}
+		})
+	}
+}
