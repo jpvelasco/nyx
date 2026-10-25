@@ -94,10 +94,12 @@ required fields (secrets are entered with no echo). After store, only
 
 func parseSetFlags(kvs []string) (credentials.Entry, error) {
 	entry := credentials.Entry{}
-	for _, kv := range kvs {
+	for i, kv := range kvs {
 		k, v, ok := strings.Cut(kv, "=")
 		if !ok || k == "" {
-			return nil, fmt.Errorf("--set values must be key=value, got %q", kv)
+			// Never echo the raw argument: a malformed --set value
+			// can carry a secret. Identify it by position only.
+			return nil, fmt.Errorf("--set values must be key=value; argument %d is malformed", i+1)
 		}
 		entry[k] = v
 	}

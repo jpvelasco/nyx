@@ -232,6 +232,47 @@ func TestDNSSECStatus(t *testing.T) {
 		{"noerror with rrsig", ";  status: NOERROR\nexample.com. 300 IN RRSIG A 8 0 300", models.StatusPass, "validation successful"},
 		{"rrsig only", "example.com. 300 IN RRSIG A 8 0 300", models.StatusPass, "signature records present"},
 		{"undetermined", "no useful markers here", models.StatusWarn, "could not be determined"},
+
+		// Real dig responses carry the status inside the ->>HEADER<<-
+		// line, where no semicolon directly precedes "status:".
+		{
+			"real servfail header",
+			";; ->>HEADER<<- opcode: QUERY, status: SERVFAIL, id: 12345\n;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 0, ADDITIONAL: 1",
+			models.StatusFail,
+			"broken chain",
+		},
+		{
+			"real bogus header",
+			";; ->>HEADER<<- opcode: QUERY, status: BOGUS, id: 12345",
+			models.StatusFail,
+			"broken chain",
+		},
+		{
+			"real validated header",
+			";; ->>HEADER<<- opcode: QUERY, status: VALIDATED, id: 12345\n;; flags: qr rd ra ad; QUERY: 1, ANSWER: 2, AUTHORITY: 0, ADDITIONAL: 1",
+			models.StatusPass,
+			"validation successful",
+		},
+		{
+			"real noerror header with rrsig",
+			";; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 12345\nexample.com. 300 IN RRSIG A 8 0 300",
+			models.StatusPass,
+			"validation successful",
+		},
+		// Record contents and domain names must never be mistaken for
+		// status markers.
+		{
+			"rrsig record mentioning servfail-like name",
+			"servfail.example.com. 300 IN RRSIG A 8 0 300\n;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 12345",
+			models.StatusPass,
+			"validation successful",
+		},
+		{
+			"answer record with status-like text",
+			";; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 12345\nstatus-servfail.example.com. 300 IN A 10.0.40.1",
+			models.StatusWarn,
+			"could not be determined",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
