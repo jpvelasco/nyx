@@ -3147,3 +3147,18 @@ func TestDispatchNatReads_MissingHost(t *testing.T) {
 		})
 	}
 }
+
+// TestVerifyIsolation_NoSpecCIDRRejected pins the MCP entry point of #189:
+// without a spec_file, a CIDR target is rejected explicitly — a ping usage
+// error must never masquerade as confirmed isolation.
+func TestVerifyIsolation_NoSpecCIDRRejected(t *testing.T) {
+	server := newTestServer()
+	text, isErr := server.DispatchToolForTest(context.Background(), "verify_isolation",
+		map[string]interface{}{"from": "lan", "to": "10.0.60.0/24"})
+	if !isErr {
+		t.Fatalf("expected an explicit error for a CIDR target, got: %s", text)
+	}
+	if !strings.Contains(text, "10.0.60.0/24") || !strings.Contains(text, "single host") {
+		t.Errorf("error should explain the unsupported form, got: %s", text)
+	}
+}

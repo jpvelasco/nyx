@@ -4,8 +4,10 @@ package system
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -184,9 +186,21 @@ func Ping(ctx context.Context, target string) (*PingResult, error) {
 	}
 
 	pr := &PingResult{}
-	// ping.exe's exit code is locale-independent: 0 = at least one reply.
-	pr.Reachable = err == nil
-	pr.PacketLoss = whatLoss(out, pr.Reachable)
+	// ping.exe's exit codes are locale-independent: 0 = at least one
+	// reply, 1 = no reply, anything else = a usage or execution error.
+	// Only exit code 1 is evidence of an unreachable host; a command
+	// error must surface as an error, never fabricated as 100% loss.
+	if err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+			return nil, fmt.Errorf("ping %s failed: %w", target, err)
+		}
+		pr.Reachable = false
+		pr.PacketLoss = 100
+		return pr, nil
+	}
+	pr.Reachable = true
+	pr.PacketLoss = whatLoss(out, true)
 	if m := reAvgRTTWindows.FindStringSubmatch(out); m != nil {
 		pr.AvgLatency = m[1]
 	}

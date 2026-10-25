@@ -1755,3 +1755,57 @@ func TestBuildInventoryCmd_WarningsPrintedOnce(t *testing.T) {
 		t.Errorf("human output must not duplicate warnings:\n%s", out)
 	}
 }
+
+func TestVerifyIsolationCmd_ZonePrefixDocumentedForm(t *testing.T) {
+	// The documented zone: form must resolve against the spec (#189): the
+	// prefixed reference is normalized to the zone/network name.
+	saveRestoreGlobals(t)
+	specPath := filepath.Join(t.TempDir(), "spec.yaml")
+	spec := `version: 1
+site: test
+networks:
+  - name: iot
+    cidr: 10.0.60.0/24
+    gateway: 10.0.60.1
+    zone: iot
+assertions:
+  - type: isolation
+    from: iot
+    to: iot
+    expect: deny
+`
+	if err := os.WriteFile(specPath, []byte(spec), 0600); err != nil {
+		t.Fatalf("writing spec: %v", err)
+	}
+	specFile = specPath
+	isolationFrom = "zone:iot"
+	isolationTo = "zone:iot"
+	timeout = "500ms"
+	defer func() { timeout = "" }()
+	err := verifyIsolationCmd.RunE(verifyIsolationCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "not declared") {
+		// zone:iot resolves — the command proceeds into the engine (any
+		// outcome is fine here as long as the zone-prefix rejection is
+		// gone). We assert the specific "not declared" wording is absent
+		// by requiring either success or a different error.
+		return
+	}
+	t.Errorf("documented zone: form was rejected: %v", err)
+}
+
+func TestVerifyIsolationCmd_NoSpecCIDRTargetRejected(t *testing.T) {
+	// Without a spec, a CIDR target cannot be pinged by the single-host
+	// ping: it must be rejected explicitly, never turned into a false
+	// isolation confirmation (#189).
+	saveRestoreGlobals(t)
+	isolationFrom = "lan"
+	isolationTo = "10.0.60.0/24"
+	timeout = "500ms"
+	err := verifyIsolationCmd.RunE(verifyIsolationCmd, nil)
+	if err == nil {
+		t.Fatal("expected an explicit error for a CIDR target without a spec")
+	}
+	if !strings.Contains(err.Error(), "10.0.60.0/24") || !strings.Contains(err.Error(), "single host") {
+		t.Errorf("error should explain the unsupported form: %v", err)
+	}
+}
