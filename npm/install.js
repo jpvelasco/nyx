@@ -98,8 +98,14 @@ function download(url, redirectCount = 0) {
 function verifyChecksum(buffer, archiveName, pkg) {
   const expected = getExpectedChecksum(pkg, archiveName);
   if (!expected) {
-    console.log("nyx: no checksum available, skipping verification");
-    return;
+    // A published release must carry a checksum for every supported
+    // platform archive. A missing entry means the checksum manifest is
+    // incomplete — refuse to install unverified bytes rather than
+    // silently disabling verification. Development versions never reach
+    // this path: main() exits before downloading for version 0.0.0.
+    throw new Error(
+      `Missing checksum for ${archiveName} — refusing to install unverified bytes`
+    );
   }
 
   const actual = crypto.createHash("sha256").update(buffer).digest("hex");
@@ -205,7 +211,13 @@ async function main() {
   console.log("nyx: installed successfully");
 }
 
-main().catch((err) => {
-  console.error(`nyx: installation failed: ${err.message}`);
-  process.exit(1);
-});
+// Postinstall entrypoint: run only when executed directly, so the helpers
+// above can be required by tests without triggering a download.
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(`nyx: installation failed: ${err.message}`);
+    process.exit(1);
+  });
+}
+
+module.exports = { getArchiveName, getExpectedChecksum, verifyChecksum };
