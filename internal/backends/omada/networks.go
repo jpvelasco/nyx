@@ -79,7 +79,7 @@ func (c *Client) CreateLANNetwork(ctx context.Context, siteID string, w LANWrite
 	var res struct {
 		ID string `json:"id"`
 	}
-	if err := c.post(ctx, fmt.Sprintf("sites/%s/lan-networks", siteID), w, &res); err != nil {
+	if err := c.postCreate(ctx, fmt.Sprintf("sites/%s/lan-networks", siteID), w, &res); err != nil {
 		return "", fmt.Errorf("creating LAN %q: %w", w.Name, err)
 	}
 	if res.ID == "" {

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/tlsutil"
@@ -100,6 +101,15 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) (*htt
 		}
 
 		action := classifyRetry(lastErr)
+		// A create whose outcome is ambiguous (the controller may already
+		// have committed the record before the failure) must never be
+		// replayed automatically — a duplicate record is worse than an
+		// error. Idempotent operations (set/del/toggle/apply) and reads
+		// (search/get, including POST-based search endpoints) keep their
+		// transient retries (#185).
+		if action == retryBackoff && isCreatePath(path) {
+			return nil, fmt.Errorf("%w (uncertain outcome: the controller may have committed the create — verify before retrying)", lastErr)
+		}
 		if action == retryFail || attempt >= c.maxRetries {
 			return nil, lastErr
 		}
@@ -151,6 +161,15 @@ const (
 	retryFail    retryAction = iota // give up immediately
 	retryBackoff                    // retry with exponential backoff
 )
+
+// isCreatePath reports whether the request targets a create endpoint
+// (add_rule, add_item, add_host, add_subnet, …). Creates are the only
+// non-idempotent operations on the OPNsense API surface: their failure
+// after a possible commit is ambiguous, so they are never replayed
+// automatically.
+func isCreatePath(path string) bool {
+	return strings.Contains(path, "/add_")
+}
 
 // classifyRetry decides whether a failed request is retried with backoff
 // (transient) or fails immediately (stable).
