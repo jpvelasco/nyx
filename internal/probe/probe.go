@@ -145,16 +145,45 @@ func dialAndAuth(ctx context.Context, p Probe, skipHostKeyVerify bool) (*ssh.Cli
 		return nil, unreachableError(p, err)
 	}
 
+	// Bind cancellation and a finite deadline to the raw TCP connection
+	// for the whole handshake: NewClientConn does not honor
+	// ClientConfig.Timeout on an already-open connection, so a peer that
+	// accepts TCP but stalls before the SSH banner would otherwise block
+	// past the context deadline (and forever when the context has none).
+	if err := conn.SetDeadline(handshakeDeadline(ctx)); err != nil {
+		conn.Close() // #nosec G104 — best-effort cleanup
+		return nil, unreachableError(p, err)
+	}
+	watchDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			// Force in-flight handshake reads/writes to abort now.
+			_ = conn.SetDeadline(time.Now())
+		case <-watchDone:
+		}
+	}()
+	handshakeDone := func(clearDeadline bool) {
+		close(watchDone)
+		if clearDeadline {
+			// Subsequent remote commands run under their own cancellation
+			// handling (Run's context watcher), not the handshake deadline.
+			_ = conn.SetDeadline(time.Time{})
+		}
+	}
+
 	// Build auth methods; agentConn (if any) must stay open until the handshake ends.
 	methods, agentConn, err := authMethods(p.Key)
 	if agentConn != nil {
 		defer agentConn.Close()
 	}
 	if err != nil {
+		handshakeDone(false)
 		conn.Close() // #nosec G104 — best-effort cleanup
 		return nil, &AuthError{fmt.Errorf("probe %q: %w", p.Name, err)}
 	}
 	if len(methods) == 0 {
+		handshakeDone(false)
 		conn.Close() // #nosec G104 — best-effort cleanup
 		return nil, &AuthError{fmt.Errorf("probe %q: no authentication methods available — set key: <path> in the probe spec, or start ssh-agent and export SSH_AUTH_SOCK", p.Name)}
 	}
@@ -175,10 +204,23 @@ func dialAndAuth(ctx context.Context, p Probe, skipHostKeyVerify bool) (*ssh.Cli
 
 	sshConn, chans, reqs, err := ssh.NewClientConn(conn, p.addr(), cfg)
 	if err != nil {
+		handshakeDone(false)
 		conn.Close() // #nosec G104 — best-effort cleanup
 		return nil, classifyHandshakeError(p, err)
 	}
+	handshakeDone(true)
 	return ssh.NewClient(sshConn, chans, reqs), nil
+}
+
+// handshakeDeadline is the effective deadline for the connection +
+// handshake phase: the context's own deadline when one is set, otherwise
+// a finite 10s cap so a stalling peer cannot block a deadline-less
+// caller forever.
+func handshakeDeadline(ctx context.Context) time.Time {
+	if deadline, ok := ctx.Deadline(); ok {
+		return deadline
+	}
+	return time.Now().Add(10 * time.Second)
 }
 
 // classifyHandshakeError maps an SSH handshake failure to a typed, actionable
