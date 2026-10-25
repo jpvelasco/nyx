@@ -71,7 +71,7 @@ func fakeNmapOnPATH(t *testing.T) {
 		script = "@echo off\r\nexit /b 0\r\n"
 	}
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil { // nosemgrep — the shim needs its owner execute bit
 		t.Fatalf("writing fake nmap: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
