@@ -2621,3 +2621,30 @@ func TestParseProbeOutput_HealthWithoutThresholdsKeepsReachabilityVerdict(t *tes
 		t.Errorf("expected pass for plain reachability (no thresholds), got %s", got.Status)
 	}
 }
+
+func TestParseProbeOutput_HealthThresholdsWindowsOutput(t *testing.T) {
+	// A probe host may run a different OS than the local machine, so the
+	// threshold evaluation must recognize the output format from content.
+	// Windows ping output reporting 500ms average against a 1ms limit and
+	// 33% loss against a 1% limit must fail on every runner platform.
+	const windowsOutput = `Pinging 10.0.40.1 with 32 bytes of data:
+Reply from 10.0.40.1: bytes=32 time=480ms TTL=64
+Reply from 10.0.40.1: bytes=32 time=500ms TTL=64
+Request timed out.
+
+Ping statistics for 10.0.40.1:
+    Packets: Sent = 3, Received = 2, Lost = 1 (33% loss),
+Approximate round trip times in milli-seconds:
+    Minimum = 480ms, Maximum = 520ms, Average = 500ms`
+	result := models.NewCheckResult("probe", "network_health", "probe1", "10.0.40.1")
+	a := intent.Assertion{Type: "network_health", Target: "10.0.40.1", Runner: "probe1",
+		ExpectLatencyMs: 1, ExpectLossPct: 1}
+	got := parseProbeOutput(result, a, windowsOutput, false)
+	if got.Status != models.StatusFail {
+		t.Errorf("expected fail for exceeded thresholds in Windows-format output, got %s: %s", got.Status, got.Summary)
+	}
+	joined := strings.Join(got.Violations, "; ")
+	if !strings.Contains(joined, "latency") || !strings.Contains(joined, "loss") {
+		t.Errorf("violations should name both exceeded limits, got %v", got.Violations)
+	}
+}
