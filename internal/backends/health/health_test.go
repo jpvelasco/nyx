@@ -1440,7 +1440,7 @@ func TestProbeMTUAllProbesFailIsError(t *testing.T) {
 		script = "@echo off\r\nexit /b 1\r\n"
 	}
 	shim := filepath.Join(dir, name)
-	if err := os.WriteFile(shim, []byte(script), 0o700); err != nil {
+	if err := os.WriteFile(shim, []byte(script), 0o700); err != nil { // nosemgrep — the shim needs its owner execute bit
 		t.Fatalf("writing ping shim: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
