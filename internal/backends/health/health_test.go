@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -1422,5 +1424,38 @@ func TestProbeMTUSummaryContainsMTU(t *testing.T) {
 	}
 	if !strings.Contains(result.Summary, "MTU") {
 		t.Error("expected summary to mention MTU")
+	}
+}
+
+// TestProbeMTUAllProbesFailIsError pins the public-path repro of #178: a
+// target where every DF probe fails must report that the MTU could not be
+// determined — never an invented 576 measurement. The ping binary is
+// shimmed to fail, so the test is hermetic and sends no packets.
+func TestProbeMTUAllProbesFailIsError(t *testing.T) {
+	dir := t.TempDir()
+	name := "ping"
+	script := "#!/bin/sh\nexit 1\n"
+	if runtime.GOOS == "windows" {
+		name = "ping.bat"
+		script = "@echo off\r\nexit /b 1\r\n"
+	}
+	shim := filepath.Join(dir, name)
+	if err := os.WriteFile(shim, []byte(script), 0o700); err != nil {
+		t.Fatalf("writing ping shim: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := ProbeMTU(context.Background(), "10.0.60.0", 1500)
+	if err != nil {
+		t.Fatalf("an unreachable target is a finding, not a Go error: %v", err)
+	}
+	if result.Status != models.StatusError {
+		t.Errorf("status = %s, want error (MTU could not be determined)", result.Status)
+	}
+	if !strings.Contains(result.Summary, "could not be determined") {
+		t.Errorf("summary = %q, want the unmeasurable verdict", result.Summary)
+	}
+	if mtu, ok := result.Observed["mtu"]; !ok || mtu != "unknown" {
+		t.Errorf("observed mtu = %v, want \"unknown\"", result.Observed["mtu"])
 	}
 }
