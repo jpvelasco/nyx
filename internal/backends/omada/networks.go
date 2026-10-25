@@ -105,7 +105,10 @@ func (c *Client) DeleteLANNetwork(ctx context.Context, siteID, networkID string)
 }
 
 // LANMatchesWrite reports whether an existing network already has the
-// requested name, VLAN, CIDR, DHCP pool, and posture.
+// requested name, VLAN, CIDR, DHCP pool (including lease time and DHCP DNS
+// server), and posture. Every field the write payload carries must be
+// compared: a requested field that changed silently skipping the update
+// is a false no-op.
 func LANMatchesWrite(n Network, w LANWrite) bool {
 	return strings.EqualFold(n.Name, w.Name) &&
 		n.VLANID == w.VLANID &&
@@ -114,6 +117,8 @@ func LANMatchesWrite(n Network, w LANWrite) bool {
 		n.DHCPEnabled == w.DHCPSettings.Enable &&
 		n.DHCPStart == w.DHCPSettings.IPAddrStart &&
 		n.DHCPEnd == w.DHCPSettings.IPAddrEnd &&
+		n.LeaseTime == w.DHCPSettings.LeaseTime &&
+		n.DHCPDNS == w.DHCPSettings.DHCPNS &&
 		n.DHCPL2Relay == w.DHCPL2RelayEnable &&
 		n.DHCPGuard == w.DHCPGuard &&
 		n.IGMPSnoop == w.IGMPSnoopEnable &&
