@@ -15,6 +15,19 @@ import (
 
 // reDigStatus matches the dig response status line: ";; ->>HEADER<<- ... status: SERVFAIL"
 var (
+	// reDigHeaderStatus captures the status field from the standard dig
+	// response header line:
+	//
+	//	;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 12345
+	//
+	// Anchoring to the header line keeps record contents and domain
+	// names (e.g. servfail.example.com) from being mistaken for status
+	// markers.
+	reDigHeaderStatus = regexp.MustCompile(`(?m)^;;\s*->>HEADER<<-.*\bstatus:\s*([A-Z]+)\b`)
+	// The patterns below match a genuine separate validation-status line
+	// (";  status: SERVFAIL"), which delv-style output and abbreviated
+	// fixtures use. They do not match the standard header line, which is
+	// why header statuses are read through reDigHeaderStatus as well.
 	reDigBogus     = regexp.MustCompile(`(?m);\s+status:\s+BOGUS`)
 	reDigServFail  = regexp.MustCompile(`(?m);\s+status:\s+SERVFAIL`)
 	reDigNoError   = regexp.MustCompile(`(?m);\s+status:\s+NOERROR`)
@@ -166,13 +179,18 @@ func Available() bool {
 
 // dnssecStatus classifies dig +dnssec output into a status and summary.
 // Pattern-independent so the classification branches are testable without
-// spawning dig.
+// spawning dig. Statuses are read both from the standard ->>HEADER<<- line
+// and from a genuine separate validation-status line.
 func dnssecStatus(output string) (models.Status, string) {
-	isValidated := reDigValidated.MatchString(output)
-	isNoError := reDigNoError.MatchString(output)
+	headerStatus := ""
+	if m := reDigHeaderStatus.FindStringSubmatch(output); m != nil {
+		headerStatus = m[1]
+	}
+	isValidated := headerStatus == "VALIDATED" || reDigValidated.MatchString(output)
+	isNoError := headerStatus == "NOERROR" || reDigNoError.MatchString(output)
+	isServFail := headerStatus == "SERVFAIL" || reDigServFail.MatchString(output)
+	isBogus := headerStatus == "BOGUS" || reDigBogus.MatchString(output)
 	hasRRSIG := reRRSIG.MatchString(output)
-	isBogus := reDigBogus.MatchString(output)
-	isServFail := reDigServFail.MatchString(output)
 
 	switch {
 	case isBogus || isServFail:
