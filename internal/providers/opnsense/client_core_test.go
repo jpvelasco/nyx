@@ -779,3 +779,59 @@ func TestDebugDumpPrintsRawResponse(t *testing.T) {
 type errorReader struct{ err error }
 
 func (e errorReader) Read([]byte) (int, error) { return 0, e.err }
+
+// TestCreateNeverReplaysAmbiguousFailures reproduces #185: a create whose
+// response fails after the controller may have committed (here: a 500 on
+// the first POST, success on the second) must not be retried — replaying
+// duplicates the record. The call fails once with an uncertain-outcome
+// error and exactly one POST is issued.
+func TestCreateNeverReplaysAmbiguousFailures(t *testing.T) {
+	posts := 0
+	c, _ := fastTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/add_") {
+			posts++
+			if posts == 1 {
+				// The controller commits the record and then fails.
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			testutil.WriteBody(w, `{"result":"saved","uuid":"dup"}`)
+			return
+		}
+		testutil.WriteBody(w, systemInfoJSON)
+	}))
+	_, err := c.CreateAlias(context.Background(), AliasWrite{Name: "iot_net", Type: "network", Addresses: []string{"10.0.60.0/24"}})
+	if err == nil {
+		t.Fatal("an ambiguous create failure must surface an error, not a success")
+	}
+	if !strings.Contains(err.Error(), "uncertain") {
+		t.Errorf("error should name the uncertain outcome: %v", err)
+	}
+	if posts != 1 {
+		t.Errorf("create replayed %d times, want exactly 1 POST", posts)
+	}
+}
+
+// TestSetReplayIsIdempotentAndRetried pins the complementary behavior:
+// idempotent mutations (set/del) keep their transient retry.
+func TestSetReplayIsIdempotentAndRetried(t *testing.T) {
+	sets := 0
+	c, _ := fastTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/set_") {
+			sets++
+			if sets == 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			testutil.WriteBody(w, `{"result":"saved"}`)
+			return
+		}
+		testutil.WriteBody(w, systemInfoJSON)
+	}))
+	if err := c.SetAlias(context.Background(), "a1", AliasWrite{Name: "iot_net", Type: "network", Addresses: []string{"10.0.60.0/24"}}); err != nil {
+		t.Fatalf("transient set failure should be retried: %v", err)
+	}
+	if sets != 2 {
+		t.Errorf("set issued %d POSTs, want 2 (transient retry)", sets)
+	}
+}

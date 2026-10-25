@@ -214,7 +214,10 @@ func TestCreatePortForwardRule(t *testing.T) {
 		expectExactlyOneRequest(t, calls)
 	})
 
-	t.Run("5xx is retried then surfaces", func(t *testing.T) {
+	t.Run("5xx on a create is never replayed", func(t *testing.T) {
+		// A create whose outcome is ambiguous (the controller may have
+		// committed before the failure) is not retried automatically —
+		// replaying duplicates the record (#185).
 		var calls int
 		c, _ := fastTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			calls++
@@ -224,7 +227,12 @@ func TestCreatePortForwardRule(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "unexpected status 503") {
 			t.Errorf("error = %v, want unexpected status 503", err)
 		}
-		expectRetryBudget(t, calls)
+		if !strings.Contains(err.Error(), "uncertain") {
+			t.Errorf("error should name the uncertain outcome: %v", err)
+		}
+		if calls != 1 {
+			t.Errorf("requests = %d, want 1 (creates are never replayed)", calls)
+		}
 	})
 
 	t.Run("404 on add is stable", func(t *testing.T) {
@@ -390,7 +398,9 @@ func TestCreateOneToOneRule(t *testing.T) {
 		expectExactlyOneRequest(t, calls)
 	})
 
-	t.Run("5xx is retried then surfaces", func(t *testing.T) {
+	t.Run("5xx on a create is never replayed", func(t *testing.T) {
+		// A create whose outcome is ambiguous is not retried automatically —
+		// replaying duplicates the record (#185).
 		var calls int
 		c, _ := fastTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			calls++
@@ -400,7 +410,12 @@ func TestCreateOneToOneRule(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "unexpected status 500") {
 			t.Errorf("error = %v, want unexpected status 500", err)
 		}
-		expectRetryBudget(t, calls)
+		if !strings.Contains(err.Error(), "uncertain") {
+			t.Errorf("error should name the uncertain outcome: %v", err)
+		}
+		if calls != 1 {
+			t.Errorf("requests = %d, want 1 (creates are never replayed)", calls)
+		}
 	})
 }
 

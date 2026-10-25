@@ -366,12 +366,41 @@ func (c *Client) post(ctx context.Context, path string, body interface{}, dest i
 	return c.doRequest(ctx, http.MethodPost, path, data, dest)
 }
 
+// postCreate performs an authenticated POST that creates a record. A
+// create whose outcome is ambiguous (the controller may have committed
+// before the failure) is never retried automatically — replaying
+// duplicates the record; the error surfaces the uncertainty (#185).
+func (c *Client) postCreate(ctx context.Context, path string, body interface{}, dest interface{}) error {
+	if body == nil {
+		return c.doCreate(ctx, http.MethodPost, path, nil, dest)
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshaling request body: %w", err)
+	}
+	return c.doCreate(ctx, http.MethodPost, path, data, dest)
+}
+
 // doRequest serialises a request through the client mutex and applies the
 // retry and token-refresh policy.
 func (c *Client) doRequest(ctx context.Context, method, path string, body []byte, dest interface{}) error {
+	return c.doRequestKind(ctx, method, path, body, dest, false)
+}
+
+// doCreate is doRequest for non-idempotent creates: ambiguous failures are
+// not retried.
+func (c *Client) doCreate(ctx context.Context, method, path string, body []byte, dest interface{}) error {
+	return c.doRequestKind(ctx, method, path, body, dest, true)
+}
+
+// doRequestKind serialises a request through the client mutex and applies
+// the retry and token-refresh policy. create marks a non-idempotent
+// create: its transient failures surface immediately as uncertain
+// outcomes instead of being replayed.
+func (c *Client) doRequestKind(ctx context.Context, method, path string, body []byte, dest interface{}, create bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.doRequestLocked(ctx, method, c.requestURL(path), path, body, dest, true)
+	return c.doRequestLocked(ctx, method, c.requestURL(path), path, body, dest, true, create)
 }
 
 // doRequestLocked executes a request, retrying transient failures with
@@ -379,7 +408,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 // logPath is the request path used in retry log entries — the log must
 // never carry the controller address. allowReauth is false for the token
 // mint itself, so a failed mint can never trigger a recursive re-mint.
-func (c *Client) doRequestLocked(ctx context.Context, method, reqURL, logPath string, body []byte, dest interface{}, allowReauth bool) error {
+func (c *Client) doRequestLocked(ctx context.Context, method, reqURL, logPath string, body []byte, dest interface{}, allowReauth, create bool) error {
 	reauthUsed := false
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, method, reqURL, bytes.NewReader(body))
@@ -408,6 +437,15 @@ func (c *Client) doRequestLocked(ctx context.Context, method, reqURL, logPath st
 			}
 			c.logEvent("token_re_mint", nil)
 		case retryBackoff:
+			// A create whose outcome is ambiguous (the controller may
+			// already have committed the record before the failure) is
+			// never replayed automatically — a duplicate record is worse
+			// than an error. Reads (including POST-based observation
+			// endpoints) and idempotent PUT/DELETE mutations keep their
+			// transient retries (#185).
+			if create {
+				return fmt.Errorf("%w (uncertain outcome: the controller may have committed the create — verify before retrying)", err)
+			}
 			if attempt >= c.maxRetries {
 				return err
 			}
@@ -446,7 +484,7 @@ func (c *Client) mintToken(ctx context.Context) error {
 	var result struct {
 		AccessToken string `json:"accessToken"`
 	}
-	if err := c.doRequestLocked(ctx, http.MethodPost, c.mintURL(), tokenEndpoint, body, &result, false); err != nil {
+	if err := c.doRequestLocked(ctx, http.MethodPost, c.mintURL(), tokenEndpoint, body, &result, false, false); err != nil {
 		return err
 	}
 	c.token = result.AccessToken

@@ -586,3 +586,81 @@ func TestLogSafeErrorStripsHost(t *testing.T) {
 		}
 	}
 }
+
+// TestCreateNeverReplaysAmbiguousFailures reproduces the Omada side of
+// #185: an ACL create whose response fails after the controller may have
+// committed (a 500 on the first POST, success on the second) must not be
+// retried — replaying duplicates the rule. The call surfaces an
+// uncertain-outcome error and issues exactly one POST.
+func TestCreateNeverReplaysAmbiguousFailures(t *testing.T) {
+	posts := 0
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"tok1"}`)
+		case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
+			posts++
+			if posts == 1 {
+				// The controller commits the rule and then fails.
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			writeEnvelope(w, 0, "", `{"id":"dup-rule"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	if err := c.Login(context.Background(), "cid-1", "csecret"); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	err := c.CreateACLRule(context.Background(), "s1", ACLRule{
+		Name:   "Deny iot to servers",
+		Type:   ACLTypeSwitch,
+		Status: true,
+		Policy: ACLPolicyDeny,
+	})
+	if err == nil {
+		t.Fatal("an ambiguous create failure must surface an error, not a success")
+	}
+	if !strings.Contains(err.Error(), "uncertain") {
+		t.Errorf("error should name the uncertain outcome: %v", err)
+	}
+	if posts != 1 {
+		t.Errorf("create replayed %d times, want exactly 1 POST", posts)
+	}
+}
+
+// TestUpdateKeepsTransientRetry pins the complementary behavior: the PUT
+// update path is idempotent and keeps its transient retry.
+func TestUpdateKeepsTransientRetry(t *testing.T) {
+	var calls int
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"tok1"}`)
+		case "/openapi/v1/abc123/sites/s1/acls/osw-acls/r1":
+			calls++
+			if calls == 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			writeEnvelope(w, 0, "", "null")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	if err := c.Login(context.Background(), "cid-1", "csecret"); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if err := c.UpdateACLRule(context.Background(), "s1", "r1", ACLRule{
+		Name:   "Deny iot to servers",
+		Type:   ACLTypeSwitch,
+		Status: true,
+		Policy: ACLPolicyDeny,
+	}); err != nil {
+		t.Fatalf("transient update failure should be retried: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("update issued %d PUTs, want 2 (transient retry)", calls)
+	}
+}
