@@ -115,3 +115,19 @@ func TestGetVLANs_SkipsMalformedAndReconfigureErrors(t *testing.T) {
 		t.Fatal("expected post error")
 	}
 }
+
+// TestFindVLAN_UUIDAuthoritative pins the UUID precedence for VLANs: an
+// explicitly selected UUID wins over an earlier row's natural-key match,
+// and a missing UUID never falls back to the natural key (#168).
+func TestFindVLAN_UUIDAuthoritative(t *testing.T) {
+	rows := []VLAN{
+		{UUID: "v-first", Parent: "igb0", Tag: 60},
+		{UUID: "v-target", Parent: "igb0", Tag: 60},
+	}
+	if got, ok := FindVLAN(rows, "v-target", "igb0", 60); !ok || got.UUID != "v-target" {
+		t.Errorf("got = %+v ok=%v, want the explicitly selected v-target", got, ok)
+	}
+	if _, ok := FindVLAN(rows, "v-missing", "igb0", 60); ok {
+		t.Error("a missing UUID must not fall back to the natural key")
+	}
+}
