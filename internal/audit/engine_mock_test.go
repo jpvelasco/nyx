@@ -1138,3 +1138,62 @@ func TestRunPortCheck_OpenPassesWhenOpen(t *testing.T) {
 		t.Errorf("expected pass (open port with expect open), got %s: %s", result.Status, result.Summary)
 	}
 }
+
+// TestRunNetworkHealth_MTUUnmeasurableIsError pins that a health assertion
+// whose MTU probe could not confirm any size (unreachable or canceled)
+// never reads as PASS: the MTU result's error status escalates the
+// assertion verdict (repro of the invented-576 PASS in #178).
+func TestRunNetworkHealth_MTUUnmeasurableIsError(t *testing.T) {
+	spec := &intent.Spec{
+		Version: 1,
+		Site:    "test",
+		Assertions: []intent.Assertion{
+			{Type: "network_health", Target: "10.0.40.1", ExpectMTU: 1500},
+		},
+	}
+
+	pingPass := models.NewCheckResult("ping", "network_health", "system", "10.0.40.1")
+	pingPass.Status = models.StatusPass
+	pingPass.Summary = "health ok"
+	pingPass.Observed = map[string]interface{}{"loss_pct": 0.0}
+
+	mtuErrResult := models.NewCheckResult("ping", "network_health", "system", "10.0.40.1")
+	mtuErrResult.Status = models.StatusError
+	mtuErrResult.Summary = "MTU could not be determined - no probe size succeeded"
+	mtuErrResult.Observed = map[string]interface{}{"mtu": "unknown"}
+	mtuErrResult.Evidence = append(mtuErrResult.Evidence, "MTU probe: 1500 failed", "MTU probe: 576 failed")
+
+	mock := &backends.MockBackend{
+		PingCheckResult: pingPass,
+		MTUResult:       mtuErrResult,
+	}
+
+	eng := NewEngine(spec)
+	eng.Backend = mock
+	report, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(report.Findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(report.Findings))
+	}
+	finding := report.Findings[0]
+	if finding.Status != models.StatusError {
+		t.Errorf("health assertion with unmeasurable MTU = %s, want error", finding.Status)
+	}
+	if finding.Summary == "" {
+		t.Error("finding should keep the health summary")
+	}
+	found := false
+	for _, v := range finding.Violations {
+		if strings.Contains(v, "MTU could not be determined") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an MTU violation, got %v", finding.Violations)
+	}
+	if mtu, ok := finding.Observed["mtu"]; !ok || mtu != "unknown" {
+		t.Errorf("observed mtu = %v, want \"unknown\"", finding.Observed["mtu"])
+	}
+}

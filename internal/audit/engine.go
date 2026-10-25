@@ -832,11 +832,17 @@ func (e *Engine) runNetworkHealth(ctx context.Context, a intent.Assertion) (*mod
 			result.Evidence = append(result.Evidence, fmt.Sprintf("MTU probe error: %v", mtuErr))
 		} else {
 			result.Evidence = append(result.Evidence, mtuResult.Evidence...)
-			if mtuResult.Status == models.StatusFail && result.Status == models.StatusPass {
+			switch {
+			case mtuResult.Status == models.StatusFail && result.Status == models.StatusPass:
 				result.Status = models.StatusFail
 				result.Violations = append(result.Violations, mtuResult.Summary)
-			} else if mtuResult.Status == models.StatusWarn && result.Status == models.StatusPass {
+			case mtuResult.Status == models.StatusWarn && result.Status == models.StatusPass:
 				result.Status = models.StatusWarn
+			case mtuResult.Status == models.StatusError && result.Status == models.StatusPass:
+				// An unmeasurable MTU (no probe size confirmed) must not
+				// read as a passing health assertion.
+				result.Status = models.StatusError
+				result.Violations = append(result.Violations, mtuResult.Summary)
 			}
 			if mtu, ok := mtuResult.Observed["mtu"]; ok {
 				result.Observed["mtu"] = mtu
