@@ -15,6 +15,15 @@ func ValidateTarget(s string) error {
 	return validateNetworkTarget(s, "target", false)
 }
 
+// NormalizeZoneRef strips the documented "zone:" prefix from a zone or
+// network reference (e.g. "zone:iot" → "iot"). The CLI help and examples
+// advertise the prefixed form; the spec's zone and name fields carry the
+// bare value, so entry points normalize before resolving. A bare
+// reference passes through unchanged.
+func NormalizeZoneRef(s string) string {
+	return strings.TrimPrefix(s, "zone:")
+}
+
 // ValidateServer validates a dig server: a valid IP/hostname, optionally with
 // an explicit ":port" (e.g. "10.0.10.1:5353" or "[::1]:53"). It applies the
 // same option-marker rejection as ValidateTarget.
