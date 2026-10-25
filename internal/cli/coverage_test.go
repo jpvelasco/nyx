@@ -1169,9 +1169,24 @@ func TestInitCmd_OutputError(t *testing.T) {
 
 func TestMcpServeCmd_InvalidTransport(t *testing.T) {
 	saveRestoreGlobals(t)
-	mcpTransport = "http"
+	mcpTransport = "bogus"
 	if err := mcpServeCmd.RunE(mcpServeCmd, nil); err == nil {
 		t.Fatal("expected error for unsupported transport")
+	}
+}
+
+func TestMcpServeCmd_HTTPRefusesNonLoopbackBind(t *testing.T) {
+	// The loopback-only binding rule (docs/mcp-http.md) refuses any
+	// non-loopback --bind before the listener opens; there is no remote
+	// escape hatch.
+	saveRestoreGlobals(t)
+	mcpTransport = "http"
+	for _, bind := range []string{"0.0.0.0:9000", ":9000", "192.168.1.10:9000"} {
+		mcpBind = bind
+		err := mcpServeCmd.RunE(mcpServeCmd, nil)
+		if err == nil || !strings.Contains(err.Error(), "loopback") {
+			t.Errorf("bind %q: expected a loopback-only refusal, got %v", bind, err)
+		}
 	}
 }
 

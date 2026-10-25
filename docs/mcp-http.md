@@ -1,12 +1,18 @@
-# Design: HTTP Transport for `nyx mcp`
+# HTTP Transport for `nyx mcp`
 
-**Status:** Design only (issue #15). Not implemented.
+**Status:** Implemented (#138). `nyx mcp serve --transport http` serves MCP
+streamable HTTP per this design; stdio remains the default local path.
 **Related:** #2 (credential vault), #14 (harness wiring), `docs/bdd/mcp-credentials.md`, `docs/naming.md`
 
-This document settles the binding, authentication, and session model for a
-future HTTP transport. It does **not** implement that transport. `nyx mcp
-serve` remains stdio-only; any other `--transport` value is rejected with
-`only stdio transport is supported in v1` (`internal/cli/mcp.go`).
+This document settles the binding, authentication, and session model for
+the HTTP transport. The implementation follows it as the contract:
+loopback bind only (`--bind` accepts loopback addresses; anything else
+errors with `bind to loopback only; remote exposure is out of scope`),
+bearer auth on every request (`Authorization: Bearer <token>` from
+`NYX_MCP_TOKEN`, or a token generated at start and printed once to
+stderr), one `Server` per session ID with a 30-minute idle timeout, the
+5-minute per-call timeout unchanged, and the credential resolution chain
+exactly as stdio (`docs/bdd/mcp-credentials.md`).
 
 ## Why stdio is the only transport today
 
@@ -226,19 +232,30 @@ If vault and HTTP land in different PRs, HTTP still reads the store
 through the existing overlay. It does not invent a parallel
 provisioning path "just for the listener."
 
-## Implementation notes (not this change)
+## Implementation notes
 
-Leave the stub in place until a dedicated implementation issue is
-accepted:
+The transport is implemented in `internal/mcp/http.go` (listener surface,
+auth, session registry) and `internal/cli/mcp.go` (`--transport http`,
+`--bind`, token provisioning, graceful shutdown):
 
-- `internal/cli/mcp.go` keeps rejecting `--transport` values other than
-  `stdio`.
-- `internal/mcp` stays a stdio JSON-RPC loop. Do not grow a half-open
-  `net.Listener` behind the stub.
-- Feature work does not edit `CHANGELOG.md`; a release-prep PR will
-  mention HTTP if and when it ships.
+- `internal/cli/mcp.go` accepts `--transport stdio|http`; anything else
+  is refused. The `--bind` flag accepts loopback addresses only
+  (`internal/mcp.ValidateBindAddr`); the default is `127.0.0.1:0` with
+  the bound address printed on stderr.
+- `internal/mcp/http.go` serves MCP streamable HTTP at `/mcp`: POST
+  only (GET/DELETE → 405), one JSON-RPC message per body (frame-size
+  capped like stdio), `Mcp-Session-Id` assigned on initialize, 400 for
+  a missing session on non-initialize requests, 404 for unknown or
+  idle-expired sessions, 202 for notifications. Idle sessions are swept
+  by a reaper (30-minute default) and on access.
+- The token is compared constant-time; failures return a generic 401
+  body. Tokens and Authorization headers are never logged, echoed, or
+  accepted from URLs.
+- Feature work does not edit `CHANGELOG.md`; a release-prep PR mentions
+  HTTP when it ships.
 
-Acceptance for an implementation PR (future) should include: loopback
+Acceptance for the implementation (met, see `internal/mcp/http_test.go`
+and `internal/cli/coverage_test.go`): loopback
 bind only, non-loopback refused, bearer header required, token never
 logged or placed in a URL, one `Server` per session, idle + per-call
 timeouts, credential resolution unchanged from

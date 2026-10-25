@@ -251,7 +251,18 @@ nyx includes a Model Context Protocol server for AI agent integration:
 nyx mcp serve --transport stdio
 ```
 
-HTTP transport is not implemented; the auth, binding, and session design is in [docs/mcp-http.md](docs/mcp-http.md).
+An HTTP transport is also available for serving multiple local harnesses from
+one process — loopback-only with bearer auth:
+
+```bash
+NYX_MCP_TOKEN=$(openssl rand -hex 32) nyx mcp serve --transport http --bind 127.0.0.1:9000
+```
+
+The listener requires `Authorization: Bearer <NYX_MCP_TOKEN>` on every request
+(generated and printed to stderr when the env var is unset), binds to loopback
+only, and gives each session its own server state with a 30-minute idle
+timeout. The auth, binding, and session design is in
+[docs/mcp-http.md](docs/mcp-http.md).
 
 ### Harness Config
 
