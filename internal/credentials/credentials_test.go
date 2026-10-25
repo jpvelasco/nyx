@@ -571,3 +571,40 @@ func TestKeyReadFailurePreservesOriginalKey(t *testing.T) {
 		t.Error("entry lost after key read failure")
 	}
 }
+
+func TestKeyCreationRefusesUnexpectedExistingPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Symlink requires developer mode on Windows")
+	}
+	// A dangling in-root symlink at the key path reads as a missing key
+	// but exists as a directory entry: first-use creation must refuse it
+	// exclusively instead of following or replacing it.
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	if err := os.Symlink(filepath.Join(filepath.Dir(path), "missing-target.key"), path+".key"); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, err := Open(path); err == nil {
+		t.Fatal("Open should fail when the key path exists unexpectedly")
+	}
+	info, err := os.Lstat(path + ".key")
+	if err != nil {
+		t.Fatalf("Lstat key path: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Error("unexpected existing key path was replaced instead of refused")
+	}
+}
+
+func TestOpenReportsLockAcquisitionFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only directory permissions are not enforced on Windows")
+	}
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0500); err != nil {
+		t.Fatalf("Chmod failed: %v", err)
+	}
+	defer os.Chmod(dir, 0700)
+	if _, err := Open(filepath.Join(dir, "credentials.json")); err == nil || !strings.Contains(err.Error(), "locking credential store") {
+		t.Errorf("Open in an unwritable store directory = %v, want locking error", err)
+	}
+}
