@@ -104,7 +104,18 @@ func TestBuildReportRisk(t *testing.T) {
 		{"all unknown", []DeviceFacts{
 			{Provider: ProviderOpnsense},
 			{Provider: ProviderOmada},
-		}, RiskNone},
+		}, RiskIndeterminate},
+		{"unknown only", []DeviceFacts{
+			{Provider: ProviderOpnsense},
+		}, RiskIndeterminate},
+		{"router plus unknown", []DeviceFacts{
+			{Provider: ProviderOmada, HasManagedGateway: true},
+			{Provider: ProviderOpnsense},
+		}, RiskDouble},
+		{"bridge plus unknown", []DeviceFacts{
+			{Provider: ProviderOpnsense, OutboundNatMode: "disabled"},
+			{Provider: ProviderOmada},
+		}, RiskIndeterminate},
 		{"empty", []DeviceFacts{}, RiskNone},
 	}
 	for _, tc := range cases {
