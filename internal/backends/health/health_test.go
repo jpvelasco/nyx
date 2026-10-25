@@ -1427,6 +1427,69 @@ func TestProbeMTUSummaryContainsMTU(t *testing.T) {
 	}
 }
 
+// TestEvaluatePingOutputThresholds covers the canonical evaluation of
+// externally captured ping output directly (the engine's remote probe
+// path calls it): exceeded thresholds fail with violations naming both
+// limits, format detection works across producer platforms, and outputs
+// without thresholds pass.
+func TestEvaluatePingOutputThresholds(t *testing.T) {
+	const linuxOutput = `PING 10.0.40.1 (10.0.40.1) 56(84) bytes of data.
+64 bytes from 10.0.40.1: icmp_seq=1 ttl=64 time=480.1 ms
+64 bytes from 10.0.40.1: icmp_seq=2 ttl=64 time=500.2 ms
+64 bytes from 10.0.40.1: icmp_seq=3 ttl=64 time=520.3 ms
+
+--- 10.0.40.1 ping statistics ---
+3 packets transmitted, 2 received, 33% packet loss, time 2003ms
+rtt min/avg/max/mdev = 480.1/500.2/520.3/16.7 ms`
+	status, violations, summary := EvaluatePingOutput(linuxOutput, "10.0.40.1", 3, 1, 1)
+	if status != models.StatusFail {
+		t.Errorf("status = %s, want fail for exceeded thresholds", status)
+	}
+	joined := strings.Join(violations, "; ")
+	if !strings.Contains(joined, "latency") || !strings.Contains(joined, "loss") {
+		t.Errorf("violations should name both exceeded limits, got %v", violations)
+	}
+	if !strings.Contains(summary, "health check failed") {
+		t.Errorf("summary = %q, want the failure summary", summary)
+	}
+
+	const windowsOutput = `Pinging 10.0.40.1 with 32 bytes of data:
+Reply from 10.0.40.1: bytes=32 time=480ms TTL=64
+Reply from 10.0.40.1: bytes=32 time=500ms TTL=64
+Request timed out.
+
+Ping statistics for 10.0.40.1:
+    Packets: Sent = 3, Received = 2, Lost = 1 (33% loss),
+Approximate round trip times in milli-seconds:
+    Minimum = 480ms, Maximum = 520ms, Average = 500ms`
+	status, violations, _ = EvaluatePingOutput(windowsOutput, "10.0.40.1", 3, 1, 1)
+	if status != models.StatusFail || len(violations) == 0 {
+		t.Errorf("Windows-format output: status = %s violations = %v, want fail with violations", status, violations)
+	}
+
+	const darwinOutput = `PING 10.0.40.1: 56 data bytes
+64 bytes from 10.0.40.1: icmp_seq=0 ttl=64 time=500.1 ms
+
+--- 10.0.40.1 ping statistics ---
+1 packets transmitted, 1 packets received, 0.0% packet loss
+round-trip min/avg/max/stddev = 500.1/500.2/500.3/0.1 ms`
+	status, violations, _ = EvaluatePingOutput(darwinOutput, "10.0.40.1", 1, 1, 0)
+	if status != models.StatusFail || len(violations) == 0 {
+		t.Errorf("Darwin-format output: status = %s violations = %v, want latency failure", status, violations)
+	}
+
+	const healthyOutput = `PING 10.0.40.1 (10.0.40.1) 56(84) bytes of data.
+64 bytes from 10.0.40.1: icmp_seq=1 ttl=64 time=0.2 ms
+
+--- 10.0.40.1 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 0.2/0.2/0.2/0.1 ms`
+	status, violations, summary = EvaluatePingOutput(healthyOutput, "10.0.40.1", 1, 5, 5)
+	if status != models.StatusPass || len(violations) != 0 || summary != "" {
+		t.Errorf("healthy output: status = %s violations = %v summary = %q, want clean pass", status, violations, summary)
+	}
+}
+
 // TestProbeMTUAllProbesFailIsError pins the public-path repro of #178: a
 // target where every DF probe fails must report that the MTU could not be
 // determined — never an invented 576 measurement. The ping binary is

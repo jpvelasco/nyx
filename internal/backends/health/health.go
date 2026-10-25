@@ -172,6 +172,32 @@ func classifyLatencyLoss(stats *PingStats, maxLatencyMs float64, maxLossPct floa
 	return models.StatusPass, nil, ""
 }
 
+// EvaluatePingOutput classifies externally captured ping output (e.g. from
+// a probe host's `ping -c count`) against latency/loss thresholds using the
+// same classification as CheckLatencyAndLoss. count is the number of pings
+// the remote command sent; thresholds <= 0 mean "don't check".
+func EvaluatePingOutput(output, target string, count int, maxLatencyMs, maxLossPct float64) (models.Status, []string, string) {
+	stats := parsePingOutputAnyFormat(output, target, count)
+	return classifyLatencyLoss(stats, maxLatencyMs, maxLossPct)
+}
+
+// parsePingOutputAnyFormat extracts ping stats from output whose producing
+// platform is unknown — a probe host may run a different OS than the local
+// machine, so the output format is detected from its content (the Windows
+// loss marker, then the Darwin-vs-Linux RTT marker) instead of runtime.GOOS.
+func parsePingOutputAnyFormat(output string, target string, count int) *PingStats {
+	stats := &PingStats{Target: target, Sent: count}
+	switch {
+	case rePktLossWindows.MatchString(output):
+		parseWindowsPingOutput(output, stats)
+	case reRTTDarwin.MatchString(output):
+		parseDarwinPingOutput(output, stats)
+	default:
+		parseLinuxPingOutput(output, stats)
+	}
+	return stats
+}
+
 // ProbeMTU performs binary search to find the maximum MTU to a target.
 // Returns StatusPass if discovered >= expected, StatusWarn if within 10%, StatusFail otherwise.
 func ProbeMTU(ctx context.Context, target string, expectedMTU int) (*models.CheckResult, error) {
