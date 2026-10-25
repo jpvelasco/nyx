@@ -1075,3 +1075,48 @@ func TestRun_HandshakeStallHonorsContextDeadline(t *testing.T) {
 		t.Errorf("Run returned after %v, want it bounded near the 50ms deadline", elapsed)
 	}
 }
+
+// TestRun_CancellationWithoutDeadlineAbortsHandshake pins the watcher
+// branch: with no deadline on the context, the raw connection's 10s
+// handshake cap cannot be waited out — only the cancellation watcher can
+// unblock a stalled handshake, and it must.
+func TestRun_CancellationWithoutDeadlineAbortsHandshake(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	stalled := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		stalled <- conn
+	}()
+
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+	p := Probe{Name: "iot-probe", Host: "127.0.0.1", User: "testuser", VLAN: "iot", Port: ln.Addr().(*net.TCPAddr).Port, Key: keyPath}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	_, err = Run(ctx, p, []string{"echo", "hi"}, true)
+	elapsed := time.Since(start)
+
+	if conn := <-stalled; conn != nil {
+		conn.Close()
+	}
+	if err == nil {
+		t.Fatal("a canceled handshake must fail")
+	}
+	if elapsed > 300*time.Millisecond {
+		t.Errorf("Run returned after %v, want the cancellation to abort the stalled handshake near 50ms", elapsed)
+	}
+}
