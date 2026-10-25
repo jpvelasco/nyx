@@ -90,16 +90,6 @@ type otlpTelemetry struct {
 	shutdownOnce   sync.Once
 }
 
-// exporterHeaders applies the configured NYX_OTLP_HEADERS to an exporter
-// option list. The option types differ per exporter, so the caller passes
-// its own WithHeaders function.
-func exporterHeaders[T any](cfg otlpConfig, withHeaders func(...map[string]string) T, opts []T) []T {
-	if len(cfg.Headers) > 0 {
-		opts = append(opts, withHeaders(cfg.Headers))
-	}
-	return opts
-}
-
 // newOTLPTelemetry builds the OTLP pipelines for cfg: OTLP/HTTP exporters
 // for logs, traces, and metrics sharing one PII-safe resource.
 func newOTLPTelemetry(cfg otlpConfig) (*otlpTelemetry, error) {
@@ -184,7 +174,6 @@ func (t *otlpTelemetry) Shutdown(ctx context.Context) error {
 // deferred Shutdown() flushes them alongside the log providers.
 var (
 	telemetryMu   sync.Mutex
-	telemetryOnce = map[*otlpTelemetry]func(){}
 	otlpActive    bool
 	telemetryInst *otlpTelemetry
 )
