@@ -135,10 +135,12 @@ func classifyIsolation(f models.CheckResult, groups map[string]*failureGroup, sp
 		return
 	}
 
-	ctx := buildIsolationContext(from, to, spec, runner)
+	ctx := buildIsolationContext(from, to, spec, runner, f.Runner)
 
 	// If the runner is NOT in the source zone, this is a vantage-point issue.
 	// The check ran from the wrong place, so the result is meaningless.
+	// The finding's own runner decides: a probe in the source zone makes the
+	// check verified regardless of where the report itself was produced.
 	if ctx == nil || !ctx.runnerInFrom {
 		g := groups["vantage_point"]
 		g.failures = append(g.failures, f)
@@ -174,7 +176,13 @@ func classifyIsolation(f models.CheckResult, groups map[string]*failureGroup, sp
 }
 
 // buildIsolationContext determines vantage-point details for an isolation check.
-func buildIsolationContext(from, to string, spec *intent.Spec, runner models.RunnerContext) *isolationContext {
+// buildIsolationContext determines the vantage point of an isolation
+// finding. findingRunner is the runner recorded on the finding itself: a
+// named probe means the check executed remotely from that probe's zone, so
+// the probe — not the local report runner — decides whether the check saw
+// the source zone. An empty or "local" finding runner falls back to the
+// report runner's networks.
+func buildIsolationContext(from, to string, spec *intent.Spec, runner models.RunnerContext, findingRunner string) *isolationContext {
 	if spec == nil {
 		return nil
 	}
@@ -191,38 +199,32 @@ func buildIsolationContext(from, to string, spec *intent.Spec, runner models.Run
 		}
 	}
 
-	// Check if runner is in the source zone
-	for _, netName := range runner.Networks {
-		for _, n := range spec.Networks {
-			if n.Name == netName && (n.Zone == from || n.Name == from) {
-				ctx.runnerInFrom = true
-				break
+	if findingRunner != "" && findingRunner != "local" {
+		// The finding ran on a named probe: its vantage point is the
+		// probe's zone, not the local report runner's.
+		if p := spec.ProbeByName(findingRunner); p != nil {
+			ctx.runnerInFrom = probeInZone(*p, from, spec.Networks)
+		}
+		// An unknown runner name cannot be resolved: leave runnerInFrom
+		// false — the check's vantage point is unknown and the finding is
+		// reported as unverified.
+	} else {
+		// Local check: the report runner's networks decide.
+		for _, netName := range runner.Networks {
+			for _, n := range spec.Networks {
+				if n.Name == netName && (n.Zone == from || n.Name == from) {
+					ctx.runnerInFrom = true
+					break
+				}
 			}
 		}
 	}
 
-	// Check if a probe is declared in the source zone
+	// Check if a probe is declared in the source zone (vantage-point hint)
 	for _, p := range spec.Probes {
-		if p.VLAN == from {
+		if probeInZone(p, from, spec.Networks) {
 			ctx.probeInFromZone = true
 			ctx.probeName = p.Name
-			break
-		}
-		// Also check if probe's host IP is within a network in the from zone
-		if p.Host == "" {
-			continue
-		}
-		for _, n := range spec.Networks {
-			if n.Zone != from && n.Name != from {
-				continue
-			}
-			if ipInCIDR(p.Host, n.CIDR) {
-				ctx.probeInFromZone = true
-				ctx.probeName = p.Name
-				break
-			}
-		}
-		if ctx.probeInFromZone {
 			break
 		}
 	}
@@ -1156,6 +1158,27 @@ func extractInt(v any) int {
 	default:
 		return 0
 	}
+}
+
+// probeInZone reports whether the declared probe sits inside the named
+// zone: either by its VLAN declaration or by a host address inside one of
+// the zone's networks.
+func probeInZone(p intent.Probe, zone string, networks []intent.Network) bool {
+	if p.VLAN == zone {
+		return true
+	}
+	if p.Host == "" {
+		return false
+	}
+	for _, n := range networks {
+		if n.Zone != zone && n.Name != zone {
+			continue
+		}
+		if ipInCIDR(p.Host, n.CIDR) {
+			return true
+		}
+	}
+	return false
 }
 
 // ipInCIDR checks if an IP address (or hostname that resolves to an IP) falls

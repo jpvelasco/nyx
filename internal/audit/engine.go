@@ -800,12 +800,27 @@ func (e *Engine) runDNSCheck(ctx context.Context, a intent.Assertion) (*models.C
 	if a.DNSSEC {
 		dnssecResult, dnssecErr := e.Backend.CheckDNSSEC(ctx, a.Query, a.Server)
 		if dnssecErr != nil {
+			// The validator could not run at all. A requested validation
+			// must not silently read as a validated pass: the finding
+			// escalates to error (still non-fatal — other assertions keep
+			// running) and preserves the validator's explanation.
 			result.Evidence = append(result.Evidence, fmt.Sprintf("DNSSEC check error: %v", dnssecErr))
+			if result.Status == models.StatusPass {
+				result.Status = models.StatusError
+				result.Summary = fmt.Sprintf("%s; DNSSEC validation could not run: %v", result.Summary, dnssecErr)
+			}
 		} else {
 			result.Evidence = append(result.Evidence, dnssecResult.Evidence...)
-			if dnssecResult.Status == models.StatusFail && result.Status == models.StatusPass {
-				result.Status = models.StatusFail
-				result.Violations = append(result.Violations, dnssecResult.Summary)
+			// Combine the verdicts explicitly: an unvalidated or failed
+			// DNSSEC result is visible at its own severity — WARN
+			// (indeterminate), FAIL (broken chain), or ERROR (validator
+			// unavailable such as missing dig) — never reduced to PASS.
+			if dnssecResult.Status != models.StatusPass && result.Status == models.StatusPass {
+				result.Status = dnssecResult.Status
+				result.Summary = fmt.Sprintf("%s; DNSSEC: %s", result.Summary, dnssecResult.Summary)
+				if dnssecResult.Status == models.StatusFail {
+					result.Violations = append(result.Violations, dnssecResult.Summary)
+				}
 			}
 		}
 	}

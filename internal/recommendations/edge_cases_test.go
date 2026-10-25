@@ -82,7 +82,7 @@ func TestBuildIsolationContext_ProbeWithEmptyHost(t *testing.T) {
 		},
 	}
 	// probe1 has VLAN="zone-b" which doesn't match "zone-a", and Host="" so IP check is skipped
-	ctx := buildIsolationContext("zone-a", "zone-b", spec, models.RunnerContext{})
+	ctx := buildIsolationContext("zone-a", "zone-b", spec, models.RunnerContext{}, "")
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
@@ -103,7 +103,7 @@ func TestBuildIsolationContext_ProbeHostNotInZone(t *testing.T) {
 		},
 	}
 	// probe1 Host is not in any network matching zone-a
-	ctx := buildIsolationContext("zone-a", "zone-b", spec, models.RunnerContext{})
+	ctx := buildIsolationContext("zone-a", "zone-b", spec, models.RunnerContext{}, "")
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}

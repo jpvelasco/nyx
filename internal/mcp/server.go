@@ -503,7 +503,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
 				},
-				Required: []string{"host"},
+				Required: nil,
 			},
 		},
 		{
@@ -536,7 +536,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			Description: "Preview the difference between the controller's current ACL rules and a proposed intent spec. Read-only: nothing is applied.",
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
 				"spec": {Type: "string", Description: "Proposed intent spec (YAML): networks and policies to preview"},
-			}, []string{"host", "spec"}),
+			}, []string{"spec"}),
 		},
 		{
 			Name:        "omada_apply_acl",
@@ -550,7 +550,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"protocols":   {Type: "string", Description: "Optional comma-separated IP protocol numbers (e.g. 6,17). Empty means all protocols."},
 				"dry_run":     {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
 				"post_audit":  {Type: "boolean", Description: "Run a targeted isolation audit after a real apply. Default true."},
-			}, []string{"host", "from", "to", "action"}),
+			}, []string{"from", "to", "action"}),
 		},
 		{
 			Name:        "omada_list_port_forwardings",
@@ -577,35 +577,35 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			Description: "Look up which managed device (and which port) a device MAC is cabled into, from the controller's uplink observation. Use to find where a standalone switch's uplink lands before changing port profiles. Read-only.",
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
 				"device_mac": {Type: "string", Description: "MAC address of the device to look up (e.g. the standalone switch's MAC)"},
-			}, []string{"host", "device_mac"}),
+			}, []string{"device_mac"}),
 		},
 		{
 			Name:        "omada_list_switch_ports",
 			Description: "List switch ports with their live VLAN membership: the bound profile plus the resolved native (untagged) network and tagged set. Read-only.",
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
 				"switch_mac": {Type: "string", Description: "Optional switch MAC to filter ports; empty lists every switch in the site"},
-			}, []string{"host"}),
+			}, nil),
 		},
 		{
 			Name:        "omada_list_gateway_dhcp_users",
 			Description: "List the fresher per-gateway DHCP lease table (ip, mac, name, network, remaining lease). gateway_mac is required. Read-only.",
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
 				"gateway_mac": {Type: "string", Description: "Managed gateway MAC (colon or dash separators)"},
-			}, []string{"host", "gateway_mac"}),
+			}, []string{"gateway_mac"}),
 		},
 		{
 			Name:        "omada_get_client_topology",
 			Description: "Read the client's uplink chain (POST-only): client node plus managed switch/AP/gateway hops. A dumb switch does not appear — the last managed port is the crime scene. Works for leaseless clients. client_mac is required.",
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
 				"client_mac": {Type: "string", Description: "Client MAC (colon or dash separators)"},
-			}, []string{"host", "client_mac"}),
+			}, []string{"client_mac"}),
 		},
 		{
 			Name:        "omada_get_dhcp_server_info",
 			Description: "Read the per-network DHCP pool panel (available/total IPs and range). network_id is required. Read-only.",
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
 				"network_id": {Type: "string", Description: "LAN network id from omada_list_networks"},
-			}, []string{"host", "network_id"}),
+			}, []string{"network_id"}),
 		},
 		{
 			Name:        "omada_get_dhcp_snoop_status",
@@ -629,7 +629,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"client_mac": {Type: "string", Description: "Client MAC (optional if switch_mac+port is set)"},
 				"switch_mac": {Type: "string", Description: "Managed switch MAC (optional if client_mac is set)"},
 				"port":       {Type: "integer", Description: "Managed switch port number (required with switch_mac)"},
-			}, []string{"host"}),
+			}, nil),
 		},
 		{
 			Name:        "omada_list_lan_profiles",
@@ -645,7 +645,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"native":       {Type: "string", Description: "Native (untagged) LAN network name"},
 				"tagged":       {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
 				"profile_name": {Type: "string", Description: "Optional name for a new profile; derived when empty"},
-			}, []string{"host", "switch_mac", "port", "native"}),
+			}, []string{"switch_mac", "port", "native"}),
 		},
 		{
 			Name:        "omada_plan_lan",
@@ -659,7 +659,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"dhcp_start":     {Type: "string", Description: "DHCP pool start"},
 				"dhcp_end":       {Type: "string", Description: "DHCP pool end"},
 				"delete":         {Type: "boolean", Description: "Preview a delete"},
-			}, []string{"host", "name"}),
+			}, []string{"name"}),
 		},
 		{
 			Name:        "omada_apply_lan",
@@ -674,7 +674,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"dhcp_end":       {Type: "string", Description: "DHCP pool end"},
 				"delete":         {Type: "boolean", Description: "Delete the LAN"},
 				"dry_run":        {Type: "boolean", Description: "Preview only. Default true."},
-			}, []string{"host", "name"}),
+			}, []string{"name"}),
 		},
 		{
 			Name:        "omada_list_ssids",
@@ -693,7 +693,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"security":   {Type: "string", Description: "Security mode, e.g. wpa2"},
 				"band":       {Type: "string", Description: "Radio band if the controller exposes it"},
 				"delete":     {Type: "boolean", Description: "Preview a delete"},
-			}, []string{"host"}),
+			}, nil),
 		},
 		{
 			Name:        "omada_apply_ssid",
@@ -708,7 +708,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"band":       {Type: "string", Description: "Radio band if the controller exposes it"},
 				"delete":     {Type: "boolean", Description: "Delete the SSID"},
 				"dry_run":    {Type: "boolean", Description: "Preview only. Default true."},
-			}, []string{"host"}),
+			}, nil),
 		},
 		{
 			Name:        "omada_apply_port_profile",
@@ -720,7 +720,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"tagged":       {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
 				"profile_name": {Type: "string", Description: "Optional name for a new profile; derived when empty"},
 				"dry_run":      {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
-			}, []string{"host", "switch_mac", "port", "native"}),
+			}, []string{"switch_mac", "port", "native"}),
 		},
 		{
 			Name:        "opnsense_get_info",
@@ -742,7 +742,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			Description: "Fetch one OPNsense firewall filter rule by UUID.",
 			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
 				"uuid": {Type: "string", Description: "Firewall rule UUID"},
-			}, []string{"host", "uuid"}),
+			}, []string{"uuid"}),
 		},
 		{
 			Name:        "opnsense_list_clients",
@@ -880,7 +880,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"uuid":        {Type: "string", Description: "Existing VLAN or bridge uuid"},
 				"members":     {Type: "string", Description: "Comma-separated bridge members"},
 				"delete":      {Type: "boolean", Description: "Preview a VLAN delete"},
-			}, []string{"host"}),
+			}, nil),
 		},
 		{
 			Name:        "opnsense_apply_vlan",
@@ -894,7 +894,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"members":     {Type: "string", Description: "Comma-separated bridge members"},
 				"delete":      {Type: "boolean", Description: "Delete the VLAN device"},
 				"dry_run":     {Type: "boolean", Description: "Preview only. Default true."},
-			}, []string{"host"}),
+			}, nil),
 		},
 		{
 			Name:        "opnsense_plan_filter",
@@ -912,7 +912,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"description": {Type: "string", Description: "Optional description"},
 				"enabled":     {Type: "boolean", Description: "Whether the rule or alias is enabled"},
 				"delete":      {Type: "boolean", Description: "Preview a delete"},
-			}, []string{"host"}),
+			}, nil),
 		},
 		{
 			Name:        "opnsense_apply_filter",
@@ -931,7 +931,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"enabled":     {Type: "boolean", Description: "Whether the rule or alias is enabled"},
 				"delete":      {Type: "boolean", Description: "Delete the rule or alias"},
 				"dry_run":     {Type: "boolean", Description: "Preview only. Default true."},
-			}, []string{"host"}),
+			}, nil),
 		},
 		{
 			Name:        "opnsense_plan_unbound_override",
@@ -943,7 +943,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"uuid":        {Type: "string", Description: "Existing override uuid"},
 				"description": {Type: "string", Description: "Optional description"},
 				"delete":      {Type: "boolean", Description: "Preview a delete"},
-			}, []string{"host"}),
+			}, nil),
 		},
 		{
 			Name:        "opnsense_apply_unbound_override",
@@ -956,7 +956,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"description": {Type: "string", Description: "Optional description"},
 				"delete":      {Type: "boolean", Description: "Delete the override"},
 				"dry_run":     {Type: "boolean", Description: "Preview only. Default true."},
-			}, []string{"host"}),
+			}, nil),
 		},
 		{
 			Name:        "opnsense_plan_dhcp",
@@ -972,7 +972,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"hostname":  {Type: "string", Description: "Static host / reservation hostname"},
 				"uuid":      {Type: "string", Description: "Existing item uuid"},
 				"delete":    {Type: "boolean", Description: "Preview a delete"},
-			}, []string{"host"}),
+			}, nil),
 		},
 		{
 			Name:        "opnsense_apply_dhcp",
@@ -989,7 +989,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"uuid":      {Type: "string", Description: "Existing item uuid"},
 				"delete":    {Type: "boolean", Description: "Delete the item"},
 				"dry_run":   {Type: "boolean", Description: "Preview only. Default true."},
-			}, []string{"host"}),
+			}, nil),
 		},
 		{
 			Name:        "topology",
@@ -1021,21 +1021,22 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 }
 
 // omadaToolSchema returns the credential input schema shared by every
-// credential-bearing Omada tool. Required lists only host — client_id /
-// client_secret have env and credential-store fallbacks (BDD S3.1), and
-// TLS opts are optional.
+// credential-bearing Omada tool. No argument is required: host and
+// client_id / client_secret resolve from OMADA_* env vars and the
+// credential store (BDD S3.1), TLS opts are optional, and the options
+// builder reports missing configuration when every supported source is
+// empty.
 func omadaToolSchema() inputSchema {
 	return inputSchema{
 		Type: "object",
 		Properties: map[string]propSchema{
-			"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-			"client_id":       {Type: "string", Description: "Omada Open API client ID"},
-			"client_secret":   {Type: "string", Description: "Omada Open API client secret"},
+			"host":            {Type: "string", Description: "Omada controller hostname or IP (OMADA_HOST env fallback)"},
+			"client_id":       {Type: "string", Description: "Omada Open API client ID (OMADA_CLIENT_ID env fallback)"},
+			"client_secret":   {Type: "string", Description: "Omada Open API client secret (OMADA_CLIENT_SECRET env fallback)"},
 			"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
 			"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 			"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
 		},
-		Required: []string{"host"},
 	}
 }
 
@@ -1051,18 +1052,20 @@ func omadaToolSchemaExtra(extra map[string]propSchema, required []string) inputS
 }
 
 // opnsenseToolSchema returns the credential input schema shared by every
-// credential-bearing OPNsense tool.
+// credential-bearing OPNsense tool. No argument is required: host and
+// api_key / api_secret resolve from OPNSENSE_* env vars, the Windows
+// Credential Manager, and the credential store, and the options builder
+// reports missing configuration when every supported source is empty.
 func opnsenseToolSchema() inputSchema {
 	return inputSchema{
 		Type: "object",
 		Properties: map[string]propSchema{
-			"host":            {Type: "string", Description: "OPNsense firewall hostname or IP"},
-			"api_key":         {Type: "string", Description: "OPNsense API key"},
-			"api_secret":      {Type: "string", Description: "OPNsense API secret"},
+			"host":            {Type: "string", Description: "OPNsense firewall hostname or IP (OPNSENSE_HOST env fallback)"},
+			"api_key":         {Type: "string", Description: "OPNsense API key (OPNSENSE_API_KEY env fallback)"},
+			"api_secret":      {Type: "string", Description: "OPNsense API secret (OPNSENSE_API_SECRET env fallback)"},
 			"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 			"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
 		},
-		Required: []string{"host"},
 	}
 }
 
@@ -1084,9 +1087,10 @@ func opnsenseNatToolSchema() inputSchema {
 		"target":           {Type: "string", Description: "Target host address (port_forward) or external address (one_to_one)"},
 		"type":             {Type: "string", Description: "One-to-one type: binat or nat (one_to_one only)"},
 		"label":            {Type: "string", Description: "Rule label / description"},
+		"toggle_disable":   {Type: "boolean", Description: "Direction for action=toggle (port_forward only): true disables the rule, false/omitted enables it."},
 		"allow_double_nat": {Type: "boolean", Description: "Allow mutations on a bridge/indeterminate device. The flag does NOT override an unknown outbound NAT mode (always refused)."},
 		"dry_run":          {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
-	}, []string{"host", "operation"})
+	}, []string{"operation"})
 }
 
 // opnsenseToolSchemaExtra returns an OPNsense credential schema plus extra
