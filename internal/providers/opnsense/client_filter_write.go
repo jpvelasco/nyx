@@ -150,42 +150,83 @@ func (c *Client) ReconfigureAliases(ctx context.Context) error {
 	return c.postOK(ctx, aliasReconfigure)
 }
 
-// FindFilterRule matches by uuid or description.
+// FindFilterRule matches by uuid or description. An explicitly selected
+// UUID is authoritative: it is resolved in a dedicated pass across the
+// whole collection, and when it is absent the lookup misses — a natural-
+// key (label) match must never silently retarget the mutation onto a
+// different object.
 func FindFilterRule(rows []FirewallRule, uuid, label string) (FirewallRule, bool) {
-	for _, r := range rows {
-		if uuid != "" && strings.EqualFold(r.RuleUUID, uuid) {
-			return r, true
+	if uuid != "" {
+		for _, r := range rows {
+			if strings.EqualFold(r.RuleUUID, uuid) {
+				return r, true
+			}
 		}
-		if label != "" && strings.EqualFold(r.Label, label) {
-			return r, true
+		return FirewallRule{}, false
+	}
+	if label != "" {
+		for _, r := range rows {
+			if strings.EqualFold(r.Label, label) {
+				return r, true
+			}
 		}
 	}
 	return FirewallRule{}, false
 }
 
-// FindAlias matches by uuid or name.
+// FindAlias matches by uuid or name with the same UUID-authoritative
+// precedence as FindFilterRule.
 func FindAlias(rows []Alias, uuid, name string) (Alias, bool) {
-	for _, a := range rows {
-		if uuid != "" && strings.EqualFold(a.UUID, uuid) {
-			return a, true
+	if uuid != "" {
+		for _, a := range rows {
+			if strings.EqualFold(a.UUID, uuid) {
+				return a, true
+			}
 		}
-		if name != "" && strings.EqualFold(a.Name, name) {
-			return a, true
+		return Alias{}, false
+	}
+	if name != "" {
+		for _, a := range rows {
+			if strings.EqualFold(a.Name, name) {
+				return a, true
+			}
 		}
 	}
 	return Alias{}, false
 }
 
-// FilterMatchesWrite reports whether an existing rule already has the
-// requested action, endpoints, and description.
+// FilterMatchesWrite reports whether an existing rule already carries the
+// requested configuration. Every field the write model carries participates
+// in the comparison: a requested field that differs must produce an update,
+// never a silent no-op. Fields the wire omits when empty (interface,
+// protocol, ports, direction, description) compare only when requested;
+// the IP protocol defaults to "inet" on both sides, matching the wire.
 func FilterMatchesWrite(r FirewallRule, w FilterWrite) bool {
 	if w.Action != "" && !strings.EqualFold(r.Action, w.Action) {
+		return false
+	}
+	if w.Interface != "" && !interfacesMatch(r.Interface, w.Interface) {
+		return false
+	}
+	if w.Protocol != "" && !strings.EqualFold(r.Protocol, w.Protocol) {
 		return false
 	}
 	if w.Source != "" && !strings.EqualFold(r.Source, w.Source) {
 		return false
 	}
 	if w.Destination != "" && !strings.EqualFold(r.Destination, w.Destination) {
+		return false
+	}
+	if w.SourcePort != "" && !strings.EqualFold(r.SourcePort, w.SourcePort) {
+		return false
+	}
+	if w.DestPort != "" && !strings.EqualFold(r.DestPort, w.DestPort) {
+		return false
+	}
+	if w.Direction != "" && !strings.EqualFold(r.Direction, w.Direction) {
+		return false
+	}
+	if !strings.EqualFold(firstNonEmpty(r.IPProtocol, "inet"), firstNonEmpty(w.IPProtocol, "inet")) {
 		return false
 	}
 	if w.Description != "" && !strings.EqualFold(r.Label, w.Description) {
@@ -196,8 +237,37 @@ func FilterMatchesWrite(r FirewallRule, w FilterWrite) bool {
 	return wantEnabled == haveEnabled
 }
 
-// AliasMatchesWrite reports whether an existing alias already has the
-// requested type, name, and address set.
+// interfacesMatch compares the read model's interface list against the
+// write's comma-separated selection as normalized sets.
+func interfacesMatch(read []string, write string) bool {
+	want := make(map[string]bool)
+	for _, w := range strings.Split(write, ",") {
+		w = strings.TrimSpace(w)
+		if w != "" {
+			want[strings.ToLower(w)] = true
+		}
+	}
+	if len(want) == 0 {
+		return true
+	}
+	if len(read) != len(want) {
+		return false
+	}
+	for _, r := range read {
+		key := strings.ToLower(strings.TrimSpace(r))
+		if !want[key] {
+			return false
+		}
+		want[key] = false // mark seen so duplicates cannot match twice
+	}
+	return true
+}
+
+// AliasMatchesWrite reports whether an existing alias already carries the
+// requested configuration. The wire payload always carries the enabled
+// state, so the comparison does too: enabling a disabled alias (or the
+// reverse) is a change. A requested description must match; an omitted one
+// leaves the existing description untouched, matching the wire.
 func AliasMatchesWrite(a Alias, w AliasWrite) bool {
 	if w.Name != "" && !strings.EqualFold(a.Name, w.Name) {
 		return false
@@ -205,5 +275,14 @@ func AliasMatchesWrite(a Alias, w AliasWrite) bool {
 	if w.Type != "" && !strings.EqualFold(a.Type, w.Type) {
 		return false
 	}
-	return BridgeMembersMatch(a.Addresses, w.Addresses)
+	if !BridgeMembersMatch(a.Addresses, w.Addresses) {
+		return false
+	}
+	if !a.Disabled != w.Enabled {
+		return false
+	}
+	if w.Description != "" && !strings.EqualFold(a.Description, w.Description) {
+		return false
+	}
+	return true
 }

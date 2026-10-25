@@ -327,10 +327,13 @@ func (c *Client) ReconfigureUnbound(ctx context.Context) error {
 
 // FindUnboundOverride matches by uuid or hostname+domain (case-insensitive).
 func FindUnboundOverride(rows []UnboundHostOverride, uuid, hostname, domain string) (UnboundHostOverride, bool) {
-	for _, h := range rows {
-		if uuid != "" && strings.EqualFold(h.UUID, uuid) {
-			return h, true
+	if uuid != "" {
+		for _, h := range rows {
+			if strings.EqualFold(h.UUID, uuid) {
+				return h, true
+			}
 		}
+		return UnboundHostOverride{}, false
 	}
 	if hostname == "" {
 		return UnboundHostOverride{}, false

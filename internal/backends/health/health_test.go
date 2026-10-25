@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -871,9 +873,12 @@ rtt min/avg/max/mdev = 1.000/2.000/3.000/0.500 ms
 // -----------------------------------------------------------------------
 
 func TestMTUBinarySearch_AllSizesSucceed(t *testing.T) {
-	mtu, evidence := mtuBinarySearch(func(int) bool { return true })
+	mtu, confirmed, evidence := mtuBinarySearch(func(int) bool { return true })
 	if mtu != 1500 {
 		t.Errorf("expected MTU 1500 when all sizes succeed, got %d", mtu)
+	}
+	if !confirmed {
+		t.Error("expected confirmed=true when all sizes succeed")
 	}
 	if len(evidence) != 1 || !strings.Contains(evidence[0], "1500 successful") {
 		t.Errorf("expected single 1500-successful evidence entry, got %v", evidence)
@@ -881,9 +886,14 @@ func TestMTUBinarySearch_AllSizesSucceed(t *testing.T) {
 }
 
 func TestMTUBinarySearch_NoSizesSucceed(t *testing.T) {
-	mtu, evidence := mtuBinarySearch(func(int) bool { return false })
-	if mtu != 576 {
-		t.Errorf("expected MTU 576 when no sizes succeed, got %d", mtu)
+	// No probe size confirmed must read as an unmeasurable MTU, not as the
+	// lower search bound (576): unreachability never invents a measurement.
+	mtu, confirmed, evidence := mtuBinarySearch(func(int) bool { return false })
+	if confirmed {
+		t.Error("expected confirmed=false when no sizes succeed")
+	}
+	if mtu != 0 {
+		t.Errorf("expected MTU 0 (unknown) when no sizes succeed, got %d", mtu)
 	}
 	if len(evidence) == 0 {
 		t.Error("expected evidence from failed probes")
@@ -893,9 +903,12 @@ func TestMTUBinarySearch_NoSizesSucceed(t *testing.T) {
 func TestMTUBinarySearch_PartialSizesSucceed(t *testing.T) {
 	// Sizes up to 1200 work — search should converge on 1200 and produce
 	// mixed success/failure evidence covering both loop branches.
-	mtu, evidence := mtuBinarySearch(func(size int) bool { return size <= 1200 })
+	mtu, confirmed, evidence := mtuBinarySearch(func(size int) bool { return size <= 1200 })
 	if mtu != 1200 {
 		t.Errorf("expected MTU 1200, got %d", mtu)
+	}
+	if !confirmed {
+		t.Error("expected confirmed=true when some sizes succeed")
 	}
 	successful, failed := 0, 0
 	for _, e := range evidence {
@@ -908,6 +921,33 @@ func TestMTUBinarySearch_PartialSizesSucceed(t *testing.T) {
 	}
 	if successful == 0 || failed == 0 {
 		t.Errorf("expected mixed evidence, got successful=%d failed=%d", successful, failed)
+	}
+}
+
+// TestProbeMTUCanceledContext pins that an already-canceled context never
+// reports a successful measurement: every DF probe is refused, so the
+// result must be an error verdict carrying the cancellation, not PASS.
+// The context is canceled before any process starts, so no network packet
+// is sent.
+func TestProbeMTUCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := ProbeMTU(ctx, "127.0.0.1", 576)
+	if err == nil {
+		t.Fatal("canceled context should propagate a cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled", err)
+	}
+	if result == nil {
+		t.Fatal("result must not be nil")
+	}
+	if result.Status != models.StatusError {
+		t.Errorf("status = %q, want error", result.Status)
+	}
+	if !strings.Contains(result.Summary, "cancel") && !strings.Contains(result.Summary, "context") {
+		t.Errorf("summary should name the cancellation, got %q", result.Summary)
 	}
 }
 
@@ -944,9 +984,12 @@ func TestIsFragmentationError(t *testing.T) {
 // -----------------------------------------------------------------------
 
 func TestProbeMTUBinarySearchLocalhost(t *testing.T) {
-	mtu, evidence := probeMTUBinarySearch(context.Background(), "127.0.0.1")
+	mtu, confirmed, evidence := probeMTUBinarySearch(context.Background(), "127.0.0.1")
 	if mtu < 576 {
 		t.Errorf("discovered MTU %d is below minimum 576", mtu)
+	}
+	if !confirmed {
+		t.Error("expected a confirmed measurement for localhost")
 	}
 	if len(evidence) == 0 {
 		t.Error("expected non-empty evidence from binary search")
@@ -965,14 +1008,16 @@ func TestProbeMTUBinarySearchLocalhost(t *testing.T) {
 }
 
 func TestProbeMTUBinarySearchUnreachable(t *testing.T) {
-	// Target that should not respond — binary search should still complete
-	// with a low MTU (the low bound)
+	// Target that should not respond — the search must complete without
+	// inventing a measurement: unconfirmed, MTU 0, failure evidence only.
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	mtu, evidence := probeMTUBinarySearch(ctx, "192.0.2.1")
-	// Should return low (576) since no size succeeds
-	if mtu != 576 {
-		t.Logf("MTU for unreachable host: %d (expected 576)", mtu)
+	mtu, confirmed, evidence := probeMTUBinarySearch(ctx, "192.0.2.1")
+	if confirmed {
+		t.Error("unreachable target must not report a confirmed MTU")
+	}
+	if mtu != 0 {
+		t.Errorf("unreachable target reported MTU %d, want 0 (unknown)", mtu)
 	}
 	if len(evidence) == 0 {
 		t.Error("expected non-empty evidence even for unreachable target")
@@ -980,7 +1025,8 @@ func TestProbeMTUBinarySearchUnreachable(t *testing.T) {
 }
 
 func TestProbeMTUBinarySearchCancellation(t *testing.T) {
-	// Cancel early — should still return some result
+	// Cancel early — a partial search keeps its confirmed prefix but never
+	// reports an invented measurement.
 	ctx, cancel := context.WithCancel(context.Background())
 	// Don't cancel immediately — let the first probe (1500) run
 	// but cancel after a short delay
@@ -988,10 +1034,12 @@ func TestProbeMTUBinarySearchCancellation(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		cancel()
 	}()
-	mtu, evidence := probeMTUBinarySearch(ctx, "127.0.0.1")
-	// Should return something even if cancelled mid-search
-	if mtu < 576 {
+	mtu, confirmed, evidence := probeMTUBinarySearch(ctx, "127.0.0.1")
+	if confirmed && mtu < 576 {
 		t.Errorf("discovered MTU %d is below minimum 576", mtu)
+	}
+	if !confirmed && mtu != 0 {
+		t.Errorf("unconfirmed search reported MTU %d, want 0", mtu)
 	}
 	_ = evidence
 }
@@ -1439,5 +1487,38 @@ rtt min/avg/max/mdev = 0.2/0.2/0.2/0.1 ms`
 	status, violations, summary = EvaluatePingOutput(healthyOutput, "10.0.40.1", 1, 5, 5)
 	if status != models.StatusPass || len(violations) != 0 || summary != "" {
 		t.Errorf("healthy output: status = %s violations = %v summary = %q, want clean pass", status, violations, summary)
+	}
+}
+
+// TestProbeMTUAllProbesFailIsError pins the public-path repro of #178: a
+// target where every DF probe fails must report that the MTU could not be
+// determined — never an invented 576 measurement. The ping binary is
+// shimmed to fail, so the test is hermetic and sends no packets.
+func TestProbeMTUAllProbesFailIsError(t *testing.T) {
+	dir := t.TempDir()
+	name := "ping"
+	script := "#!/bin/sh\nexit 1\n"
+	if runtime.GOOS == "windows" {
+		name = "ping.bat"
+		script = "@echo off\r\nexit /b 1\r\n"
+	}
+	shim := filepath.Join(dir, name)
+	if err := os.WriteFile(shim, []byte(script), 0o700); err != nil { // nosemgrep — the shim needs its owner execute bit
+		t.Fatalf("writing ping shim: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := ProbeMTU(context.Background(), "10.0.60.0", 1500)
+	if err != nil {
+		t.Fatalf("an unreachable target is a finding, not a Go error: %v", err)
+	}
+	if result.Status != models.StatusError {
+		t.Errorf("status = %s, want error (MTU could not be determined)", result.Status)
+	}
+	if !strings.Contains(result.Summary, "could not be determined") {
+		t.Errorf("summary = %q, want the unmeasurable verdict", result.Summary)
+	}
+	if mtu, ok := result.Observed["mtu"]; !ok || mtu != "unknown" {
+		t.Errorf("observed mtu = %v, want \"unknown\"", result.Observed["mtu"])
 	}
 }

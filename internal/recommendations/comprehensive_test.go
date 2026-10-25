@@ -152,7 +152,7 @@ func TestClassifyIsolation_FromSummaryParsing(t *testing.T) {
 
 // TestBuildIsolationContext_NilSpec tests nil spec returns nil context.
 func TestBuildIsolationContext_NilSpec(t *testing.T) {
-	ctx := buildIsolationContext("personal", "gaming", nil, models.RunnerContext{})
+	ctx := buildIsolationContext("personal", "gaming", nil, models.RunnerContext{}, "")
 	if ctx != nil {
 		t.Error("expected nil context for nil spec")
 	}
@@ -168,7 +168,7 @@ func TestBuildIsolationContext_ProbeInZoneViaCIDR(t *testing.T) {
 			{Name: "my-probe", Host: "10.0.20.50", VLAN: "personal"},
 		},
 	}
-	ctx := buildIsolationContext("personal", "gaming", spec, models.RunnerContext{})
+	ctx := buildIsolationContext("personal", "gaming", spec, models.RunnerContext{}, "")
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
@@ -190,7 +190,7 @@ func TestBuildIsolationContext_ProbeInZoneViaVLAN(t *testing.T) {
 			{Name: "vlan-probe", VLAN: "personal"},
 		},
 	}
-	ctx := buildIsolationContext("personal", "gaming", spec, models.RunnerContext{})
+	ctx := buildIsolationContext("personal", "gaming", spec, models.RunnerContext{}, "")
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
@@ -213,7 +213,7 @@ func TestBuildIsolationContext_PolicyMatch(t *testing.T) {
 			{Name: "deny-personal-gaming", From: "personal", To: "gaming", Action: "deny"},
 		},
 	}
-	ctx := buildIsolationContext("personal", "gaming", spec, models.RunnerContext{})
+	ctx := buildIsolationContext("personal", "gaming", spec, models.RunnerContext{}, "")
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
@@ -230,7 +230,7 @@ func TestBuildIsolationContext_RunnerInFromZone(t *testing.T) {
 		},
 	}
 	runner := models.RunnerContext{Networks: []string{"personal"}}
-	ctx := buildIsolationContext("personal", "gaming", spec, runner)
+	ctx := buildIsolationContext("personal", "gaming", spec, runner, "")
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
@@ -248,7 +248,7 @@ func TestBuildIsolationContext_RunnerNotInFromZone(t *testing.T) {
 		},
 	}
 	runner := models.RunnerContext{Networks: []string{"gaming"}}
-	ctx := buildIsolationContext("personal", "gaming", spec, runner)
+	ctx := buildIsolationContext("personal", "gaming", spec, runner, "")
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
@@ -2014,7 +2014,7 @@ func TestBuildIsolationContext_FromNetworkName(t *testing.T) {
 			{Name: "personal", CIDR: "10.0.20.0/24", Zone: "home"},
 		},
 	}
-	ctx := buildIsolationContext("personal", "gaming", spec, models.RunnerContext{})
+	ctx := buildIsolationContext("personal", "gaming", spec, models.RunnerContext{}, "")
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
@@ -2037,7 +2037,7 @@ func TestBuildIsolationContext_ProbeHostInCIDR(t *testing.T) {
 			{Name: "cidr-probe", Host: "10.0.20.100"},
 		},
 	}
-	ctx := buildIsolationContext("personal", "gaming", spec, models.RunnerContext{})
+	ctx := buildIsolationContext("personal", "gaming", spec, models.RunnerContext{}, "")
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
@@ -2062,7 +2062,7 @@ func TestBuildIsolationContext_ProbeHostNotInCIDR(t *testing.T) {
 			{Name: "other-probe", Host: "10.0.0.1"},
 		},
 	}
-	ctx := buildIsolationContext("personal", "gaming", spec, models.RunnerContext{})
+	ctx := buildIsolationContext("personal", "gaming", spec, models.RunnerContext{}, "")
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
@@ -2083,7 +2083,7 @@ func TestBuildIsolationContext_RunnerNetworkInFromZone(t *testing.T) {
 		},
 	}
 	runner := models.RunnerContext{Networks: []string{"personal"}}
-	ctx := buildIsolationContext("personal", "gaming", spec, runner)
+	ctx := buildIsolationContext("personal", "gaming", spec, runner, "")
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
@@ -2104,11 +2104,58 @@ func TestBuildIsolationContext_MultipleNetworksInFromZone(t *testing.T) {
 			{Name: "guest", CIDR: "10.0.40.0/24", Zone: "guest"},
 		},
 	}
-	ctx := buildIsolationContext("home", "guest", spec, models.RunnerContext{})
+	ctx := buildIsolationContext("home", "guest", spec, models.RunnerContext{}, "")
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
 	if len(ctx.fromNetworkNames) != 2 {
 		t.Errorf("expected 2 networks in from zone, got %d", len(ctx.fromNetworkNames))
+	}
+}
+
+// TestBuildIsolationContext_UnknownFindingRunnerIsUnverified pins that a
+// finding claiming an undeclared probe cannot be treated as verified: the
+// vantage point is unknown and the runner is not in the source zone.
+func TestBuildIsolationContext_UnknownFindingRunnerIsUnverified(t *testing.T) {
+	spec := &intent.Spec{
+		Networks: []intent.Network{
+			{Name: "personal", CIDR: "10.0.20.0/24", Zone: "personal"},
+		},
+		Probes: []intent.Probe{
+			{Name: "known-probe", Host: "10.0.20.15", User: "probe", VLAN: "personal"},
+		},
+	}
+	// The local report runner would be in the zone, but the finding claims
+	// a probe the spec does not declare.
+	runner := models.RunnerContext{Networks: []string{"personal"}}
+	ctx := buildIsolationContext("personal", "gaming", spec, runner, "undeclared-probe")
+	if ctx == nil {
+		t.Fatal("expected non-nil context")
+	}
+	if ctx.runnerInFrom {
+		t.Error("an undeclared runner must not count as a source-zone vantage point")
+	}
+}
+
+// TestBuildIsolationContext_ProbeFindingRunnerResolvesZone pins the
+// finding-runner resolution: a declared probe in the source zone makes the
+// finding verified even when the local report runner sits elsewhere.
+func TestBuildIsolationContext_ProbeFindingRunnerResolvesZone(t *testing.T) {
+	spec := &intent.Spec{
+		Networks: []intent.Network{
+			{Name: "personal", CIDR: "10.0.20.0/24", Zone: "personal"},
+			{Name: "gaming", CIDR: "10.0.30.0/24", Zone: "gaming"},
+		},
+		Probes: []intent.Probe{
+			{Name: "personal-probe", Host: "10.0.20.15", User: "probe", VLAN: "personal"},
+		},
+	}
+	runner := models.RunnerContext{Networks: []string{"gaming"}}
+	ctx := buildIsolationContext("personal", "gaming", spec, runner, "personal-probe")
+	if ctx == nil {
+		t.Fatal("expected non-nil context")
+	}
+	if !ctx.runnerInFrom {
+		t.Error("a finding from a probe in the source zone is verified")
 	}
 }

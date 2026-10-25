@@ -550,3 +550,110 @@ func TestGenerateRecommendations_NetworkDegraded_Both(t *testing.T) {
 		t.Error("expected network_degraded recommendation for combined issues")
 	}
 }
+
+// TestGenerateRecommendations_ProbeBreachIsNotVantagePoint reproduces #184:
+// a failed isolation finding produced by a probe that sits in the source
+// zone is a verified breach, not a vantage-point issue. Classification
+// must use the finding's runner, not the local report runner.
+func TestGenerateRecommendations_ProbeBreachIsNotVantagePoint(t *testing.T) {
+	failures := []models.CheckResult{
+		{
+			CheckType:  "isolation",
+			Runner:     "iot-probe",
+			Target:     "iot -> servers",
+			Status:     models.StatusFail,
+			Summary:    "isolation violation: iot can reach servers",
+			Violations: []string{"expected deny but traffic is reachable from the probe VLAN"},
+		},
+	}
+
+	spec := &intent.Spec{
+		Networks: []intent.Network{
+			{Name: "iot", CIDR: "10.0.60.0/24", Zone: "iot"},
+			{Name: "servers", CIDR: "10.0.40.0/24", Zone: "servers"},
+		},
+		Probes: []intent.Probe{
+			{Name: "iot-probe", Host: "10.0.60.15", User: "probe", VLAN: "iot"},
+		},
+		Policies: []intent.Policy{
+			{Name: "iot-isolation", From: "iot", To: "servers", Action: "deny"},
+		},
+	}
+
+	// The LOCAL runner is in the servers zone — the wrong place. The
+	// finding still ran from the iot probe, so it is verified.
+	runner := models.RunnerContext{Networks: []string{"servers"}}
+
+	recs, err := GenerateRecommendations(failures, spec, runner)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var breach, vantage *Recommendation
+	for i := range recs {
+		switch recs[i].Category {
+		case "isolation_breach":
+			breach = &recs[i]
+		case "vantage_point":
+			vantage = &recs[i]
+		}
+	}
+	if breach == nil {
+		t.Fatal("expected an isolation_breach recommendation for a probe-verified breach")
+	}
+	if !strings.Contains(breach.Remediation, "iot-isolation") {
+		t.Errorf("expected remediation to mention the policy, got: %s", breach.Remediation)
+	}
+	if vantage != nil {
+		t.Errorf("probe-verified breach must not be classified as a vantage-point issue: %s", vantage.Remediation)
+	}
+}
+
+// TestGenerateRecommendations_LocalBreachStillNeedsVantagePoint guards the
+// other direction: a local-runner failure from outside the source zone
+// stays a vantage-point issue even when a probe exists in the source zone.
+func TestGenerateRecommendations_LocalBreachStillNeedsVantagePoint(t *testing.T) {
+	failures := []models.CheckResult{
+		{
+			CheckType:  "isolation",
+			Runner:     "local",
+			Target:     "iot -> servers",
+			Status:     models.StatusFail,
+			Summary:    "isolation violation: iot can reach servers",
+			Violations: []string{"expected deny but traffic is reachable"},
+		},
+	}
+
+	spec := &intent.Spec{
+		Networks: []intent.Network{
+			{Name: "iot", CIDR: "10.0.60.0/24", Zone: "iot"},
+			{Name: "servers", CIDR: "10.0.40.0/24", Zone: "servers"},
+		},
+		Probes: []intent.Probe{
+			{Name: "iot-probe", Host: "10.0.60.15", User: "probe", VLAN: "iot"},
+		},
+	}
+
+	runner := models.RunnerContext{Networks: []string{"servers"}} // wrong zone
+
+	recs, err := GenerateRecommendations(failures, spec, runner)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var vantage, breach *Recommendation
+	for i := range recs {
+		switch recs[i].Category {
+		case "vantage_point":
+			vantage = &recs[i]
+		case "isolation_breach":
+			breach = &recs[i]
+		}
+	}
+	if vantage == nil {
+		t.Fatal("expected a vantage_point recommendation for a local out-of-zone failure")
+	}
+	if breach != nil {
+		t.Errorf("unverified local breach must not be classified as isolation_breach: %s", breach.Remediation)
+	}
+}
