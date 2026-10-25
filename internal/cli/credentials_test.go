@@ -78,6 +78,38 @@ func TestCredentialsSetRequiresKV(t *testing.T) {
 	}
 }
 
+func TestCredentialsSetMalformedKVNeverEchoesValue(t *testing.T) {
+	t.Setenv("NYX_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+
+	// A malformed --set argument can carry a secret value (here an inert
+	// fixture). The validation error must never echo the raw argument.
+	cases := [][]string{
+		{"=fixture-secret"},
+		{"fixture-secret"},
+	}
+	for _, args := range cases {
+		err := runCredentialsCmd(t, append([]string{"credentials", "set", "omada"}, flagSetArgs(args)...)...)
+		if err == nil {
+			t.Fatalf("malformed --set %q should fail", args[0])
+		}
+		if strings.Contains(err.Error(), "fixture-secret") {
+			t.Errorf("error echoes the supplied value: %v", err)
+		}
+		if !strings.Contains(err.Error(), "key=value") {
+			t.Errorf("error should explain the key=value shape: %v", err)
+		}
+	}
+}
+
+// flagSetArgs prefixes each element with the --set flag.
+func flagSetArgs(values []string) []string {
+	out := make([]string, 0, len(values)*2)
+	for _, v := range values {
+		out = append(out, "--set", v)
+	}
+	return out
+}
+
 func TestCredentialsVerifyNamedEntry(t *testing.T) {
 	t.Setenv("NYX_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 
