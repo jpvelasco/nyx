@@ -1427,3 +1427,39 @@ func TestProviderApplyACL(t *testing.T) {
 func TestProviderImplementsACLApplier(t *testing.T) {
 	var _ providers.ACLApplier = (*OmadaProvider)(nil)
 }
+
+// TestLookupACLMatch_NamedRuleMustCoverRequestedEndpoints reproduces the
+// Omada side of #186: a name-first match whose endpoints do not cover the
+// requested from/to must not satisfy the check — the name is a candidate
+// identity, and endpoint coverage decides the verdict.
+func TestLookupACLMatch_NamedRuleMustCoverRequestedEndpoints(t *testing.T) {
+	rules := []omadabackend.ACLRule{
+		{ID: "a-wrong", Name: "Deny Personal to Gaming", Status: true,
+			Policy: omadabackend.ACLPolicyDeny, SourceName: "personal", DestName: "gaming"},
+		{ID: "a-right", Name: "Deny IoT to Servers", Status: true,
+			Policy: omadabackend.ACLPolicyDeny, SourceName: "iot", DestName: "servers"},
+	}
+	// Requested policy named like the wrong-endpoint rule (policy names in
+	// specs are the sanitized slug of the rule name): the name must not
+	// produce an enforced verdict for different endpoints.
+	req := providers.ACLCheckRequest{
+		PolicyName: omadabackend.SanitizeName("Deny Personal to Gaming"), From: "iot", To: "servers", Action: "deny",
+	}
+	m := lookupACLMatch(rules, req)
+	if m == nil || m.Rule.ID != "a-right" {
+		t.Errorf("expected the endpoint-covering rule, got %+v", m)
+	}
+	if m != nil && m.Rule.ID == "a-wrong" {
+		t.Fatal("wrong-endpoint rule matched by name")
+	}
+	if m != nil && m.MatchedBy != "endpoints" {
+		t.Errorf("match attribution = %q, want endpoints", m.MatchedBy)
+	}
+
+	// A name-only request (no declared endpoints) keeps the name shortcut.
+	nameOnly := providers.ACLCheckRequest{PolicyName: omadabackend.SanitizeName("Deny Personal to Gaming"), Action: "deny"}
+	m2 := lookupACLMatch(rules, nameOnly)
+	if m2 == nil || m2.Rule.ID != "a-wrong" || m2.MatchedBy != "name" {
+		t.Errorf("name-only request should match by name, got %+v", m2)
+	}
+}

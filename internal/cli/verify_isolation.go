@@ -27,6 +27,12 @@ var verifyIsolationCmd = &cobra.Command{
 			return fmt.Errorf("--to is required")
 		}
 
+		// The documented endpoint forms share one normalization: the
+		// "zone:" prefix is stripped before the value resolves against
+		// the spec or a zone label.
+		isolationFrom = intent.NormalizeZoneRef(isolationFrom)
+		isolationTo = intent.NormalizeZoneRef(isolationTo)
+
 		dur, err := parseTimeoutFlag(timeout)
 		if err != nil {
 			return err
@@ -46,7 +52,13 @@ var verifyIsolationCmd = &cobra.Command{
 			}
 		} else {
 			// Without a spec there is no zone mapping, so --from is a label
-			// and the check pings --to directly from this host.
+			// and the check pings --to directly from this host. A single-host
+			// ping cannot evaluate a CIDR: reject the unsupported form
+			// explicitly instead of letting a ping usage error masquerade as
+			// a confirmed isolation.
+			if err := intent.ValidateTarget(isolationTo); err != nil {
+				return fmt.Errorf("--to %q is not a single host (IP or hostname) — without a spec, a CIDR or zone target cannot be verified directly; provide --spec or a host target", isolationTo)
+			}
 			result = verifyIsolationViaPing(ctx)
 		}
 

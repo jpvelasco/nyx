@@ -331,16 +331,30 @@ type aclCheckMatch struct {
 }
 
 // lookupACLMatch finds the active rule implementing the requested policy.
-// The rule name (sanitized) is the primary key; from/to/action matching is
-// the fallback for hand-written specs that name policies freely.
+// The rule name (sanitized) is a candidate identity: when the request
+// declares endpoints, the name-matching rule's endpoints must cover them
+// before it can report an enforced verdict — a same-named rule covering
+// different endpoints never satisfies the check (#186). Endpoint-only
+// matching remains the path for freely named policies.
 func lookupACLMatch(rules []omadabackend.ACLRule, req providers.ACLCheckRequest) *aclCheckMatch {
 	for i := range rules {
 		r := rules[i]
 		if !r.Status {
 			continue
 		}
-		if strings.EqualFold(omadabackend.SanitizeName(r.Name), req.PolicyName) &&
-			r.Policy.MatchesAction(req.Action) {
+		if !strings.EqualFold(omadabackend.SanitizeName(r.Name), req.PolicyName) {
+			continue
+		}
+		// When the request declares endpoints, a fully resolvable rule must
+		// cover them: a same-named rule protecting different endpoints
+		// never satisfies the check (#186). An unresolvable endpoint cannot
+		// be verified either way, so the name still decides.
+		if req.From != "" || req.To != "" {
+			if r.SourceName != "" && r.DestName != "" && !omadabackend.RuleMatchesNames(r, req.From, req.To) {
+				continue
+			}
+		}
+		if r.Policy.MatchesAction(req.Action) {
 			return &aclCheckMatch{Rule: r, MatchedBy: "name"}
 		}
 	}
