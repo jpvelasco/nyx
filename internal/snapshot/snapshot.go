@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -176,7 +178,11 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 	return &snap, nil
 }
 
-// ListSnapshots returns all snapshot filenames sorted by time (oldest first).
+// ListSnapshots returns all snapshot filenames sorted chronologically
+// (oldest first). Canonical filenames (snapshot-<timestamp>[-N].json) are
+// ordered by their embedded timestamp and then by the numeric collision
+// suffix; foreign .json files sort first as unparseable (oldest) so
+// rotation removes them before any timestamped audit.
 func ListSnapshots() ([]string, error) {
 	dir, err := Dir()
 	if err != nil {
@@ -194,8 +200,51 @@ func ListSnapshots() ([]string, error) {
 			snaps = append(snaps, e.Name())
 		}
 	}
-	sort.Strings(snaps)
+	sort.Slice(snaps, func(i, j int) bool { return snapshotLess(snaps[i], snaps[j]) })
 	return snaps, nil
+}
+
+// snapshotNameRe parses a canonical snapshot filename into its millisecond
+// timestamp and numeric collision suffix: snapshot-20060102-150405.000[-N].json
+var snapshotNameRe = regexp.MustCompile(`^snapshot-(\d{8}-\d{6}\.\d{3})(?:-(\d+))?\.json$`)
+
+// snapshotLess orders two snapshot filenames chronologically. The
+// timestamp is fixed-width and zero-padded, so lexicographic order equals
+// chronological order; collision suffixes compare numerically ('-2' before
+// '-10') so a same-millisecond retry never sorts before the base it
+// collided with. Foreign (unparseable) names sort first as the oldest
+// candidates, with their name as a deterministic tie-breaker.
+func snapshotLess(a, b string) bool {
+	ka, kb := parseSnapshotKey(a), parseSnapshotKey(b)
+	switch {
+	case ka.canonical != kb.canonical:
+		return !ka.canonical
+	case !ka.canonical:
+		return a < b
+	case ka.ts != kb.ts:
+		return ka.ts < kb.ts
+	default:
+		return ka.suffix < kb.suffix
+	}
+}
+
+// snapshotKey is the chronological sort key of one snapshot filename.
+type snapshotKey struct {
+	ts        string // 20060102-150405.000 — fixed-width, lexicographic == chronological
+	suffix    int    // numeric collision suffix; 0 for the un-suffixed base
+	canonical bool   // false for foreign .json files
+}
+
+func parseSnapshotKey(name string) snapshotKey {
+	m := snapshotNameRe.FindStringSubmatch(name)
+	if m == nil {
+		return snapshotKey{canonical: false}
+	}
+	suffix := 0
+	if m[2] != "" {
+		suffix, _ = strconv.Atoi(m[2])
+	}
+	return snapshotKey{ts: m[1], suffix: suffix, canonical: true}
 }
 
 // rotate removes the oldest snapshots when the count exceeds maxSnapshots.
