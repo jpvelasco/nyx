@@ -988,3 +988,135 @@ func TestDiagnosticCheckTable(t *testing.T) {
 		})
 	}
 }
+
+// TestDiagnose_HandshakeStallHonorsContextDeadline reproduces #167: a peer
+// that accepts TCP but never completes the SSH handshake must not block
+// past the context deadline. The listener accepts the connection and holds
+// it open without sending any SSH banner; Diagnose must return within the
+// deadline with a transport error.
+func TestDiagnose_HandshakeStallHonorsContextDeadline(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	stalled := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		// Hold the connection open without sending the SSH banner.
+		stalled <- conn
+	}()
+
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+	p := Probe{Name: "iot-probe", Host: "127.0.0.1", User: "testuser", VLAN: "iot", Port: ln.Addr().(*net.TCPAddr).Port, Key: keyPath}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err = Diagnose(ctx, p)
+	elapsed := time.Since(start)
+
+	if conn := <-stalled; conn != nil {
+		conn.Close()
+	}
+	if err == nil {
+		t.Fatal("Diagnose against a stalling handshake should fail")
+	}
+	var transport *TransportError
+	if !errors.As(err, &transport) {
+		t.Errorf("error = %v, want TransportError", err)
+	}
+	if elapsed > 300*time.Millisecond {
+		t.Errorf("Diagnose returned after %v, want it bounded near the 50ms deadline", elapsed)
+	}
+}
+
+// TestRun_HandshakeStallHonorsContextDeadline pins the same contract for
+// Run: a stalled handshake is interrupted by the context deadline instead
+// of hanging until the remote side closes the socket.
+func TestRun_HandshakeStallHonorsContextDeadline(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	stalled := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		stalled <- conn
+	}()
+
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+	p := Probe{Name: "iot-probe", Host: "127.0.0.1", User: "testuser", VLAN: "iot", Port: ln.Addr().(*net.TCPAddr).Port, Key: keyPath}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err = Run(ctx, p, []string{"echo", "hi"}, true)
+	elapsed := time.Since(start)
+
+	if conn := <-stalled; conn != nil {
+		conn.Close()
+	}
+	if err == nil {
+		t.Fatal("Run against a stalling handshake should fail")
+	}
+	if elapsed > 300*time.Millisecond {
+		t.Errorf("Run returned after %v, want it bounded near the 50ms deadline", elapsed)
+	}
+}
+
+// TestRun_CancellationWithoutDeadlineAbortsHandshake pins the watcher
+// branch: with no deadline on the context, the raw connection's 10s
+// handshake cap cannot be waited out — only the cancellation watcher can
+// unblock a stalled handshake, and it must.
+func TestRun_CancellationWithoutDeadlineAbortsHandshake(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	stalled := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		stalled <- conn
+	}()
+
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+	p := Probe{Name: "iot-probe", Host: "127.0.0.1", User: "testuser", VLAN: "iot", Port: ln.Addr().(*net.TCPAddr).Port, Key: keyPath}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	_, err = Run(ctx, p, []string{"echo", "hi"}, true)
+	elapsed := time.Since(start)
+
+	if conn := <-stalled; conn != nil {
+		conn.Close()
+	}
+	if err == nil {
+		t.Fatal("a canceled handshake must fail")
+	}
+	if elapsed > 300*time.Millisecond {
+		t.Errorf("Run returned after %v, want the cancellation to abort the stalled handshake near 50ms", elapsed)
+	}
+}
