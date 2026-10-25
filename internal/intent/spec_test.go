@@ -716,3 +716,26 @@ func TestSpec_ProbeByName_NotFound(t *testing.T) {
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
+
+func TestValidateSpec_NetworkHealthProbeRejectsMTU(t *testing.T) {
+	// The probe network_health command measures reachability, latency, and
+	// loss — it cannot measure MTU, so declaring expect_mtu with a remote
+	// runner is rejected at validation instead of silently ignored (#187).
+	spec := &Spec{Version: 1, Site: "test", Assertions: []Assertion{
+		{Type: "network_health", Target: "10.0.40.1", Runner: "iot-probe", ExpectMTU: 1500},
+	}}
+	err := ValidateSpec(spec)
+	if err == nil {
+		t.Fatal("probe network_health with expect_mtu should be rejected")
+	}
+	if !strings.Contains(err.Error(), "expect_mtu") {
+		t.Errorf("error should name expect_mtu, got: %v", err)
+	}
+	// Local-runner assertions keep MTU support.
+	local := &Spec{Version: 1, Site: "test", Assertions: []Assertion{
+		{Type: "network_health", Target: "10.0.40.1", ExpectMTU: 1500},
+	}}
+	if err := ValidateSpec(local); err != nil {
+		t.Errorf("local network_health with expect_mtu should be valid: %v", err)
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/backends"
+	"github.com/jpvelasco/nyx/internal/backends/health"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/credentials"
@@ -31,6 +32,9 @@ const (
 	assertionTimeoutDiscovery = 90 * time.Second
 	// assertionTimeoutDefault is the per-assertion timeout for all other checks.
 	assertionTimeoutDefault = 30 * time.Second
+	// probeHealthPingCount is the number of pings the remote probe command
+	// sends for isolation and network_health assertions (ping -c N).
+	probeHealthPingCount = 3
 )
 
 // Engine runs audit assertions. It is NOT safe for concurrent use —
@@ -1011,7 +1015,7 @@ func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, p
 	unreached := 0
 
 	for _, gw := range gateways {
-		cmd := []string{"ping", "-c", "3", "-W", "3", gw}
+		cmd := []string{"ping", "-c", fmt.Sprint(probeHealthPingCount), "-W", "3", gw}
 		result.Evidence = append(result.Evidence, fmt.Sprintf("command: %s", strings.Join(cmd, " ")))
 
 		output, err := probe.Run(ctx, probeP, cmd, e.SkipHostKeyVerify)
@@ -1078,7 +1082,7 @@ func probeCommandFor(a intent.Assertion, spec *intent.Spec) []string {
 		if target == "" {
 			return nil
 		}
-		return []string{"ping", "-c", "3", "-W", "3", target}
+		return []string{"ping", "-c", fmt.Sprint(probeHealthPingCount), "-W", "3", target}
 	case "port_check":
 		// Use nc -z (netcat) to check port openness
 		if len(a.Ports) == 0 {
@@ -1211,6 +1215,19 @@ func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output str
 			result.Status = models.StatusFail
 			result.Summary = fmt.Sprintf("100%% packet loss to %s from probe %q", a.Target, a.Runner)
 			result.Violations = append(result.Violations, "100% packet loss")
+		} else if a.ExpectLatencyMs > 0 || a.ExpectLossPct > 0 {
+			// Declared thresholds apply to the remote measurement too,
+			// evaluated with the canonical health classification so the
+			// same assertion cannot pass remotely and fail locally on
+			// identical health.
+			status, violations, summary := health.EvaluatePingOutput(output, a.Target, probeHealthPingCount, a.ExpectLatencyMs, a.ExpectLossPct)
+			result.Status = status
+			result.Violations = append(result.Violations, violations...)
+			if summary != "" {
+				result.Summary = fmt.Sprintf("network health from probe %q: %s", a.Runner, summary)
+			} else {
+				result.Summary = fmt.Sprintf("host %s is reachable from probe %q (latency/loss within thresholds)", a.Target, a.Runner)
+			}
 		} else {
 			result.Status = models.StatusPass
 			result.Summary = fmt.Sprintf("host %s is reachable from probe %q", a.Target, a.Runner)
