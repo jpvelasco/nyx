@@ -603,8 +603,36 @@ func TestOpenReportsLockAcquisitionFailure(t *testing.T) {
 	if err := os.Chmod(dir, 0500); err != nil {
 		t.Fatalf("Chmod failed: %v", err)
 	}
-	defer os.Chmod(dir, 0700)
+	defer os.Chmod(dir, 0700) // nosemgrep — 0700 is the least-privilege permission for a directory
 	if _, err := Open(filepath.Join(dir, "credentials.json")); err == nil || !strings.Contains(err.Error(), "locking credential store") {
 		t.Errorf("Open in an unwritable store directory = %v, want locking error", err)
+	}
+}
+
+func TestNullPlaintextStoreYieldsEmptyStore(t *testing.T) {
+	// A store file whose plaintext is JSON null must decode to an empty
+	// store (never a nil map): Set/Remove mutate the decoded map directly,
+	// and a nil map would panic on assignment.
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	sealed, err := encrypt([]byte("null"), s.key)
+	if err != nil {
+		t.Fatalf("encrypt failed: %v", err)
+	}
+	if err := os.WriteFile(path, sealed, 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on null-plaintext store: %v", err)
+	}
+	if got := reopened.Providers(); len(got) != 0 {
+		t.Errorf("null-plaintext store should be empty, got providers %v", got)
+	}
+	if err := reopened.Set("probe", "iot-probe", Entry{"host": "iot.example"}); err != nil {
+		t.Errorf("Set on a null-plaintext store must not panic: %v", err)
 	}
 }
