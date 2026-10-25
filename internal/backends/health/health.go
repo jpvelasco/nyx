@@ -185,8 +185,25 @@ func ProbeMTU(ctx context.Context, target string, expectedMTU int) (*models.Chec
 		return result, err
 	}
 
-	discoveredMTU, evidence := probeMTUBinarySearch(ctx, target)
+	discoveredMTU, mtuConfirmed, evidence := probeMTUBinarySearch(ctx, target)
 	result.Evidence = evidence
+
+	if !mtuConfirmed {
+		// No DF probe was confirmed: the MTU is unknown. Never report the
+		// lower search bound as a measurement, and never let context
+		// cancellation read as a successful probe.
+		result.Status = models.StatusError
+		result.Observed = map[string]interface{}{"mtu": "unknown"}
+		result.Expected = map[string]interface{}{"mtu": expectedMTU}
+		if err := ctx.Err(); err != nil {
+			result.Summary = fmt.Sprintf("MTU probe canceled before any measurement: %v", err)
+			result.Finish()
+			return result, fmt.Errorf("mtu probe: %w", err)
+		}
+		result.Summary = "MTU could not be determined - no probe size succeeded"
+		result.Finish()
+		return result, nil
+	}
 
 	mtuResult := MTUResult{
 		Target:        target,
@@ -333,13 +350,19 @@ func parseDarwinPingOutput(output string, stats *PingStats) {
 	}
 }
 
-// probeMTUBinarySearch performs binary search to find max MTU
-func probeMTUBinarySearch(ctx context.Context, target string) (int, []string) {
+// probeMTUBinarySearch performs binary search to find max MTU. The second
+// return value reports whether any probe size was confirmed; false means the
+// target's MTU could not be measured.
+func probeMTUBinarySearch(ctx context.Context, target string) (int, bool, []string) {
 	return mtuBinarySearch(func(size int) bool { return canPing(ctx, target, size) })
 }
 
-// mtuBinarySearch finds the largest size in [576, 1500] that canPingFn accepts.
-func mtuBinarySearch(canPingFn func(size int) bool) (int, []string) {
+// mtuBinarySearch finds the largest size in [576, 1500] that canPingFn
+// accepts. It returns the confirmed size, whether any probe succeeded, and
+// the probe evidence. When no probe succeeds it reports 0/false instead of
+// inventing the lower search bound as a measurement — unreachability never
+// implies a working MTU.
+func mtuBinarySearch(canPingFn func(size int) bool) (int, bool, []string) {
 	var evidence []string
 	low := 576
 	high := 1500
@@ -347,15 +370,17 @@ func mtuBinarySearch(canPingFn func(size int) bool) (int, []string) {
 	// Sanity check with max size first
 	if canPingFn(high) {
 		evidence = append(evidence, fmt.Sprintf("MTU probe: %d successful", high))
-		return high, evidence
+		return high, true, evidence
 	}
 
 	// Binary search for max working size
-	result := low
+	result := 0
+	confirmed := false
 	for low <= high {
 		mid := (low + high) / 2
 		if canPingFn(mid) {
 			result = mid
+			confirmed = true
 			evidence = append(evidence, fmt.Sprintf("MTU probe: %d successful", mid))
 			low = mid + 1
 		} else {
@@ -364,7 +389,7 @@ func mtuBinarySearch(canPingFn func(size int) bool) (int, []string) {
 		}
 	}
 
-	return result, evidence
+	return result, confirmed, evidence
 }
 
 // canPing tests if a packet of specified size (with DF bit) can reach the target
