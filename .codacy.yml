@@ -12,6 +12,8 @@ exclude_paths:
   - npm/install.js
   - npm/run.js
   - scripts/embed-checksums.js
+  - npm/install.test.js
+  - scripts/embed-checksums.test.js
   - AGENTS.md
   - CLAUDE.md
   - .codacy/tools-configs/**
