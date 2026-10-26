@@ -36,6 +36,8 @@ func buildOmadaExtraCommands() []*cobra.Command {
 		buildOmadaApplyLANCmd(),
 		buildOmadaPlanSSIDCmd(),
 		buildOmadaApplySSIDCmd(),
+		buildOmadaPlanNatCmd(),
+		buildOmadaApplyNatCmd(),
 	}
 }
 

@@ -2079,3 +2079,72 @@ func withSession[T any](s *OmadaService, ctx context.Context, opts OmadaOptions,
 	defer client.Logout(ctx) //nolint:errcheck
 	return fn(client, site.EffectiveID())
 }
+
+// OmadaNatApplyRequest is an Omada NAT plan/apply request (#139). The
+// surface mirrors the OPNsense pair so agents can carry the same intent
+// across providers; the Omada Open API exposes no live-site NAT write
+// path, so PlanNat/ApplyNat HOLD clearly with evidence.
+type OmadaNatApplyRequest struct {
+	Operation string // "port_forward" | "one_to_one" (Omada has no source_nat)
+	Action    string // "create" | "update" | "delete" | "toggle" (default "create")
+	RuleUUID  string // required for update/delete/toggle
+	Spec      providers.NatRuleSpec
+	DryRun    bool
+}
+
+// omadaNatMutation resolves the Omada provider's NAT mutation surface.
+func (s *OmadaService) omadaNatMutation() (providers.NatMutationProvider, error) {
+	p := providers.Get("omada")
+	if p == nil {
+		return nil, fmt.Errorf("provider omada not registered")
+	}
+	mutator, ok := p.(providers.NatMutationProvider)
+	if !ok {
+		return nil, fmt.Errorf("provider omada does not implement NAT mutation")
+	}
+	return mutator, nil
+}
+
+func omadaNatProvOpts(opts OmadaOptions) providers.ImportOptions {
+	return providers.ImportOptions{
+		Host:          opts.Host,
+		ClientID:      opts.ClientID,
+		ClientSecret:  opts.ClientSecret,
+		Site:          opts.Site,
+		SkipTLSVerify: opts.SkipTLSVerify,
+		CACertPath:    opts.CACertPath,
+	}
+}
+
+// PlanNat previews an Omada NAT mutation: the Open API exposes no
+// live-site NAT write path, so the plan refuses with the current rules
+// as Before evidence and the write-surface explanation.
+func (s *OmadaService) PlanNat(ctx context.Context, opts OmadaOptions, req OmadaNatApplyRequest) (*providers.NatPlan, error) {
+	mutator, err := s.omadaNatMutation()
+	if err != nil {
+		return nil, err
+	}
+	return mutator.PlanNat(ctx, providers.NatApplyRequest{
+		Operation: req.Operation,
+		Action:    req.Action,
+		RuleUUID:  req.RuleUUID,
+		Spec:      req.Spec,
+		DryRun:    req.DryRun,
+	}, omadaNatProvOpts(opts))
+}
+
+// ApplyNat refuses every Omada NAT mutation with identical Before/After
+// evidence — nothing can mutate, dry-run or not.
+func (s *OmadaService) ApplyNat(ctx context.Context, opts OmadaOptions, req OmadaNatApplyRequest) (*providers.NatApplyResult, error) {
+	mutator, err := s.omadaNatMutation()
+	if err != nil {
+		return nil, err
+	}
+	return mutator.ApplyNat(ctx, providers.NatApplyRequest{
+		Operation: req.Operation,
+		Action:    req.Action,
+		RuleUUID:  req.RuleUUID,
+		Spec:      req.Spec,
+		DryRun:    req.DryRun,
+	}, omadaNatProvOpts(opts))
+}

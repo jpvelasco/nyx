@@ -358,3 +358,128 @@ func buildOmadaApplySSIDCmd() *cobra.Command {
 	addDryRunFlag(cmd, &dryRun)
 	return cmd
 }
+
+// buildOmadaPlanNatCmd previews an Omada NAT mutation. The Omada Open API
+// exposes NAT reads but no live-site NAT write path, so the plan always
+// refuses with the current rules as before-evidence and the write-surface
+// explanation (#139).
+func buildOmadaPlanNatCmd() *cobra.Command {
+	var f omadaNatFlags
+	cmd := &cobra.Command{
+		Use:   "plan-nat",
+		Short: "Preview an Omada NAT mutation (always refused: no Open API write path)",
+		Long: `Preview an Omada NAT mutation.
+
+The Omada Open API exposes NAT reads (port forwardings, one-to-one NAT)
+but no live-site NAT write path, so the plan always refuses with the
+current rules as before-evidence and the write-surface explanation.
+Configure NAT via the controller UI, or use provider opnsense.`,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			req, err := f.request()
+			if err != nil {
+				return err
+			}
+			return withProviderSession("omada", func(ctx context.Context, opts providers.ImportOptions) error {
+				plan, err := service.NewOmadaService().PlanNat(ctx, toOmadaOptions(opts), req)
+				if err != nil {
+					return err
+				}
+				return printPlan(plan, plan.Outcome)
+			})
+		},
+	}
+	bindOmadaNatFlags(cmd, &f)
+	return cmd
+}
+
+// buildOmadaApplyNatCmd applies an Omada NAT mutation. Always refused:
+// nothing can mutate, dry-run or not (#139).
+func buildOmadaApplyNatCmd() *cobra.Command {
+	var f omadaNatFlags
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "apply-nat",
+		Short: "Apply an Omada NAT mutation (always refused: no Open API write path)",
+		Long: `Apply an Omada NAT mutation.
+
+The Omada Open API exposes no live-site NAT write path, so every apply is
+refused with identical before/after evidence — nothing can mutate,
+dry-run or not. Use provider opnsense for NAT writes.`,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			req, err := f.request()
+			if err != nil {
+				return err
+			}
+			// The surface always refuses regardless, but the flag is
+			// carried honestly so the result's dry_run reflects the
+			// request (and stays consistent with the other mutations).
+			req.DryRun = dryRun
+			return withProviderSession("omada", func(ctx context.Context, opts providers.ImportOptions) error {
+				res, err := service.NewOmadaService().ApplyNat(ctx, toOmadaOptions(opts), req)
+				if err != nil {
+					return err
+				}
+				return printApply(res, res.Outcome, res.DryRun)
+			})
+		},
+	}
+	bindOmadaNatFlags(cmd, &f)
+	addDryRunFlag(cmd, &dryRun)
+	return cmd
+}
+
+// omadaNatFlags carries the NAT mutation intent for the CLI surface.
+type omadaNatFlags struct {
+	operation string
+	action    string
+	ruleUUID  string
+	protocol  string
+	source    string
+	port      string
+	localPort string
+	target    string
+	label     string
+}
+
+func (f omadaNatFlags) request() (service.OmadaNatApplyRequest, error) {
+	req := service.OmadaNatApplyRequest{
+		Operation: f.operation,
+		Action:    f.action,
+		RuleUUID:  f.ruleUUID,
+	}
+	req.Spec.Protocol = f.protocol
+	req.Spec.Source = f.source
+	req.Spec.Port = f.port
+	req.Spec.LocalPort = f.localPort
+	req.Spec.Target = f.target
+	req.Spec.Label = f.label
+	switch req.Operation {
+	case "port_forward", "one_to_one":
+	default:
+		return req, fmt.Errorf("operation must be port_forward or one_to_one (Omada has no source_nat collection); got %q", req.Operation)
+	}
+	if req.Action == "" {
+		req.Action = "create"
+	}
+	switch req.Action {
+	case "create", "update", "delete", "toggle":
+	default:
+		return req, fmt.Errorf("action must be one of create, update, delete, toggle; got %q", req.Action)
+	}
+	if req.Action != "create" && req.RuleUUID == "" {
+		return req, fmt.Errorf("rule-uuid is required for action %q", req.Action)
+	}
+	return req, nil
+}
+
+func bindOmadaNatFlags(cmd *cobra.Command, f *omadaNatFlags) {
+	cmd.Flags().StringVar(&f.operation, "operation", "", "NAT collection: port_forward or one_to_one (required)")
+	cmd.Flags().StringVar(&f.action, "action", "create", "create (default), update, delete, or toggle")
+	cmd.Flags().StringVar(&f.ruleUUID, "rule-uuid", "", "Target rule ID for update/delete/toggle")
+	cmd.Flags().StringVar(&f.protocol, "protocol", "", "IP protocol (tcp, udp); empty = any")
+	cmd.Flags().StringVar(&f.source, "source", "", "Source restriction")
+	cmd.Flags().StringVar(&f.port, "port", "", "External (WAN) port or range")
+	cmd.Flags().StringVar(&f.localPort, "local-port", "", "Forwarded (internal) port or range")
+	cmd.Flags().StringVar(&f.target, "target", "", "Forwarded internal address")
+	cmd.Flags().StringVar(&f.label, "label", "", "Rule name")
+}

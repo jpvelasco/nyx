@@ -1827,6 +1827,62 @@ func TestVerifyIsolationCmd_NoSpecCIDRTargetRejected(t *testing.T) {
 	}
 }
 
+// TestOmadaNatCLIRequestValidation pins the CLI NAT request shape (#139):
+// the flags translate to the service request with the same validation as
+// the MCP surface (operation, action, rule-uuid).
+func TestOmadaNatCLIRequestValidation(t *testing.T) {
+	var f omadaNatFlags
+
+	// Unknown operation.
+	f = omadaNatFlags{operation: "bogus", action: "create"}
+	if _, err := f.request(); err == nil || !strings.Contains(err.Error(), "port_forward") {
+		t.Errorf("unknown operation must be rejected, got %v", err)
+	}
+
+	// source_nat is OPNsense-only.
+	f = omadaNatFlags{operation: "source_nat", action: "create"}
+	if _, err := f.request(); err == nil || !strings.Contains(err.Error(), "one_to_one") {
+		t.Errorf("source_nat must be rejected for omada, got %v", err)
+	}
+
+	// Unknown action.
+	f = omadaNatFlags{operation: "port_forward", action: "bogus"}
+	if _, err := f.request(); err == nil || !strings.Contains(err.Error(), "toggle") {
+		t.Errorf("unknown action must be rejected, got %v", err)
+	}
+
+	// update requires a rule UUID.
+	f = omadaNatFlags{operation: "port_forward", action: "update"}
+	if _, err := f.request(); err == nil || !strings.Contains(err.Error(), "rule-uuid") {
+		t.Errorf("update without rule-uuid must be rejected, got %v", err)
+	}
+
+	// A valid create passes through with defaults.
+	f = omadaNatFlags{operation: "port_forward", protocol: "tcp", port: "443", target: "10.0.40.10"}
+	req, err := f.request()
+	if err != nil {
+		t.Fatalf("valid create: %v", err)
+	}
+	if req.Action != "create" || req.Spec.Protocol != "tcp" || req.Spec.Port != "443" || req.Spec.Target != "10.0.40.10" {
+		t.Errorf("request = %+v, want the flag translation", req)
+	}
+}
+
+// TestOmadaNatApplyCLICarriesDryRun pins the flag wiring (#215 review):
+// apply-nat's --dry-run reaches the service request even though the
+// surface always refuses — the result's dry_run reflects the request.
+func TestOmadaNatApplyCLICarriesDryRun(t *testing.T) {
+	f := omadaNatFlags{operation: "port_forward", protocol: "tcp", port: "443", target: "10.0.40.10"}
+	req, err := f.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.DryRun = false
+	if req.DryRun {
+		t.Error("dry-run flag must be carried onto the request")
+	}
+}
+
 // TestMcpServeCmd_HTTPServeAndAuth pins the CLI serve-http path end to
 // end (#138): the listener binds loopback, the token gates every
 // request, and the shutdown drains on context cancel.

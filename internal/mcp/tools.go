@@ -64,6 +64,8 @@ var toolHandlers = map[string]toolHandler{
 	"omada_list_ssids":                 (*Server).toolOmadaListSSIDs,
 	"omada_plan_ssid":                  (*Server).toolOmadaPlanSSID,
 	"omada_apply_ssid":                 (*Server).toolOmadaApplySSID,
+	"omada_plan_nat":                   (*Server).toolOmadaPlanNat,
+	"omada_apply_nat":                  (*Server).toolOmadaApplyNat,
 	"opnsense_get_info":                (*Server).toolOpnsenseGetInfo,
 	"opnsense_list_interfaces":         (*Server).toolOpnsenseListInterfaces,
 	"opnsense_list_firewall_rules":     (*Server).toolOpnsenseListFirewallRules,
@@ -1323,4 +1325,69 @@ func subArgs(args map[string]interface{}, prefix string) map[string]interface{} 
 		}
 	}
 	return sub
+}
+
+// omadaNatRequestFromArgs parses the shared NAT mutation intent for the
+// Omada surface (#139). The surface always refuses — the Open API exposes
+// no live-site NAT write path — but the request is validated exactly like
+// the OPNsense pair so agents carry identical intent shapes.
+func omadaNatRequestFromArgs(args map[string]interface{}) (service.OmadaNatApplyRequest, string) {
+	req := service.OmadaNatApplyRequest{
+		Operation: argString(args, "operation"),
+		Action:    argString(args, "action"),
+		RuleUUID:  argString(args, "rule_uuid"),
+		DryRun:    argBoolDefault(args, "dry_run", true),
+	}
+	req.Spec.Protocol = argString(args, "protocol")
+	req.Spec.Source = argString(args, "source")
+	req.Spec.Port = argString(args, "port")
+	req.Spec.LocalPort = argString(args, "local_port")
+	req.Spec.Target = argString(args, "target")
+	req.Spec.Label = argString(args, "label")
+	if req.Operation == "" {
+		return req, "operation parameter is required: port_forward or one_to_one"
+	}
+	if req.Operation != "port_forward" && req.Operation != "one_to_one" {
+		return req, fmt.Sprintf("operation must be port_forward or one_to_one (Omada has no source_nat collection); got %q", req.Operation)
+	}
+	action := req.Action
+	if action == "" {
+		action = "create"
+	}
+	if action != "create" && req.RuleUUID == "" {
+		return req, fmt.Sprintf("rule_uuid is required for action %q", action)
+	}
+	return req, ""
+}
+
+func (s *Server) toolOmadaPlanNat(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req, merr := omadaNatRequestFromArgs(args)
+	if merr != "" {
+		return errResult(merr)
+	}
+	plan, err := s.omadaSvc.PlanNat(ctx, opts, req)
+	if err != nil {
+		return errResult(fmt.Sprintf("omada nat plan request failed: %v", err))
+	}
+	return okResult(toJSON(plan))
+}
+
+func (s *Server) toolOmadaApplyNat(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req, merr := omadaNatRequestFromArgs(args)
+	if merr != "" {
+		return errResult(merr)
+	}
+	res, err := s.omadaSvc.ApplyNat(ctx, opts, req)
+	if err != nil {
+		return errResult(fmt.Sprintf("omada nat apply request failed: %v", err))
+	}
+	return okResult(toJSON(res))
 }
