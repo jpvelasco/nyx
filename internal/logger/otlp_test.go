@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
@@ -102,9 +103,11 @@ func TestParseOTLPConfig_Headers(t *testing.T) {
 func TestOTLPTelemetryExportsAllThreeSignals(t *testing.T) {
 	var mu sync.Mutex
 	var paths []string
+	sinkAuth := map[string]bool{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		paths = append(paths, r.URL.Path)
+		sinkAuth[r.Header.Get("authorization")] = true
 		mu.Unlock()
 		io.Copy(io.Discard, r.Body)
 		w.WriteHeader(http.StatusOK)
@@ -112,7 +115,8 @@ func TestOTLPTelemetryExportsAllThreeSignals(t *testing.T) {
 	defer srv.Close()
 
 	host := strings.TrimPrefix(srv.URL, "http://")
-	cfg := otlpConfig{Enabled: true, Host: host, Insecure: true}
+	cfg := otlpConfig{Enabled: true, Host: host, Insecure: true,
+		Headers: map[string]string{"authorization": "Bearer sink-token"}}
 	tel, err := newOTLPTelemetry(cfg)
 	if err != nil {
 		t.Fatalf("newOTLPTelemetry: %v", err)
@@ -161,6 +165,9 @@ func TestOTLPTelemetryExportsAllThreeSignals(t *testing.T) {
 			t.Errorf("OTLP sink never received %s (got %v)", want, paths)
 		}
 	}
+	if !sinkAuth["Bearer sink-token"] {
+		t.Errorf("NYX_OTLP_HEADERS never reached the collector (auth seen: %v)", sinkAuth)
+	}
 }
 
 // TestInitTelemetryDisabledKeepsDefaults pins the disabled path: without
@@ -195,5 +202,118 @@ func TestTelemetryShutdownIdempotent(t *testing.T) {
 	}
 	if err := tel.Shutdown(ctx); err != nil {
 		t.Errorf("second shutdown must be a no-op, got: %v", err)
+	}
+}
+
+// TestParseOTLPConfig_HeaderValidation pins the header parsing error
+// path: a malformed entry is rejected with the offending pair named.
+func TestParseOTLPConfig_HeaderValidation(t *testing.T) {
+	t.Setenv("NYX_OTLP_ENDPOINT", "http://localhost:4318")
+	t.Setenv("NYX_OTLP_HEADERS", "good=yes,noequalssign")
+	if _, err := parseOTLPConfig(); err == nil || !strings.Contains(err.Error(), "noequalssign") {
+		t.Errorf("malformed header must be rejected naming the pair, got %v", err)
+	}
+	t.Setenv("NYX_OTLP_HEADERS", "=novalue")
+	if _, err := parseOTLPConfig(); err == nil {
+		t.Error("an empty header key must be rejected")
+	}
+}
+
+// TestNewOTLPTelemetrySecureWithHeaders pins the https pipeline
+// construction: the exporters build against a secure endpoint with the
+// configured headers, and the accessors expose the providers. The
+// end-to-end export (including header delivery) is exercised over the
+// insecure sink in TestOTLPTelemetryExportsAllThreeSignals — the wire
+// behaviors (TLS handshake, header attachment) belong to the exporter.
+func TestNewOTLPTelemetrySecureWithHeaders(t *testing.T) {
+	cfg := otlpConfig{
+		Enabled:  true,
+		Host:     "collector.invalid:4318",
+		Insecure: false,
+		Headers:  map[string]string{"authorization": "Bearer tok"},
+	}
+	tel, err := newOTLPTelemetry(cfg)
+	if err != nil {
+		t.Fatalf("newOTLPTelemetry: %v", err)
+	}
+	if tel.tracerProvider == nil || tel.meterProvider == nil || tel.logExporter == nil {
+		t.Fatalf("secure construction must yield all three pipelines, got %+v", tel)
+	}
+	// Shutdown on an unreachable secure endpoint may surface a flush
+	// error — the pipeline still shut down (idempotent second call).
+	_ = tel.Shutdown(context.Background())
+	if err := tel.Shutdown(context.Background()); err != nil {
+		t.Errorf("second shutdown must be a no-op, got: %v", err)
+	}
+}
+
+// TestTelemetryAccessorsAfterInit pins the accessor behavior around
+// InitTelemetry: enabled exposes the providers, disabled returns nil.
+func TestTelemetryAccessorsAfterInit(t *testing.T) {
+	t.Setenv("NYX_OTLP_ENDPOINT", "")
+	t.Setenv("NYX_OTLP_HEADERS", "")
+	if err := InitTelemetry(); err != nil {
+		t.Fatalf("InitTelemetry disabled: %v", err)
+	}
+	if TelemetryTracerProvider() != nil || TelemetryMeterProvider() != nil || TelemetryLogExporter() != nil {
+		t.Error("disabled telemetry must expose nil accessors")
+	}
+
+	// Invalid endpoint: InitTelemetry is best-effort — it reports and
+	// continues without failing the command, leaving telemetry off.
+	t.Setenv("NYX_OTLP_ENDPOINT", "not-a-url")
+	if err := InitTelemetry(); err != nil {
+		t.Fatalf("InitTelemetry with an invalid endpoint must not fail the command: %v", err)
+	}
+	if OTLPEnabled() {
+		t.Error("an invalid endpoint must leave telemetry disabled")
+	}
+}
+
+// TestInitTelemetryEnabled pins the full enabled path: NYX_OTLP_ENDPOINT
+// configured ⇒ telemetry initialized, globals set, accessors non-nil, and
+// the process-wide Shutdown flushes and clears it.
+func TestInitTelemetryEnabled(t *testing.T) {
+	var mu sync.Mutex
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	t.Setenv("NYX_OTLP_ENDPOINT", srv.URL)
+	t.Setenv("NYX_OTLP_HEADERS", "authorization=Bearer init-tok")
+	if err := InitTelemetry(); err != nil {
+		t.Fatalf("InitTelemetry: %v", err)
+	}
+	if !OTLPEnabled() {
+		t.Fatal("OTLPEnabled must report true after a successful init")
+	}
+	if TelemetryTracerProvider() == nil || TelemetryMeterProvider() == nil || TelemetryLogExporter() == nil {
+		t.Fatal("the enabled accessors must expose the pipelines")
+	}
+
+	// A span through the global provider flows to the sink.
+	_, span := otel.Tracer("nyx").Start(context.Background(), "init.span")
+	span.End()
+	Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	seen := false
+	for _, p := range paths {
+		if p == "/v1/traces" {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Errorf("the global tracer never reached the sink (got %v)", paths)
+	}
+	if OTLPEnabled() {
+		t.Error("Shutdown must clear the enabled state")
 	}
 }
