@@ -88,7 +88,7 @@ func parseOTLPConfig() (otlpConfig, error) {
 // the default endpoints (/v1/traces, /v1/metrics, /v1/logs) are appended
 // to the base so a gateway base path like /otlp produces /otlp/v1/traces.
 func joinOTLPPath(base, signal string) string {
-	return path.Join(base, signal)
+	return path.Join(base, signal) // nosemgrep — URL path, not a filesystem path: forward-slash joining is the intent
 }
 
 // otlpTelemetry owns the trace and meter providers (plus the OTLP log
