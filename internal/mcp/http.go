@@ -143,7 +143,7 @@ func (h *HTTPServer) serveMCP(w http.ResponseWriter, r *http.Request) {
 	if !h.authorized(r) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		io.WriteString(w, httpAuthError) //nolint:errcheck — best-effort generic body
+		_, _ = io.WriteString(w, httpAuthError) // best-effort generic body
 		return
 	}
 
@@ -200,7 +200,7 @@ func (h *HTTPServer) serveMCP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Mcp-Session-Id", sessionID)
 	}
 	w.WriteHeader(http.StatusOK)
-	io.WriteString(w, string(respBytes)) //nolint:errcheck — response write is best-effort
+	_, _ = w.Write(respBytes) // response write is best-effort
 }
 
 // authorized applies the constant-time bearer check. The token is never
@@ -302,5 +302,5 @@ func writeHTTPJSONError(w http.ResponseWriter, status int, message string) {
 	if err != nil {
 		return
 	}
-	io.WriteString(w, string(data)) //nolint:errcheck — best-effort error body
+	_, _ = w.Write(data) // best-effort error body
 }
