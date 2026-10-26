@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path"
 	"strings"
 	"sync"
 
@@ -47,6 +48,7 @@ import (
 type otlpConfig struct {
 	Enabled  bool
 	Host     string // host:port for the OTLP/HTTP exporters (no scheme)
+	Path     string // base path preserved from the endpoint URL, e.g. "/otlp"
 	Insecure bool   // http:// endpoints export without TLS
 	Headers  map[string]string
 }
@@ -66,6 +68,7 @@ func parseOTLPConfig() (otlpConfig, error) {
 	}
 	cfg.Enabled = true
 	cfg.Host = u.Host
+	cfg.Path = u.Path // collector gateways (e.g. Grafana /otlp) need the base path preserved
 	cfg.Insecure = u.Scheme == "http"
 	for _, pair := range strings.Split(os.Getenv("NYX_OTLP_HEADERS"), ",") {
 		pair = strings.TrimSpace(pair)
@@ -79,6 +82,13 @@ func parseOTLPConfig() (otlpConfig, error) {
 		cfg.Headers[strings.TrimSpace(k)] = strings.TrimSpace(v)
 	}
 	return cfg, nil
+}
+
+// joinOTLPPath builds the full signal path from the configured base path:
+// the default endpoints (/v1/traces, /v1/metrics, /v1/logs) are appended
+// to the base so a gateway base path like /otlp produces /otlp/v1/traces.
+func joinOTLPPath(base, signal string) string {
+	return path.Join(base, signal)
 }
 
 // otlpTelemetry owns the trace and meter providers (plus the OTLP log
@@ -97,6 +107,7 @@ func newOTLPTelemetry(cfg otlpConfig) (*otlpTelemetry, error) {
 
 	traceOpts := []otlptracehttp.Option{
 		otlptracehttp.WithEndpoint(cfg.Host),
+		otlptracehttp.WithURLPath(joinOTLPPath(cfg.Path, "/v1/traces")),
 	}
 	if cfg.Insecure {
 		traceOpts = append(traceOpts, otlptracehttp.WithInsecure())
@@ -115,6 +126,7 @@ func newOTLPTelemetry(cfg otlpConfig) (*otlpTelemetry, error) {
 
 	metricOpts := []otlpmetrichttp.Option{
 		otlpmetrichttp.WithEndpoint(cfg.Host),
+		otlpmetrichttp.WithURLPath(joinOTLPPath(cfg.Path, "/v1/metrics")),
 	}
 	if cfg.Insecure {
 		metricOpts = append(metricOpts, otlpmetrichttp.WithInsecure())
@@ -134,6 +146,7 @@ func newOTLPTelemetry(cfg otlpConfig) (*otlpTelemetry, error) {
 
 	logOpts := []otlploghttp.Option{
 		otlploghttp.WithEndpoint(cfg.Host),
+		otlploghttp.WithURLPath(joinOTLPPath(cfg.Path, "/v1/logs")),
 	}
 	if cfg.Insecure {
 		logOpts = append(logOpts, otlploghttp.WithInsecure())

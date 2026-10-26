@@ -213,16 +213,18 @@ var registeredProviders = new(sync.Map) // *nyxProvider -> struct{}
 
 func registerProvider(p *nyxProvider) { registeredProviders.Store(p, struct{}{}) }
 
-// Shutdown closes every pipeline created in this process — the OTLP
-// telemetry first (so its log exporter flushes before it closes), then
-// the log providers. Safe to call more than once.
+// Shutdown closes every pipeline created in this process. The log
+// providers shut down FIRST so their OTLP batch processors drain their
+// buffered records into the still-open OTLP log exporter; the telemetry
+// (which owns that exporter) closes after them. Safe to call more than
+// once.
 func Shutdown() {
-	telemetryShutdown()
 	registeredProviders.Range(func(k, _ any) bool {
 		registeredProviders.Delete(k)
 		_ = k.(*nyxProvider).Shutdown(context.Background())
 		return true
 	})
+	telemetryShutdown()
 }
 
 // bridgeHandler wraps the otelslog handler with a minimum-level filter (the

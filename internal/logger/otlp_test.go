@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"log/slog"
+	"path/filepath"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
@@ -315,5 +318,75 @@ func TestInitTelemetryEnabled(t *testing.T) {
 	}
 	if OTLPEnabled() {
 		t.Error("Shutdown must clear the enabled state")
+	}
+}
+
+// TestParseOTLPConfigPreservesBasePath pins the gateway-path behavior:
+// a collector gateway base path (e.g. Grafana Cloud's /otlp) survives
+// parsing and reaches the signal URLs (#213 review finding: the path
+// was silently discarded).
+func TestParseOTLPConfigPreservesBasePath(t *testing.T) {
+	t.Setenv("NYX_OTLP_ENDPOINT", "https://otlp-gateway.example.net/otlp")
+	cfg, err := parseOTLPConfig()
+	if err != nil {
+		t.Fatalf("parseOTLPConfig: %v", err)
+	}
+	if cfg.Host != "otlp-gateway.example.net" {
+		t.Errorf("host = %q", cfg.Host)
+	}
+	if cfg.Path != "/otlp" {
+		t.Errorf("base path = %q, want /otlp (gateway paths must survive)", cfg.Path)
+	}
+	if cfg.Insecure {
+		t.Error("https must stay secure")
+	}
+	if got := joinOTLPPath(cfg.Path, "/v1/traces"); got != "/otlp/v1/traces" {
+		t.Errorf("trace path = %q, want /otlp/v1/traces", got)
+	}
+	// The default (no base path) keeps the standard signal paths.
+	if got := joinOTLPPath("", "/v1/logs"); got != "/v1/logs" {
+		t.Errorf("default log path = %q, want /v1/logs", got)
+	}
+}
+
+// TestShutdownOrderDrainsLogProvidersBeforeTelemetry pins the drain
+// ordering (#213 review finding): the log providers shut down first so
+// their OTLP batch processors flush into the still-open exporter; the
+// telemetry closes after them. The observable behavior: the sink
+// receives a log record exported through a batched provider when the
+// process-wide Shutdown runs.
+func TestShutdownOrderDrainsLogProvidersBeforeTelemetry(t *testing.T) {
+	var mu sync.Mutex
+	sawLogs := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if r.URL.Path == "/v1/logs" {
+			sawLogs = true
+		}
+		mu.Unlock()
+		io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	t.Setenv("NYX_OTLP_ENDPOINT", srv.URL)
+	if err := InitTelemetry(); err != nil {
+		t.Fatalf("InitTelemetry: %v", err)
+	}
+	// The file pipeline attaches the OTLP batch processor to the same
+	// records; a logger write buffers into the batch processor.
+	sl, err := NewSlog(filepath.Join(t.TempDir(), "nyx.log"), DefaultMaxSize, DefaultMaxFiles, slog.LevelInfo)
+	if err != nil {
+		t.Fatalf("NewSlog: %v", err)
+	}
+	sl.Info("drain-order fixture")
+	// The process-wide Shutdown must drain the buffered record into the
+	// OTLP exporter before closing it.
+	Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !sawLogs {
+		t.Error("the batched log record never reached the sink — the exporter closed before the drain")
 	}
 }
