@@ -433,6 +433,19 @@ make clean    # Remove built binaries and coverage.out
 make release  # Cross-compile for all platforms
 ```
 
+## Observability
+
+Structured JSON-lines logs land in `~/.nyx/nyx.log` (rotating; `NYX_LOG_FILE`
+/ `NYX_LOG_LEVEL` configure it). Opt-in OTLP export sends the same telemetry —
+logs, traces, and metrics — to any OTLP/HTTP collector:
+
+```bash
+NYX_OTLP_ENDPOINT=http://localhost:4318 nyx audit --spec homelab.yaml
+```
+
+See [docs/observability.md](docs/observability.md) for the full configuration
+surface, the emitted signals, and the security notes.
+
 ## Platform Support
 
 | Platform | Status | Commands Used |

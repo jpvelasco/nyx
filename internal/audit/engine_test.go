@@ -7,6 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	"github.com/jpvelasco/nyx/internal/audit"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/intent"
@@ -382,3 +388,98 @@ func TestLooksVirtualUnitWithSeenDB(t *testing.T) {
 		t.Error("should be acked after write")
 	}
 }
+
+// TestEngineRunEmitsTelemetry instruments Run through the global OTel
+// providers with a test tracer recorder and a manual metric reader (#137):
+// one root span, one span per assertion, and one counter increment per
+// finding with type+status attributes. Attributes stay PII-safe (types
+// and statuses only).
+func TestEngineRunEmitsTelemetry(t *testing.T) {
+	spanRec := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(spanRec)))
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	prevTP, prevMP := otel.GetTracerProvider(), otel.GetMeterProvider()
+	otel.SetTracerProvider(tp)
+	otel.SetMeterProvider(mp)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(prevTP)
+		otel.SetMeterProvider(prevMP)
+	})
+
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Assertions: []intent.Assertion{
+			{Type: "route_check", Target: "127.0.0.1"},
+			{Type: "dns_check", Query: "localhost"},
+		},
+	}
+	eng := audit.NewEngine(spec)
+	_, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	spans := spanRec.GetSpans()
+	if len(spans) != 3 {
+		t.Fatalf("spans = %d, want 3 (root + one per assertion)", len(spans))
+	}
+	var root, route, dns bool
+	for _, s := range spans {
+		switch s.Name {
+		case "nyx.audit.run":
+			root = true
+		case "nyx.assertion.route_check":
+			route = true
+		case "nyx.assertion.dns_check":
+			dns = true
+		}
+	}
+	if !root || !route || !dns {
+		t.Errorf("expected run root and per-assertion spans, got %v", spanNames(spans))
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("metric collect: %v", err)
+	}
+	counts := metricCountersByName(&rm)
+	if len(counts) == 0 {
+		t.Fatal("no metrics collected, want nyx_audit_assertions_total")
+	}
+	for name := range counts {
+		if name != "nyx_audit_assertions_total" && name != "nyx_audit_run_duration_ms" {
+			t.Errorf("unexpected metric %q (only assertion counters and the duration histogram are emitted)", name)
+		}
+	}
+	if counts["nyx_audit_assertions_total"] != 2 {
+		t.Errorf("assertion counter = %d, want 2", counts["nyx_audit_assertions_total"])
+	}
+}
+
+func spanNames(spans []tracetest.SpanStub) []string {
+	names := make([]string, 0, len(spans))
+	for _, s := range spans {
+		names = append(names, s.Name)
+	}
+	return names
+}
+
+func metricCountersByName(rm *metricdata.ResourceMetrics) map[string]int {
+	counts := map[string]int{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			switch agg := m.Data.(type) {
+			case metricdata.Sum[int64]:
+				for _, dp := range agg.DataPoints {
+					counts[m.Name] += int(dp.Value)
+				}
+			case metricdata.Histogram[float64]:
+				counts[m.Name] += dpCount(agg)
+			}
+		}
+	}
+	return counts
+}
+
+func dpCount(h metricdata.Histogram[float64]) int { return len(h.DataPoints) }
