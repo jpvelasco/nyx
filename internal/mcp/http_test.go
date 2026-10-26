@@ -310,9 +310,9 @@ func TestStartReaperStopsWithContext(t *testing.T) {
 // loopback rule with its named reason.
 func TestValidateBindAddrErrorBranches(t *testing.T) {
 	bad := map[string]string{
-		"no-port-here":         "needs a port",
+		"no-port-here":         "missing port",
 		":9000":                "no host",
-		"example.invalid:9000": "not loopback",
+		"example.invalid:9000": "does not resolve",
 	}
 	for addr, want := range bad {
 		_, err := ValidateBindAddr(addr)
