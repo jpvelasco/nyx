@@ -246,7 +246,7 @@ func (s *PlaybookService) observeTopology(ctx context.Context, opts PlaybookOpti
 	if opts.Omada == nil && opts.Opnsense == nil {
 		return nil, fmt.Errorf("the port-forward playbook needs a host for at least one provider: set omada_host or opnsense_host (or the OMADA_HOST / OPNSENSE_HOST environment variables or the credential store)")
 	}
-	return s.Topology.Report(ctx, TopologyOptions{Omada: opts.Omada, Opnsense: opts.Opnsense})
+	return s.Topology.Report(ctx, TopologyOptions(opts))
 }
 
 // planWithProvider routes the plan to the selected provider's service
