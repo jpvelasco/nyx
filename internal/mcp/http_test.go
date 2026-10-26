@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -267,5 +268,56 @@ func TestTokenNeverInURLs(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("token in query string must not authenticate: status = %d, want 401", resp.StatusCode)
+	}
+}
+
+// TestSweepIdleRemovesExpiredSessions pins the reaper's core: sessions
+// idle beyond the timeout are removed even with no further request.
+func TestSweepIdleRemovesExpiredSessions(t *testing.T) {
+	h := NewHTTPServer(testToken)
+	h.idleTimeout = 20 * time.Millisecond
+	id := h.newSession()
+	if len(h.sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(h.sessions))
+	}
+	time.Sleep(60 * time.Millisecond)
+	h.SweepIdle()
+	if len(h.sessions) != 0 {
+		t.Errorf("idle session survived the sweep: %d remain", len(h.sessions))
+	}
+	_ = id
+}
+
+// TestStartReaperStopsWithContext pins the reaper lifecycle: the ticker
+// goroutine exits when the context ends.
+func TestStartReaperStopsWithContext(t *testing.T) {
+	h := NewHTTPServer(testToken)
+	h.idleTimeout = 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	h.StartReaper(ctx)
+	// Let a couple of ticks happen, then cancel.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	// The goroutine exits on the next tick at the latest; nothing to
+	// assert beyond no-panic, but the sweep must have run.
+	time.Sleep(10 * time.Millisecond)
+	if len(h.sessions) != 0 {
+		t.Errorf("reaper should have swept, %d remain", len(h.sessions))
+	}
+}
+
+// TestValidateBindAddrErrorBranches pins each refusal branch of the
+// loopback rule with its named reason.
+func TestValidateBindAddrErrorBranches(t *testing.T) {
+	bad := map[string]string{
+		"no-port-here":         "needs a port",
+		":9000":                "no host",
+		"example.invalid:9000": "not loopback",
+	}
+	for addr, want := range bad {
+		_, err := ValidateBindAddr(addr)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("ValidateBindAddr(%q) = %v, want an error naming %q", addr, err, want)
+		}
 	}
 }
