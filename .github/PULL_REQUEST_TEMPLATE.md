@@ -11,7 +11,7 @@ Brief description of what this PR does.
 
 ## Documentation
 - [ ] Updated README.md (if applicable)
-- [ ] Updated CLAUDE.md (if applicable)
+- [ ] Updated AGENTS.md (if applicable)
 
 ## Related Issues
 Closes #
