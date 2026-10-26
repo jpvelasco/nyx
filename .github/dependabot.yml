@@ -8,3 +8,11 @@ updates:
       codeql:
         patterns:
           - "github/codeql-action/*"
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      gomod:
+        patterns:
+          - "*"
