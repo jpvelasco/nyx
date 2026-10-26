@@ -1831,8 +1831,15 @@ func TestPortForwardCmdValidation(t *testing.T) {
 		t.Errorf("missing --target must be an actionable error, got %v", err)
 	}
 
-	// No providers configured.
+	// No providers configured. The test is hermetic against the
+	// developer's environment: both provider env vars are cleared and
+	// the credential store points at an empty file (a populated store
+	// or set env vars would otherwise resolve a host and proceed to a
+	// live topology call).
 	pfTarget = "10.0.40.10"
+	t.Setenv("OMADA_HOST", "")
+	t.Setenv("OPNSENSE_HOST", "")
+	t.Setenv("NYX_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 	if err := portForwardCmd.RunE(portForwardCmd, nil); err == nil || !strings.Contains(err.Error(), "at least one provider") {
 		t.Errorf("no providers must be a clear error, got %v", err)
 	}
