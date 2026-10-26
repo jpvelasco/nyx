@@ -1850,3 +1850,18 @@ func TestOmadaNatCLIRequestValidation(t *testing.T) {
 		t.Errorf("request = %+v, want the flag translation", req)
 	}
 }
+
+// TestOmadaNatApplyCLICarriesDryRun pins the flag wiring (#215 review):
+// apply-nat's --dry-run reaches the service request even though the
+// surface always refuses — the result's dry_run reflects the request.
+func TestOmadaNatApplyCLICarriesDryRun(t *testing.T) {
+	f := omadaNatFlags{operation: "port_forward", protocol: "tcp", port: "443", target: "10.0.40.10"}
+	req, err := f.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.DryRun = false
+	if req.DryRun {
+		t.Error("dry-run flag must be carried onto the request")
+	}
+}

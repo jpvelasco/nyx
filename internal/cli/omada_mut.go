@@ -410,6 +410,10 @@ dry-run or not. Use provider opnsense for NAT writes.`,
 			if err != nil {
 				return err
 			}
+			// The surface always refuses regardless, but the flag is
+			// carried honestly so the result's dry_run reflects the
+			// request (and stays consistent with the other mutations).
+			req.DryRun = dryRun
 			return withProviderSession("omada", func(ctx context.Context, opts providers.ImportOptions) error {
 				res, err := service.NewOmadaService().ApplyNat(ctx, toOmadaOptions(opts), req)
 				if err != nil {
