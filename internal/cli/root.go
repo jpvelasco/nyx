@@ -76,7 +76,11 @@ func init() {
 
 	// Single structured-logging pipeline (OTel bridge → rotating file),
 	// honoring NYX_LOG_LEVEL / NYX_LOG_FILE. Best-effort: if it fails, we
-	// continue without logging.
+	// continue without logging. OTLP telemetry is initialized first so the
+	// log pipeline can attach the OTLP log exporter to the same records
+	// (#137); without NYX_OTLP_ENDPOINT it stays disabled and the file log
+	// is the whole pipeline.
+	_ = logger.InitTelemetry()
 	if sl, err := logger.NewSlog(logger.EnvLogFile(), logger.DefaultMaxSize, logger.DefaultMaxFiles, logger.EnvLevel()); err == nil {
 		slogLog = sl
 		slog.SetDefault(sl)

@@ -14,6 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
 	"github.com/jpvelasco/nyx/internal/backends"
 	"github.com/jpvelasco/nyx/internal/backends/health"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
@@ -36,6 +40,51 @@ const (
 	// sends for isolation and network_health assertions (ping -c N).
 	probeHealthPingCount = 3
 )
+
+// Telemetry (#137): spans and metrics flow through the process-wide OTel
+// globals — no-op unless OTLP is configured (logger.InitTelemetry). All
+// attributes are PII-safe by construction (types and statuses, never
+// CIDRs, hostnames, or targets; docs/naming.md).
+var (
+	// auditTracerName/auditMeterName are resolved against the process-wide
+	// OTel globals at call time (not init), so a provider configured later
+	// — including by tests — is honored.
+	auditTracerName = "nyx/audit"
+	auditMeterName  = "nyx/audit"
+
+	assertionsTotal metric.Int64Counter
+	runDuration     metric.Float64Histogram
+	telemetryOnce   sync.Once
+)
+
+// initTelemetryInstruments creates the run's metric instruments once per
+// process. With no configured provider the no-op meter returns no-op
+// instruments, so the instrumentation is inert until OTLP is enabled.
+func initTelemetryInstruments() {
+	assertionsTotal, _ = otel.Meter(auditMeterName).Int64Counter(
+		"nyx_audit_assertions_total",
+		metric.WithDescription("Number of audit assertions by type and status"),
+	)
+	runDuration, _ = otel.Meter(auditMeterName).Float64Histogram(
+		"nyx_audit_run_duration_ms",
+		metric.WithDescription("Audit run duration in milliseconds"),
+		metric.WithUnit("ms"),
+	)
+}
+
+// instrumentAssertion records one finding: one counter increment carrying
+// the assertion type and resulting status.
+func instrumentAssertion(checkType string, status models.Status) {
+	telemetryOnce.Do(initTelemetryInstruments)
+	if assertionsTotal == nil {
+		return
+	}
+	assertionsTotal.Add(context.Background(), 1,
+		metric.WithAttributes(
+			attribute.String("type", checkType),
+			attribute.String("status", string(status)),
+		))
+}
 
 // Engine runs audit assertions. It is NOT safe for concurrent use —
 // Run() mutates runnerCtx and seenDB, and callers should create a new
@@ -69,6 +118,10 @@ func NewEngine(spec *intent.Spec) *Engine {
 // Engine is designed for single-use; Run resets internal state for safety
 // but callers should create a new Engine via NewEngine for each audit.
 func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
+	runStart := time.Now()
+	ctx, runSpan := otel.Tracer(auditTracerName).Start(ctx, "nyx.audit.run")
+	defer runSpan.End()
+
 	if e.Logger == nil {
 		// Callers (MCP, tests) may pass a nil logger; keep the stderr
 		// fallback so engine warnings stay visible.
@@ -140,7 +193,9 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 			default:
 			}
 
-			result, err := e.runAssertion(ctx, assertion)
+			assertCtx, assertSpan := otel.Tracer(auditTracerName).Start(ctx, "nyx.assertion."+assertion.Type)
+			result, err := e.runAssertion(assertCtx, assertion)
+			assertSpan.End()
 			if err != nil {
 				target := assertion.Target
 				if target == "" {
@@ -166,6 +221,18 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 	}
 
 	wg.Wait()
+
+	// Telemetry: one counter per finding (type + status) and the run
+	// duration, recorded centrally after the findings settle (#137).
+	telemetryOnce.Do(initTelemetryInstruments)
+	if assertionsTotal != nil {
+		for i := range findings {
+			instrumentAssertion(findings[i].CheckType, findings[i].Status)
+		}
+	}
+	if runDuration != nil {
+		runDuration.Record(context.Background(), float64(time.Since(runStart).Milliseconds()))
+	}
 
 	report := &models.AuditReport{
 		Audit:    e.Spec.Site,

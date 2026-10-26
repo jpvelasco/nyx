@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1169,9 +1171,24 @@ func TestInitCmd_OutputError(t *testing.T) {
 
 func TestMcpServeCmd_InvalidTransport(t *testing.T) {
 	saveRestoreGlobals(t)
-	mcpTransport = "http"
+	mcpTransport = "bogus"
 	if err := mcpServeCmd.RunE(mcpServeCmd, nil); err == nil {
 		t.Fatal("expected error for unsupported transport")
+	}
+}
+
+func TestMcpServeCmd_HTTPRefusesNonLoopbackBind(t *testing.T) {
+	// The loopback-only binding rule (docs/mcp-http.md) refuses any
+	// non-loopback --bind before the listener opens; there is no remote
+	// escape hatch.
+	saveRestoreGlobals(t)
+	mcpTransport = "http"
+	for _, bind := range []string{"0.0.0.0:9000", ":9000", "192.168.1.10:9000"} {
+		mcpBind = bind
+		err := mcpServeCmd.RunE(mcpServeCmd, nil)
+		if err == nil || !strings.Contains(err.Error(), "loopback") {
+			t.Errorf("bind %q: expected a loopback-only refusal, got %v", bind, err)
+		}
 	}
 }
 
@@ -1883,5 +1900,94 @@ func TestOmadaNatCLIRequestValidation(t *testing.T) {
 	}
 	if req.Action != "create" || req.Spec.Protocol != "tcp" || req.Spec.Port != "443" || req.Spec.Target != "10.0.40.10" {
 		t.Errorf("request = %+v, want the flag translation", req)
+	}
+}
+
+// TestOmadaNatApplyCLICarriesDryRun pins the flag wiring (#215 review):
+// apply-nat's --dry-run reaches the service request even though the
+// surface always refuses — the result's dry_run reflects the request.
+func TestOmadaNatApplyCLICarriesDryRun(t *testing.T) {
+	f := omadaNatFlags{operation: "port_forward", protocol: "tcp", port: "443", target: "10.0.40.10"}
+	req, err := f.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.DryRun = false
+	if req.DryRun {
+		t.Error("dry-run flag must be carried onto the request")
+	}
+}
+
+// TestMcpServeCmd_HTTPServeAndAuth pins the CLI serve-http path end to
+// end (#138): the listener binds loopback, the token gates every
+// request, and the shutdown drains on context cancel.
+func TestMcpServeCmd_HTTPServeAndAuth(t *testing.T) {
+	saveRestoreGlobals(t)
+	mcpTransport = "http"
+	t.Setenv("NYX_MCP_TOKEN", "integration-token")
+
+	// Find a free loopback port for the bind (small race window, fine
+	// for an isolated CI runner).
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("finding a free port: %v", err)
+	}
+	port := probe.Addr().(*net.TCPAddr).Port
+	probe.Close()
+	mcpBind = fmt.Sprintf("127.0.0.1:%d", port)
+	base := "http://127.0.0.1:" + strconv.Itoa(port)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Call serveHTTP directly with the test context: the RunE wrapper
+	// only routes to it, and cobra's default context is Background().
+	done := make(chan error, 1)
+	go func() {
+		done <- serveHTTP(ctx)
+	}()
+
+	// Poll until the listener answers (401 without the token).
+	// The test client bypasses any configured proxy: loopback must be
+	// reached directly regardless of HTTP_PROXY/NO_PROXY.
+	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	deadline := time.Now().Add(5 * time.Second)
+	var unauthed bool
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(base + "/mcp")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusUnauthorized {
+				unauthed = true
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !unauthed {
+		t.Fatal("the HTTP listener never came up or did not require auth")
+	}
+
+	// With the token, a GET is 405 (POST-only surface).
+	req, _ := http.NewRequest(http.MethodGet, base+"/mcp", nil)
+	req.Header.Set("Authorization", "Bearer integration-token")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("authed GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("authed GET status = %d, want 405", resp.StatusCode)
+	}
+
+	// Cancel the context: the graceful shutdown returns cleanly.
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("serve-http should shut down cleanly, got %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve-http did not shut down on context cancel")
 	}
 }

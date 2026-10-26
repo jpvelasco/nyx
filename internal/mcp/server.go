@@ -729,6 +729,11 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: omadaNatToolSchema(),
 		},
 		{
+			Name:        "omada_apply_nat",
+			Description: "Apply an Omada NAT mutation. Always refused: the Omada Open API exposes no live-site NAT write path, so nothing can mutate — the result carries identical before/after evidence and the write-surface explanation. Use provider opnsense for NAT writes.",
+			InputSchema: omadaNatToolSchema(),
+		},
+		{
 			Name:        "plan_port_forward",
 			Description: "Composed playbook (#140): plan a port-forward rule on the backend that owns the egress-path NAT, selected from the topology report. Routes to opnsense_plan_nat semantics when OPNsense owns NAT; reports the Omada hold when the managed gateway owns it; refuses on double-NAT or indeterminate topologies. Read-only.",
 			InputSchema: portForwardToolSchema(),
@@ -737,11 +742,6 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			Name:        "apply_port_forward",
 			Description: "Composed playbook (#140): apply a port-forward rule on the backend that owns the egress-path NAT, selected from the topology report. Dry-run default: set dry_run=false to apply for real. The selected provider's own safety gates still apply (double-NAT guard; the Omada write-path hold).",
 			InputSchema: portForwardToolSchema(),
-		},
-		{
-			Name:        "omada_apply_nat",
-			Description: "Apply an Omada NAT mutation. Always refused: the Omada Open API exposes no live-site NAT write path, so nothing can mutate — the result carries identical before/after evidence and the write-surface explanation. Use provider opnsense for NAT writes.",
-			InputSchema: omadaNatToolSchema(),
 		},
 		{
 			Name:        "omada_apply_port_profile",
