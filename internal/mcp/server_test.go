@@ -3208,4 +3208,27 @@ func TestDispatchOmadaNatPlanApplyHold(t *testing.T) {
 	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan_nat", badArgs); !isErr || !strings.Contains(text, "one_to_one") {
 		t.Errorf("source_nat must be rejected for omada, got (%q, %v)", text, isErr)
 	}
+
+	// A missing operation is actionable.
+	noOp := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw"}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan_nat", noOp); !isErr || !strings.Contains(text, "operation parameter is required") {
+		t.Errorf("missing operation must be an actionable error, got (%q, %v)", text, isErr)
+	}
+
+	// update requires a rule UUID.
+	noUUID := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "operation": "port_forward", "action": "update"}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan_nat", noUUID); !isErr || !strings.Contains(text, "rule_uuid is required") {
+		t.Errorf("update without rule_uuid must be an actionable error, got (%q, %v)", text, isErr)
+	}
+
+	// A service error surfaces with context (not a silent refusal).
+	failing := serverWithOmadaStub(&stubOmadaSvc{err: errors.New("controller down")})
+	if text, isErr := failing.DispatchToolForTest(context.Background(), "omada_plan_nat",
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "operation": "port_forward"}); !isErr || !strings.Contains(text, "omada nat plan request failed") {
+		t.Errorf("a controller failure must surface as a plan error, got (%q, %v)", text, isErr)
+	}
+	if text, isErr := failing.DispatchToolForTest(context.Background(), "omada_apply_nat",
+		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "operation": "port_forward", "dry_run": true}); !isErr || !strings.Contains(text, "omada nat apply request failed") {
+		t.Errorf("a controller failure must surface as an apply error, got (%q, %v)", text, isErr)
+	}
 }
