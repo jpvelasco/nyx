@@ -200,7 +200,7 @@ func (h *HTTPServer) serveMCP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Mcp-Session-Id", sessionID)
 	}
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(respBytes) // response write is best-effort
+	_, _ = w.Write(respBytes) // nosemgrep — JSON-RPC body (Content-Type: application/json), not HTML; best-effort
 }
 
 // authorized applies the constant-time bearer check. The token is never
@@ -302,5 +302,5 @@ func writeHTTPJSONError(w http.ResponseWriter, status int, message string) {
 	if err != nil {
 		return
 	}
-	_, _ = w.Write(data) // best-effort error body
+	_, _ = w.Write(data) // nosemgrep — JSON-RPC error body, not HTML; best-effort
 }
