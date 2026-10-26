@@ -1601,3 +1601,101 @@ func TestNatWriteSurfaceDocumentsTheGap(t *testing.T) {
 		t.Errorf("the write-surface note should name the Open API: %q", s)
 	}
 }
+
+// TestOmadaNatValidationMatrix pins the full request validation matrix
+// (#139): the operation set (no source_nat), the action set, the
+// per-action rule-uuid requirement, and the toggle port-forward-only rule.
+func TestOmadaNatValidationMatrix(t *testing.T) {
+	cases := []struct {
+		name string
+		req  providers.NatApplyRequest
+		want string // "" = accepted
+	}{
+		{"create port_forward", providers.NatApplyRequest{Operation: "port_forward", Action: "create"}, ""},
+		{"create one_to_one default action", providers.NatApplyRequest{Operation: "one_to_one"}, ""},
+		{"source_nat is opnsense-only", providers.NatApplyRequest{Operation: "source_nat"}, "one_to_one"},
+		{"unknown operation", providers.NatApplyRequest{Operation: "bogus"}, "one_to_one"},
+		{"update requires uuid", providers.NatApplyRequest{Operation: "port_forward", Action: "update"}, "rule_uuid"},
+		{"delete requires uuid", providers.NatApplyRequest{Operation: "port_forward", Action: "delete"}, "rule_uuid"},
+		{"toggle requires uuid", providers.NatApplyRequest{Operation: "port_forward", Action: "toggle"}, "rule_uuid"},
+		{"toggle is port_forward-only", providers.NatApplyRequest{Operation: "one_to_one", Action: "toggle", RuleUUID: "pf-1"}, "port_forward"},
+		{"unknown action", providers.NatApplyRequest{Operation: "port_forward", Action: "bogus"}, "toggle"},
+		{"update with uuid accepted", providers.NatApplyRequest{Operation: "one_to_one", Action: "update", RuleUUID: "o1"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateOmadaNatRequest(tc.req)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("expected acceptance, got %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected an error naming %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+// TestPlanNatOneToOneReadsCollection pins the one-to-one branch of the
+// HOLD evidence: the plan refuses with the collection's current rules
+// as before-evidence.
+func TestPlanNatOneToOneReadsCollection(t *testing.T) {
+	var writes []string
+	ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/openapi/authorize/token"):
+			writeEnvelope(w, 0, "", `{"accessToken":"t1"}`)
+		case r.Method != http.MethodGet:
+			writes = append(writes, r.Method+" "+r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		case strings.Contains(r.URL.Path, "/nat/one-to-one-nat"):
+			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"o-1","name":"binat","status":true,"internalIp":"10.0.40.10","externalIp":"203.0.113.20","dmz":false,"description":"srv"}]}`)
+		case strings.Contains(r.URL.Path, "/sites"):
+			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"siteId":"s1","name":"HQ"}]}`)
+		case strings.Contains(r.URL.Path, "/devices"):
+			writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	p := &OmadaProvider{}
+	plan, err := p.PlanNat(context.Background(), providers.NatApplyRequest{
+		Operation: "one_to_one",
+		Action:    "create",
+		Spec:      providers.NatRuleSpec{Target: "10.0.40.10", Protocol: "tcp"},
+	}, providers.ImportOptions{Host: ts.URL, ClientID: "admin", ClientSecret: "pw", Site: "HQ", SkipTLSVerify: true})
+	if err != nil {
+		t.Fatalf("PlanNat: %v", err)
+	}
+	if plan.Outcome != "refused" || !strings.Contains(plan.Before, "o-1") {
+		t.Errorf("one-to-one plan should refuse with the collection as evidence, got %+v", plan)
+	}
+	if !strings.Contains(strings.Join(plan.Endpoints, ","), "one-to-one-nat") {
+		t.Errorf("the evidence path should name the one-to-one read endpoint, got %v", plan.Endpoints)
+	}
+	if len(writes) > 0 {
+		t.Errorf("PlanNat must issue zero writes, saw %v", writes)
+	}
+}
+
+// TestPlanNatErrorPaths pins the honest error handling: a controller
+// that fails the login surfaces as an error, not a refusal with
+// fabricated evidence (#139's failures-are-honest exit).
+func TestPlanNatErrorPaths(t *testing.T) {
+	ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/openapi/authorize/token"):
+			writeEnvelope(w, -1001, "bad credentials", "null")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	p := &OmadaProvider{}
+	_, err := p.PlanNat(context.Background(), providers.NatApplyRequest{Operation: "port_forward"},
+		providers.ImportOptions{Host: ts.URL, ClientID: "admin", ClientSecret: "wrong", SkipTLSVerify: true})
+	if err == nil {
+		t.Fatal("a failed login must surface as an error, not a refusal")
+	}
+}
