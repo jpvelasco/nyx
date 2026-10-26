@@ -304,6 +304,8 @@ Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `O
 | `omada_list_lan_profiles` | List a site's LAN profiles — the VLAN membership sets (native + tagged) ports bind to |
 | `omada_plan_port` | Preview bringing one switch port to a desired VLAN membership: current vs. desired state and whether an existing profile can be rebound or a new one must be created (read-only) |
 | `omada_apply_port_profile` | Bind a switch port to a LAN profile with the desired VLAN membership (find-or-create the matching profile, then bind). Idempotent (`unchanged`/`bound`/`created_and_bound`); dry-run is the default |
+| `omada_plan_nat` / `omada_apply_nat` | Omada NAT plan/apply. The Open API exposes NAT reads but no live-site write path, so both always refuse with current-state evidence and the write-surface explanation — configure via the controller UI or use `opnsense_plan_nat`/`opnsense_apply_nat` |
+| `opnsense_plan_nat` / `opnsense_apply_nat` | OPNsense NAT plan/apply: port forwards, one-to-one, and source NAT with double-NAT guard, idempotent creates, and dry-run default |
 | `opnsense_get_info` | Fetch OPNsense system metadata (version, product, arch) |
 | `opnsense_list_interfaces` | List OPNsense interfaces with IP configuration |
 | `opnsense_list_firewall_rules` | List OPNsense firewall filter rules |

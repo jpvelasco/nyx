@@ -141,6 +141,8 @@ type omadaSurface interface {
 	ListSSIDs(ctx context.Context, opts service.OmadaOptions) (*service.OmadaSSIDInventory, error)
 	PlanSSID(ctx context.Context, opts service.OmadaOptions, req service.OmadaSSIDRequest) (*service.OmadaSSIDPlan, error)
 	ApplySSID(ctx context.Context, opts service.OmadaOptions, req service.OmadaSSIDRequest, dryRun bool) (*service.OmadaSSIDApplyResult, error)
+	PlanNat(ctx context.Context, opts service.OmadaOptions, req service.OmadaNatApplyRequest) (*providers.NatPlan, error)
+	ApplyNat(ctx context.Context, opts service.OmadaOptions, req service.OmadaNatApplyRequest) (*providers.NatApplyResult, error)
 }
 
 // opnsenseSurface is the OPNsense observation surface exposed to agents.
@@ -711,6 +713,16 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			}, nil),
 		},
 		{
+			Name:        "omada_plan_nat",
+			Description: "Preview an Omada NAT mutation. The Omada Open API exposes NAT reads but no live-site NAT write path, so the plan always refuses with the current rules as before-evidence and the write-surface explanation — configure via the controller UI, or use provider opnsense.",
+			InputSchema: omadaNatToolSchema(),
+		},
+		{
+			Name:        "omada_apply_nat",
+			Description: "Apply an Omada NAT mutation. Always refused: the Omada Open API exposes no live-site NAT write path, so nothing can mutate — the result carries identical before/after evidence and the write-surface explanation. Use provider opnsense for NAT writes.",
+			InputSchema: omadaNatToolSchema(),
+		},
+		{
 			Name:        "omada_apply_port_profile",
 			Description: "Bind a switch port to a LAN profile with the desired VLAN membership (native network plus tagged set): find an existing profile whose membership matches, create one when none does, then bind it to the port. Idempotent (unchanged / bound / created_and_bound). Dry-run is the default: set dry_run=false to apply for real. The result carries before/after evidence (the port row joined to its referenced profile).",
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
@@ -1067,6 +1079,26 @@ func opnsenseToolSchema() inputSchema {
 			"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
 		},
 	}
+}
+
+// omadaNatToolSchema returns the Omada NAT plan/apply schema: the same
+// mutation intent surface as the OPNsense pair (operation, action,
+// rule_uuid, spec fields), with the operation set limited to the Omada
+// collections (port_forward, one_to_one — no source_nat) and the apply
+// dry_run flag documented even though the surface always refuses.
+func omadaNatToolSchema() inputSchema {
+	return omadaToolSchemaExtra(map[string]propSchema{
+		"operation":  {Type: "string", Description: "NAT collection: port_forward or one_to_one"},
+		"action":     {Type: "string", Description: "create (default), update, delete, or toggle. update/delete/toggle require rule_uuid. Always refused: the Omada Open API exposes no live-site NAT write path."},
+		"rule_uuid":  {Type: "string", Description: "Target rule ID for update/delete/toggle"},
+		"protocol":   {Type: "string", Description: "IP protocol, lowercase (e.g. tcp, udp); empty = any"},
+		"port":       {Type: "string", Description: "External (WAN) port or range"},
+		"local_port": {Type: "string", Description: "Forwarded (internal) port or range"},
+		"target":     {Type: "string", Description: "Forwarded internal address (port_forward) or internal IP (one_to_one)"},
+		"source":     {Type: "string", Description: "Source restriction (limited addresses)"},
+		"label":      {Type: "string", Description: "Rule name"},
+		"dry_run":    {Type: "boolean", Description: "Preview only. Default true; the surface always refuses regardless."},
+	}, []string{"operation"})
 }
 
 // opnsenseNatToolSchema returns the OPNsense NAT-mutation tool schema:

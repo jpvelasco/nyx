@@ -299,8 +299,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 78 {
-		t.Fatalf("expected 78 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 80 {
+		t.Fatalf("expected 80 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -2160,6 +2160,22 @@ func (s *stubOmadaSvc) ListSSIDs(_ context.Context, opts service.OmadaOptions) (
 	}, nil
 }
 
+func (s *stubOmadaSvc) PlanNat(_ context.Context, opts service.OmadaOptions, req service.OmadaNatApplyRequest) (*providers.NatPlan, error) {
+	s.lastOpts = opts
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &providers.NatPlan{Provider: "omada", DryRun: true, Outcome: "refused", Before: "[]", Warnings: []string{"stub refusal"}}, nil
+}
+
+func (s *stubOmadaSvc) ApplyNat(_ context.Context, opts service.OmadaOptions, req service.OmadaNatApplyRequest) (*providers.NatApplyResult, error) {
+	s.lastOpts = opts
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &providers.NatApplyResult{Provider: "omada", DryRun: req.DryRun, Outcome: "refused", Before: "[]", After: "[]", Warnings: []string{"stub refusal"}}, nil
+}
+
 func (s *stubOmadaSvc) PlanSSID(_ context.Context, opts service.OmadaOptions, req service.OmadaSSIDRequest) (*service.OmadaSSIDPlan, error) {
 	s.lastOpts = opts
 	if s.err != nil {
@@ -3160,5 +3176,36 @@ func TestVerifyIsolation_NoSpecCIDRRejected(t *testing.T) {
 	}
 	if !strings.Contains(text, "10.0.60.0/24") || !strings.Contains(text, "single host") {
 		t.Errorf("error should explain the unsupported form, got: %s", text)
+	}
+}
+
+// TestDispatchOmadaNatPlanApplyHold pins the MCP surface of the Omada NAT
+// HOLD (#139): plan and apply both return a structured refusal carrying
+// the write-surface explanation — never an error, never a mutation.
+func TestDispatchOmadaNatPlanApplyHold(t *testing.T) {
+	hermeticCreds(t)
+	server := serverWithOmadaStub(&stubOmadaSvc{})
+	args := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "operation": "port_forward"}
+
+	text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan_nat", args)
+	if isErr {
+		t.Fatalf("plan hold must be a structured refusal, got error: %s", text)
+	}
+	if !strings.Contains(text, "refused") {
+		t.Errorf("plan outcome should be refused, got: %s", text)
+	}
+
+	text, isErr = server.DispatchToolForTest(context.Background(), "omada_apply_nat", args)
+	if isErr {
+		t.Fatalf("apply hold must be a structured refusal, got error: %s", text)
+	}
+	if !strings.Contains(text, "refused") {
+		t.Errorf("apply outcome should be refused, got: %s", text)
+	}
+
+	// Validation errors are actionable errors, not refusals.
+	badArgs := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "operation": "source_nat"}
+	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan_nat", badArgs); !isErr || !strings.Contains(text, "one_to_one") {
+		t.Errorf("source_nat must be rejected for omada, got (%q, %v)", text, isErr)
 	}
 }

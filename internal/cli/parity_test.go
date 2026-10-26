@@ -166,6 +166,8 @@ var mcpMutationCLI = map[string]string{
 	"omada_apply_lan":                 "apply-lan",
 	"omada_plan_ssid":                 "plan-ssid",
 	"omada_apply_ssid":                "apply-ssid",
+	"omada_plan_nat":                  "plan-nat",
+	"omada_apply_nat":                 "apply-nat",
 	"opnsense_plan_nat":               "plan-nat",
 	"opnsense_apply_nat":              "apply-nat",
 	"opnsense_plan_vlan":              "plan-vlan",

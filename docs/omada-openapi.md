@@ -93,6 +93,37 @@ inventory records a `rule_count` per scope (a listed scope is active), and the
 recommendation engine explains that the gateway scope has no enable surface via
 any API; rule CRUD remains stored but inert at the gateway when unsupported.
 
+## NAT surface — reads only, no live-site write path
+
+The Open API exposes NAT **reads** for a live site (`GET
+sites/{siteId}/nat/port-forwardings`, `.../nat/one-to-one-nat`,
+`.../nat/alg`, plus the insight/firewall settings nyx observes), and those
+reads are what `nat_check`, `omada_nat_facts`, and the plan/apply evidence
+use. There is **no live-site NAT write path** on the Open API:
+
+1. Port-forwarding writes exist only on the controller's **internal web
+   UI API** (`/{omadacId}/api/v2/...`, cookie + CSRF), which nyx does not
+   call — the v2 API is fully cut from the backend by design.
+2. The Open API's NAT *template* family (`sitetemplates/{tid}/nat/...`)
+   manages **site templates**, a different product concept from a live
+   site's gateway NAT, and community/SDK reports show the template write
+   verbs are unreliable on standard controllers (-1600 path/method
+   confusion, spec parameter bugs).
+3. Independent implementers (Omada MCP servers, Terraform providers)
+   converge on the same finding: port-forward CRUD is "internal web UI
+   API only".
+
+Consequence for nyx (#139): the Omada NAT write surface is an honest
+**HOLD**. `omada_plan_nat` / `omada_apply_nat` (and the `nyx omada
+plan-nat` / `apply-nat` CLI extras) exist so agents discover the refusal
+with evidence instead of a missing tool: the plan reads the collection as
+before-evidence and returns outcome `refused` with the write-surface
+explanation; the apply returns identical before/after evidence and can
+never mutate — dry-run or not. `omadaNatHoldNote`
+(`internal/providers/omada/provider.go`) is the single source of truth
+for the explanation; configure NAT via the controller UI or use
+`provider: opnsense`, whose NAT write path is fully supported.
+
 ## Port speed (configured, not negotiated)
 
 `GET sites/{siteId}/switches/ports/overview` and
