@@ -251,7 +251,18 @@ nyx includes a Model Context Protocol server for AI agent integration:
 nyx mcp serve --transport stdio
 ```
 
-HTTP transport is not implemented; the auth, binding, and session design is in [docs/mcp-http.md](docs/mcp-http.md).
+An HTTP transport is also available for serving multiple local harnesses from
+one process — loopback-only with bearer auth:
+
+```bash
+NYX_MCP_TOKEN=$(openssl rand -hex 32) nyx mcp serve --transport http --bind 127.0.0.1:9000
+```
+
+The listener requires `Authorization: Bearer <NYX_MCP_TOKEN>` on every request
+(generated and printed to stderr when the env var is unset), binds to loopback
+only, and gives each session its own server state with a 30-minute idle
+timeout. The auth, binding, and session design is in
+[docs/mcp-http.md](docs/mcp-http.md).
 
 ### Harness Config
 
@@ -423,6 +434,19 @@ make vet      # Run go vet
 make clean    # Remove built binaries and coverage.out
 make release  # Cross-compile for all platforms
 ```
+
+## Observability
+
+Structured JSON-lines logs land in `~/.nyx/nyx.log` (rotating; `NYX_LOG_FILE`
+/ `NYX_LOG_LEVEL` configure it). Opt-in OTLP export sends the same telemetry —
+logs, traces, and metrics — to any OTLP/HTTP collector:
+
+```bash
+NYX_OTLP_ENDPOINT=http://localhost:4318 nyx audit --spec homelab.yaml
+```
+
+See [docs/observability.md](docs/observability.md) for the full configuration
+surface, the emitted signals, and the security notes.
 
 ## Platform Support
 
