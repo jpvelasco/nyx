@@ -135,15 +135,18 @@ func (h *HTTPServer) Handler() http.Handler {
 // serveMCP applies auth, session routing, and the JSON-RPC dispatch for
 // one streamable-HTTP request.
 func (h *HTTPServer) serveMCP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		writeHTTPJSONError(w, http.StatusMethodNotAllowed, "method not allowed: only POST is supported")
-		return
-	}
+	// Auth gates every request before anything else: an unauthenticated
+	// caller learns nothing about the surface — not even which methods
+	// exist (docs/mcp-http.md).
 	if !h.authorized(r) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = io.WriteString(w, httpAuthError) // best-effort generic body
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeHTTPJSONError(w, http.StatusMethodNotAllowed, "method not allowed: only POST is supported")
 		return
 	}
 

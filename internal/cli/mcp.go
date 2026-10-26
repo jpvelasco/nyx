@@ -39,12 +39,12 @@ telemetry to a collector. See docs/mcp-http.md for the security model.`,
 	Example: `  nyx mcp serve
   nyx mcp serve --stdio
   nyx mcp serve --transport http --bind 127.0.0.1:9000`,
-	RunE: func(_ *cobra.Command, _ []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		switch mcpTransport {
 		case "stdio":
 			return serveStdio()
 		case "http":
-			return serveHTTP()
+			return serveHTTP(cmd.Context())
 		default:
 			return fmt.Errorf("unsupported transport %q (use stdio or http)", mcpTransport)
 		}
@@ -68,9 +68,18 @@ func serveStdio() error {
 
 // serveHTTP runs the MCP streamable-HTTP transport: loopback bind only,
 // bearer auth on every request, one Server per session, idle-sweeped.
-func serveHTTP() error {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+// serveHTTP runs the MCP streamable-HTTP transport: loopback bind only,
+// bearer auth on every request, one Server per session, idle-sweeped.
+// The caller's context (cobra's, driven by test harnesses or embedded
+// use) shuts the listener down gracefully alongside SIGINT/SIGTERM.
+func serveHTTP(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// SIGINT/SIGTERM cancel the same context so both the signal and the
+	// caller can drain the listener.
+	signalCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	bind := mcpBind
 	if bind == "" {
@@ -118,7 +127,7 @@ func serveHTTP() error {
 	select {
 	case err := <-errCh:
 		return err
-	case <-ctx.Done():
+	case <-signalCtx.Done():
 		// Drain in-flight calls and close the listener; no session survives
 		// the process.
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1822,5 +1824,79 @@ func TestVerifyIsolationCmd_NoSpecCIDRTargetRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "10.0.60.0/24") || !strings.Contains(err.Error(), "single host") {
 		t.Errorf("error should explain the unsupported form: %v", err)
+	}
+}
+
+// TestMcpServeCmd_HTTPServeAndAuth pins the CLI serve-http path end to
+// end (#138): the listener binds loopback, the token gates every
+// request, and the shutdown drains on context cancel.
+func TestMcpServeCmd_HTTPServeAndAuth(t *testing.T) {
+	saveRestoreGlobals(t)
+	mcpTransport = "http"
+	t.Setenv("NYX_MCP_TOKEN", "integration-token")
+
+	// Find a free loopback port for the bind (small race window, fine
+	// for an isolated CI runner).
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("finding a free port: %v", err)
+	}
+	port := probe.Addr().(*net.TCPAddr).Port
+	probe.Close()
+	mcpBind = fmt.Sprintf("127.0.0.1:%d", port)
+	base := "http://127.0.0.1:" + strconv.Itoa(port)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Call serveHTTP directly with the test context: the RunE wrapper
+	// only routes to it, and cobra's default context is Background().
+	done := make(chan error, 1)
+	go func() {
+		done <- serveHTTP(ctx)
+	}()
+
+	// Poll until the listener answers (401 without the token).
+	// The test client bypasses any configured proxy: loopback must be
+	// reached directly regardless of HTTP_PROXY/NO_PROXY.
+	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	deadline := time.Now().Add(5 * time.Second)
+	var unauthed bool
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(base + "/mcp")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusUnauthorized {
+				unauthed = true
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !unauthed {
+		t.Fatal("the HTTP listener never came up or did not require auth")
+	}
+
+	// With the token, a GET is 405 (POST-only surface).
+	req, _ := http.NewRequest(http.MethodGet, base+"/mcp", nil)
+	req.Header.Set("Authorization", "Bearer integration-token")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("authed GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("authed GET status = %d, want 405", resp.StatusCode)
+	}
+
+	// Cancel the context: the graceful shutdown returns cleanly.
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("serve-http should shut down cleanly, got %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve-http did not shut down on context cancel")
 	}
 }
