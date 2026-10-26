@@ -51,18 +51,21 @@ telemetry to a collector. See docs/mcp-http.md for the security model.`,
 	},
 }
 
+// serverLog returns the shared OTel-backed logger, falling back to
+// the stderr default when the pipeline failed to start so tool-call
+// records are not dropped silently.
+func serverLog() *slog.Logger {
+	if slogLog != nil {
+		return slogLog
+	}
+	return slog.Default()
+}
+
 func serveStdio() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	// The shared OTel-backed file logger is nil only when the pipeline
-	// failed to start; fall back to the stderr default so tool-call
-	// records are not dropped silently.
-	serverLog := slogLog
-	if serverLog == nil {
-		serverLog = slog.Default()
-	}
-	server := mcp.NewServerWithLogger(serverLog)
+	server := mcp.NewServerWithLogger(serverLog())
 	return server.Serve(ctx)
 }
 
@@ -110,7 +113,9 @@ func serveHTTP(ctx context.Context) error {
 	}
 	fmt.Fprintf(os.Stderr, "nyx mcp: HTTP transport listening on http://%s (loopback only)\n", listener.Addr().String())
 
-	server := mcp.NewHTTPServer(token)
+	// The HTTP sessions share the same OTel-backed file logger as
+	// stdio, so tool-call records land in the rotating log either way.
+	server := mcp.NewHTTPServer(token, serverLog())
 	server.StartReaper(ctx)
 
 	// ReadHeaderTimeout bounds slow clients (slowloris); the per-call

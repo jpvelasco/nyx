@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -55,15 +56,22 @@ type HTTPServer struct {
 	mu          sync.Mutex
 	sessions    map[string]*httpSession
 	idleTimeout time.Duration
+	// logger writes session tool-call records through the shared OTel
+	// pipeline, exactly like the stdio server; nil keeps the slog
+	// default so records are never dropped silently.
+	logger *slog.Logger
 }
 
 // NewHTTPServer creates the listener surface guarded by token. The token
 // is a listener credential (from NYX_MCP_TOKEN or generated at start).
-func NewHTTPServer(token string) *HTTPServer {
+// The logger flows to every session's Server so HTTP tool calls land in
+// the same rotating file log as stdio.
+func NewHTTPServer(token string, log *slog.Logger) *HTTPServer {
 	return &HTTPServer{
 		token:       token,
 		sessions:    map[string]*httpSession{},
 		idleTimeout: sessionIdleTimeout,
+		logger:      log,
 	}
 }
 
@@ -92,8 +100,12 @@ func ValidateBindAddr(addr string) (string, error) {
 	if host == "" {
 		return "", fmt.Errorf("bind address %q has no host (bind to loopback only; remote exposure is out of scope)", addr)
 	}
-	// Resolve hostnames (e.g. localhost) and check every result is
-	// loopback; a name that resolves to anything non-loopback is refused.
+	// Resolve hostnames (e.g. localhost) and accept the first loopback
+	// result — the returned address is the resolved loopback IP itself,
+	// so the listener binds that exact loopback address even when the
+	// name also resolves non-loopback addresses (e.g. a dual-stack
+	// localhost with a mapped IPv6). A name with no loopback result is
+	// refused.
 	var lastErr error
 	for _, resolved := range resolveHost(host) {
 		ip := net.ParseIP(resolved)
@@ -232,7 +244,7 @@ func (h *HTTPServer) newSession() string {
 		id := hex.EncodeToString(b[:])
 		h.mu.Lock()
 		if _, exists := h.sessions[id]; !exists {
-			h.sessions[id] = &httpSession{server: NewServer(), lastUsed: time.Now()}
+			h.sessions[id] = &httpSession{server: NewServerWithLogger(h.logger), lastUsed: time.Now()}
 			h.mu.Unlock()
 			return id
 		}

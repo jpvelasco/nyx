@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,7 +21,7 @@ const testToken = "test-listener-token"
 
 func newTestHTTPServer(t *testing.T) (*HTTPServer, *httptest.Server) {
 	t.Helper()
-	h := NewHTTPServer(testToken)
+	h := NewHTTPServer(testToken, nil)
 	h.idleTimeout = 50 * time.Millisecond // fast expiry for tests
 	ts := httptest.NewServer(h.Handler())
 	t.Cleanup(ts.Close)
@@ -274,7 +275,7 @@ func TestTokenNeverInURLs(t *testing.T) {
 // TestSweepIdleRemovesExpiredSessions pins the reaper's core: sessions
 // idle beyond the timeout are removed even with no further request.
 func TestSweepIdleRemovesExpiredSessions(t *testing.T) {
-	h := NewHTTPServer(testToken)
+	h := NewHTTPServer(testToken, nil)
 	h.idleTimeout = 20 * time.Millisecond
 	id := h.newSession()
 	if len(h.sessions) != 1 {
@@ -291,7 +292,7 @@ func TestSweepIdleRemovesExpiredSessions(t *testing.T) {
 // TestStartReaperStopsWithContext pins the reaper lifecycle: the ticker
 // goroutine exits when the context ends.
 func TestStartReaperStopsWithContext(t *testing.T) {
-	h := NewHTTPServer(testToken)
+	h := NewHTTPServer(testToken, nil)
 	h.idleTimeout = 10 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	h.StartReaper(ctx)
@@ -319,5 +320,23 @@ func TestValidateBindAddrErrorBranches(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("ValidateBindAddr(%q) = %v, want an error naming %q", addr, err, want)
 		}
+	}
+}
+
+// TestHTTPServerSessionsUseSharedLogger pins the review finding fix:
+// HTTP sessions write tool-call records through the configured logger,
+// exactly like stdio — never silently dropped.
+func TestHTTPServerSessionsUseSharedLogger(t *testing.T) {
+	var buf bytes.Buffer
+	sl := slog.New(slog.NewJSONHandler(&buf, nil))
+	h := NewHTTPServer(testToken, sl)
+	id := h.newSession()
+	s := h.sessionServer(id)
+	if s == nil || s.logger != sl {
+		t.Fatal("the session must carry the shared logger")
+	}
+	s.logger.Info("http-session-record")
+	if !strings.Contains(buf.String(), "http-session-record") {
+		t.Error("session records must flow through the configured logger")
 	}
 }
