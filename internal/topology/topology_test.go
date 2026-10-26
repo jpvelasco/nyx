@@ -200,3 +200,31 @@ func TestReportEvidenceNeverLeaksPII(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildReportOnPathFlags pins the egress-path membership the
+// port-forward playbook selects NAT owners from (#140): a downstream
+// device reports on_path=false while the on-path gateway reports true.
+func TestBuildReportOnPathFlags(t *testing.T) {
+	rep := BuildReport([]DeviceFacts{
+		{Provider: ProviderOmada, HasManagedGateway: true},
+		{Provider: ProviderOpnsense, OutboundNatMode: "automatic", DownstreamOfManagedGateway: true},
+	})
+	var gateway, downstream *DeviceReport
+	for i := range rep.Devices {
+		switch rep.Devices[i].Provider {
+		case ProviderOmada:
+			gateway = &rep.Devices[i]
+		case ProviderOpnsense:
+			downstream = &rep.Devices[i]
+		}
+	}
+	if gateway == nil || downstream == nil {
+		t.Fatalf("expected both devices in the report, got %+v", rep.Devices)
+	}
+	if !gateway.OnPath {
+		t.Error("the managed gateway is on the egress path")
+	}
+	if downstream.OnPath {
+		t.Error("a LAN-side appliance is not on the egress path")
+	}
+}

@@ -1809,3 +1809,31 @@ func TestVerifyIsolationCmd_NoSpecCIDRTargetRejected(t *testing.T) {
 		t.Errorf("error should explain the unsupported form: %v", err)
 	}
 }
+
+// TestPortForwardCmdValidation pins the composed playbook's CLI surface
+// (#140): request validation errors are actionable and no providers
+// configured is a clear error.
+func TestPortForwardCmdValidation(t *testing.T) {
+	saveRestoreGlobals(t)
+
+	// Missing required flags.
+	pfExternalPort = ""
+	pfTarget = ""
+	pfOmadaHost = ""
+	pfOpnsenseHost = ""
+	if err := portForwardCmd.RunE(portForwardCmd, nil); err == nil || !strings.Contains(err.Error(), "external_port") {
+		t.Errorf("missing --port must be an actionable error, got %v", err)
+	}
+
+	// Missing target.
+	pfExternalPort = "443"
+	if err := portForwardCmd.RunE(portForwardCmd, nil); err == nil || !strings.Contains(err.Error(), "target") {
+		t.Errorf("missing --target must be an actionable error, got %v", err)
+	}
+
+	// No providers configured.
+	pfTarget = "10.0.40.10"
+	if err := portForwardCmd.RunE(portForwardCmd, nil); err == nil || !strings.Contains(err.Error(), "at least one provider") {
+		t.Errorf("no providers must be a clear error, got %v", err)
+	}
+}

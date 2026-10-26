@@ -66,6 +66,8 @@ var toolHandlers = map[string]toolHandler{
 	"omada_apply_ssid":                 (*Server).toolOmadaApplySSID,
 	"omada_plan_nat":                   (*Server).toolOmadaPlanNat,
 	"omada_apply_nat":                  (*Server).toolOmadaApplyNat,
+	"plan_port_forward":                (*Server).toolPlanPortForward,
+	"apply_port_forward":               (*Server).toolApplyPortForward,
 	"opnsense_get_info":                (*Server).toolOpnsenseGetInfo,
 	"opnsense_list_interfaces":         (*Server).toolOpnsenseListInterfaces,
 	"opnsense_list_firewall_rules":     (*Server).toolOpnsenseListFirewallRules,
@@ -1390,4 +1392,74 @@ func (s *Server) toolOmadaApplyNat(ctx context.Context, args map[string]interfac
 		return errResult(fmt.Sprintf("omada nat apply request failed: %v", err))
 	}
 	return okResult(toJSON(res))
+}
+
+// playbookOptionsFromArgs resolves the composed playbook's provider
+// credential sets (optional; at least one must be configured, exactly
+// like the topology report).
+func (s *Server) playbookOptionsFromArgs(args map[string]interface{}) (service.PlaybookOptions, string) {
+	var opts service.PlaybookOptions
+	if o, msg := s.omadaOptionsFromArgs(subArgs(args, "omada_"), true); msg == "" {
+		opts.Omada = &o
+	} else if msg != requiredHostMsg {
+		return opts, msg
+	}
+	if o, msg := s.opnsenseOptionsFromArgs(subArgs(args, "opnsense_"), true); msg == "" {
+		opts.Opnsense = &o
+	} else if msg != requiredHostMsg {
+		return opts, msg
+	}
+	if opts.Omada == nil && opts.Opnsense == nil {
+		return opts, "the port-forward playbook requires a host for at least one provider: set omada_host or opnsense_host (or the OMADA_HOST / OPNSENSE_HOST environment variables or the credential store)"
+	}
+	return opts, ""
+}
+
+// portForwardRequestFromArgs parses the provider-neutral port-forward
+// intent.
+func portForwardRequestFromArgs(args map[string]interface{}) (service.PortForwardRequest, string) {
+	req := service.PortForwardRequest{
+		ExternalPort: argString(args, "external_port"),
+		Target:       argString(args, "target"),
+		LocalPort:    argString(args, "local_port"),
+		Protocol:     argString(args, "protocol"),
+		Label:        argString(args, "label"),
+	}
+	if err := req.Validate(); err != nil {
+		return req, err.Error()
+	}
+	return req, ""
+}
+
+func (s *Server) toolPlanPortForward(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.playbookOptionsFromArgs(args)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req, merr := portForwardRequestFromArgs(args)
+	if merr != "" {
+		return errResult(merr)
+	}
+	plan, err := s.playbookSvc.PlanPortForward(ctx, opts, req)
+	if err != nil {
+		return errResult(fmt.Sprintf("port-forward playbook failed: %v", err))
+	}
+	return okResult(toJSON(plan))
+}
+
+func (s *Server) toolApplyPortForward(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	opts, msg := s.playbookOptionsFromArgs(args)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req, merr := portForwardRequestFromArgs(args)
+	if merr != "" {
+		return errResult(merr)
+	}
+	dryRun := argBoolDefault(args, "dry_run", true)
+	plan, err := s.playbookSvc.ApplyPortForward(ctx, opts, req, dryRun)
+	if err != nil {
+		return errResult(fmt.Sprintf("port-forward playbook failed: %v", err))
+	}
+	return okResult(toJSON(plan))
 }

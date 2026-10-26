@@ -230,8 +230,13 @@ type Report struct {
 
 // DeviceReport is the classified role of one device plus its evidence.
 type DeviceReport struct {
-	Provider string   `json:"provider"`
-	Role     NatRole  `json:"role"`
+	Provider string  `json:"provider"`
+	Role     NatRole `json:"role"`
+	// OnPath reports whether the device sits on the inferred egress path
+	// (a LAN-side appliance whose WAN points at the managed gateway is a
+	// downstream client, not an egress NAT). Consumers like the
+	// port-forward playbook select the NAT owner from on-path devices.
+	OnPath   bool     `json:"on_path"`
 	Evidence []string `json:"evidence"`
 }
 
@@ -249,7 +254,7 @@ func BuildReport(facts []DeviceFacts) *Report {
 	var path, off natCounts
 	for _, f := range facts {
 		role, evidence := Classify(f)
-		rep.Devices = append(rep.Devices, DeviceReport{Provider: f.Provider, Role: role, Evidence: evidence})
+		rep.Devices = append(rep.Devices, DeviceReport{Provider: f.Provider, Role: role, OnPath: !f.DownstreamOfManagedGateway, Evidence: evidence})
 		if f.DownstreamOfManagedGateway {
 			off.add(role)
 			continue
