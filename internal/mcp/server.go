@@ -193,6 +193,14 @@ type topologySurface interface {
 	Report(ctx context.Context, opts service.TopologyOptions) (*service.TopologyReport, error)
 }
 
+// playbookSurface is the composed-operation surface exposed to agents
+// (#140): the port-forward playbook selects the NAT-owning backend from
+// topology signals and defers to its plan/apply.
+type playbookSurface interface {
+	PlanPortForward(ctx context.Context, opts service.PlaybookOptions, req service.PortForwardRequest) (*service.PortForwardPlan, error)
+	ApplyPortForward(ctx context.Context, opts service.PlaybookOptions, req service.PortForwardRequest, dryRun bool) (*service.PortForwardPlan, error)
+}
+
 // Server is the MCP stdio server
 type Server struct {
 	reader      io.Reader
@@ -202,6 +210,7 @@ type Server struct {
 	omadaSvc    omadaSurface
 	opnsenseSvc opnsenseSurface
 	topoSvc     topologySurface
+	playbookSvc playbookSurface
 	// logger writes MCP operation records to the shared rotating log file.
 	// The writer is the stdout RPC channel, so nothing is ever logged to
 	// it; a nil logger disables file logging (tests).
@@ -229,13 +238,15 @@ func NewServerWithLogger(sl *slog.Logger) *Server {
 	omadaSvc.PostAudit = func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
 		return audit.NewEngine(spec).Run(ctx)
 	}
+	topoSvc := service.NewTopologyService()
 	return &Server{
 		reader:          os.Stdin,
 		writer:          os.Stdout,
 		checkSvc:        service.NewCheckService(),
 		omadaSvc:        omadaSvc,
 		opnsenseSvc:     service.NewOpnsenseService(),
-		topoSvc:         service.NewTopologyService(),
+		topoSvc:         topoSvc,
+		playbookSvc:     service.NewPlaybookService(topoSvc),
 		logger:          sl,
 		credEnv:         credEnvFrom(OmadaCredEnvVars),
 		opnsenseCredEnv: credEnvFrom(OpnsenseCredEnvVars),
@@ -723,6 +734,16 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: omadaNatToolSchema(),
 		},
 		{
+			Name:        "plan_port_forward",
+			Description: "Composed playbook (#140): plan a port-forward rule on the backend that owns the egress-path NAT, selected from the topology report. Routes to opnsense_plan_nat semantics when OPNsense owns NAT; reports the Omada hold when the managed gateway owns it; refuses on double-NAT or indeterminate topologies. Read-only.",
+			InputSchema: portForwardToolSchema(),
+		},
+		{
+			Name:        "apply_port_forward",
+			Description: "Composed playbook (#140): apply a port-forward rule on the backend that owns the egress-path NAT, selected from the topology report. Dry-run default: set dry_run=false to apply for real. The selected provider's own safety gates still apply (double-NAT guard; the Omada write-path hold).",
+			InputSchema: portForwardToolSchema(),
+		},
+		{
 			Name:        "omada_apply_port_profile",
 			Description: "Bind a switch port to a LAN profile with the desired VLAN membership (native network plus tagged set): find an existing profile whose membership matches, create one when none does, then bind it to the port. Idempotent (unchanged / bound / created_and_bound). Dry-run is the default: set dry_run=false to apply for real. The result carries before/after evidence (the port row joined to its referenced profile).",
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
@@ -1079,6 +1100,40 @@ func opnsenseToolSchema() inputSchema {
 			"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
 		},
 	}
+}
+
+// portForwardToolSchema returns the composed port-forward playbook
+// schema (#140): the provider-neutral rule intent plus both providers'
+// optional credential sets (at least one must resolve, like the topology
+// report).
+func portForwardToolSchema() inputSchema {
+	props := map[string]propSchema{
+		"external_port": {Type: "string", Description: "External (WAN) port or range to forward (required)"},
+		"target":        {Type: "string", Description: "Internal LAN IP to forward to (required)"},
+		"local_port":    {Type: "string", Description: "Forwarded internal port or range (default: same as external_port)"},
+		"protocol":      {Type: "string", Description: "IP protocol, lowercase (e.g. tcp, udp); empty = any"},
+		"label":         {Type: "string", Description: "Rule name"},
+		"dry_run":       {Type: "boolean", Description: "Preview only (apply tool). Default true."},
+	}
+	for _, k := range []string{"host", "client_id", "client_secret", "site", "skip_tls_verify", "ca_cert_path"} {
+		props["omada_"+k] = propSchema{Type: propTypeFor(k), Description: "Omada " + k + " (OMADA_* env fallback)"}
+	}
+	for _, k := range []string{"host", "api_key", "api_secret", "skip_tls_verify", "ca_cert_path"} {
+		props["opnsense_"+k] = propSchema{Type: propTypeFor(k), Description: "OPNsense " + k + " (OPNSENSE_* env fallback)"}
+	}
+	return inputSchema{
+		Type:       "object",
+		Properties: props,
+		Required:   []string{"external_port", "target"},
+	}
+}
+
+// propTypeFor maps credential keys to their schema types.
+func propTypeFor(key string) string {
+	if key == "skip_tls_verify" {
+		return "boolean"
+	}
+	return "string"
 }
 
 // omadaNatToolSchema returns the Omada NAT plan/apply schema: the same

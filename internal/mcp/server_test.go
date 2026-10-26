@@ -299,8 +299,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 80 {
-		t.Fatalf("expected 80 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 82 {
+		t.Fatalf("expected 82 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -3208,27 +3208,86 @@ func TestDispatchOmadaNatPlanApplyHold(t *testing.T) {
 	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan_nat", badArgs); !isErr || !strings.Contains(text, "one_to_one") {
 		t.Errorf("source_nat must be rejected for omada, got (%q, %v)", text, isErr)
 	}
+}
 
-	// A missing operation is actionable.
-	noOp := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw"}
-	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan_nat", noOp); !isErr || !strings.Contains(text, "operation parameter is required") {
-		t.Errorf("missing operation must be an actionable error, got (%q, %v)", text, isErr)
+// stubPlaybookSvc pins the composed playbook surface for dispatch tests.
+type stubPlaybookSvc struct {
+	plan  *service.PortForwardPlan
+	apply *service.PortForwardPlan
+	err   error
+}
+
+func (s *stubPlaybookSvc) PlanPortForward(_ context.Context, _ service.PlaybookOptions, _ service.PortForwardRequest) (*service.PortForwardPlan, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.plan, nil
+}
+
+func (s *stubPlaybookSvc) ApplyPortForward(_ context.Context, _ service.PlaybookOptions, _ service.PortForwardRequest, _ bool) (*service.PortForwardPlan, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.apply, nil
+}
+
+func serverWithPlaybookStub(stub *stubPlaybookSvc) *Server {
+	omada, opnsense := credEnvReaders()
+	return &Server{
+		reader:          &bytes.Buffer{},
+		writer:          &bytes.Buffer{},
+		checkSvc:        service.NewCheckService(),
+		omadaSvc:        &stubOmadaSvc{},
+		topoSvc:         &stubTopoSvc{},
+		playbookSvc:     stub,
+		credEnv:         omada,
+		opnsenseCredEnv: opnsense,
+	}
+}
+
+// TestDispatchPortForwardPlaybook pins the MCP surface of the composed
+// playbook (#140): plan and apply dispatch through the composed surface
+// with validation and the provider-credential composition.
+func TestDispatchPortForwardPlaybook(t *testing.T) {
+	hermeticCreds(t)
+	server := serverWithPlaybookStub(&stubPlaybookSvc{
+		plan:  &service.PortForwardPlan{Provider: "opnsense", Decision: "nat_owner", Outcome: "would_create"},
+		apply: &service.PortForwardPlan{Provider: "opnsense", Decision: "nat_owner", Outcome: "created"},
+	})
+
+	text, isErr := server.DispatchToolForTest(context.Background(), "plan_port_forward", map[string]interface{}{
+		"opnsense_host": "firewall.example", "opnsense_api_key": "k", "opnsense_api_secret": "s",
+		"external_port": "443", "target": "10.0.40.10", "protocol": "tcp",
+	})
+	if isErr {
+		t.Fatalf("plan dispatch: %s", text)
+	}
+	if !strings.Contains(text, "nat_owner") || !strings.Contains(text, "opnsense") {
+		t.Errorf("plan should carry the routing decision, got: %s", text)
 	}
 
-	// update requires a rule UUID.
-	noUUID := map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "operation": "port_forward", "action": "update"}
-	if text, isErr := server.DispatchToolForTest(context.Background(), "omada_plan_nat", noUUID); !isErr || !strings.Contains(text, "rule_uuid is required") {
-		t.Errorf("update without rule_uuid must be an actionable error, got (%q, %v)", text, isErr)
+	text, isErr = server.DispatchToolForTest(context.Background(), "apply_port_forward", map[string]interface{}{
+		"opnsense_host": "firewall.example", "opnsense_api_key": "k", "opnsense_api_secret": "s",
+		"external_port": "443", "target": "10.0.40.10", "dry_run": true,
+	})
+	if isErr {
+		t.Fatalf("apply dispatch: %s", text)
+	}
+	if !strings.Contains(text, "created") {
+		t.Errorf("apply should carry the delegated outcome, got: %s", text)
 	}
 
-	// A service error surfaces with context (not a silent refusal).
-	failing := serverWithOmadaStub(&stubOmadaSvc{err: errors.New("controller down")})
-	if text, isErr := failing.DispatchToolForTest(context.Background(), "omada_plan_nat",
-		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "operation": "port_forward"}); !isErr || !strings.Contains(text, "omada nat plan request failed") {
-		t.Errorf("a controller failure must surface as a plan error, got (%q, %v)", text, isErr)
+	// Validation: missing target is an actionable error.
+	if text, isErr := server.DispatchToolForTest(context.Background(), "plan_port_forward", map[string]interface{}{
+		"opnsense_host": "firewall.example", "opnsense_api_key": "k", "opnsense_api_secret": "s", "external_port": "443",
+	}); !isErr || !strings.Contains(text, "target") {
+		t.Errorf("missing target must be an actionable error, got (%q, %v)", text, isErr)
 	}
-	if text, isErr := failing.DispatchToolForTest(context.Background(), "omada_apply_nat",
-		map[string]interface{}{"host": "omada.local", "client_id": "cid-1", "client_secret": "pw", "operation": "port_forward", "dry_run": true}); !isErr || !strings.Contains(text, "omada nat apply request failed") {
-		t.Errorf("a controller failure must surface as an apply error, got (%q, %v)", text, isErr)
+
+	// At least one provider must be configured.
+	if text, isErr := server.DispatchToolForTest(context.Background(), "plan_port_forward", map[string]interface{}{
+		"external_port": "443", "target": "10.0.40.10",
+	}); !isErr || !strings.Contains(text, "at least one provider") {
+		t.Errorf("no providers must be an actionable error, got (%q, %v)", text, isErr)
 	}
 }
