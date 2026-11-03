@@ -278,37 +278,30 @@ func (c *Client) SetLogger(l *slog.Logger) {
 }
 
 // logEvent records a structured operation event. Callers must hold c.mu.
-// Fields never include credentials, hostnames, or IP addresses; every
-// string is passed through sanitizeLogValue so a controller-supplied
-// message cannot forge extra log lines.
+// Fields never include credentials, hostnames, or IP addresses. All string
+// values are CR/LF-stripped inline before reaching the log so a
+// controller-supplied message cannot forge additional entries.
 func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	if c.log == nil {
 		return
 	}
 	// The JSON line is key-sorted by the exporter, so map iteration order
-	// does not affect the output.
-	attrs := make([]any, 0, 1+len(fields))
-	attrs = append(attrs, "event", sanitizeLogValue(event))
+	// does not affect the output. Each string is CR/LF-stripped inline so
+	// the CodeQL go/log-injection query sees the sanitizer at the sink.
+	cleanEvent := strings.ReplaceAll(event, "\n", "")
+	cleanEvent = strings.ReplaceAll(cleanEvent, "\r", "")
+	attrs := make([]slog.Attr, 0, 1+len(fields))
+	attrs = append(attrs, slog.String("event", cleanEvent))
 	for k, v := range fields {
 		if s, ok := v.(string); ok {
-			// Strip CR/LF before logging so a controller-supplied message
-			// cannot forge additional log entries.
 			clean := strings.ReplaceAll(s, "\n", "")
 			clean = strings.ReplaceAll(clean, "\r", "")
-			attrs = append(attrs, k, clean)
+			attrs = append(attrs, slog.String(k, clean))
 		} else {
-			attrs = append(attrs, k, v)
+			attrs = append(attrs, slog.Any(k, v))
 		}
 	}
-	c.log.Info("omada", attrs...)
-}
-
-// sanitizeLogValue strips CR/LF so a server-supplied or caller-supplied
-// string written to the log cannot inject forged entries.
-func sanitizeLogValue(v string) string {
-	v = strings.ReplaceAll(v, "\n", "")
-	v = strings.ReplaceAll(v, "\r", "")
-	return v
+	c.log.LogAttrs(context.Background(), slog.LevelInfo, "omada", attrs...)
 }
 
 // logSafeError reduces an error to a static description safe for the log
