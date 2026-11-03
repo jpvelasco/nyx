@@ -97,6 +97,48 @@ func TestToolCallLogsToLoggerAndKeepsStdoutRPCClean(t *testing.T) {
 	}
 }
 
+// TestToolNameLogSanitization asserts that a crafted tools/call name
+// containing CR/LF cannot forge additional log lines: the injected payload
+// must appear only as inert text inside the tool= value of the single
+// tool_call record.
+func TestToolNameLogSanitization(t *testing.T) {
+	handler, cap := newCapturingLogHandler()
+	server := NewServerWithLogger(slog.New(handler))
+	server.initialized = true
+	server.reader = &bytes.Buffer{}
+	server.writer = &bytes.Buffer{}
+
+	crafted := "evil\nINFO admin logged in\rtool_call"
+	params, err := json.Marshal(map[string]interface{}{"name": crafted, "arguments": map[string]interface{}{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := server.handleToolCall(context.Background(), &jsonRPCRequest{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`1`),
+		Params:  params,
+	})
+	if res.Error != nil {
+		t.Fatalf("tools/call failed: %+v", res.Error)
+	}
+
+	found := false
+	for _, line := range *cap {
+		if strings.Contains(line, "tool_call") {
+			if strings.ContainsAny(line, "\r\n") {
+				t.Errorf("log record contains a raw newline — log injection not blocked: %q", line)
+			}
+			if !strings.Contains(line, "tool=evilINFO admin logged intool_call") {
+				t.Errorf("sanitized tool name not recorded as expected: %q", line)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a tool_call log record, got: %v", *cap)
+	}
+}
+
 // TestHandleToolCallTimeoutEmitsWarnLog covers the ctx.Done() path in
 // handleToolCall: when a tool dispatch does not finish within toolCallTimeout
 // the server logs tool_call_timed_out (with cmd/tool/trace_id) and returns a
