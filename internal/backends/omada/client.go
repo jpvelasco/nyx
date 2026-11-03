@@ -293,11 +293,12 @@ func (c *Client) logEvent(event string, fields map[string]interface{}) {
 		if s, ok := v.(string); ok {
 			// Strip CR/LF before logging so a controller-supplied message
 			// cannot forge additional log entries.
-			s = strings.ReplaceAll(s, "\n", "")
-			s = strings.ReplaceAll(s, "\r", "")
-			v = s
+			clean := strings.ReplaceAll(s, "\n", "")
+			clean = strings.ReplaceAll(clean, "\r", "")
+			attrs = append(attrs, k, clean)
+		} else {
+			attrs = append(attrs, k, v)
 		}
-		attrs = append(attrs, k, v)
 	}
 	c.log.Info("omada", attrs...)
 }
