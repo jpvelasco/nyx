@@ -565,6 +565,49 @@ func TestSetLoggerNilSafe(t *testing.T) {
 	}
 }
 
+// TestLogEventSanitizesStrings asserts that controller-supplied strings
+// flowing through logEvent (event name, error field) cannot inject forged
+// log lines via CR/LF.
+func TestLogEventSanitizesStrings(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"AT-1"}`)
+		default:
+			writeEnvelope(w, 0, "", `{"data":[]}`)
+		}
+	}))
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nyx.log")
+	l, err := logger.NewSlog(path, 5*1024*1024, 3, slog.LevelDebug)
+	if err != nil {
+		t.Fatalf("logger.NewSlog: %v", err)
+	}
+	c.SetLogger(l)
+
+	c.logEvent("evil\nINFO admin logged in", map[string]interface{}{
+		"error": "failure\rforged line",
+		"count": 3,
+	})
+	logger.CloseSlog(l)
+
+	// Codacy false positive: path names this test's log inside t.TempDir().
+	data, err := os.ReadFile(path) // nosemgrep: go_filesystem_rule-fileread
+	if err != nil {
+		t.Fatalf("reading log: %v", err)
+	}
+	logText := string(data)
+	if strings.Contains(logText, "\nINFO admin logged in") || strings.Contains(logText, "\rforged line") {
+		t.Errorf("log contains injected lines — CR/LF sanitization missing:\n%s", logText)
+	}
+	if !strings.Contains(logText, "evilINFO admin logged in") || !strings.Contains(logText, "failureforged line") {
+		t.Errorf("expected sanitized strings in log; got:\n%s", logText)
+	}
+	if !strings.Contains(logText, `"count":3`) {
+		t.Errorf("non-string field must pass through unchanged; got:\n%s", logText)
+	}
+}
+
 // logSafeError reduces errors to a static, host-free description so the log
 // file never carries the controller hostname/IP.
 func TestLogSafeErrorStripsHost(t *testing.T) {
