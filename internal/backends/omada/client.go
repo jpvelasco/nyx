@@ -35,7 +35,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jpvelasco/nyx/internal/logger"
 	"github.com/jpvelasco/nyx/internal/tlsutil"
 )
 
@@ -288,13 +287,13 @@ func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	}
 	// The JSON line is key-sorted by the exporter, so map iteration order
 	// does not affect the output. Each string is CR/LF-stripped via
-	// logger.Sanitize so the CodeQL go/log-injection query sees the
-	// sanitizer at the sink.
+	// strings.ReplaceAll directly on the value so the CodeQL
+	// go/log-injection query recognizes the sanitizer.
 	attrs := make([]slog.Attr, 0, 1+len(fields))
-	attrs = append(attrs, slog.String("event", logger.Sanitize(event)))
+	attrs = append(attrs, slog.String("event", strings.ReplaceAll(strings.ReplaceAll(event, "\n", ""), "\r", "")))
 	for k, v := range fields {
 		if s, ok := v.(string); ok {
-			attrs = append(attrs, slog.String(k, logger.Sanitize(s)))
+			attrs = append(attrs, slog.String(k, strings.ReplaceAll(strings.ReplaceAll(s, "\n", ""), "\r", "")))
 		} else {
 			attrs = append(attrs, slog.Any(k, v))
 		}
