@@ -278,7 +278,9 @@ func (c *Client) SetLogger(l *slog.Logger) {
 }
 
 // logEvent records a structured operation event. Callers must hold c.mu.
-// Fields never include credentials, hostnames, or IP addresses.
+// Fields never include credentials, hostnames, or IP addresses; every
+// string is passed through sanitizeLogValue so a controller-supplied
+// message cannot forge extra log lines.
 func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	if c.log == nil {
 		return
@@ -286,11 +288,20 @@ func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	// The JSON line is key-sorted by the exporter, so map iteration order
 	// does not affect the output.
 	attrs := make([]any, 0, 1+len(fields))
-	attrs = append(attrs, "event", event)
+	attrs = append(attrs, "event", sanitizeLogValue(event))
 	for k, v := range fields {
+		if s, ok := v.(string); ok {
+			v = sanitizeLogValue(s)
+		}
 		attrs = append(attrs, k, v)
 	}
 	c.log.Info("omada", attrs...)
+}
+
+// sanitizeLogValue strips CR/LF so a server-supplied or caller-supplied
+// string written to the log cannot inject forged entries.
+func sanitizeLogValue(v string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(v)
 }
 
 // logSafeError reduces an error to a static description safe for the log
