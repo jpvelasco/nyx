@@ -290,8 +290,7 @@ func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	// the CodeQL go/log-injection query sees the sanitizer at the sink.
 	cleanEvent := strings.ReplaceAll(event, "\n", "")
 	cleanEvent = strings.ReplaceAll(cleanEvent, "\r", "")
-	attrs := make([]slog.Attr, 0, 1+len(fields))
-	attrs = append(attrs, slog.String("event", cleanEvent))
+	attrs := []slog.Attr{slog.String("event", cleanEvent)}
 	for k, v := range fields {
 		if s, ok := v.(string); ok {
 			clean := strings.ReplaceAll(s, "\n", "")
