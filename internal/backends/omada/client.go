@@ -294,9 +294,9 @@ func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	args := []any{"event", cleanEvent}
 	for k, v := range fields {
 		if s, ok := v.(string); ok {
-			clean := strings.ReplaceAll(s, "\n", "")
-			clean = strings.ReplaceAll(clean, "\r", "")
-			args = append(args, k, clean)
+			cleanV := strings.ReplaceAll(s, "\n", "")
+			cleanV = strings.ReplaceAll(cleanV, "\r", "")
+			args = append(args, k, cleanV)
 		} else {
 			args = append(args, k, v)
 		}
