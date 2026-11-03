@@ -291,7 +291,11 @@ func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	attrs = append(attrs, "event", sanitizeLogValue(event))
 	for k, v := range fields {
 		if s, ok := v.(string); ok {
-			v = sanitizeLogValue(s)
+			// Strip CR/LF before logging so a controller-supplied message
+			// cannot forge additional log entries.
+			s = strings.ReplaceAll(s, "\n", "")
+			s = strings.ReplaceAll(s, "\r", "")
+			v = s
 		}
 		attrs = append(attrs, k, v)
 	}
@@ -301,7 +305,9 @@ func (c *Client) logEvent(event string, fields map[string]interface{}) {
 // sanitizeLogValue strips CR/LF so a server-supplied or caller-supplied
 // string written to the log cannot inject forged entries.
 func sanitizeLogValue(v string) string {
-	return strings.NewReplacer("\r", "", "\n", "").Replace(v)
+	v = strings.ReplaceAll(v, "\n", "")
+	v = strings.ReplaceAll(v, "\r", "")
+	return v
 }
 
 // logSafeError reduces an error to a static description safe for the log
