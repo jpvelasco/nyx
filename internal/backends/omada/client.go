@@ -289,20 +289,15 @@ func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	// does not affect the output. Each string is CR/LF-stripped via
 	// strings.ReplaceAll directly on the value so the CodeQL
 	// go/log-injection query recognizes the sanitizer.
-	cleanEvent := strings.ReplaceAll(event, "\n", "")
-	cleanEvent = strings.ReplaceAll(cleanEvent, "\r", "")
-	attrs := make([]slog.Attr, 0, 1+len(fields))
-	attrs = append(attrs, slog.String("event", cleanEvent))
+	args := []any{"event", strings.ReplaceAll(strings.ReplaceAll(event, "\n", ""), "\r", "")}
 	for k, v := range fields {
 		if s, ok := v.(string); ok {
-			clean := strings.ReplaceAll(s, "\n", "")
-			clean = strings.ReplaceAll(clean, "\r", "")
-			attrs = append(attrs, slog.String(k, clean))
+			args = append(args, k, strings.ReplaceAll(strings.ReplaceAll(s, "\n", ""), "\r", ""))
 		} else {
-			attrs = append(attrs, slog.Any(k, v))
+			args = append(args, k, v)
 		}
 	}
-	c.log.LogAttrs(context.Background(), slog.LevelInfo, "omada", attrs...)
+	c.log.Info("omada", args...)
 }
 
 // logSafeError reduces an error to a static description safe for the log
