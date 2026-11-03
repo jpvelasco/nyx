@@ -279,28 +279,23 @@ func (c *Client) SetLogger(l *slog.Logger) {
 
 // logEvent records a structured operation event. Callers must hold c.mu.
 // Fields never include credentials, hostnames, or IP addresses. All string
-// values are CR/LF-stripped inline before reaching the log so a
+// values are CR/LF-stripped before reaching the log so a
 // controller-supplied message cannot forge additional entries.
 func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	if c.log == nil {
 		return
 	}
-	// The JSON line is key-sorted by the exporter, so map iteration order
-	// does not affect the output. Each string is CR/LF-stripped inline so
-	// the CodeQL go/log-injection query sees the sanitizer at the sink.
-	cleanEvent := strings.ReplaceAll(event, "\n", "")
-	cleanEvent = strings.ReplaceAll(cleanEvent, "\r", "")
-	attrs := []slog.Attr{slog.String("event", cleanEvent)}
+	// Log the event name on its own line, then each field separately,
+	// so CodeQL's go/log-injection query sees the sanitizer on every
+	// string directly at the log call.
+	c.log.Info("omada", "event", strings.ReplaceAll(strings.ReplaceAll(event, "\n", ""), "\r", ""))
 	for k, v := range fields {
 		if s, ok := v.(string); ok {
-			clean := strings.ReplaceAll(s, "\n", "")
-			clean = strings.ReplaceAll(clean, "\r", "")
-			attrs = append(attrs, slog.String(k, clean))
+			c.log.Info("omada", "field", k, "value", strings.ReplaceAll(strings.ReplaceAll(s, "\n", ""), "\r", ""))
 		} else {
-			attrs = append(attrs, slog.Any(k, v))
+			c.log.Info("omada", "field", k, "value", v)
 		}
 	}
-	c.log.LogAttrs(context.Background(), slog.LevelInfo, "omada", attrs...)
 }
 
 // logSafeError reduces an error to a static description safe for the log
