@@ -604,7 +604,7 @@ func TestLogEventSanitizesStrings(t *testing.T) {
 			t.Errorf("log line is not valid JSON (possible log injection): %q", line)
 		}
 	}
-	if !strings.Contains(logText, "evilINFO admin logged in") || !strings.Contains(logText, "failureforged line") {
+	if !strings.Contains(logText, `"event":"evilINFO admin logged in"`) || !strings.Contains(logText, `"error":"failureforged line"`) {
 		t.Errorf("expected sanitized strings in log; got:\n%s", logText)
 	}
 	if !strings.Contains(logText, `"count":3`) {
