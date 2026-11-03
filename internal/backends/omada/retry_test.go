@@ -607,7 +607,7 @@ func TestLogEventSanitizesStrings(t *testing.T) {
 	if !strings.Contains(logText, "evilINFO admin logged in") || !strings.Contains(logText, "failureforged line") {
 		t.Errorf("expected sanitized strings in log; got:\n%s", logText)
 	}
-	if !strings.Contains(logText, `"count":3`) && !strings.Contains(logText, `"value":3`) {
+	if !strings.Contains(logText, `"count":3`) {
 		t.Errorf("non-string field must pass through unchanged; got:\n%s", logText)
 	}
 }
