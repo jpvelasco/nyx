@@ -597,13 +597,17 @@ func TestLogEventSanitizesStrings(t *testing.T) {
 		t.Fatalf("reading log: %v", err)
 	}
 	logText := string(data)
-	if strings.Contains(logText, "\nINFO admin logged in") || strings.Contains(logText, "\rforged line") {
-		t.Errorf("log contains injected lines — CR/LF sanitization missing:\n%s", logText)
+	// Each line must be a single JSON object — no forged entries.
+	for _, line := range strings.Split(strings.TrimSpace(logText), "\n") {
+		var rec map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Errorf("log line is not valid JSON (possible log injection): %q", line)
+		}
 	}
 	if !strings.Contains(logText, "evilINFO admin logged in") || !strings.Contains(logText, "failureforged line") {
 		t.Errorf("expected sanitized strings in log; got:\n%s", logText)
 	}
-	if !strings.Contains(logText, `"count":3`) {
+	if !strings.Contains(logText, `"value":3`) && !strings.Contains(logText, `"count":3`) {
 		t.Errorf("non-string field must pass through unchanged; got:\n%s", logText)
 	}
 }

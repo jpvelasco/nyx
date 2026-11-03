@@ -278,8 +278,8 @@ func (c *Client) SetLogger(l *slog.Logger) {
 }
 
 // logEvent records a structured operation event. Callers must hold c.mu.
-// Fields never include credentials, hostnames, or IP addresses. All string
-// values are CR/LF-stripped inline before reaching the log so a
+// Fields never include credentials, hostnames, or IP addresses. Every
+// string is CR/LF-stripped before reaching the log so a
 // controller-supplied message cannot forge additional entries.
 func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	if c.log == nil {
@@ -288,19 +288,26 @@ func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	// The JSON line is key-sorted by the exporter, so map iteration order
 	// does not affect the output. Each string is CR/LF-stripped inline so
 	// the CodeQL go/log-injection query sees the sanitizer at the sink.
-	cleanEvent := strings.ReplaceAll(event, "\n", "")
-	cleanEvent = strings.ReplaceAll(cleanEvent, "\r", "")
-	attrs := []slog.Attr{slog.String("event", cleanEvent)}
+	attrs := make([]slog.Attr, 0, 1+len(fields))
+	attrs = append(attrs, slog.String("event", stripNewlines(event)))
 	for k, v := range fields {
 		if s, ok := v.(string); ok {
-			clean := strings.ReplaceAll(s, "\n", "")
-			clean = strings.ReplaceAll(clean, "\r", "")
-			attrs = append(attrs, slog.String(k, clean))
+			attrs = append(attrs, slog.String(k, stripNewlines(s)))
 		} else {
 			attrs = append(attrs, slog.Any(k, v))
 		}
 	}
 	c.log.LogAttrs(context.Background(), slog.LevelInfo, "omada", attrs...)
+}
+
+// stripNewlines removes CR/LF so a value written to the log cannot
+// inject forged entries. The CodeQL go/log-injection query recognizes
+// strings.ReplaceAll with \n or \r as a sanitizer when the result
+// flows directly into the log call.
+func stripNewlines(v string) string {
+	v = strings.ReplaceAll(v, "\n", "")
+	v = strings.ReplaceAll(v, "\r", "")
+	return v
 }
 
 // logSafeError reduces an error to a static description safe for the log
