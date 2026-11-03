@@ -289,7 +289,8 @@ func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	// does not affect the output. Each string is CR/LF-stripped via
 	// strings.ReplaceAll directly on the value so the CodeQL
 	// go/log-injection query recognizes the sanitizer.
-	args := []any{"event", strings.ReplaceAll(strings.ReplaceAll(event, "\n", ""), "\r", "")}
+	args := make([]any, 0, 1+2*len(fields))
+	args = append(args, "event", strings.ReplaceAll(strings.ReplaceAll(event, "\n", ""), "\r", ""))
 	for k, v := range fields {
 		if s, ok := v.(string); ok {
 			args = append(args, k, strings.ReplaceAll(strings.ReplaceAll(s, "\n", ""), "\r", ""))
