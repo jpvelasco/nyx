@@ -291,17 +291,18 @@ func (c *Client) logEvent(event string, fields map[string]interface{}) {
 	// go/log-injection query recognizes the sanitizer.
 	cleanEvent := strings.ReplaceAll(event, "\n", "")
 	cleanEvent = strings.ReplaceAll(cleanEvent, "\r", "")
-	args := []any{"event", cleanEvent}
+	attrs := make([]slog.Attr, 0, 1+len(fields))
+	attrs = append(attrs, slog.String("event", cleanEvent))
 	for k, v := range fields {
 		if s, ok := v.(string); ok {
 			cleanV := strings.ReplaceAll(s, "\n", "")
 			cleanV = strings.ReplaceAll(cleanV, "\r", "")
-			args = append(args, k, cleanV)
+			attrs = append(attrs, slog.String(k, cleanV))
 		} else {
-			args = append(args, k, v)
+			attrs = append(attrs, slog.Any(k, v))
 		}
 	}
-	c.log.Info("omada", args...)
+	c.log.LogAttrs(context.Background(), slog.LevelInfo, "omada", attrs...)
 }
 
 // logSafeError reduces an error to a static description safe for the log
