@@ -28,6 +28,7 @@
 package credentials
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -40,6 +41,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/jpvelasco/nyx/internal/filewrite"
 )
 
 // Entry is a single credential record: a set of string fields whose keys
@@ -146,17 +149,17 @@ func DefaultPath() string {
 // The store directory is created when missing so a custom store path can
 // initialize cleanly, and the sibling lock file serializes first-use key
 // creation against concurrent processes.
-func Open(path string) (*Store, error) {
-	s := &Store{path: path, data: map[string]map[string]Entry{}}
+func Open(path string) (s *Store, err error) {
+	s = &Store{path: path, data: map[string]map[string]Entry{}}
 	//nolint:gosec
 	if err := os.MkdirAll(filepath.Dir(filepath.Clean(path)), 0700); err != nil { // nosemgrep — 0700 is the least-privilege permission for a directory
 		return nil, fmt.Errorf("creating credential directory: %w", err)
 	}
-	lock, err := acquireFileLock(s.lockPath())
+	lock, err := acquireFileLock(s.lockPath(), lockFile)
 	if err != nil {
 		return nil, fmt.Errorf("locking credential store: %w", err)
 	}
-	defer lock.release()
+	defer func() { err = errors.Join(err, lock.release()) }()
 	if err := s.loadKey(); err != nil {
 		return nil, err
 	}
@@ -289,15 +292,15 @@ func (s *Store) Remove(provider, name string) error {
 // handles and processes merge instead of overwriting each other, applies
 // fn, and atomically replaces the file. The lock also keeps first-use key
 // creation races from producing divergent keys.
-func (s *Store) mutate(fn func(data map[string]map[string]Entry) error) error {
+func (s *Store) mutate(fn func(data map[string]map[string]Entry) error) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	lock, err := acquireFileLock(s.lockPath())
+	lock, err := acquireFileLock(s.lockPath(), lockFile)
 	if err != nil {
 		return fmt.Errorf("locking credential store: %w", err)
 	}
-	defer lock.release()
+	defer func() { err = errors.Join(err, lock.release()) }()
 
 	data, err := readStore(s.path, s.key)
 	if err != nil {
@@ -345,8 +348,8 @@ func (s *Store) loadKey() error {
 		if _, err := rand.Read(key); err != nil {
 			return fmt.Errorf("generating credential key: %w", err)
 		}
-		if err := writeKeyFile(keyPath, key); err != nil {
-			return err
+		if err := filewrite.Create(keyPath, bytes.NewReader(key)); err != nil {
+			return fmt.Errorf("writing credential key: %w", err)
 		}
 		s.key = key
 		return nil
@@ -355,37 +358,24 @@ func (s *Store) loadKey() error {
 	}
 }
 
-// writeKeyFile creates the key file exclusively with owner-only
-// permissions. An unexpected existing path — including a symlink — is an
-// error, never a file to rewrite.
-func writeKeyFile(keyPath string, key []byte) error {
-	f, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600) // nosemgrep — keyPath is derived from the configured store path, same trust level as every other store sibling
-	if err != nil {
-		return fmt.Errorf("creating credential key: %w", err)
-	}
-	if _, err := f.Write(key); err != nil {
-		f.Close()
-		os.Remove(keyPath)
-		return fmt.Errorf("writing credential key: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(keyPath)
-		return fmt.Errorf("writing credential key: %w", err)
-	}
-	return nil
-}
-
 // readKey reads the sibling key through an os.Root anchored at the store's
-// directory. This prevents path components in the configured store name from
-// escaping that directory while preserving support for custom store paths.
-func (s *Store) readKey() ([]byte, error) {
-	cleanPath := filepath.Clean(s.path)
-	root, err := os.OpenRoot(filepath.Dir(cleanPath))
+// directory. Symlinks that escape that directory are rejected while custom
+// store paths remain supported.
+func (s *Store) readKey() (data []byte, err error) {
+	root, name, err := openStoreRoot(s.path)
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
-	return root.ReadFile(filepath.Base(cleanPath) + ".key")
+	defer func() { err = errors.Join(err, root.Close()) }()
+	return root.ReadFile(name + ".key")
+}
+
+// openStoreRoot anchors operations at the configured file's directory.
+// Only its base name is used for accesses within that root.
+func openStoreRoot(path string) (*os.Root, string, error) {
+	path = filepath.Clean(path)
+	root, err := os.OpenRoot(filepath.Dir(path))
+	return root, filepath.Base(path), err
 }
 
 // keyPath returns the key file beside the configured store file. Constructing
@@ -416,9 +406,17 @@ func (s *Store) load() error {
 
 // readStore decrypts and decodes the store file at path. A missing file
 // means an empty store.
-func readStore(path string, key []byte) (map[string]map[string]Entry, error) {
-	data := map[string]map[string]Entry{}
-	raw, err := os.ReadFile(path)
+func readStore(path string, key []byte) (data map[string]map[string]Entry, err error) {
+	data = map[string]map[string]Entry{}
+	root, name, err := openStoreRoot(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return data, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("opening credential directory: %w", err)
+	}
+	defer func() { err = errors.Join(err, root.Close()) }()
+	raw, err := root.ReadFile(name)
 	if errors.Is(err, os.ErrNotExist) {
 		return data, nil
 	}
@@ -449,25 +447,8 @@ func writeStore(path string, data map[string]map[string]Entry, key []byte) error
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(filepath.Clean(path))
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-")
-	if err != nil {
+	if err := filewrite.Write(path, bytes.NewReader(sealed)); err != nil {
 		return fmt.Errorf("writing credential store: %w", err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once the file has been renamed
-	if _, err := tmp.Write(sealed); err != nil {
-		tmp.Close()
-		return fmt.Errorf("writing credential store: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("writing credential store: %w", err)
-	}
-	if err := os.Chmod(tmpName, 0600); err != nil {
-		return fmt.Errorf("writing credential store: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("replacing credential store: %w", err)
 	}
 	return nil
 }

@@ -361,6 +361,9 @@ func TestSaveWriteError(t *testing.T) {
 	if err := s.Set("omada", "default", Entry{"host": "h2"}); err == nil {
 		t.Error("Set against an unwritable store location should fail")
 	}
+	if got, ok := s.Get("omada", "default"); !ok || got["host"] != "h" {
+		t.Errorf("failed write changed in-memory credentials: %v", got)
+	}
 }
 
 func TestLoadUnmarshalError(t *testing.T) {
@@ -634,5 +637,105 @@ func TestNullPlaintextStoreYieldsEmptyStore(t *testing.T) {
 	}
 	if err := reopened.Set("probe", "iot-probe", Entry{"host": "iot.example"}); err != nil {
 		t.Errorf("Set on a null-plaintext store must not panic: %v", err)
+	}
+}
+
+func TestStoreAndLockRejectEscapingSymlinks(t *testing.T) {
+	for _, suffix := range []string{"", ".lock"} {
+		t.Run("store"+suffix, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "credentials.json")
+			s, err := Open(path)
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			if err := s.Set("probe", "iot-probe", Entry{"host": "iot.example"}); err != nil {
+				t.Fatalf("Set: %v", err)
+			}
+			target := path + suffix
+			original, err := os.ReadFile(target) // nosemgrep: go_filesystem_rule-fileread — fixed test fixture
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+			outside := filepath.Join(t.TempDir(), "outside")
+			if err := os.WriteFile(outside, original, 0600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			if err := os.Remove(target); err != nil {
+				t.Fatalf("remove fixture: %v", err)
+			}
+			if err := os.Symlink(outside, target); err != nil {
+				t.Skipf("symlink unavailable: %v", err)
+			}
+			if _, err := Open(path); err == nil {
+				t.Fatal("Open accepted a symlink escaping the store directory")
+			}
+			got, err := os.ReadFile(outside) // nosemgrep: go_filesystem_rule-fileread — fixed test fixture
+			if err != nil || !bytes.Equal(got, original) {
+				t.Fatalf("outside file changed: %v", err)
+			}
+		})
+	}
+}
+
+func TestCredentialRootFailures(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing", "credentials.json")
+	if data, err := readStore(missing, nil); err != nil || len(data) != 0 {
+		t.Fatalf("missing store = %v, %v", data, err)
+	}
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	invalid := filepath.Join(blocker, "credentials.json")
+	if _, err := readStore(invalid, nil); err == nil {
+		t.Fatal("readStore accepted a file as its parent directory")
+	}
+	s := &Store{path: invalid}
+	if _, err := s.readKey(); err == nil {
+		t.Fatal("readKey accepted a file as its parent directory")
+	}
+	if _, err := acquireFileLock(invalid, lockFile); err == nil {
+		t.Fatal("lock accepted a file as its parent directory")
+	}
+	lockDir := filepath.Join(dir, "credentials.json.lock")
+	if err := os.Mkdir(lockDir, 0700); err != nil { // nosemgrep — owner-only fixture directory
+		t.Fatal(err)
+	}
+	if _, err := acquireFileLock(lockDir, lockFile); err == nil {
+		t.Fatal("lock accepted a directory as its file")
+	}
+}
+
+func TestLockAcquisitionFailureClosesFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials.json.lock")
+	failure := errors.New("platform lock failed")
+	var opened *os.File
+	lock, err := acquireFileLock(path, func(f *os.File) error {
+		opened = f
+		return failure
+	})
+	if lock != nil || !errors.Is(err, failure) {
+		t.Fatalf("acquisition result = %v, %v", lock, err)
+	}
+	if opened == nil {
+		t.Fatal("lock syscall was not reached")
+	}
+	if _, err := opened.Stat(); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("file remained open after acquisition failed: %v", err)
+	}
+}
+
+func TestLockReleasePreservesCloseFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials.json.lock")
+	lock, err := acquireFileLock(path, lockFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.release(); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("release lost close failure: %v", err)
 	}
 }
