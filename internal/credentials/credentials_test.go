@@ -721,7 +721,9 @@ func TestLockAcquisitionFailureClosesFile(t *testing.T) {
 	if opened == nil {
 		t.Fatal("lock syscall was not reached")
 	}
-	if _, err := opened.Stat(); !errors.Is(err, os.ErrClosed) {
+	// A second Close reports os.ErrClosed on every platform; Stat may return
+	// a native invalid-handle error on Windows.
+	if err := opened.Close(); !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("file remained open after acquisition failed: %v", err)
 	}
 }
