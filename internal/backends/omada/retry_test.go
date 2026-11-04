@@ -1,6 +1,7 @@
 package omada
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -565,50 +566,84 @@ func TestSetLoggerNilSafe(t *testing.T) {
 	}
 }
 
-// TestLogEventSanitizesStrings asserts that controller-supplied strings
-// flowing through logEvent (event name, error field) cannot inject forged
-// log lines via CR/LF.
+// TestLogEventSanitizesStrings covers every operation field with a JSON
+// handler and a text handler, including numeric retry metadata.
 func TestLogEventSanitizesStrings(t *testing.T) {
-	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/openapi/authorize/token":
-			writeEnvelope(w, 0, "", `{"accessToken":"AT-1"}`)
-		default:
-			writeEnvelope(w, 0, "", `{"data":[]}`)
-		}
-	}))
-	dir := t.TempDir()
-	path := filepath.Join(dir, "nyx.log")
-	l, err := logger.NewSlog(path, 5*1024*1024, 3, slog.LevelDebug)
-	if err != nil {
-		t.Fatalf("logger.NewSlog: %v", err)
+	cases := []struct {
+		name   string
+		fields *operationLogFields
+		want   map[string]interface{}
+	}{
+		{
+			name: "event only",
+			want: map[string]interface{}{"event": "evilINFO admin logged in"},
+		},
+		{
+			name:   "error",
+			fields: &operationLogFields{error: "failure\r\nforged line"},
+			want: map[string]interface{}{
+				"event": "evilINFO admin logged in",
+				"error": "failureforged line",
+			},
+		},
+		{
+			name: "retry",
+			fields: &operationLogFields{
+				attempt: 3,
+				delayMS: 500,
+				method:  "GET\r\nforged",
+				path:    "sites\n\rforged",
+			},
+			want: map[string]interface{}{
+				"event":    "evilINFO admin logged in",
+				"attempt":  float64(3),
+				"delay_ms": float64(500),
+				"method":   "GETforged",
+				"path":     "sitesforged",
+			},
+		},
 	}
-	c.SetLogger(l)
-
-	c.logEvent("evil\nINFO admin logged in", map[string]interface{}{
-		"error": "failure\rforged line",
-		"count": 3,
-	})
-	logger.CloseSlog(l)
-
-	// Codacy false positive: path names this test's log inside t.TempDir().
-	data, err := os.ReadFile(path) // nosemgrep: go_filesystem_rule-fileread
-	if err != nil {
-		t.Fatalf("reading log: %v", err)
-	}
-	logText := string(data)
-	// Each line must be a single JSON object — no forged entries.
-	for _, line := range strings.Split(strings.TrimSpace(logText), "\n") {
-		var rec map[string]interface{}
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			t.Errorf("log line is not valid JSON (possible log injection): %q", line)
-		}
-	}
-	if !strings.Contains(logText, `"event":"evilINFO admin logged in"`) || !strings.Contains(logText, `"error":"failureforged line"`) {
-		t.Errorf("expected sanitized strings in log; got:\n%s", logText)
-	}
-	if !strings.Contains(logText, `"count":3`) {
-		t.Errorf("non-string field must pass through unchanged; got:\n%s", logText)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, format := range []string{"json", "text"} {
+				t.Run(format, func(t *testing.T) {
+					var buf bytes.Buffer
+					var handler slog.Handler = slog.NewJSONHandler(&buf, nil)
+					if format == "text" {
+						handler = slog.NewTextHandler(&buf, nil)
+					}
+					c := &Client{log: slog.New(handler)}
+					c.logEvent("evil\r\nINFO admin logged in", tc.fields)
+					out := buf.String()
+					if strings.Count(out, "\n") != 1 || strings.Contains(out, "\r") {
+						t.Fatalf("expected exactly one log line; got %q", out)
+					}
+					if format == "text" {
+						for _, forbidden := range []string{`\n`, `\r`, "!BADKEY"} {
+							if strings.Contains(out, forbidden) {
+								t.Errorf("text log contains unsanitized field: %q", out)
+							}
+						}
+						return
+					}
+					var rec map[string]interface{}
+					if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+						t.Fatalf("log is not valid JSON: %v", err)
+					}
+					if rec["msg"] != "omada" {
+						t.Errorf("message = %v, want omada", rec["msg"])
+					}
+					for key, want := range tc.want {
+						if got := rec[key]; got != want {
+							t.Errorf("%s = %v, want %v", key, got, want)
+						}
+					}
+					if len(rec) != len(tc.want)+3 { // time, level, msg
+						t.Errorf("unexpected log fields: %v", rec)
+					}
+				})
+			}
+		})
 	}
 }
 

@@ -242,7 +242,7 @@ func (c *Client) Login(ctx context.Context, clientID, clientSecret string) error
 	if err := c.mintToken(ctx); err != nil {
 		c.clientID = ""
 		c.clientSecret = ""
-		c.logEvent("token_mint_failed", map[string]interface{}{"error": logSafeError(err)})
+		c.logEvent("token_mint_failed", &operationLogFields{error: logSafeError(err)})
 		return fmt.Errorf("token mint failed: %w", err)
 	}
 	c.logEvent("token_mint", nil)
@@ -281,23 +281,41 @@ func (c *Client) SetLogger(l *slog.Logger) {
 // Fields never include credentials, hostnames, or IP addresses. Every
 // string is CR/LF-stripped before reaching the log so a
 // controller-supplied message cannot forge additional entries.
-func (c *Client) logEvent(event string, fields map[string]interface{}) {
+func (c *Client) logEvent(event string, fields *operationLogFields) {
 	if c.log == nil {
 		return
 	}
-	// The JSON line is key-sorted by the exporter, so map iteration order
-	// does not affect the output. Each string is CR/LF-stripped via
-	// strings.ReplaceAll directly on the value so the CodeQL
-	// go/log-injection query recognizes the sanitizer.
-	args := []any{"event", strings.ReplaceAll(strings.ReplaceAll(event, "\n", ""), "\r", "")}
-	for k, v := range fields {
-		if s, ok := v.(string); ok {
-			args = append(args, k, strings.ReplaceAll(strings.ReplaceAll(s, "\n", ""), "\r", ""))
-		} else {
-			args = append(args, k, v)
-		}
+	l := c.log.With("event", sanitizeLogString(event))
+	if fields == nil {
+		l.Info("omada")
+		return
 	}
-	c.log.Info("omada", args...)
+	if fields.error != "" {
+		l.Info("omada", "error", sanitizeLogString(fields.error))
+		return
+	}
+	l.Info("omada",
+		"attempt", fields.attempt,
+		"delay_ms", fields.delayMS,
+		"method", sanitizeLogString(fields.method),
+		"path", sanitizeLogString(fields.path),
+	)
+}
+
+// operationLogFields describes a failure (error set) or a retry. Fixed
+// keys and scalar types keep controller strings separate from numeric
+// metadata; no map or mixed argument slice crosses the logging boundary.
+type operationLogFields struct {
+	error   string
+	attempt int
+	delayMS int64
+	method  string
+	path    string
+}
+
+func sanitizeLogString(s string) string {
+	s = strings.ReplaceAll(s, "\n", "")
+	return strings.ReplaceAll(s, "\r", "")
 }
 
 // logSafeError reduces an error to a static description safe for the log
@@ -439,7 +457,7 @@ func (c *Client) doRequestLocked(ctx context.Context, method, reqURL, logPath st
 			reauthUsed = true
 			c.logEvent("token_expired", nil)
 			if rerr := c.mintToken(ctx); rerr != nil {
-				c.logEvent("token_re_mint_failed", map[string]interface{}{"error": logSafeError(rerr)})
+				c.logEvent("token_re_mint_failed", &operationLogFields{error: logSafeError(rerr)})
 				return fmt.Errorf("%v (automatic re-mint failed: %v)", err, rerr)
 			}
 			c.logEvent("token_re_mint", nil)
@@ -457,11 +475,11 @@ func (c *Client) doRequestLocked(ctx context.Context, method, reqURL, logPath st
 				return err
 			}
 			delay := backoffDelay(attempt, c.retryBase, maxRetryDelay)
-			c.logEvent("retry", map[string]interface{}{
-				"attempt":  attempt + 1,
-				"delay_ms": delay.Milliseconds(),
-				"method":   method,
-				"path":     logPath,
+			c.logEvent("retry", &operationLogFields{
+				attempt: attempt + 1,
+				delayMS: delay.Milliseconds(),
+				method:  method,
+				path:    logPath,
 			})
 			if err := sleepCtx(ctx, delay); err != nil {
 				return err
