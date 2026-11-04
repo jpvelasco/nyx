@@ -1212,11 +1212,13 @@ func (s *Server) handleToolCall(ctx context.Context, req *jsonRPCRequest) *jsonR
 	defer cancel()
 
 	// Stamp the call with a trace ID so its log records correlate; records
-	// go to the shared file, never to the stdout RPC channel.
+	// go to the shared file, never to the stdout RPC channel. The tool
+	// name is client-supplied and must be sanitized so a crafted name
+	// cannot forge extra log lines.
 	traceID := logger.NewTraceID()
 	var logCtx *slog.Logger
 	if s.logger != nil {
-		logCtx = s.logger.With("cmd", "mcp", "tool", params.Name, "trace_id", traceID)
+		logCtx = s.logger.With("cmd", "mcp", "tool", sanitizeLogValue(params.Name), "trace_id", traceID)
 	}
 
 	done := make(chan toolDispatchResult, 1)
@@ -1255,6 +1257,12 @@ func (s *Server) handleToolCall(ctx context.Context, req *jsonRPCRequest) *jsonR
 type toolDispatchResult struct {
 	text  string
 	isErr bool
+}
+
+// sanitizeLogValue strips CR/LF from a client-supplied string before it is
+// written to the log so a crafted value cannot forge extra log lines.
+func sanitizeLogValue(v string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(v)
 }
 
 func okResult(text string) toolDispatchResult {

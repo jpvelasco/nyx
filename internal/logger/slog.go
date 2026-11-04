@@ -70,3 +70,13 @@ func CloseSlog(sl *slog.Logger) {
 		_ = h.Close()
 	}
 }
+
+// Sanitize strips CR and LF from a string so it cannot inject forged
+// entries when written to a log. The CodeQL go/log-injection query
+// recognizes strings.ReplaceAll with \n or \r as a sanitizer when the
+// result flows directly into the log call.
+func Sanitize(v string) string {
+	v = strings.ReplaceAll(v, "\n", "")
+	v = strings.ReplaceAll(v, "\r", "")
+	return v
+}
