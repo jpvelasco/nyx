@@ -3,9 +3,9 @@ module github.com/jpvelasco/nyx
 go 1.26.10
 
 require (
-	github.com/Microsoft/go-winio v0.6.2
-	github.com/spf13/cobra v1.8.1
-	github.com/spf13/pflag v1.0.5
+	github.com/Microsoft/go-winio v0.6.4
+	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.9
 	go.opentelemetry.io/contrib/bridges/otelslog v0.21.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.23.0
