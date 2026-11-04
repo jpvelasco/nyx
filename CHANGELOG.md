@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-11-04
+
+**Feature release.** The MCP server gains a loopback HTTP transport (streamable HTTP + bearer auth); telemetry can be exported to any OTLP collector; a port-forward playbook routes NAT mutations by live topology; Omada NAT plan/apply ships as an honest, evidenced hold.
+
+### New Features
+
+- **MCP HTTP transport.** `nyx mcp serve --transport http` speaks MCP streamable HTTP per `docs/mcp-http.md`: loopback-only bind (`--bind` refuses non-loopback; the `127.0.0.1:0` default prints the bound address to stderr), a bearer token (`NYX_MCP_TOKEN`, or a generated token printed once) that gates every request before method dispatch, one `Server` per session with a 30-minute idle timeout, and the same tool surface, result shapes, and credential resolution as stdio.
+- **OTLP telemetry export.** `NYX_OTLP_ENDPOINT` (an explicit `http(s)://` OTLP/HTTP base URL) exports the same log records as the rotating file, one trace span per audit run plus one per assertion, and two metrics (`nyx_audit_assertions_total{type,status}`, `nyx_audit_run_duration_ms`) to any collector; `NYX_OTLP_HEADERS` carries collector auth. All signals share the PII-safe resource; unset leaves the file log as the whole pipeline. See `docs/observability.md`.
+- **Omada NAT plan/apply (evidenced hold).** `omada_plan_nat` / `omada_apply_nat` (and `nyx omada plan-nat` / `apply-nat`) implement the NAT mutation surface over the Open API, which has no live-site NAT write path: both return outcome `refused` with before/after evidence and the write-surface explanation (configure via the controller UI, or use the OPNsense provider), with OPNsense-shaped request validation so an invalid request errors instead of refusing.
+- **Port-forward playbook.** `nyx port-forward` and `plan_port_forward` / `apply_port_forward` plan or apply a port-forward rule on the backend that owns the egress-path NAT, selected from the live topology report: OPNsense on-path routes to its NAT write path (dry-run default preserved), the managed Omada gateway routes to the honest hold, and double-NAT or indeterminate topologies refuse with an explanation. The plan output carries the decision trail (topology roles, on-path flags, risk) plus the delegated outcome and evidence.
+
+### Changed
+
+- **Topology reports expose per-device `on_path` membership** so consumers select NAT owners from the egress path only.
+
+### Fixed
+
+- **Credential store hardening.** Store initialization, cross-process writes, and key handling are hardened, with platform file locks (Windows + Unix) guarding the store file.
+- **Log injection guards.** Omada operation log fields and MCP `tool_call` records strip CR/LF (CodeQL `go/log-injection`), and text log export redacts nested sensitive keys before flattening.
+- **CLI init.** A failed `init` no longer truncates an existing output spec.
+- **Isolation checks.** Documented endpoint forms resolve correctly and ping errors are reported as errors, not isolation failures; explicit `expect` enums for `isolation`, `port_check`, and `acl_check` are validated.
+- **Probe and health.** Context cancellation and a deadline bind to the SSH handshake; probe-run `network_health` assertions evaluate declared thresholds; DNSSEC verdicts stay visible (including `dig` header status); failed or canceled MTU probes report unknown instead of an invented 576.
+- **Provider accuracy.** OPNsense mutation lookups are UUID-authoritative with comparisons covering writable fields; DHCP/Unbound planning compares effective requested values; Omada LAN/SSID no-op comparisons cover every writable field; named ACL matches verify endpoint coverage before passing.
+- **Recommendations.** Probe-verified isolation breaches classify into the right category.
+- **Topology.** Unknown NAT roles no longer report as no double-NAT risk.
+- **Snapshot.** Collision suffixes order chronologically for listing, latest, and rotation.
+- **npm installer.** The wrapper requires the matching platform checksum before installing release bytes.
+- **MCP schemas.** Provider schemas no longer require `host` and advertise `toggle_disable`.
+- **Credential errors.** Malformed `--set` argument values are never echoed in error messages.
+
+### Documentation
+
+- `docs/observability.md` documents the OTLP configuration surface, emitted signals, and security notes; the AGENTS.md PR-template standard is adopted and the required checks documented.
+
+### Other
+
+- Go toolchain and CodeQL action bumps, dependabot gomod group (go-winio 0.6.4, cobra 1.10.2, pflag 1.0.9), LF renormalization.
+
 ## [0.5.3] - 2026-10-23
 
 **Patch release.** Updates the Go toolchain and release tooling; no application source changes.
@@ -347,7 +385,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.6.0
 [0.5.3]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.3
 [0.5.2]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.2
 [0.5.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.1
