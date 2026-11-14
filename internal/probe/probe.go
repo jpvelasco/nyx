@@ -28,11 +28,16 @@ func (e *TransportError) Error() string { return e.err.Error() }
 func (e *TransportError) Unwrap() error { return e.err }
 
 // RemoteError indicates the remote command executed but exited non-zero
-// (e.g. nc -z on a closed port, or ping with 100% packet loss).
-type RemoteError struct{ err error }
+// (e.g. nc -z on a closed port, or ping with 100% packet loss). status
+// carries the remote exit status when determined (0 when it is not).
+type RemoteError struct {
+	err    error
+	status int
+}
 
 func (e *RemoteError) Error() string { return e.err.Error() }
 func (e *RemoteError) Unwrap() error { return e.err }
+func (e *RemoteError) Status() int   { return e.status }
 
 // HostKeyError indicates SSH host key verification failed; the connection
 // was refused before authentication.
@@ -126,7 +131,7 @@ func Run(ctx context.Context, p Probe, cmd []string, skipHostKeyVerify bool) (st
 		var exitErr *ssh.ExitError
 		if errors.As(err, &exitErr) {
 			//nolint:staticcheck // SA1019 — ExitError.Waitmsg is deprecated; status is what callers need
-			return string(output), &RemoteError{fmt.Errorf("remote command failed with status %d: %w", exitErr.ExitStatus(), err)}
+			return string(output), &RemoteError{err: fmt.Errorf("remote command failed with status %d: %w", exitErr.ExitStatus(), err), status: exitErr.ExitStatus()}
 		}
 		return string(output), err
 	}

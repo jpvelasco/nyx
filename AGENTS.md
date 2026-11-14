@@ -139,7 +139,7 @@ End-to-end agent workflow: **observe → import → plan → apply (dry-run) →
 Assertions with `runner: <probe-name>` execute remotely via SSH from a declared probe host (`internal/probe`, built on `golang.org/x/crypto/ssh`). Supported assertion types over SSH:
 - `isolation` — runs `ping -c 3 -W 3 <target>` against every gateway in the destination zone
 - `network_health` — runs `ping -c 3 -W 3 <target>`
-- `port_check` — runs `nc -z -w 3 <target> <port>` (first port only)
+- `port_check` — runs `nc -z -w 3 <target> <port>` once per requested port (tcp only; an empty `protocol` is treated as tcp, any other protocol is rejected with an error). A port that could not be measured (netcat missing, transport failure, cancellation) degrades the verdict to WARN instead of passing
 - `dns_check` — runs `nslookup <query> [server]`
 
 All other assertion types return an error if a runner is set.

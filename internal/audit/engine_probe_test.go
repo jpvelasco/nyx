@@ -33,22 +33,12 @@ func TestProbeCommandFor_NetworkHealth(t *testing.T) {
 	}
 }
 
-func TestProbeCommandFor_PortCheck(t *testing.T) {
-	a := intent.Assertion{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}}
-	cmd := probeCommandFor(a, nil)
-	if cmd == nil {
-		t.Fatal("expected non-nil command")
-	}
-	if cmd[0] != "nc" || cmd[len(cmd)-1] != "80" {
-		t.Errorf("unexpected command: %v", cmd)
-	}
-}
-
-func TestProbeCommandFor_PortCheck_NoPorts(t *testing.T) {
-	a := intent.Assertion{Type: "port_check", Target: "10.0.0.1", Ports: nil}
-	cmd := probeCommandFor(a, nil)
-	if cmd != nil {
-		t.Errorf("expected nil for port_check without ports, got %v", cmd)
+// port_check runs one command per requested port through
+// runPortCheckViaProbe, so it never produces a single shared command.
+func TestProbeCommandFor_PortCheckUsesDedicatedPath(t *testing.T) {
+	a := intent.Assertion{Type: "port_check", Target: "10.0.0.1", Ports: []int{80, 443}}
+	if cmd := probeCommandFor(a, nil); cmd != nil {
+		t.Errorf("port_check must not produce a single-command probe, got %v", cmd)
 	}
 }
 
@@ -317,48 +307,6 @@ func TestParseProbeOutput_IsolationAllowBlocked(t *testing.T) {
 	got := parseProbeOutput(result, a, "100% packet loss", false)
 	if got.Status != models.StatusFail {
 		t.Errorf("expected fail (allow+blocked), got %s: %s", got.Status, got.Summary)
-	}
-}
-
-func TestParseProbeOutput_PortCheckOpen(t *testing.T) {
-	result := models.NewCheckResult("probe", "port_check", "probe1", "10.0.0.1")
-	a := intent.Assertion{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}, Expect: "open", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "some output", false)
-	if got.Status != models.StatusPass {
-		t.Errorf("expected pass (open), got %s: %s", got.Status, got.Summary)
-	}
-}
-
-func TestParseProbeOutput_PortCheckOpenExpectedButRemoteClosed(t *testing.T) {
-	result := models.NewCheckResult("probe", "port_check", "probe1", "10.0.0.1")
-	a := intent.Assertion{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}, Expect: "open", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "", true)
-	if got.Status != models.StatusFail {
-		t.Errorf("expected fail (nc closed a port expected open), got %s: %s", got.Status, got.Summary)
-	}
-	if len(got.Violations) == 0 {
-		t.Error("expected violations")
-	}
-}
-
-func TestParseProbeOutput_PortCheckClosedWhenOpen(t *testing.T) {
-	result := models.NewCheckResult("probe", "port_check", "probe1", "10.0.0.1")
-	a := intent.Assertion{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}, Expect: "closed", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "some output", false)
-	if got.Status != models.StatusFail {
-		t.Fatalf("expected fail (expect closed but port is open), got %s: %s", got.Status, got.Summary)
-	}
-	if len(got.Violations) == 0 {
-		t.Error("expected violations")
-	}
-}
-
-func TestParseProbeOutput_PortCheckClosedWhenRemoteClosed(t *testing.T) {
-	result := models.NewCheckResult("probe", "port_check", "probe1", "10.0.0.1")
-	a := intent.Assertion{Type: "port_check", Target: "10.0.0.1", Ports: []int{80}, Expect: "closed", Runner: "probe1"}
-	got := parseProbeOutput(result, a, "", true)
-	if got.Status != models.StatusPass {
-		t.Errorf("expected pass (nc reported closed), got %s: %s", got.Status, got.Summary)
 	}
 }
 
@@ -1571,8 +1519,13 @@ func TestRunViaProbe_PortCheckSSHFailure(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected result")
 	}
-	if result.Status != models.StatusError {
-		t.Errorf("expected error status, got %s: %s", result.Status, result.Summary)
+	// The probe never ran the netcat command: the port is unmeasured, which
+	// degrades the verdict to WARN instead of a pass, fail, or error.
+	if result.Status != models.StatusWarn {
+		t.Errorf("expected warn (unmeasured), got %s: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "unverifiable") {
+		t.Errorf("summary should say unverifiable, got %q", result.Summary)
 	}
 }
 

@@ -1043,9 +1043,14 @@ func (e *Engine) runViaProbe(ctx context.Context, a intent.Assertion) (*models.C
 
 	probeP := probe.FromSpec(*p)
 
-	// For isolation assertions, check all gateways in the destination zone
-	if a.Type == "isolation" {
+	// Assertion types that need more than one remote command (or a
+	// per-port protocol gate) have a dedicated path; the rest share the
+	// single command below.
+	switch a.Type {
+	case "isolation":
 		return e.runIsolationViaProbe(ctx, a, probeP)
+	case "port_check":
+		return e.runPortCheckViaProbe(ctx, a, probeP)
 	}
 
 	cmd := probeCommandFor(a, e.Spec)
@@ -1155,9 +1160,83 @@ func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, p
 	return result, nil
 }
 
+// runPortCheckViaProbe runs one netcat check per requested port from the
+// probe and evaluates every measured port against the expectation. A port
+// that could not be measured (netcat missing, transport failure,
+// cancellation) never produces a passing assertion: the verdict degrades to
+// WARN instead.
+func (e *Engine) runPortCheckViaProbe(ctx context.Context, a intent.Assertion, probeP probe.Probe) (*models.CheckResult, error) {
+	protocol := a.Protocol
+	if protocol == "" {
+		protocol = "tcp"
+	}
+	result := models.NewCheckResult("probe", "port_check", a.Runner, probeTarget(a))
+	result.Evidence = append(result.Evidence, fmt.Sprintf("probe: %s@%s", probeP.User, probeP.Host))
+	result.Expected["expect"] = a.Expect
+	result.Expected["ports"] = a.Ports
+	if !strings.EqualFold(protocol, "tcp") {
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("remote port_check supports tcp only; drop protocol %q from the assertion to check %s locally", strings.ToUpper(protocol), a.Target)
+		result.Finish()
+		return result, nil
+	}
+
+	states := make([]string, 0, len(a.Ports))
+	portsObserved := make([]interface{}, 0, len(a.Ports))
+	for _, port := range a.Ports {
+		cmd := []string{"nc", "-z", "-w", "3", a.Target, fmt.Sprintf("%d", port)}
+		result.Evidence = append(result.Evidence, fmt.Sprintf("command: %s", strings.Join(cmd, " ")))
+
+		output, err := probe.Run(ctx, probeP, cmd, e.SkipHostKeyVerify)
+		if output != "" {
+			result.Evidence = append(result.Evidence, output)
+		}
+
+		state := classifyPortProbeResult(err)
+		if state == "unmeasured" {
+			result.Evidence = append(result.Evidence, fmt.Sprintf("port %d: unmeasured (%v)", port, err))
+		} else {
+			result.Evidence = append(result.Evidence, fmt.Sprintf("port %d: %s", port, state))
+		}
+		states = append(states, state)
+		portsObserved = append(portsObserved, map[string]interface{}{"port": float64(port), "state": state, "protocol": "tcp"})
+	}
+	result.Observed["ports"] = portsObserved
+
+	status, summary, violations := evalPortCheckVerdict(a.Target, a.Runner, a.Expect == "open", a.Ports, states)
+	result.Status = status
+	result.Summary = summary
+	result.Violations = append(result.Violations, violations...)
+	result.Finish()
+	return result, nil
+}
+
+// classifyPortProbeResult maps one probe.Run outcome to the port's measured
+// state: "open" (netcat exit 0), "closed" (netcat ran and exited non-zero,
+// i.e. closed or filtered), or "unmeasured" (netcat missing — shell exit
+// 126/127 — or a transport/auth/host-key/context error).
+func classifyPortProbeResult(err error) string {
+	if err == nil {
+		return "open"
+	}
+	var remoteErr *probe.RemoteError
+	if errors.As(err, &remoteErr) {
+		if remoteErr.Status() == 126 || remoteErr.Status() == 127 {
+			// Command not executable / not found: netcat is missing on the
+			// probe, so the port was never actually checked.
+			return "unmeasured"
+		}
+		return "closed"
+	}
+	// The remote command never produced a usable result.
+	return "unmeasured"
+}
+
 // probeCommandFor returns the shell command to run on a remote probe for the assertion.
 // For isolation assertions, the spec is used to resolve zone names to gateway IPs.
-// Returns nil if the assertion type doesn't support remote execution.
+// port_check runs one command per requested port through
+// runPortCheckViaProbe and never reaches this path. Returns nil if the
+// assertion type doesn't support remote execution.
 func probeCommandFor(a intent.Assertion, spec *intent.Spec) []string {
 	switch a.Type {
 	case "isolation", "network_health":
@@ -1171,13 +1250,6 @@ func probeCommandFor(a intent.Assertion, spec *intent.Spec) []string {
 			return nil
 		}
 		return []string{"ping", "-c", fmt.Sprint(probeHealthPingCount), "-W", "3", target}
-	case "port_check":
-		// Use nc -z (netcat) to check port openness
-		if len(a.Ports) == 0 {
-			return nil
-		}
-		port := fmt.Sprintf("%d", a.Ports[0])
-		return []string{"nc", "-z", "-w", "3", a.Target, port}
 	case "dns_check":
 		args := []string{"nslookup", a.Query}
 		if a.Server != "" {
@@ -1262,10 +1334,49 @@ func EvalIsolationStatus(runner, from, to string, expectDeny, anyTested, allBloc
 		fmt.Sprintf("connectivity failure from probe %q: %s cannot reach %s", runner, from, to), nil
 }
 
+// evalPortCheckVerdict consolidates the verdict for a remote port check:
+// any measured violation fails the assertion, an assertion with no measured
+// ports is unverifiable (WARN), and a mix of measured and unmeasured ports
+// is only partially verified (WARN).
+func evalPortCheckVerdict(target, runner string, expectOpen bool, ports []int, states []string) (models.Status, string, []string) {
+	expect := "open"
+	observed := "open"
+	if !expectOpen {
+		expect = "closed"
+		observed = "closed"
+	}
+	var violations []string
+	unmeasured := 0
+	for i, port := range ports {
+		switch states[i] {
+		case "unmeasured":
+			unmeasured++
+		case "open":
+			if !expectOpen {
+				violations = append(violations, fmt.Sprintf("port %d: expected closed, got open", port))
+			}
+		default: // measured closed/filtered
+			if expectOpen {
+				violations = append(violations, fmt.Sprintf("port %d: expected open, got %s", port, states[i]))
+			}
+		}
+	}
+	if len(violations) > 0 {
+		return models.StatusFail, fmt.Sprintf("port check failed on %s from probe %q: %s", target, runner, strings.Join(violations, "; ")), violations
+	}
+	if unmeasured == len(ports) {
+		return models.StatusWarn, fmt.Sprintf("port check unverifiable on %s from probe %q: all %d port(s) unmeasured (expected %s)", target, runner, len(ports), expect), nil
+	}
+	if unmeasured > 0 {
+		return models.StatusWarn, fmt.Sprintf("port check partially verified on %s from probe %q: %d of %d port(s) unmeasured (expected %s)", target, runner, unmeasured, len(ports), expect), nil
+	}
+	return models.StatusPass, fmt.Sprintf("all %d port(s) %s on %s (from probe %q)", len(ports), observed, target, runner), nil
+}
+
 // parseProbeOutput interprets raw probe command output and updates result status.
 // remoteFailed reports that the remote command executed but exited non-zero
-// (e.g. nc -z on a closed port, nslookup on NXDOMAIN) — a value signal that
-// must be evaluated against the assertion rather than treated as an error.
+// (e.g. ping with 100% packet loss, nslookup on NXDOMAIN) — a value signal
+// that must be evaluated against the assertion rather than treated as an error.
 func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output string, remoteFailed bool) *models.CheckResult {
 	switch a.Type {
 	case "isolation":
@@ -1276,27 +1387,6 @@ func parseProbeOutput(result *models.CheckResult, a intent.Assertion, output str
 		result.Status = status
 		result.Summary = summary
 		result.Violations = append(result.Violations, violations...)
-	case "port_check":
-		// nc -z exits 0 when the port is open; a non-zero exit means closed
-		// or filtered. The verdict is the inverse of the expectation — a
-		// closed port is a value signal, never an execution error.
-		portOpen := !remoteFailed
-		switch {
-		case a.Expect == "open" && portOpen:
-			result.Status = models.StatusPass
-			result.Summary = fmt.Sprintf("port %d is open on %s (from probe %q)", a.Ports[0], a.Target, a.Runner)
-		case a.Expect == "open" && !portOpen:
-			result.Status = models.StatusFail
-			result.Summary = fmt.Sprintf("port %d is closed on %s but expected open (from probe %q)", a.Ports[0], a.Target, a.Runner)
-			result.Violations = append(result.Violations, fmt.Sprintf("expected open but port %d is closed", a.Ports[0]))
-		case portOpen:
-			result.Status = models.StatusFail
-			result.Summary = fmt.Sprintf("port %d is open on %s but expected closed (from probe %q)", a.Ports[0], a.Target, a.Runner)
-			result.Violations = append(result.Violations, fmt.Sprintf("expected closed but port %d is open", a.Ports[0]))
-		default:
-			result.Status = models.StatusPass
-			result.Summary = fmt.Sprintf("port %d is closed on %s (from probe %q)", a.Ports[0], a.Target, a.Runner)
-		}
 	case "network_health":
 		// ping output — non-zero exit means no replies (100% loss)
 		if remoteFailed || isPingBlocked(output) {
