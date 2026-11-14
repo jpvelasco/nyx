@@ -22,7 +22,9 @@ const testToken = "test-listener-token"
 func newTestHTTPServer(t *testing.T) (*HTTPServer, *httptest.Server) {
 	t.Helper()
 	h := NewHTTPServer(testToken, nil)
-	h.idleTimeout = 50 * time.Millisecond // fast expiry for tests
+	// Retain the production idle timeout: ordinary session tests must not
+	// race a shortened expiry window under load or race instrumentation
+	// (#267). Tests whose purpose is expiration set their own timeout.
 	ts := httptest.NewServer(h.Handler())
 	t.Cleanup(ts.Close)
 	return h, ts
@@ -151,7 +153,8 @@ func TestHTTPSessionsAreIsolated(t *testing.T) {
 }
 
 func TestHTTPIdleSessionExpires(t *testing.T) {
-	_, ts := newTestHTTPServer(t) // 50ms idle timeout
+	h, ts := newTestHTTPServer(t)
+	h.idleTimeout = 50 * time.Millisecond // this test exercises expiration only
 
 	resp, _ := httpPost(t, ts, "/mcp", testToken, "", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
 	sid := resp.Header.Get("Mcp-Session-Id")
@@ -164,6 +167,27 @@ func TestHTTPIdleSessionExpires(t *testing.T) {
 	resp, _ = httpPost(t, ts, "/mcp", testToken, sid, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("idle session: status = %d, want 404 (session expired)", resp.StatusCode)
+	}
+}
+
+// TestHTTPSessionSurvivesOrdinaryPause pins the #267 regression: the shared
+// test server must not shorten the production idle window, so an ordinary
+// session test survives a pause that would cross the old 50ms override
+// (race instrumentation or load can pause a test that long).
+func TestHTTPSessionSurvivesOrdinaryPause(t *testing.T) {
+	_, ts := newTestHTTPServer(t)
+
+	resp, _ := httpPost(t, ts, "/mcp", testToken, "", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	sid := resp.Header.Get("Mcp-Session-Id")
+	if sid == "" {
+		t.Fatal("no session id on initialize")
+	}
+
+	time.Sleep(100 * time.Millisecond) // beyond the old 50ms test override
+
+	resp, body := httpPost(t, ts, "/mcp", testToken, sid, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "provider_list") {
+		t.Errorf("ordinary session must outlive a normal pause, got %d: %s", resp.StatusCode, body)
 	}
 }
 
