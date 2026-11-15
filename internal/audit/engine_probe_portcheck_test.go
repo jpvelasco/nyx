@@ -203,6 +203,46 @@ func TestRunPortCheckViaProbe_NetcatMissingIsUnverifiable(t *testing.T) {
 	}
 }
 
+// netcat present but not executable (exit 126) degrades exactly like
+// "netcat missing" (127): an unmeasured dependency failure, so WARN.
+func TestRunPortCheckViaProbe_NetcatNotExecutableIsUnverifiable(t *testing.T) {
+	srv := fake.Start(t, fake.Options{ExecReply: true, OnExec: func(cmd string) (string, uint32) {
+		return "", 126
+	}})
+	eng := newPortCheckProbeEngine(t, srv)
+	a := intent.Assertion{Type: "port_check", Runner: "probe1", Target: remotePortCheckTarget, Ports: []int{80, 443}, Expect: "open"}
+	result := remotePortCheck(t, eng, a)
+	if result.Status != models.StatusWarn {
+		t.Fatalf("expected WARN (unmeasured), got %s: %s", result.Status, result.Summary)
+	}
+	if !strings.Contains(result.Summary, "unverifiable") {
+		t.Errorf("summary should say unverifiable, got %q", result.Summary)
+	}
+}
+
+// A verbose netcat that prints output still passes: the remote output is
+// preserved in the evidence.
+func TestRunPortCheckViaProbe_RemoteOutputInEvidence(t *testing.T) {
+	srv := fake.Start(t, fake.Options{ExecReply: true, OnExec: func(cmd string) (string, uint32) {
+		return "netcat: connection succeeded", 0
+	}})
+	eng := newPortCheckProbeEngine(t, srv)
+	a := intent.Assertion{Type: "port_check", Runner: "probe1", Target: remotePortCheckTarget, Ports: []int{80}, Expect: "open"}
+	result := remotePortCheck(t, eng, a)
+	if result.Status != models.StatusPass {
+		t.Fatalf("expected PASS, got %s: %s", result.Status, result.Summary)
+	}
+	found := false
+	for _, ev := range result.Evidence {
+		if strings.Contains(ev, "connection succeeded") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("evidence should carry the remote output, got %v", result.Evidence)
+	}
+}
+
 // One port measured, one unmeasured: partial verification is WARN, and a
 // measured violation still FAILs with priority.
 func TestRunPortCheckViaProbe_PartialUnmeasured(t *testing.T) {
