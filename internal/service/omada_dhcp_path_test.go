@@ -157,3 +157,93 @@ func TestDHCPPathHelpers(t *testing.T) {
 		t.Fatal("no LANs without selectors")
 	}
 }
+
+func TestDiagnoseDHCPPath_ReadFailures(t *testing.T) {
+	ctx := context.Background()
+	req := OmadaDHCPPathRequest{SwitchMAC: "aa:bb:cc:dd:ee:01", Port: 1}
+
+	t.Run("switch-ports fetch fails", func(t *testing.T) {
+		st := omadaPortStateFresh()
+		st.OverviewFailAfter = 1
+		ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+		_, err := NewOmadaService().DiagnoseDHCPPath(ctx, omadaPortOpts(ts.URL), req)
+		if err == nil || !strings.Contains(err.Error(), "listing switch ports") {
+			t.Errorf("err = %v, want listing switch ports failure", err)
+		}
+	})
+
+	t.Run("networks fetch fails after ports succeed", func(t *testing.T) {
+		st := omadaPortStateFresh()
+		st.NetworksFailAfter = 2
+		ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+		_, err := NewOmadaService().DiagnoseDHCPPath(ctx, omadaPortOpts(ts.URL), req)
+		if err == nil || !strings.Contains(err.Error(), "listing networks") {
+			t.Errorf("err = %v, want listing networks failure", err)
+		}
+	})
+}
+
+func TestDiagnoseDHCPPath_GatewayUsersFailWarns(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case r.URL.Path == "/openapi/v1/abc123/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		case r.URL.Path == "/openapi/v1/abc123/sites/s1/networks/client":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa-bb-cc-dd-ee-01","name":"pc1","type":"wired"}]}`)
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/clients/") && strings.HasSuffix(r.URL.Path, "/client-link-topology"):
+			writeOmadaEnvelope(w, 0, `[{"nodeType":"deviceNode","deviceNode":{"mac":"aa-bb-cc-dd-ee-00","name":"GW-CORE","model":"gateway"}}]`)
+		case strings.Contains(r.URL.Path, "/switches/ports/overview"):
+			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
+		case strings.Contains(r.URL.Path, "/lan-profiles"):
+			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
+		case strings.HasSuffix(r.URL.Path, "/lan-networks"):
+			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
+		case strings.Contains(r.URL.Path, "/dhcp/user-list"):
+			writeOmadaEnvelope(w, -33004, `{"detail":"site busy"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	rep, err := NewOmadaService().DiagnoseDHCPPath(context.Background(), OmadaOptions{
+		Host: ts.URL, ClientID: "a", ClientSecret: "b", SkipTLSVerify: true,
+	}, OmadaDHCPPathRequest{ClientMAC: "aa:bb:cc:dd:ee:01"})
+	if err != nil {
+		t.Fatalf("DiagnoseDHCPPath: %v, want warning not error", err)
+	}
+	if !strings.Contains(strings.Join(rep.Warnings, " "), "gateway leases unavailable") {
+		t.Errorf("warnings = %v, want gateway lease failure warning", rep.Warnings)
+	}
+}
+
+func TestComposeDHCPPath_LeaseInference(t *testing.T) {
+	t.Run("lease fills missing network name", func(t *testing.T) {
+		rep := composeDHCPPath(dhcpPathFacts{
+			clientMAC: "aa:bb:cc:dd:ee:77",
+			client:    &OmadaClient{MAC: "aa:bb:cc:dd:ee:77", IP: "10.0.20.5", Name: "pc"},
+			leases:    []OmadaGatewayDHCPUser{{MAC: "aa:bb:cc:dd:ee:77", IP: "10.0.20.5", NetworkName: "personal"}},
+		})
+		if rep.Client == nil || rep.Client.NetworkName != "personal" || !rep.Client.HasLease {
+			t.Errorf("client = %+v, want network name from lease and lease set", rep.Client)
+		}
+		if rep.Port != nil {
+			t.Errorf("port = %+v, want nil without a managed selector", rep.Port)
+		}
+	})
+
+	t.Run("observed IP implies lease without a gateway row", func(t *testing.T) {
+		rep := composeDHCPPath(dhcpPathFacts{
+			clientMAC: "aa:bb:cc:dd:ee:88",
+			client:    &OmadaClient{MAC: "aa:bb:cc:dd:ee:88", IP: "10.0.20.9", Name: "pc9"},
+			leases:    []OmadaGatewayDHCPUser{{MAC: "aa:bb:cc:dd:ee:01", IP: "10.0.60.20", NetworkName: "iot"}},
+			topo:      []OmadaClientTopologyNode{{SwitchMAC: "aa-bb-cc-dd-ee-10", SwitchPort: "x"}},
+		})
+		if rep.Client == nil || !rep.Client.HasLease || rep.Client.NetworkName != "" {
+			t.Errorf("client = %+v, want IP-implied lease with empty network name", rep.Client)
+		}
+		if rep.Port != nil {
+			t.Errorf("port = %+v, want nil for a non-numeric topology port", rep.Port)
+		}
+	})
+}
