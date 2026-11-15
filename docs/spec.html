@@ -277,6 +277,12 @@
             <p class="text-slate-400 text-sm mt-3">
                 Most fields exist to give context and meaning to your assertions. The more accurately you model your network, the more useful the results become.
             </p>
+            <div class="mt-4 rounded-2xl border border-cyan-400/30 bg-cyan-400/5 px-5 py-4">
+                <div class="text-xs font-bold tracking-[1.5px] text-cyan-400 mb-1">STRICT FIELD CHECKING</div>
+                <p class="text-slate-300 text-sm">
+                    A spec is exactly <strong>one YAML document</strong>, and every key must be a known spec field — typos and leftover keys are rejected with the field name and line number instead of being silently dropped (a dropped limit would quietly weaken the audit). The free-form <code class="bg-slate-100 dark:bg-slate-800 px-1 rounded">inventory.network_gateways</code> map is exempt: its keys are data. When nyx reports an unknown field, fix or remove the key and re-run the command.
+                </p>
+            </div>
         </div>
 
         <!-- Visual Diagram: Two-Layer Mental Model -->
