@@ -1164,7 +1164,8 @@ func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, p
 // probe and evaluates every measured port against the expectation. A port
 // that could not be measured (netcat missing, transport failure,
 // cancellation) never produces a passing assertion: the verdict degrades to
-// WARN instead.
+// WARN instead. A probe-wide failure (transport/auth/host-key/cancellation)
+// marks the remaining ports unmeasured without redialing the failed probe.
 func (e *Engine) runPortCheckViaProbe(ctx context.Context, a intent.Assertion, probeP probe.Probe) (*models.CheckResult, error) {
 	protocol := a.Protocol
 	if protocol == "" {
@@ -1183,23 +1184,40 @@ func (e *Engine) runPortCheckViaProbe(ctx context.Context, a intent.Assertion, p
 
 	states := make([]string, 0, len(a.Ports))
 	portsObserved := make([]interface{}, 0, len(a.Ports))
-	for _, port := range a.Ports {
-		cmd := []string{"nc", "-z", "-w", "3", a.Target, fmt.Sprintf("%d", port)}
-		result.Evidence = append(result.Evidence, fmt.Sprintf("command: %s", strings.Join(cmd, " ")))
-
-		output, err := probe.Run(ctx, probeP, cmd, e.SkipHostKeyVerify)
-		if output != "" {
-			result.Evidence = append(result.Evidence, output)
-		}
-
-		state := classifyPortProbeResult(err)
+	record := func(port int, state string, note error) {
 		if state == "unmeasured" {
-			result.Evidence = append(result.Evidence, fmt.Sprintf("port %d: unmeasured (%v)", port, err))
+			result.Evidence = append(result.Evidence, fmt.Sprintf("port %d: unmeasured (%v)", port, note))
 		} else {
 			result.Evidence = append(result.Evidence, fmt.Sprintf("port %d: %s", port, state))
 		}
 		states = append(states, state)
 		portsObserved = append(portsObserved, map[string]interface{}{"port": float64(port), "state": state, "protocol": "tcp"})
+	}
+	for i, port := range a.Ports {
+		cmd := []string{"nc", "-z", "-w", "3", a.Target, fmt.Sprintf("%d", port)}
+		result.Evidence = append(result.Evidence, fmt.Sprintf("command: %s", strings.Join(cmd, " ")))
+
+		output, err := probe.Run(ctx, probeP, cmd, e.SkipHostKeyVerify)
+		if output != "" {
+			// Frame the remote output as inert data: audit results feed agent
+			// surfaces (MCP), where verbatim attacker-controlled text could
+			// be read as instructions.
+			result.Evidence = append(result.Evidence, fmt.Sprintf("remote output (untrusted): %q", output))
+		}
+
+		state := classifyPortProbeResult(err)
+		record(port, state, err)
+
+		var remoteErr *probe.RemoteError
+		if state == "unmeasured" && !errors.As(err, &remoteErr) {
+			// The remote command never executed (dial/auth/host-key failure or
+			// cancellation): a probe-wide failure that redialing cannot fix,
+			// so the remaining ports are marked unmeasured without redialing.
+			for _, rest := range a.Ports[i+1:] {
+				record(rest, "unmeasured", errors.New("skipped after probe failure"))
+			}
+			break
+		}
 	}
 	result.Observed["ports"] = portsObserved
 

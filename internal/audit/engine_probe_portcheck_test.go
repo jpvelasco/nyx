@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -128,8 +129,10 @@ func TestRunPortCheckViaProbe_MixedPortsExpectOpenFails(t *testing.T) {
 	if !slices.Contains(result.Violations, "port 443: expected open, got closed") {
 		t.Errorf("violation should name port 443, got %v", result.Violations)
 	}
-	if slices.Contains(result.Violations, "port 80") {
-		t.Errorf("port 80 matched; it must not appear in violations, got %v", result.Violations)
+	for _, v := range result.Violations {
+		if strings.HasPrefix(v, "port 80:") {
+			t.Errorf("port 80 must not appear in violations, got %v", result.Violations)
+		}
 	}
 	requireExpectedPorts(t, result, []int{80, 443})
 	requireObservedStates(t, result, map[int]string{80: "open", 443: "closed"})
@@ -221,7 +224,8 @@ func TestRunPortCheckViaProbe_NetcatNotExecutableIsUnverifiable(t *testing.T) {
 }
 
 // A verbose netcat that prints output still passes: the remote output is
-// preserved in the evidence.
+// preserved in the evidence, framed as untrusted data (audit results feed
+// agent surfaces, where verbatim remote text could be read as instructions).
 func TestRunPortCheckViaProbe_RemoteOutputInEvidence(t *testing.T) {
 	srv := fake.Start(t, fake.Options{ExecReply: true, OnExec: func(cmd string) (string, uint32) {
 		return "netcat: connection succeeded", 0
@@ -234,12 +238,12 @@ func TestRunPortCheckViaProbe_RemoteOutputInEvidence(t *testing.T) {
 	}
 	found := false
 	for _, ev := range result.Evidence {
-		if strings.Contains(ev, "connection succeeded") {
+		if strings.Contains(ev, "remote output (untrusted):") && strings.Contains(ev, "connection succeeded") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("evidence should carry the remote output, got %v", result.Evidence)
+		t.Errorf("evidence should carry the remote output framed as untrusted, got %v", result.Evidence)
 	}
 }
 
@@ -317,6 +321,54 @@ func TestRunPortCheckViaProbe_TransportFailureIsUnverifiable(t *testing.T) {
 	if !strings.Contains(result.Summary, "unverifiable") {
 		t.Errorf("summary should say unverifiable, got %q", result.Summary)
 	}
+}
+
+// A probe-wide transport failure (the server accepts TCP but drops the
+// connection, so the SSH handshake dies) must end the run: the remaining
+// ports are marked unmeasured without redialing the failed probe, because a
+// second dial cannot change the outcome.
+func TestRunPortCheckViaProbe_ProbeFailureStopsRedialing(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	var dials atomic.Int64
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			dials.Add(1)
+			conn.Close() // drop the connection before the SSH banner
+		}
+	}()
+
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	fake.WriteKey(t, keyPath)
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Probes: []intent.Probe{
+			{Name: "probe1", Host: "127.0.0.1", User: "testuser", Port: ln.Addr().(*net.TCPAddr).Port, Key: keyPath},
+		},
+	}
+	eng := NewEngine(spec)
+	eng.Backend = &backends.MockBackend{}
+	eng.SkipHostKeyVerify = true
+	a := intent.Assertion{Type: "port_check", Runner: "probe1", Target: remotePortCheckTarget, Ports: []int{80, 443}, Expect: "open"}
+	result := remotePortCheck(t, eng, a)
+	if result.Status != models.StatusWarn {
+		t.Fatalf("expected WARN (unmeasured), got %s: %s", result.Status, result.Summary)
+	}
+	if got := dials.Load(); got != 1 {
+		t.Errorf("expected exactly 1 probe dial, got %d — probe-wide failures must not redial per port", got)
+	}
+	if !slices.Contains(result.Evidence, "port 443: unmeasured (skipped after probe failure)") {
+		t.Errorf("evidence should mark the skipped port, got %v", result.Evidence)
+	}
+	requireObservedStates(t, result, map[int]string{80: "unmeasured", 443: "unmeasured"})
 }
 
 // A cancelled context before the run leaves no measured ports: the result
