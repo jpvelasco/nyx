@@ -1647,12 +1647,100 @@ func TestRunNetworkHealth_MTUError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// MTU error is appended to evidence, not returned as error
-	if result.Status != models.StatusPass {
-		t.Errorf("expected pass (MTU error is non-fatal), got %s: %s", result.Status, result.Summary)
+	// A declared MTU expectation the backend could not measure must not
+	// read as a pass: the passing health base escalates to error (still
+	// non-fatal — runNetworkHealth returns no error) and keeps the
+	// backend's explanation (#270).
+	if result.Status != models.StatusError {
+		t.Fatalf("expected error (MTU could not be measured), got %s: %s", result.Status, result.Summary)
 	}
-	if len(result.Evidence) == 0 {
-		t.Error("expected evidence about MTU error")
+	if !strings.Contains(result.Summary, "MTU measurement could not run") {
+		t.Errorf("expected summary to say MTU measurement could not run, got %q", result.Summary)
+	}
+	found := false
+	for _, ev := range result.Evidence {
+		if strings.Contains(ev, "mtu probe failed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected the MTU backend error in evidence, got %v", result.Evidence)
+	}
+}
+
+func TestRunNetworkHealth_BaseFailKeptWithMTUError(t *testing.T) {
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Assertions: []intent.Assertion{{Type: "network_health", Target: "10.0.0.1", ExpectMTU: 1500}},
+	}
+	r := models.NewCheckResult("ping", "network_health", "system", "10.0.0.1")
+	r.Status = models.StatusFail
+	r.Summary = "health check failed"
+	r.Violations = []string{"host unreachable"}
+	r.Finish()
+	mock := &backends.MockBackend{
+		PingCheckResult: r,
+		PingCheckStats:  &health.PingStats{},
+		MTUErr:          backends.BackendError("mtu probe failed"),
+	}
+	eng := NewEngine(spec)
+	eng.Backend = mock
+	result, err := eng.runNetworkHealth(context.Background(), spec.Assertions[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// A confirmed base failure is preserved: same status, same
+	// violations, with the MTU error preserved as evidence (#270).
+	if result.Status != models.StatusFail {
+		t.Fatalf("expected fail base to stay fail, got %s: %s", result.Status, result.Summary)
+	}
+	if len(result.Violations) != 1 || result.Violations[0] != "host unreachable" {
+		t.Errorf("expected base violations to be preserved, got %v", result.Violations)
+	}
+	found := false
+	for _, ev := range result.Evidence {
+		if strings.Contains(ev, "mtu probe failed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected the MTU backend error in evidence, got %v", result.Evidence)
+	}
+}
+
+func TestRunNetworkHealth_BaseWarnKeptWithMTUError(t *testing.T) {
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Assertions: []intent.Assertion{{Type: "network_health", Target: "10.0.0.1", ExpectMTU: 1500}},
+	}
+	r := models.NewCheckResult("ping", "network_health", "system", "10.0.0.1")
+	r.Status = models.StatusWarn
+	r.Summary = "health degraded"
+	r.Finish()
+	mock := &backends.MockBackend{
+		PingCheckResult: r,
+		PingCheckStats:  &health.PingStats{},
+		MTUErr:          backends.BackendError("mtu probe failed"),
+	}
+	eng := NewEngine(spec)
+	eng.Backend = mock
+	result, err := eng.runNetworkHealth(context.Background(), spec.Assertions[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// A warn base cannot be reduced to a pass by the MTU error, and the
+	// inability to measure is retained in the finding (#270).
+	if result.Status != models.StatusWarn {
+		t.Fatalf("expected warn base to stay warn, got %s: %s", result.Status, result.Summary)
+	}
+	found := false
+	for _, ev := range result.Evidence {
+		if strings.Contains(ev, "mtu probe failed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected the MTU backend error in evidence, got %v", result.Evidence)
 	}
 }
 

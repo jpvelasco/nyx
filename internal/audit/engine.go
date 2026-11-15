@@ -916,6 +916,16 @@ func (e *Engine) runNetworkHealth(ctx context.Context, a intent.Assertion) (*mod
 		mtuResult, mtuErr := e.Backend.ProbeMTU(ctx, a.Target, a.ExpectMTU)
 		if mtuErr != nil {
 			result.Evidence = append(result.Evidence, fmt.Sprintf("MTU probe error: %v", mtuErr))
+			if result.Status == models.StatusPass {
+				// The declared MTU expectation could not be measured at
+				// all. An unevaluated expectation must not read as a
+				// passing health assertion: the finding escalates to
+				// error (still non-fatal — other assertions keep
+				// running) and preserves the backend's explanation,
+				// mirroring the local DNSSEC error handling (#270).
+				result.Status = models.StatusError
+				result.Summary = fmt.Sprintf("%s; MTU measurement could not run: %v", result.Summary, mtuErr)
+			}
 		} else {
 			result.Evidence = append(result.Evidence, mtuResult.Evidence...)
 			switch {
