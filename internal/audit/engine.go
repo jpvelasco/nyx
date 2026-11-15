@@ -1199,10 +1199,11 @@ func (e *Engine) runPortCheckViaProbe(ctx context.Context, a intent.Assertion, p
 
 		output, err := probe.Run(ctx, probeP, cmd, e.SkipHostKeyVerify)
 		if output != "" {
-			// Frame the remote output as inert data: audit results feed agent
-			// surfaces (MCP), where verbatim attacker-controlled text could
-			// be read as instructions.
-			result.Evidence = append(result.Evidence, fmt.Sprintf("remote output (untrusted): %q", output))
+			// Record only the size of the remote output: the text itself is
+			// attacker-controlled, and audit results feed agent surfaces
+			// (MCP) where labeling or quoting cannot neutralize it
+			// deterministically.
+			result.Evidence = append(result.Evidence, fmt.Sprintf("remote output: %d bytes (content withheld)", len(output)))
 		}
 
 		state := classifyPortProbeResult(err)

@@ -223,10 +223,10 @@ func TestRunPortCheckViaProbe_NetcatNotExecutableIsUnverifiable(t *testing.T) {
 	}
 }
 
-// A verbose netcat that prints output still passes: the remote output is
-// preserved in the evidence, framed as untrusted data (audit results feed
-// agent surfaces, where verbatim remote text could be read as instructions).
-func TestRunPortCheckViaProbe_RemoteOutputInEvidence(t *testing.T) {
+// A verbose netcat that prints output still passes: the evidence records
+// only the output size and withholds the content (audit results feed agent
+// surfaces, where verbatim remote text cannot be neutralized by labeling).
+func TestRunPortCheckViaProbe_RemoteOutputWithheldInEvidence(t *testing.T) {
 	srv := fake.Start(t, fake.Options{ExecReply: true, OnExec: func(cmd string) (string, uint32) {
 		return "netcat: connection succeeded", 0
 	}})
@@ -238,12 +238,17 @@ func TestRunPortCheckViaProbe_RemoteOutputInEvidence(t *testing.T) {
 	}
 	found := false
 	for _, ev := range result.Evidence {
-		if strings.Contains(ev, "remote output (untrusted):") && strings.Contains(ev, "connection succeeded") {
+		if strings.Contains(ev, "remote output:") && strings.Contains(ev, "bytes") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("evidence should carry the remote output framed as untrusted, got %v", result.Evidence)
+		t.Fatalf("evidence should record the remote output size, got %v", result.Evidence)
+	}
+	for _, ev := range result.Evidence {
+		if strings.Contains(ev, "connection succeeded") {
+			t.Errorf("remote output content must be withheld from evidence, got %v", result.Evidence)
+		}
 	}
 }
 
