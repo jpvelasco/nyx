@@ -2,6 +2,9 @@ package probe
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"net"
@@ -12,6 +15,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
@@ -59,6 +65,41 @@ func writeTestKey(t *testing.T, path string) {
 	fake.WriteKey(t, path)
 }
 
+// withTestHome points os.UserHomeDir at an empty temp dir for the test's
+// duration (t.Setenv restores the real value), so known_hosts resolution
+// never touches the developer's real trust store.
+func withTestHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	} else {
+		t.Setenv("HOME", home)
+	}
+	return home
+}
+
+// writeKnownHosts writes one entry line to <home>/.ssh/known_hosts.
+func writeKnownHosts(t *testing.T, home, line string) {
+	t.Helper()
+	dir := filepath.Join(home, ".ssh")
+	// 0o700 is the minimum usable directory mode (owner execute bit); the
+	// pattern's 0600 ceiling applies to files, not directories.
+	if err := os.MkdirAll(dir, 0o700); err != nil { // nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "known_hosts"), []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// knownHostsLine renders srv's host key for the dialed [host]:port address,
+// the entry form a probe on a non-default port needs.
+func knownHostsLine(t *testing.T, srv *fake.Server, host string) string {
+	t.Helper()
+	return knownhosts.Line([]string{fmt.Sprintf("[%s]:%d", host, srv.Port)}, srv.HostKey())
+}
+
 func testProbe(host string) Probe {
 	return Probe{Name: "p1", Host: host, User: "testuser", VLAN: "iot", Port: lastTestServerPort}
 }
@@ -83,6 +124,10 @@ func TestRun_HostKeyVerificationFailure(t *testing.T) {
 	startTestSSHServer(t, false, false, true, 0)
 	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
 	writeTestKey(t, keyPath)
+	// An empty trust store makes the rejection deterministic and hermetic:
+	// the freshly generated host key is never in the developer's real
+	// known_hosts.
+	withTestHome(t)
 
 	p := testProbe("127.0.0.1")
 	p.Key = keyPath
@@ -98,6 +143,144 @@ func TestRun_HostKeyVerificationFailure(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q, got: %v", want, err)
 		}
+	}
+}
+
+// TestRun_KnownHostsTrustedKeySucceeds pins #272 AC-1 for Run: with host
+// key verification ON and the server's key pre-registered in a temporary
+// known_hosts, the handshake and command succeed.
+func TestRun_KnownHostsTrustedKeySucceeds(t *testing.T) {
+	srv := startTestSSHServer(t, false, false, true, 0)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+	home := withTestHome(t)
+	writeKnownHosts(t, home, knownHostsLine(t, srv, "127.0.0.1"))
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+	out, err := Run(context.Background(), p, []string{"echo", "trusted"}, false)
+	if err != nil {
+		t.Fatalf("trusted known_hosts key must verify, got: %v", err)
+	}
+	if !strings.Contains(out, "'trusted'") {
+		t.Errorf("output should contain the echoed command, got %q", out)
+	}
+}
+
+// TestDiagnose_KnownHostsTrustedKeySucceeds pins AC-1 for the read-only
+// diagnose path (nyx doctor --spec / MCP run_doctor).
+func TestDiagnose_KnownHostsTrustedKeySucceeds(t *testing.T) {
+	srv := startTestSSHServer(t, false, false, true, 0)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+	home := withTestHome(t)
+	writeKnownHosts(t, home, knownHostsLine(t, srv, "127.0.0.1"))
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+	if err := Diagnose(context.Background(), p); err != nil {
+		t.Fatalf("trusted known_hosts key must verify, got: %v", err)
+	}
+}
+
+// TestRun_KnownHostsUnknownKeyRejected pins AC-2: a key absent from the
+// (present) trust file fails as HostKeyError with install guidance,
+// including the [host]:port entry form for non-default ports.
+func TestRun_KnownHostsUnknownKeyRejected(t *testing.T) {
+	srv := startTestSSHServer(t, false, false, true, 0)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+	home := withTestHome(t)
+	// An entry for a different host: the dialed host is unknown.
+	writeKnownHosts(t, home, knownhosts.Line([]string{"example.invalid"}, srv.HostKey()))
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+	_, err := Run(context.Background(), p, []string{"echo", "hi"}, false)
+	var hostKeyErr *HostKeyError
+	if !errors.As(err, &hostKeyErr) {
+		t.Fatalf("expected *HostKeyError, got %T: %v", err, err)
+	}
+	for _, want := range []string{`probe "p1"`, "host key verification failed", fmt.Sprintf("[127.0.0.1]:%d", srv.Port), "ssh-keyscan", "--skip-host-key-verify"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
+	}
+}
+
+// TestRun_KnownHostsChangedKeyRejected pins AC-2: a changed key (entry
+// present, key differs) fails as HostKeyError with mismatch guidance — no
+// silent acceptance, no trust-on-first-use.
+func TestRun_KnownHostsChangedKeyRejected(t *testing.T) {
+	srv := startTestSSHServer(t, false, false, true, 0)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+	home := withTestHome(t)
+
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherSigner, err := ssh.NewSignerFromKey(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeKnownHosts(t, home, knownhosts.Line([]string{fmt.Sprintf("[127.0.0.1]:%d", srv.Port)}, otherSigner.PublicKey()))
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+	_, err = Run(context.Background(), p, []string{"echo", "hi"}, false)
+	var hostKeyErr *HostKeyError
+	if !errors.As(err, &hostKeyErr) {
+		t.Fatalf("expected *HostKeyError, got %T: %v", err, err)
+	}
+	for _, want := range []string{"does not match", "known_hosts"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
+	}
+}
+
+// TestRun_KnownHostsUnreadableFileRejected pins AC-2: an unparseable trust
+// file is a fail-closed HostKeyError naming the path, not a transport
+// failure and not a silent verification bypass.
+func TestRun_KnownHostsUnreadableFileRejected(t *testing.T) {
+	startTestSSHServer(t, false, false, true, 0)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+	home := withTestHome(t)
+	writeKnownHosts(t, home, "this is not a valid known_hosts line")
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+	_, err := Run(context.Background(), p, []string{"echo", "hi"}, false)
+	var hostKeyErr *HostKeyError
+	if !errors.As(err, &hostKeyErr) {
+		t.Fatalf("expected *HostKeyError, got %T: %v", err, err)
+	}
+	for _, want := range []string{"missing or unreadable", ".ssh", "known_hosts", "--skip-host-key-verify"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
+	}
+}
+
+// TestRun_KnownHostsBareHostEntryDoesNotMatchNonDefaultPort pins AC-3: a
+// known_hosts entry for the bare host (port 22) must not satisfy a probe
+// dialing a non-default port — the port is part of the match.
+func TestRun_KnownHostsBareHostEntryDoesNotMatchNonDefaultPort(t *testing.T) {
+	srv := startTestSSHServer(t, false, false, true, 0)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+	home := withTestHome(t)
+	writeKnownHosts(t, home, knownhosts.Line([]string{"127.0.0.1"}, srv.HostKey()))
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+	_, err := Run(context.Background(), p, []string{"echo", "hi"}, false)
+	var hostKeyErr *HostKeyError
+	if !errors.As(err, &hostKeyErr) {
+		t.Fatalf("expected *HostKeyError for a port-22 entry against a non-default port, got %T: %v", err, err)
 	}
 }
 
@@ -620,6 +803,7 @@ func TestRun_AuthDiagnosticsTable(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			withTestHome(t)
 			if tt.rejectKeys {
 				startTestSSHServerRejectingKeys(t, false, false, true, 0)
 			} else {
@@ -653,6 +837,7 @@ func TestDiagnose_HostKeyFailure(t *testing.T) {
 	startTestSSHServer(t, false, false, true, 0)
 	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
 	writeTestKey(t, keyPath)
+	withTestHome(t)
 
 	p := testProbe("127.0.0.1")
 	p.Key = keyPath
@@ -834,6 +1019,7 @@ func TestDiagnosticCheckTable(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			withTestHome(t)
 			p := tt.setup(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
