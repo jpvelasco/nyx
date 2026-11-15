@@ -1,28 +1,33 @@
 package fake
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 )
 
-// dialClient connects to the server with a single auth method, no host-key
-// verification. The client closes itself at test end.
-func dialClient(t *testing.T, srv *Server, auth ssh.AuthMethod) *ssh.Client {
-	t.Helper()
-	cfg := &ssh.ClientConfig{
+// pinnedConfig builds a client config that pins the fake server's host key,
+// so every client connection exercises real host-key verification.
+func pinnedConfig(srv *Server, auth ssh.AuthMethod) *ssh.ClientConfig {
+	return &ssh.ClientConfig{
 		User:            "testuser",
 		Auth:            []ssh.AuthMethod{auth},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: ssh.FixedHostKey(srv.HostKey()),
 		Timeout:         5 * time.Second,
 	}
-	client, err := ssh.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", srv.Port), cfg)
+}
+
+// dialClient connects to the server with a single auth method. The client
+// closes itself at test end.
+func dialClient(t *testing.T, srv *Server, auth ssh.AuthMethod) *ssh.Client {
+	t.Helper()
+	client, err := ssh.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", srv.Port), pinnedConfig(srv, auth))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -30,17 +35,17 @@ func dialClient(t *testing.T, srv *Server, auth ssh.AuthMethod) *ssh.Client {
 	return client
 }
 
+// keySigner generates a throwaway ed25519 key in memory; the file-based
+// parse path is covered by the probe package's authMethods tests.
 func keySigner(t *testing.T) ssh.Signer {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "id_ed25519")
-	WriteKey(t, path)
-	data, err := os.ReadFile(path)
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		t.Fatalf("read key: %v", err)
+		t.Fatalf("generate key: %v", err)
 	}
-	signer, err := ssh.ParsePrivateKey(data)
+	signer, err := ssh.NewSignerFromKey(priv)
 	if err != nil {
-		t.Fatalf("parse key: %v", err)
+		t.Fatalf("signer: %v", err)
 	}
 	return signer
 }
@@ -173,13 +178,9 @@ func TestServerHangExec(t *testing.T) {
 // RejectKeys: a public-key client cannot authenticate.
 func TestServerRejectKeys(t *testing.T) {
 	srv := Start(t, Options{RejectKeys: true})
-	cfg := &ssh.ClientConfig{
-		User:            "testuser",
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(keySigner(t))},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         5 * time.Second,
-	}
-	if _, err := ssh.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", srv.Port), cfg); err == nil {
+	client, err := ssh.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", srv.Port), pinnedConfig(srv, ssh.PublicKeys(keySigner(t))))
+	if err == nil {
+		client.Close()
 		t.Fatal("expected key auth to be rejected")
 	}
 }
@@ -188,22 +189,11 @@ func TestServerRejectKeys(t *testing.T) {
 func TestServerPasswordAuth(t *testing.T) {
 	srv := Start(t, Options{ExecReply: true})
 	addr := fmt.Sprintf("127.0.0.1:%d", srv.Port)
-	bad := &ssh.ClientConfig{
-		User:            "testuser",
-		Auth:            []ssh.AuthMethod{ssh.Password("wrong")},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         5 * time.Second,
-	}
-	if _, err := ssh.Dial("tcp", addr, bad); err == nil {
+	if client, err := ssh.Dial("tcp", addr, pinnedConfig(srv, ssh.Password("wrong"))); err == nil {
+		client.Close()
 		t.Fatal("expected the wrong password to be rejected")
 	}
-	good := &ssh.ClientConfig{
-		User:            "testuser",
-		Auth:            []ssh.AuthMethod{ssh.Password(TestCredential)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         5 * time.Second,
-	}
-	client, err := ssh.Dial("tcp", addr, good)
+	client, err := ssh.Dial("tcp", addr, pinnedConfig(srv, ssh.Password(TestCredential)))
 	if err != nil {
 		t.Fatalf("TestCredential should authenticate: %v", err)
 	}

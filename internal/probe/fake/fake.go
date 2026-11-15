@@ -51,11 +51,12 @@ type Options struct {
 
 // Server is a running fake SSH server on an ephemeral loopback port.
 type Server struct {
-	ln     net.Listener
-	config *ssh.ServerConfig
-	opts   Options
-	Port   int
-	wg     sync.WaitGroup
+	ln      net.Listener
+	config  *ssh.ServerConfig
+	opts    Options
+	Port    int
+	wg      sync.WaitGroup
+	hostKey ssh.PublicKey
 }
 
 // Start binds an ephemeral 127.0.0.1 port and serves SSH in the background.
@@ -93,7 +94,7 @@ func Start(t *testing.T, opts Options) *Server {
 	if err != nil {
 		t.Fatalf("cannot bind fake SSH listener: %v", err)
 	}
-	srv := &Server{ln: ln, config: config, opts: opts, Port: ln.Addr().(*net.TCPAddr).Port}
+	srv := &Server{ln: ln, config: config, opts: opts, Port: ln.Addr().(*net.TCPAddr).Port, hostKey: signer.PublicKey()}
 	srv.wg.Add(1)
 	go srv.serve()
 	// Cleanup runs LIFO: close the listener first, then wait for the serve loop.
@@ -104,6 +105,12 @@ func Start(t *testing.T, opts Options) *Server {
 		}
 	})
 	return srv
+}
+
+// HostKey returns the server's public host key, so clients can pin it with
+// ssh.FixedHostKey and exercise real host-key verification.
+func (s *Server) HostKey() ssh.PublicKey {
+	return s.hostKey
 }
 
 func (s *Server) serve() {
