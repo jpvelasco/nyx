@@ -641,3 +641,89 @@ func TestOmadaServiceApplyACL_ProviderLacksMutation(t *testing.T) {
 		t.Fatalf("ApplyACL error = %v, want missing-mutation capability error", err)
 	}
 }
+
+// runPostAudit fails clearly when the audit engine is not configured:
+// NewOmadaService leaves PostAudit nil by default.
+func TestOmadaServiceApplyACL_PostAuditUnavailable(t *testing.T) {
+	ts := omadaApplyServer(t, `{"totalRows":0,"data":[]}`)
+	svc := NewOmadaService() // PostAudit stays nil
+	res, err := svc.ApplyACL(context.Background(), OmadaOptions{
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
+	}, OmadaACLApplyRequest{From: []string{"iot"}, To: []string{"trusted"}, Action: "deny", PostAudit: true})
+	if err != nil {
+		t.Fatalf("ApplyACL: %v", err)
+	}
+	if res.Outcome != "created" {
+		t.Errorf("outcome = %q, want created", res.Outcome)
+	}
+	if res.PostAudit == nil || res.PostAudit.Status != "error" || res.PostAudit.Summary != "post-mutation audit unavailable" {
+		t.Errorf("post_audit = %+v, want the unavailable error", res.PostAudit)
+	}
+}
+
+// A report without isolation findings is an error, not a silent pass: the
+// post-audit verdict is only as good as its isolation checks.
+func TestOmadaServiceApplyACL_PostAuditNoIsolationFindings(t *testing.T) {
+	ts := omadaApplyServer(t, `{"totalRows":0,"data":[]}`)
+	svc := NewOmadaService()
+	svc.PostAudit = func(ctx context.Context, spec *intent.Spec) (*models.AuditReport, error) {
+		return &models.AuditReport{Findings: []models.CheckResult{{
+			Tool: "system", CheckType: "port_check", Runner: "local",
+			Status: models.StatusPass,
+		}}}, nil
+	}
+	res, err := svc.ApplyACL(context.Background(), OmadaOptions{
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
+	}, OmadaACLApplyRequest{From: []string{"iot"}, To: []string{"trusted"}, Action: "deny", PostAudit: true})
+	if err != nil {
+		t.Fatalf("ApplyACL: %v", err)
+	}
+	if res.PostAudit == nil || res.PostAudit.Status != "error" || res.PostAudit.Summary != "post-mutation audit returned no isolation finding" {
+		t.Errorf("post_audit = %+v, want the no-isolation-finding error", res.PostAudit)
+	}
+}
+
+// Repeated endpoint names collapse in the post-audit spec: sources come
+// first, and a name declared on both sides appears exactly once.
+func TestOmadaServiceApplyACL_PostAuditDedupesEndpoints(t *testing.T) {
+	ts := omadaApplyServer(t, `{"totalRows":0,"data":[]}`)
+	svc := NewOmadaService()
+	svc.PostAudit = cannedPostAudit(t, []string{"iot", "trusted"}, []string{"trusted"}, "deny")
+	res, err := svc.ApplyACL(context.Background(), OmadaOptions{
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
+	}, OmadaACLApplyRequest{
+		From:      []string{"", "  ", "iot", "IOT", "trusted"},
+		To:        []string{"trusted"},
+		Action:    "deny",
+		PostAudit: true,
+	})
+	if err != nil {
+		t.Fatalf("ApplyACL: %v", err)
+	}
+	if res.PostAudit == nil || res.PostAudit.Status != string(models.StatusPass) {
+		t.Fatalf("post_audit = %+v, want pass", res.PostAudit)
+	}
+	if len(res.PostAudit.Findings) != 2 {
+		t.Errorf("post_audit findings = %d, want 2 (one per source)", len(res.PostAudit.Findings))
+	}
+}
+
+// The post-audit spec builder and endpoint normalizer are pure helpers;
+// pin their edge behavior directly.
+func TestOmadaACLHelpers(t *testing.T) {
+	if got := at([]string{"a"}, 5); got != "" {
+		t.Errorf("at out of range = %q, want empty", got)
+	}
+	if got := at(nil, 0); got != "" {
+		t.Errorf("at on nil = %q, want empty", got)
+	}
+	if got := at([]string{"a", "b"}, 1); got != "b" {
+		t.Errorf("at in range = %q, want b", got)
+	}
+	if got := dedupeNames([]string{"", "  ", "a", "A ", "a"}); !sliceEqStr(got, []string{"a"}) {
+		t.Errorf("dedupeNames = %v, want [a]", got)
+	}
+	if got := dedupeNames(nil); len(got) != 0 {
+		t.Errorf("dedupeNames(nil) = %v, want empty", got)
+	}
+}

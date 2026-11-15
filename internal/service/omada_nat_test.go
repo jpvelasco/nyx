@@ -6,6 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/jpvelasco/nyx/internal/providers"
+	omadaprovider "github.com/jpvelasco/nyx/internal/providers/omada"
 )
 
 // natReads is the shared handler for the NAT-observation endpoints NatFacts
@@ -299,5 +302,124 @@ func TestOmadaServiceNatReads_SessionFailure(t *testing.T) {
 	}
 	if _, err := svc.GetFirewallSettings(ctx, omadaNatOptions(ts)); err == nil {
 		t.Error("GetFirewallSettings: want error, got nil")
+	}
+}
+
+// PlanNat/ApplyNat refuse every Omada NAT mutation with the current
+// collection as evidence and issue zero writes: any request outside the
+// known read set is recorded and fails the test.
+func TestOmadaServicePlanApplyNat_Refused(t *testing.T) {
+	cases := []struct {
+		name, operation, ruleID, endpoint string
+	}{
+		{"port_forward", "port_forward", "pf1", "/sites/{siteId}/nat/port-forwardings"},
+		{"one_to_one", "one_to_one", "o1", "/sites/{siteId}/nat/one-to-one-nat"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var unexpected strings.Builder
+			ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if (r.URL.Path == "/openapi/v1/abc123/sites/s1/nat/port-forwardings" ||
+					r.URL.Path == "/openapi/v1/abc123/sites/s1/nat/one-to-one-nat") &&
+					r.Method != http.MethodGet {
+					unexpected.WriteString(r.Method + " " + r.URL.Path + "\n")
+					writeOmadaEnvelope(w, -1, `null`)
+					return
+				}
+				natReads(&unexpected)(w, r)
+			})
+			opts := omadaNatOptions(ts)
+			svc := NewOmadaService()
+
+			plan, err := svc.PlanNat(context.Background(), opts, OmadaNatApplyRequest{Operation: tc.operation, Action: "create"})
+			if err != nil {
+				t.Fatalf("PlanNat: %v", err)
+			}
+			if plan.Provider != "omada" || plan.Outcome != "refused" || !plan.DryRun {
+				t.Errorf("plan outcome = %q dry_run=%v, want refused dry-run plan", plan.Outcome, plan.DryRun)
+			}
+			if len(plan.Endpoints) != 1 || plan.Endpoints[0] != tc.endpoint {
+				t.Errorf("endpoints = %v, want [%s]", plan.Endpoints, tc.endpoint)
+			}
+			if !strings.Contains(plan.Before, tc.ruleID) {
+				t.Errorf("plan.Before missing rule %s:\n%s", tc.ruleID, plan.Before)
+			}
+			if len(plan.Warnings) == 0 {
+				t.Error("plan.Warnings empty, want the write-surface explanation")
+			}
+
+			res, err := svc.ApplyNat(context.Background(), opts, OmadaNatApplyRequest{Operation: tc.operation, Action: "create", DryRun: false})
+			if err != nil {
+				t.Fatalf("ApplyNat: %v", err)
+			}
+			if res.Outcome != "refused" || res.DryRun {
+				t.Errorf("apply outcome = %q dry_run=%v, want refused non-dry-run result", res.Outcome, res.DryRun)
+			}
+			if res.Before != res.After || !strings.Contains(res.Before, tc.ruleID) {
+				t.Errorf("apply evidence mismatch (Before/After %s / %s) or missing rule %s", res.Before, res.After, tc.ruleID)
+			}
+			if got := unexpected.String(); got != "" {
+				t.Errorf("refusal issued non-read requests: %s", got)
+			}
+		})
+	}
+}
+
+// Request-shape validation must reject before any controller contact.
+func TestOmadaServicePlanApplyNat_Validation(t *testing.T) {
+	svc := NewOmadaService()
+	ctx := context.Background()
+	opts := OmadaOptions{Host: "https://omada.local"}
+	cases := []struct {
+		name string
+		req  OmadaNatApplyRequest
+		want string
+	}{
+		{"source_nat refused", OmadaNatApplyRequest{Operation: "source_nat"}, "Omada has no source_nat collection"},
+		{"toggle one_to_one", OmadaNatApplyRequest{Operation: "one_to_one", Action: "toggle", RuleUUID: "u1"}, "toggle is only supported for port_forward"},
+		{"bogus action", OmadaNatApplyRequest{Operation: "port_forward", Action: "reboot"}, "action must be one of create, update, delete, toggle"},
+		{"delete without uuid", OmadaNatApplyRequest{Operation: "port_forward", Action: "delete"}, "rule_uuid is required"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := svc.PlanNat(ctx, opts, tc.req); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("PlanNat error = %v, want %q", err, tc.want)
+			}
+			if _, err := svc.ApplyNat(ctx, opts, tc.req); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("ApplyNat error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// Registry safety rails: an absent or non-mutating Omada provider must fail
+// the NAT plan/apply with a clear error, not a panic or a fake outcome.
+func TestOmadaServicePlanApplyNat_RegistryRails(t *testing.T) {
+	svc := NewOmadaService()
+	ctx := context.Background()
+	opts := OmadaOptions{Host: "https://omada.local"}
+	req := OmadaNatApplyRequest{Operation: "port_forward", Action: "create"}
+
+	providers.Reset()
+	t.Cleanup(func() {
+		providers.Reset()
+		_ = providers.Register(&omadaprovider.OmadaProvider{})
+	})
+
+	if _, err := svc.PlanNat(ctx, opts, req); err == nil || !strings.Contains(err.Error(), "provider omada not registered") {
+		t.Fatalf("unregistered PlanNat error = %v", err)
+	}
+	if _, err := svc.ApplyNat(ctx, opts, req); err == nil || !strings.Contains(err.Error(), "provider omada not registered") {
+		t.Fatalf("unregistered ApplyNat error = %v", err)
+	}
+
+	if err := providers.Register(nonMutatingProvider{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if _, err := svc.PlanNat(ctx, opts, req); err == nil || !strings.Contains(err.Error(), "does not implement NAT mutation") {
+		t.Fatalf("non-mutating PlanNat error = %v", err)
+	}
+	if _, err := svc.ApplyNat(ctx, opts, req); err == nil || !strings.Contains(err.Error(), "does not implement NAT mutation") {
+		t.Fatalf("non-mutating ApplyNat error = %v", err)
 	}
 }

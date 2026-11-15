@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
 	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
@@ -467,6 +468,14 @@ func TestOmadaService_SessionFailures(t *testing.T) {
 			_, err := NewOmadaService().ListLanProfiles(context.Background(), opts)
 			return err
 		}},
+		{"dhcp-users/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().ListGatewayDHCPUsers(context.Background(), opts, "aa:bb:cc:dd:ee:00")
+			return err
+		}},
+		{"dhcp-users/connect-fail", connectOpts, "fetching controller info", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().ListGatewayDHCPUsers(context.Background(), opts, "aa:bb:cc:dd:ee:00")
+			return err
+		}},
 		{"plan-port/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
 			_, err := NewOmadaService().PlanPort(context.Background(), opts, OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "trusted"})
 			return err
@@ -903,7 +912,105 @@ func TestOmadaServiceApplyLAN_CreateFails(t *testing.T) {
 	}
 }
 
-func omadaSSIDHandler(t *testing.T, ssids string, failGroups, failSSIDs bool) http.HandlerFunc {
+// The plan session can succeed while the apply's second session fails; the
+// error must surface from the apply, after the plan already committed.
+func TestOmadaServiceApplyLAN_SessionFailsAfterPlan(t *testing.T) {
+	st := omadaPortStateFresh()
+	h := omadaPortBaseHandler(t, st)
+	tokens := 0
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/openapi/authorize/token" {
+			tokens++
+			if tokens > 1 {
+				writeOmadaEnvelope(w, -44106, `null`)
+				return
+			}
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+			return
+		}
+		h(w, r)
+	})
+	_, err := NewOmadaService().ApplyLAN(context.Background(), omadaPortOpts(ts.URL),
+		OmadaLANRequest{Name: "newlan", VLAN: 99, GatewaySubnet: "10.0.99.1/24"}, false)
+	if err == nil {
+		t.Fatal("expected the apply session to fail")
+	}
+}
+
+func TestOmadaServiceApplyLAN_UpdateDeleteFail(t *testing.T) {
+	st := omadaPortStateFresh()
+	h := omadaPortBaseHandler(t, st)
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/lan-networks/") && (r.Method == http.MethodPut || r.Method == http.MethodDelete) {
+			writeOmadaEnvelope(w, -1001, `null`)
+			return
+		}
+		h(w, r)
+	})
+	svc := NewOmadaService()
+	ctx := context.Background()
+	opts := omadaPortOpts(ts.URL)
+	if _, err := svc.ApplyLAN(ctx, opts, OmadaLANRequest{Name: "trusted", VLAN: 2}, false); err == nil {
+		t.Fatal("expected update failure")
+	}
+	if _, err := svc.ApplyLAN(ctx, opts, OmadaLANRequest{Name: "trusted", Delete: true}, false); err == nil {
+		t.Fatal("expected delete failure")
+	}
+}
+
+// A failure on the site's network read must fail both the LAN plan and the
+// inventory's fatal network read.
+func TestOmadaServicePlanLAN_GetNetworksFails(t *testing.T) {
+	st := omadaPortStateFresh()
+	st.NetworksFailAfter = 1
+	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+	if _, err := NewOmadaService().PlanLAN(context.Background(), omadaPortOpts(ts.URL), OmadaLANRequest{Name: "iot"}); err == nil {
+		t.Fatal("expected PlanLAN fetch error")
+	}
+}
+
+func TestOmadaServiceInventory_FetchFails(t *testing.T) {
+	st := omadaPortStateFresh()
+	st.NetworksFailAfter = 1
+	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+	if _, err := NewOmadaService().Inventory(context.Background(), omadaPortOpts(ts.URL)); err == nil {
+		t.Fatal("expected Inventory fetch error")
+	}
+}
+
+// A request that matches the controller's current LAN must plan unchanged
+// with the existing network id.
+func TestOmadaServicePlanLAN_Unchanged(t *testing.T) {
+	st := omadaPortStateFresh()
+	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+	plan, err := NewOmadaService().PlanLAN(context.Background(), omadaPortOpts(ts.URL),
+		OmadaLANRequest{Name: "trusted", VLAN: 1, GatewaySubnet: "10.0.10.1/24"})
+	if err != nil {
+		t.Fatalf("PlanLAN: %v", err)
+	}
+	if plan.Action != "unchanged" || plan.ID != "n1" {
+		t.Errorf("plan = %+v, want unchanged n1", plan)
+	}
+}
+
+func TestOmadaServiceListGatewayDHCPUsers_FetchFails(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/openapi/v1/abc123/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
+		default:
+			writeOmadaEnvelope(w, -33004, `null`)
+		}
+	})
+	_, err := NewOmadaService().ListGatewayDHCPUsers(context.Background(), omadaPortOpts(ts.URL), "aa:bb:cc:dd:ee:00")
+	if err == nil || !strings.Contains(err.Error(), "fetching gateway DHCP users") {
+		t.Fatalf("error = %v, want gateway DHCP users fetch prefix", err)
+	}
+}
+
+func omadaSSIDHandler(t *testing.T, ssids string, failGroups, failSSIDs, failWrites bool) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -924,10 +1031,22 @@ func omadaSSIDHandler(t *testing.T, ssids string, failGroups, failSSIDs bool) ht
 			}
 			writeOmadaEnvelope(w, 0, ssids)
 		case strings.HasSuffix(r.URL.Path, "/ssids") && r.Method == http.MethodPost:
+			if failWrites {
+				writeOmadaEnvelope(w, -1001, `null`)
+				return
+			}
 			writeOmadaEnvelope(w, 0, `{"id":"s-new"}`)
 		case strings.Contains(r.URL.Path, "/ssids/") && r.Method == http.MethodPut:
+			if failWrites {
+				writeOmadaEnvelope(w, -1001, `null`)
+				return
+			}
 			writeOmadaEnvelope(w, 0, `{}`)
 		case strings.Contains(r.URL.Path, "/ssids/") && r.Method == http.MethodDelete:
+			if failWrites {
+				writeOmadaEnvelope(w, -1001, `null`)
+				return
+			}
 			writeOmadaEnvelope(w, 0, `{}`)
 		default:
 			writeOmadaEnvelope(w, -1, `null`)
@@ -937,7 +1056,7 @@ func omadaSSIDHandler(t *testing.T, ssids string, failGroups, failSSIDs bool) ht
 
 func TestOmadaServiceListPlanApplySSID(t *testing.T) {
 	const listed = `{"totalRows":1,"data":[{"id":"s1","name":"iot-wifi","ssid":"iot","enable":true,"vlanId":60,"security":"wpa2","wlanGroupId":"g1"}]}`
-	ts := omadaTestServer(t, omadaSSIDHandler(t, listed, false, false))
+	ts := omadaTestServer(t, omadaSSIDHandler(t, listed, false, false, false))
 	svc := NewOmadaService()
 	ctx := context.Background()
 	opts := omadaPortOpts(ts.URL)
@@ -988,14 +1107,14 @@ func TestOmadaServiceListPlanApplySSID(t *testing.T) {
 }
 
 func TestOmadaServiceSSID_Errors(t *testing.T) {
-	opts := omadaPortOpts(omadaTestServer(t, omadaSSIDHandler(t, `{"totalRows":0,"data":[]}`, true, false)).URL)
+	opts := omadaPortOpts(omadaTestServer(t, omadaSSIDHandler(t, `{"totalRows":0,"data":[]}`, true, false, false)).URL)
 	if _, err := NewOmadaService().ListSSIDs(context.Background(), opts); err == nil {
 		t.Fatal("expected list groups error")
 	}
 	if _, err := NewOmadaService().PlanSSID(context.Background(), opts, OmadaSSIDRequest{Name: "x"}); err == nil {
 		t.Fatal("expected plan groups error after ssid list")
 	}
-	failSSIDs := omadaPortOpts(omadaTestServer(t, omadaSSIDHandler(t, ``, false, true)).URL)
+	failSSIDs := omadaPortOpts(omadaTestServer(t, omadaSSIDHandler(t, ``, false, true, false)).URL)
 	if _, err := NewOmadaService().ListSSIDs(context.Background(), failSSIDs); err == nil {
 		t.Fatal("expected list ssids error")
 	}
@@ -1004,5 +1123,62 @@ func TestOmadaServiceSSID_Errors(t *testing.T) {
 	}
 	if _, err := NewOmadaService().ApplySSID(context.Background(), failSSIDs, OmadaSSIDRequest{Name: "x"}, false); err == nil {
 		t.Fatal("expected apply plan error")
+	}
+}
+
+// Controller write failures must surface from every SSID mutation outcome,
+// after the plan already succeeded.
+func TestOmadaServiceSSID_WriteFails(t *testing.T) {
+	const listed = `{"totalRows":1,"data":[{"id":"s1","name":"iot-wifi","ssid":"iot","enable":true,"vlanId":60,"security":"wpa2","wlanGroupId":"g1"}]}`
+	ts := omadaTestServer(t, omadaSSIDHandler(t, listed, false, false, true))
+	svc := NewOmadaService()
+	ctx := context.Background()
+	opts := omadaPortOpts(ts.URL)
+	if _, err := svc.ApplySSID(ctx, opts, OmadaSSIDRequest{SSID: "guest", VLAN: 70}, false); err == nil {
+		t.Error("expected create failure")
+	}
+	if _, err := svc.ApplySSID(ctx, opts, OmadaSSIDRequest{Name: "iot-wifi", VLAN: 61, Enabled: true}, false); err == nil {
+		t.Error("expected update failure")
+	}
+	if _, err := svc.ApplySSID(ctx, opts, OmadaSSIDRequest{Name: "iot-wifi", Delete: true}, false); err == nil {
+		t.Error("expected delete failure")
+	}
+}
+
+// The apply session's WLAN-group read can fail after the plan session
+// succeeded; the mutation must stop with the fetch error.
+func TestOmadaServiceSSID_ApplySessionFails(t *testing.T) {
+	const listed = `{"totalRows":1,"data":[{"id":"s1","name":"iot-wifi","ssid":"iot","enable":true,"vlanId":60,"security":"wpa2","wlanGroupId":"g1"}]}`
+	groupsGets := 0
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/wlan-groups") {
+			groupsGets++
+			if groupsGets > 1 {
+				writeOmadaEnvelope(w, -33004, `null`)
+				return
+			}
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"g1","name":"Default"}]}`)
+			return
+		}
+		omadaSSIDHandler(t, listed, false, false, false)(w, r)
+	})
+	if _, err := NewOmadaService().ApplySSID(context.Background(), omadaPortOpts(ts.URL), OmadaSSIDRequest{SSID: "guest", VLAN: 70}, false); err == nil {
+		t.Fatal("expected the apply session's wlan-groups fetch to fail")
+	}
+}
+
+func TestResolveWLANGroupID(t *testing.T) {
+	groups := []omadabackend.WLANGroup{{ID: "g1", Name: "Default"}, {ID: "g2", Name: "Guests"}}
+	if got := resolveWLANGroupID(groups, "guests"); got != "g2" {
+		t.Errorf("by name = %q, want g2", got)
+	}
+	if got := resolveWLANGroupID(groups, "G1"); got != "g1" {
+		t.Errorf("by id = %q, want g1", got)
+	}
+	if got := resolveWLANGroupID(groups, "no-such-group"); got != "no-such-group" {
+		t.Errorf("unknown name = %q, want fallthrough to the name", got)
+	}
+	if got := resolveWLANGroupID(nil, ""); got != "" {
+		t.Errorf("empty name = %q, want empty", got)
 	}
 }
