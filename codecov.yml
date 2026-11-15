@@ -59,3 +59,9 @@ ignore:
   # untestable without fault injection, which would otherwise sink the
   # patch gate; exclude them from the math.
   - "internal/testutil/**"
+  # internal/probe/fake is the in-process fake SSH server used by probe
+  # and audit tests: every importer is a _test.go file, and its own
+  # tests (fake_server_test.go) exercise the client-facing behavior.
+  # The uncounted remainder is t.Fatal guards and broken-connection
+  # error returns, untestable without fault injection.
+  - "internal/probe/fake/**"

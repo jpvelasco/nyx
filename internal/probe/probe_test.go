@@ -2,13 +2,6 @@ package probe
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/ed25519"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/subtle"
-	"encoding/binary"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
@@ -17,44 +10,25 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/ssh"
-
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/probe/fake"
 )
-
-// testSSHCredential is the single credential the fake SSH server's password
-// callback accepts. The value is inert: probe itself never authenticates with
-// a password, so this only exercises the rejection path of the handshake.
-const testSSHCredential = "testpass"
 
 // lastTestServerPort tracks the ephemeral port of the most recently started
 // test SSH server so testProbe can point Run/Check at it. Tests start their
 // server before building the probe, so the value is always the right one.
 var lastTestServerPort int
 
-// testSSHServer is an in-process SSH server used to exercise Run/Check
-// against a real handshake on a loopback port without external dependencies.
-type testSSHServer struct {
-	t              *testing.T
-	ln             net.Listener
-	config         *ssh.ServerConfig
-	rejectSessions bool
-	hangExec       bool
-	execReply      bool
-	exitStatus     uint32
-	wg             sync.WaitGroup
-}
-
 // startTestSSHServer binds an ephemeral loopback port and serves SSH in the
-// background. The bound port is recorded in lastTestServerPort so testProbe
-// points Run/Check at the running server. Ephemeral ports avoid privileged
-// port 22 so these tests also run on rootless CI runners.
-func startTestSSHServer(t *testing.T, hangExec bool, rejectSessions bool, execReply bool, exitStatus uint32) *testSSHServer {
+// background via the shared fake SSH server (internal/probe/fake). The bound
+// port is recorded in lastTestServerPort so testProbe points Run/Check at
+// the running server. Ephemeral ports avoid privileged port 22 so these
+// tests also run on rootless CI runners.
+func startTestSSHServer(t *testing.T, hangExec bool, rejectSessions bool, execReply bool, exitStatus uint32) *fake.Server {
 	t.Helper()
 	return startTestSSHServerWithOptions(t, hangExec, rejectSessions, execReply, exitStatus, false)
 }
@@ -62,141 +36,27 @@ func startTestSSHServer(t *testing.T, hangExec bool, rejectSessions bool, execRe
 // startTestSSHServerRejectingKeys is like startTestSSHServer, but the server
 // rejects every public key so client-side auth failures can be exercised
 // without racing a config mutation against the serve goroutine.
-func startTestSSHServerRejectingKeys(t *testing.T, hangExec bool, rejectSessions bool, execReply bool, exitStatus uint32) *testSSHServer {
+func startTestSSHServerRejectingKeys(t *testing.T, hangExec bool, rejectSessions bool, execReply bool, exitStatus uint32) *fake.Server {
 	t.Helper()
 	return startTestSSHServerWithOptions(t, hangExec, rejectSessions, execReply, exitStatus, true)
 }
 
-func startTestSSHServerWithOptions(t *testing.T, hangExec bool, rejectSessions bool, execReply bool, exitStatus uint32, rejectKeys bool) *testSSHServer {
+func startTestSSHServerWithOptions(t *testing.T, hangExec bool, rejectSessions bool, execReply bool, exitStatus uint32, rejectKeys bool) *fake.Server {
 	t.Helper()
-	hostKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	signer, err := ssh.NewSignerFromKey(hostKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	publicKeyCallback := func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-		return nil, nil
-	}
-	if rejectKeys {
-		publicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-			return nil, fmt.Errorf("key rejected for %q", conn.User())
-		}
-	}
-	config := &ssh.ServerConfig{
-		PasswordCallback: func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
-			if subtle.ConstantTimeCompare(password, []byte(testSSHCredential)) == 1 {
-				return nil, nil
-			}
-			return nil, fmt.Errorf("password rejected for %q", conn.User())
-		},
-		PublicKeyCallback: publicKeyCallback,
-	}
-	config.AddHostKey(signer)
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("cannot bind test SSH listener: %v", err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	lastTestServerPort = port
-
-	srv := &testSSHServer{t: t, ln: ln, config: config, hangExec: hangExec, rejectSessions: rejectSessions, execReply: execReply, exitStatus: exitStatus}
-	srv.wg.Add(1)
-	go srv.serve()
-	// Cleanup runs LIFO: close the listener first, then wait for the serve loop.
-	t.Cleanup(srv.wg.Wait)
-	t.Cleanup(func() { ln.Close() })
+	srv := fake.Start(t, fake.Options{
+		HangExec:       hangExec,
+		RejectSessions: rejectSessions,
+		ExecReply:      execReply,
+		RejectKeys:     rejectKeys,
+		ExitStatus:     exitStatus,
+	})
+	lastTestServerPort = srv.Port
 	return srv
-}
-
-func (s *testSSHServer) serve() {
-	defer s.wg.Done()
-	for {
-		conn, err := s.ln.Accept()
-		if err != nil {
-			return
-		}
-		go s.handleConn(conn)
-	}
-}
-
-func (s *testSSHServer) handleConn(conn net.Conn) {
-	sshConn, chans, reqs, err := ssh.NewServerConn(conn, s.config)
-	if err != nil {
-		return
-	}
-	defer sshConn.Close()
-	go ssh.DiscardRequests(reqs)
-	for newChannel := range chans {
-		if newChannel.ChannelType() != "session" {
-			newChannel.Reject(ssh.UnknownChannelType, "unsupported channel")
-			continue
-		}
-		if s.rejectSessions {
-			newChannel.Reject(ssh.UnknownChannelType, "sessions disabled")
-			continue
-		}
-		ch, requests, err := newChannel.Accept()
-		if err != nil {
-			continue
-		}
-		go s.handleSession(ch, requests)
-	}
-}
-
-func (s *testSSHServer) handleSession(ch ssh.Channel, requests <-chan *ssh.Request) {
-	defer ch.Close()
-	for req := range requests {
-		if req.Type != "exec" {
-			continue
-		}
-		if s.hangExec {
-			// Never reply or close — the remote command "runs" forever.
-			continue
-		}
-		if !s.execReply {
-			req.Reply(false, nil)
-			return
-		}
-		req.Reply(true, nil)
-		if _, err := ch.Write([]byte(commandFromExecPayload(req.Payload))); err != nil {
-			return
-		}
-		ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{Status: s.exitStatus}))
-		return
-	}
-}
-
-// commandFromExecPayload extracts the command string from an RFC4254 exec request.
-func commandFromExecPayload(payload []byte) string {
-	if len(payload) < 4 {
-		return ""
-	}
-	size := binary.BigEndian.Uint32(payload[:4])
-	if int(size) > len(payload)-4 {
-		return string(payload[4:])
-	}
-	return string(payload[4 : 4+size])
 }
 
 // writeTestKey writes a fresh ed25519 private key in OpenSSH format.
 func writeTestKey(t *testing.T, path string) {
-	t.Helper()
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	block, err := ssh.MarshalPrivateKey(priv, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	pemBytes := pem.EncodeToMemory(block)
-	if err := os.WriteFile(path, pemBytes, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	fake.WriteKey(t, path)
 }
 
 func testProbe(host string) Probe {
@@ -268,6 +128,26 @@ func TestRun_CommandError(t *testing.T) {
 	}
 	if !strings.Contains(out, "'false'") {
 		t.Errorf("output should still carry echoed command, got %q", out)
+	}
+}
+
+// TestRun_RemoteErrorCarriesExitStatus pins the shell exit statuses that
+// distinguish a measured result (1 = command ran, condition false) from a
+// dependency failure (126/127 = command missing or not executable).
+func TestRun_RemoteErrorCarriesExitStatus(t *testing.T) {
+	startTestSSHServer(t, false, false, true, 127)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+	_, err := Run(context.Background(), p, []string{"nc", "-z", "-w", "3", "10.0.40.1", "80"}, true)
+	var remoteErr *RemoteError
+	if !errors.As(err, &remoteErr) {
+		t.Fatalf("expected *RemoteError, got %T: %v", err, err)
+	}
+	if remoteErr.Status() != 127 {
+		t.Errorf("RemoteError.Status() = %d, want 127", remoteErr.Status())
 	}
 }
 
@@ -370,7 +250,7 @@ func TestIsUnreachable(t *testing.T) {
 		{name: "transport", err: &TransportError{fmt.Errorf("dial failed")}, want: true},
 		{name: "host key", err: &HostKeyError{fmt.Errorf("host key verification failed")}, want: true},
 		{name: "auth", err: &AuthError{fmt.Errorf("unable to authenticate")}, want: true},
-		{name: "remote command failure", err: &RemoteError{fmt.Errorf("exit status 1")}, want: false},
+		{name: "remote command failure", err: &RemoteError{err: fmt.Errorf("exit status 1")}, want: false},
 		{name: "generic", err: fmt.Errorf("something else"), want: false},
 		{name: "nil", err: nil, want: false},
 	}
@@ -592,21 +472,6 @@ func TestAuthMethods_WithAgent(t *testing.T) {
 	}
 }
 
-func TestCommandFromExecPayload(t *testing.T) {
-	payload := make([]byte, 4)
-	binary.BigEndian.PutUint32(payload, uint32(len("echo hi")))
-	payload = append(payload, []byte("echo hi")...)
-	if got := commandFromExecPayload(payload); got != "echo hi" {
-		t.Errorf("got %q", got)
-	}
-	if got := commandFromExecPayload(nil); got != "" {
-		t.Errorf("empty payload should give empty command, got %q", got)
-	}
-	if got := commandFromExecPayload([]byte{0, 0, 0, 99, 'a'}); got != "a" {
-		t.Errorf("oversized length should fall back, got %q", got)
-	}
-}
-
 func TestRun_CancellationAbortsHangingCommand(t *testing.T) {
 	// The remote server never replies to exec — the command hangs. The
 	// context deadline must abort it by closing the connection.
@@ -686,7 +551,7 @@ func TestRun_AuthMethodsError(t *testing.T) {
 func TestRun_AuthDiagnosticsTable(t *testing.T) {
 	tests := []struct {
 		name        string
-		setup       func(t *testing.T, srv *testSSHServer) string // returns key path; "" = none
+		setup       func(t *testing.T, srv *fake.Server) string // returns key path; "" = none
 		skipVerify  bool
 		rejectKeys  bool         // server rejects every public key
 		wantErrKind reflect.Type // nil = success
@@ -694,7 +559,7 @@ func TestRun_AuthDiagnosticsTable(t *testing.T) {
 	}{
 		{
 			name: "host key fail",
-			setup: func(t *testing.T, _ *testSSHServer) string {
+			setup: func(t *testing.T, _ *fake.Server) string {
 				keyPath := filepath.Join(t.TempDir(), "id_ed25519")
 				writeTestKey(t, keyPath)
 				return keyPath
@@ -704,7 +569,7 @@ func TestRun_AuthDiagnosticsTable(t *testing.T) {
 		},
 		{
 			name: "skip verify succeeds",
-			setup: func(t *testing.T, _ *testSSHServer) string {
+			setup: func(t *testing.T, _ *fake.Server) string {
 				keyPath := filepath.Join(t.TempDir(), "id_ed25519")
 				writeTestKey(t, keyPath)
 				return keyPath
@@ -713,7 +578,7 @@ func TestRun_AuthDiagnosticsTable(t *testing.T) {
 		},
 		{
 			name: "key rejected by server",
-			setup: func(t *testing.T, _ *testSSHServer) string {
+			setup: func(t *testing.T, _ *fake.Server) string {
 				keyPath := filepath.Join(t.TempDir(), "id_ed25519")
 				writeTestKey(t, keyPath)
 				return keyPath
@@ -725,7 +590,7 @@ func TestRun_AuthDiagnosticsTable(t *testing.T) {
 		},
 		{
 			name: "missing key path",
-			setup: func(t *testing.T, _ *testSSHServer) string {
+			setup: func(t *testing.T, _ *fake.Server) string {
 				return filepath.Join(t.TempDir(), "missing-key")
 			},
 			wantErrKind: reflect.TypeOf((*AuthError)(nil)),
@@ -733,7 +598,7 @@ func TestRun_AuthDiagnosticsTable(t *testing.T) {
 		},
 		{
 			name: "unparsable key",
-			setup: func(t *testing.T, _ *testSSHServer) string {
+			setup: func(t *testing.T, _ *fake.Server) string {
 				keyPath := filepath.Join(t.TempDir(), "id_ed25519")
 				if err := os.WriteFile(keyPath, []byte("not a private key"), 0o600); err != nil {
 					t.Fatal(err)
@@ -745,7 +610,7 @@ func TestRun_AuthDiagnosticsTable(t *testing.T) {
 		},
 		{
 			name: "no key and no agent",
-			setup: func(t *testing.T, _ *testSSHServer) string {
+			setup: func(t *testing.T, _ *fake.Server) string {
 				t.Setenv("SSH_AUTH_SOCK", "")
 				return ""
 			},
