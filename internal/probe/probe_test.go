@@ -284,6 +284,56 @@ func TestRun_KnownHostsBareHostEntryDoesNotMatchNonDefaultPort(t *testing.T) {
 	}
 }
 
+// TestRun_KnownHostsMissingHomeRejected pins AC-2: an unlocatable home
+// directory is a fail-closed HostKeyError naming the known_hosts problem
+// and the opt-out guidance, so a broken environment can never silently
+// disable host key verification.
+func TestRun_KnownHostsMissingHomeRejected(t *testing.T) {
+	startTestSSHServer(t, false, false, true, 0)
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	writeTestKey(t, keyPath)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", "")
+	} else {
+		t.Setenv("HOME", "")
+	}
+
+	p := testProbe("127.0.0.1")
+	p.Key = keyPath
+	_, err := Run(context.Background(), p, []string{"echo", "hi"}, false)
+	var hostKeyErr *HostKeyError
+	if !errors.As(err, &hostKeyErr) {
+		t.Fatalf("expected *HostKeyError, got %T: %v", err, err)
+	}
+	for _, want := range []string{"home directory", "known_hosts", "--skip-host-key-verify"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
+	}
+}
+
+// TestTrustedHostKeyCallback_UnparseableAddressRejected pins the
+// unparseable-dial-address safety net: an out-of-range port makes the peer
+// address unparseable, and the callback rejects with the typed error,
+// surviving a nil net.Addr from the handshake.
+func TestTrustedHostKeyCallback_UnparseableAddressRejected(t *testing.T) {
+	home := withTestHome(t)
+	// A valid, empty trust file gets the callback to the dial-address check.
+	writeKnownHosts(t, home, "")
+	p := Probe{Name: "p1", Host: "127.0.0.1", Port: 70000} // out of TCP range
+	cb := trustedHostKeyCallback(p)
+	err := cb("127.0.0.1", nil, nil)
+	var rej *hostKeyRejection
+	if !errors.As(err, &rej) {
+		t.Fatalf("expected *hostKeyRejection, got %T: %v", err, err)
+	}
+	for _, want := range []string{"host key verification failed", "invalid port"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
+	}
+}
+
 func TestRun_NoAuthMethods(t *testing.T) {
 	startTestSSHServer(t, false, false, true, 0)
 	t.Setenv("SSH_AUTH_SOCK", "")
