@@ -1177,7 +1177,7 @@ func (e *Engine) runPortCheckViaProbe(ctx context.Context, a intent.Assertion, p
 	result.Expected["ports"] = a.Ports
 	if !strings.EqualFold(protocol, "tcp") {
 		result.Status = models.StatusError
-		result.Summary = fmt.Sprintf("remote port_check supports tcp only; drop protocol %q from the assertion to check %s locally", strings.ToUpper(protocol), a.Target)
+		result.Summary = fmt.Sprintf("remote port_check supports tcp only (got %s); remove runner to check %s locally, or drop protocol to check tcp from the probe", strings.ToUpper(protocol), a.Target)
 		result.Finish()
 		return result, nil
 	}

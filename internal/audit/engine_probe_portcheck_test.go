@@ -295,6 +295,11 @@ func TestRunPortCheckViaProbe_NonTCPProtocolRejected(t *testing.T) {
 	if !strings.Contains(strings.ToLower(result.Summary), "udp") {
 		t.Errorf("summary should name the rejected protocol, got %q", result.Summary)
 	}
+	for _, want := range []string{"remove runner", "drop protocol"} {
+		if !strings.Contains(strings.ToLower(result.Summary), want) {
+			t.Errorf("summary should offer the %q remediation, got %q", want, result.Summary)
+		}
+	}
 }
 
 // Probe transport failure (dead listener) leaves every port unmeasured:
