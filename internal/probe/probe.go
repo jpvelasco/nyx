@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
@@ -52,6 +53,16 @@ type AuthError struct{ err error }
 
 func (e *AuthError) Error() string { return e.err.Error() }
 func (e *AuthError) Unwrap() error { return e.err }
+
+// hostKeyRejection is the typed failure the host-key callback returns when
+// the presented key cannot be verified against known_hosts (or the trust
+// file itself is unavailable). classifyHandshakeError recovers it via
+// errors.As — x/crypto/ssh returns the callback error from the kex layer
+// and NewClientConn wraps it with %w — so host-key failures are classified
+// by type, never by error-text markers.
+type hostKeyRejection struct{ msg string }
+
+func (e *hostKeyRejection) Error() string { return e.msg }
 
 // IsUnreachable reports whether err means the probe never executed the
 // remote command — transport, host-key, or authentication failure — as
@@ -193,9 +204,7 @@ func dialAndAuth(ctx context.Context, p Probe, skipHostKeyVerify bool) (*ssh.Cli
 		return nil, &AuthError{fmt.Errorf("probe %q: no authentication methods available — set key: <path> in the probe spec, or start ssh-agent and export SSH_AUTH_SOCK", p.Name)}
 	}
 
-	hostKeyCallback := ssh.HostKeyCallback(func(hostname string, _ net.Addr, _ ssh.PublicKey) error {
-		return fmt.Errorf("probe %q: host key verification failed for %s — verify the key matches %s, or bypass with --skip-host-key-verify (CLI) / skip_host_key_verify: true (probe spec)", p.Name, hostname, p.Host)
-	})
+	hostKeyCallback := trustedHostKeyCallback(p)
 	if skipHostKeyVerify || p.SkipHostKeyVerify {
 		hostKeyCallback = ssh.InsecureIgnoreHostKey() // #nosec G106 — user explicitly opted out // nosemgrep codacy.tools-configs.go.lang.security.audit.crypto.insecure_ssh.avoid-ssh-insecure-ignore-host-key codacy.tools-configs.go_crypto_rule-insecure-ignore-host-key
 	}
@@ -217,6 +226,77 @@ func dialAndAuth(ctx context.Context, p Probe, skipHostKeyVerify bool) (*ssh.Cli
 	return ssh.NewClient(sshConn, chans, reqs), nil
 }
 
+// skipVerifyHint is the opt-out guidance appended to every host-key
+// rejection so the fix is one line.
+const skipVerifyHint = "or bypass with --skip-host-key-verify (CLI) / skip_host_key_verify: true (probe spec)"
+
+// trustedHostKeyCallback verifies the presented host key against the
+// user's standard known_hosts file (os.UserHomeDir/.ssh/known_hosts, the
+// same location ssh(1) reads). Fail-closed by design: unknown keys,
+// changed keys, and unavailable trust files are all rejections — there is
+// no trust-on-first-use and no silent acceptance.
+func trustedHostKeyCallback(p Probe) ssh.HostKeyCallback {
+	addr := p.addr()
+	path, err := knownHostsFile()
+	if err != nil {
+		return rejectCallback(hostKeyRejectionFor(p, addr, err.Error()))
+	}
+	verify, err := knownhosts.New(path)
+	if err != nil {
+		return rejectCallback(hostKeyRejectionFor(p, addr, fmt.Sprintf("%s is missing or unreadable (%v); restore it, run an interactive ssh session to %s once to install its key, or add it with ssh-keyscan", path, err, p.Host)))
+	}
+	return func(hostname string, _ net.Addr, key ssh.PublicKey) error {
+		// The knownhosts callback dereferences the peer address (it
+		// SplitHostPorts remote.String()), so pass the parsed dial
+		// address, never nil.
+		peer, err := net.ResolveTCPAddr("tcp", addr)
+		if err != nil {
+			return hostKeyRejectionFor(p, hostname, err.Error())
+		}
+		err = verify(hostname, peer, key)
+		if err == nil {
+			return nil
+		}
+		detail := fmt.Sprintf("the host key could not be verified: %v", err)
+		var keyErr *knownhosts.KeyError
+		if errors.As(err, &keyErr) {
+			if len(keyErr.Want) > 0 {
+				// A non-empty Want names the expected keys: the host is in
+				// the file but its key differs.
+				detail = fmt.Sprintf("the host key does not match the entry in %s — the key changed, or this may be a man-in-the-middle; investigate the host before trusting it", path)
+			} else {
+				detail = fmt.Sprintf("the host key is not in %s — verify it out-of-band (interactive ssh session or ssh-keyscan), then add an entry for %q", path, knownhosts.Normalize(addr))
+			}
+		}
+		return hostKeyRejectionFor(p, hostname, detail)
+	}
+}
+
+// rejectCallback is a host-key callback that rejects every presented key
+// with the given typed error, used when the trust file itself is
+// unavailable (fail-closed, before the handshake can present a key).
+func rejectCallback(rej *hostKeyRejection) ssh.HostKeyCallback {
+	return func(hostname string, _ net.Addr, _ ssh.PublicKey) error {
+		return rej
+	}
+}
+
+// hostKeyRejectionFor builds the typed rejection error for a failed host
+// key verification, with the probe identity and the opt-out guidance.
+func hostKeyRejectionFor(p Probe, addr, detail string) *hostKeyRejection {
+	return &hostKeyRejection{fmt.Sprintf("probe %q: host key verification failed for %s — %s, %s", p.Name, addr, detail, skipVerifyHint)}
+}
+
+// knownHostsFile is the standard known_hosts location, the same file
+// ssh(1) reads.
+func knownHostsFile() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot locate the home directory to find known_hosts (%v)", err)
+	}
+	return filepath.Join(home, ".ssh", "known_hosts"), nil
+}
+
 // handshakeDeadline is the effective deadline for the connection +
 // handshake phase: the context's own deadline when one is set, otherwise
 // a finite 10s cap so a stalling peer cannot block a deadline-less
@@ -229,14 +309,17 @@ func handshakeDeadline(ctx context.Context) time.Time {
 }
 
 // classifyHandshakeError maps an SSH handshake failure to a typed, actionable
-// error. The markers are our own host-key callback message and the stable
-// "unable to authenticate" text produced by x/crypto/ssh.
+// error. Host-key rejections arrive as the callback's typed hostKeyRejection
+// (recovered via errors.As — see its comment), so only authentication
+// failures still rely on the stable "unable to authenticate" text produced
+// by x/crypto/ssh; everything else is a transport failure.
 func classifyHandshakeError(p Probe, err error) error {
-	msg := err.Error()
+	var rej *hostKeyRejection
+	if errors.As(err, &rej) {
+		return &HostKeyError{rej}
+	}
 	switch {
-	case strings.Contains(msg, "host key verification failed"):
-		return &HostKeyError{fmt.Errorf("probe %q: SSH host key verification failed for %s — the host key is not trusted; verify it matches %s, or bypass with --skip-host-key-verify (CLI) / skip_host_key_verify: true (probe spec)", p.Name, p.Host, p.Host)}
-	case strings.Contains(msg, "unable to authenticate"):
+	case strings.Contains(err.Error(), "unable to authenticate"):
 		return &AuthError{fmt.Errorf("probe %q: SSH authentication failed for user %q at %s — check the key: path in the probe spec and that the ssh-agent (SSH_AUTH_SOCK) holds the correct key", p.Name, p.User, p.addr())}
 	default:
 		return unreachableError(p, err)
