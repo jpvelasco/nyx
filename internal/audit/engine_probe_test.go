@@ -530,6 +530,62 @@ func TestRunViaProbe_UnsupportedType(t *testing.T) {
 	}
 }
 
+// TestRunViaProbe_DNSCheckRejectsDNSSEC pins the defense-in-depth guard: a
+// programmatically constructed spec (bypassing ValidateSpec) must not obtain
+// a DNSSEC PASS from a probe, because nslookup never validates (#269).
+func TestRunViaProbe_DNSCheckRejectsDNSSEC(t *testing.T) {
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Probes: []intent.Probe{
+			{Name: "probe1", Host: "192.0.2.1", User: "test"},
+		},
+	}
+	eng := NewEngine(spec)
+	eng.Backend = &backends.MockBackend{}
+	a := intent.Assertion{Type: "dns_check", Runner: "probe1", Query: "service.example", DNSSEC: true}
+	_, err := eng.runViaProbe(context.Background(), a)
+	if err == nil {
+		t.Fatal("expected error for probe dns_check with dnssec")
+	}
+	for _, want := range []string{"dnssec", "probe1"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should name %q, got: %v", want, err)
+		}
+	}
+}
+
+// TestRunViaProbe_DNSCheckWithoutDNSSECNotBlockedByGuard pins that the guard
+// only rejects the unsupported dnssec expectation: a plain probe dns_check
+// proceeds to the SSH attempt (transport failure here — no live server),
+// which must surface as a finding, not the guard error.
+func TestRunViaProbe_DNSCheckWithoutDNSSECNotBlockedByGuard(t *testing.T) {
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Probes: []intent.Probe{
+			{Name: "probe1", Host: "192.0.2.1", User: "test", VLAN: "test"},
+		},
+	}
+	eng := NewEngine(spec)
+	eng.Backend = &backends.MockBackend{}
+	eng.SkipHostKeyVerify = true
+	a := intent.Assertion{Type: "dns_check", Runner: "probe1", Query: "service.example"}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	result, err := eng.runViaProbe(ctx, a)
+	if err != nil {
+		t.Fatalf("plain probe dns_check should not hit the guard error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected result")
+	}
+	if result.Status != models.StatusError {
+		t.Errorf("expected error (SSH transport failure), got %s: %s", result.Status, result.Summary)
+	}
+	if strings.Contains(result.Summary, "dnssec") {
+		t.Errorf("summary should not mention the dnssec guard, got: %s", result.Summary)
+	}
+}
+
 func TestRunViaProbe_SSHFailure(t *testing.T) {
 	spec := &intent.Spec{
 		Version: 1, Site: "test",

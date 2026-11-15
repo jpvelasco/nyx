@@ -349,6 +349,16 @@ func validatePortCheckAssertion(i int, a *Assertion) error {
 // rejected here rather than silently reverse the verdict.
 var portCheckExpects = map[string]bool{"open": true, "closed": true}
 
+// ProbeDNSSECUnsupportedError reports that a dnssec expectation cannot be
+// evaluated by a probe runner. The probe's dns_check command is nslookup,
+// which performs plain resolution and never runs DNSSEC validation, so the
+// expectation would be silently unevaluated on the remote path (#269). Both
+// the spec validator and the engine's probe dispatch use this constructor so
+// the message cannot drift.
+func ProbeDNSSECUnsupportedError(runner string) error {
+	return fmt.Errorf("dnssec is not supported by probe runner %q — nslookup on the probe never performs DNSSEC validation; remove dnssec or run the assertion locally (runner: local or omitted)", runner)
+}
+
 func validateDNSCheckAssertion(i int, a *Assertion) error {
 	if a.Query == "" {
 		return fmt.Errorf("assertion[%d]: dns_check requires 'query'", i)
@@ -360,6 +370,12 @@ func validateDNSCheckAssertion(i int, a *Assertion) error {
 		if err := ValidateServer(a.Server); err != nil {
 			return fmt.Errorf("assertion[%d]: dns_check: %w", i, err)
 		}
+	}
+	if a.Runner != "" && a.Runner != "local" && a.DNSSEC {
+		// The probe dns_check command is nslookup, which never performs
+		// DNSSEC validation — a declared dnssec expectation would be
+		// silently unevaluated on the remote path, so reject it up front.
+		return fmt.Errorf("assertion[%d]: dns_check: %w", i, ProbeDNSSECUnsupportedError(a.Runner))
 	}
 	return nil
 }
