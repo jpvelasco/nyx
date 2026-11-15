@@ -1053,6 +1053,13 @@ func (e *Engine) runViaProbe(ctx context.Context, a intent.Assertion) (*models.C
 		return e.runPortCheckViaProbe(ctx, a, probeP)
 	}
 
+	// Defense in depth: the spec validator rejects dnssec with a probe
+	// runner, but a programmatically constructed spec must not obtain a
+	// DNSSEC PASS from nslookup, which never validates (#269).
+	if a.Type == "dns_check" && a.DNSSEC {
+		return nil, intent.ProbeDNSSECUnsupportedError(a.Runner)
+	}
+
 	cmd := probeCommandFor(a, e.Spec)
 	if cmd == nil {
 		return nil, fmt.Errorf("assertion type %q does not support remote probe execution", a.Type)
@@ -1270,6 +1277,8 @@ func probeCommandFor(a intent.Assertion, spec *intent.Spec) []string {
 		}
 		return []string{"ping", "-c", fmt.Sprint(probeHealthPingCount), "-W", "3", target}
 	case "dns_check":
+		// nslookup performs plain resolution only. dnssec expectations are
+		// rejected before remote execution (intent.ProbeDNSSECUnsupportedError).
 		args := []string{"nslookup", a.Query}
 		if a.Server != "" {
 			args = append(args, a.Server)

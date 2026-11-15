@@ -796,3 +796,65 @@ func TestValidateSpec_NetworkHealthProbeRejectsMTU(t *testing.T) {
 		t.Errorf("local network_health with expect_mtu should be valid: %v", err)
 	}
 }
+
+func TestValidateSpec_DNSCheckProbeRejectsDNSSEC(t *testing.T) {
+	// The probe dns_check command is nslookup, which never performs DNSSEC
+	// validation, so declaring dnssec with a probe runner is rejected at
+	// validation instead of silently passing without the requested
+	// validation (#269).
+	probes := []Probe{{Name: "iot-probe", Host: "127.0.0.1", User: "probe"}}
+	spec := &Spec{Version: 1, Site: "test", Probes: probes, Assertions: []Assertion{
+		{Type: "dns_check", Runner: "iot-probe", Query: "service.example", DNSSEC: true},
+	}}
+	err := ValidateSpec(spec)
+	if err == nil {
+		t.Fatal("probe dns_check with dnssec should be rejected")
+	}
+	for _, want := range []string{"dnssec", "iot-probe"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should name %q, got: %v", want, err)
+		}
+	}
+	// Omitted runner (local execution) keeps DNSSEC support (#173).
+	omitted := &Spec{Version: 1, Site: "test", Assertions: []Assertion{
+		{Type: "dns_check", Query: "service.example", DNSSEC: true},
+	}}
+	if err := ValidateSpec(omitted); err != nil {
+		t.Errorf("local dns_check with dnssec should be valid: %v", err)
+	}
+	// Explicit local runner keeps DNSSEC support.
+	local := &Spec{Version: 1, Site: "test", Assertions: []Assertion{
+		{Type: "dns_check", Runner: "local", Query: "service.example", DNSSEC: true},
+	}}
+	if err := ValidateSpec(local); err != nil {
+		t.Errorf("runner:local dns_check with dnssec should be valid: %v", err)
+	}
+	// Probe runners without dnssec keep plain resolution checks.
+	plain := &Spec{Version: 1, Site: "test", Probes: probes, Assertions: []Assertion{
+		{Type: "dns_check", Runner: "iot-probe", Query: "service.example", ExpectIP: "10.0.40.10"},
+	}}
+	if err := ValidateSpec(plain); err != nil {
+		t.Errorf("probe dns_check without dnssec should be valid: %v", err)
+	}
+}
+
+func TestParseSpec_DNSCheckProbeRejectsDNSSEC(t *testing.T) {
+	// End-to-end: the repro spec from #269 must be rejected by ParseSpec,
+	// which is what LoadSpec and every CLI/MCP entry point use.
+	data := []byte(`version: 1
+site: test
+probes:
+  - name: iot-probe
+    host: 127.0.0.1
+    user: probe
+    vlan: iot
+assertions:
+  - type: dns_check
+    runner: iot-probe
+    query: service.example
+    dnssec: true
+`)
+	if _, err := ParseSpec(data); err == nil {
+		t.Fatal("ParseSpec should reject dns_check with a probe runner and dnssec: true")
+	}
+}
