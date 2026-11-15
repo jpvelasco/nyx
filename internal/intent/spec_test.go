@@ -858,3 +858,251 @@ assertions:
 		t.Fatal("ParseSpec should reject dns_check with a probe runner and dnssec: true")
 	}
 }
+
+// --- ParseSpec: strict field decoding (#273) ---
+
+func TestParseSpec_UnknownAssertionFieldRejected(t *testing.T) {
+	// Exact repro from #273: a misspelled assertion field used to be
+	// silently dropped, zeroing the limit and weakening the audit.
+	data := []byte(`version: 1
+site: test
+assertions:
+  - type: network_health
+    target: 10.0.40.1
+    expect_latncy_ms: 1
+`)
+	_, err := ParseSpec(data)
+	if err == nil {
+		t.Fatal("ParseSpec should reject the unknown field expect_latncy_ms")
+	}
+	if !contains(err.Error(), "expect_latncy_ms") {
+		t.Fatalf("error should name the unknown field expect_latncy_ms, got: %v", err)
+	}
+}
+
+func TestParseSpec_UnknownFieldRejected(t *testing.T) {
+	// Unknown fields at every structural level are rejected and named
+	// (AC-2). Free-form map keys are the only exempt surface.
+	cases := []struct {
+		name    string
+		yaml    string
+		unknown string
+	}{
+		{
+			name:    "top-level",
+			yaml:    "version: 1\nsite: test\nassertionz: []\n",
+			unknown: "assertionz",
+		},
+		{
+			name: "network",
+			yaml: `version: 1
+site: test
+networks:
+  - name: servers
+    cidr: 10.0.40.0/24
+    vlan_id: 40
+`,
+			unknown: "vlan_id",
+		},
+		{
+			name: "probe",
+			yaml: `version: 1
+site: test
+probes:
+  - name: iot-probe
+    host: 127.0.0.1
+    user: probe
+    password: hunter2
+`,
+			unknown: "password",
+		},
+		{
+			name: "policy",
+			yaml: `version: 1
+site: test
+policies:
+  - name: p1
+    from: personal
+    to: servers
+    action: deny
+    description: blocks stuff
+`,
+			unknown: "description",
+		},
+		{
+			name: "assertion",
+			yaml: `version: 1
+site: test
+assertions:
+  - type: port_check
+    target: 10.0.40.1
+    ports: [22]
+    expect: open
+    expect_ports: [22]
+`,
+			unknown: "expect_ports",
+		},
+		{
+			name: "inventory",
+			yaml: `version: 1
+site: test
+inventory:
+  controller_version: "6.0"
+  devicesx: []
+`,
+			unknown: "devicesx",
+		},
+		{
+			name: "inventory acl scope",
+			yaml: `version: 1
+site: test
+inventory:
+  acl_scopes:
+    - scoop: gateway
+      rule_count: 3
+`,
+			unknown: "scoop",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseSpec([]byte(tc.yaml))
+			if err == nil {
+				t.Fatalf("ParseSpec should reject the unknown field %s", tc.unknown)
+			}
+			if !contains(err.Error(), tc.unknown) {
+				t.Fatalf("error should name the unknown field %s, got: %v", tc.unknown, err)
+			}
+		})
+	}
+}
+
+func TestParseSpec_FreeFormMapKeysRetained(t *testing.T) {
+	// inventory.network_gateways is a free-form name→gateway map: its keys
+	// are data, not structure, so strict decoding must not police them.
+	data := []byte(`version: 1
+site: test
+inventory:
+  network_gateways:
+    servers: 10.0.40.1
+    iot: 10.0.60.1
+`)
+	spec, err := ParseSpec(data)
+	if err != nil {
+		t.Fatalf("free-form network_gateways keys should parse: %v", err)
+	}
+	if len(spec.Inventory.NetworkGateways) != 2 {
+		t.Fatalf("expected 2 network gateways, got %d", len(spec.Inventory.NetworkGateways))
+	}
+	if spec.Inventory.NetworkGateways["servers"] != "10.0.40.1" {
+		t.Fatalf("gateway value not preserved: %v", spec.Inventory.NetworkGateways)
+	}
+}
+
+func TestParseSpec_ExtraDocumentRejected(t *testing.T) {
+	// The spec is one document; a second nonempty document is invalid and
+	// must be reported instead of silently ignored (AC-5).
+	data := []byte(`version: 1
+site: test
+---
+version: 2
+site: other
+`)
+	_, err := ParseSpec(data)
+	if err == nil {
+		t.Fatal("ParseSpec should reject a second document")
+	}
+	if !contains(err.Error(), "one document") {
+		t.Fatalf("error should say the spec must be one document, got: %v", err)
+	}
+}
+
+func TestParseSpec_TrailingMalformedRejected(t *testing.T) {
+	// Malformed input after the spec document is invalid (AC-5).
+	data := []byte("version: 1\nsite: test\n---\n{broken\n")
+	_, err := ParseSpec(data)
+	if err == nil {
+		t.Fatal("ParseSpec should reject malformed trailing input")
+	}
+	if !contains(err.Error(), "parsing spec YAML") {
+		t.Fatalf("error should be a parse error, got: %v", err)
+	}
+}
+
+func TestParseSpec_TrailingEmptyDocumentRejected(t *testing.T) {
+	// A trailing document marker starts an extra (empty) document, which
+	// still breaks the one-document contract and is rejected.
+	data := []byte("version: 1\nsite: test\n---\n")
+	_, err := ParseSpec(data)
+	if err == nil {
+		t.Fatal("ParseSpec should reject a trailing empty document")
+	}
+	if !contains(err.Error(), "one document") {
+		t.Fatalf("error should say the spec must be one document, got: %v", err)
+	}
+}
+
+func TestParseSpec_EmptyInputSemanticError(t *testing.T) {
+	// Empty input reaches ValidateSpec with the zero spec, so the error is
+	// the usual semantic one (AC-4).
+	_, err := ParseSpec([]byte(""))
+	if err == nil {
+		t.Fatal("ParseSpec should reject an empty spec")
+	}
+	if !contains(err.Error(), "unsupported spec version") {
+		t.Fatalf("empty input should yield the semantic version error, got: %v", err)
+	}
+}
+
+func TestParseSpec_RepoFixturesStillParse(t *testing.T) {
+	// Shipped examples and testdata fixtures are valid current specs and
+	// must keep parsing (AC-3).
+	for _, path := range []string{"../../testdata/valid_spec.yaml", "../../examples/homelab.yaml"} {
+		t.Run(path, func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("reading fixture: %v", err)
+			}
+			if _, err := ParseSpec(data); err != nil {
+				t.Fatalf("fixture %s should parse: %v", path, err)
+			}
+		})
+	}
+}
+
+func TestLoadSpec_RepoFixture(t *testing.T) {
+	// LoadSpec shares ParseSpec's strictness on a real fixture file.
+	if _, err := LoadSpec("../../testdata/valid_spec.yaml"); err != nil {
+		t.Fatalf("testdata/valid_spec.yaml should load: %v", err)
+	}
+}
+
+func TestLoadSpec_SemanticInvalidFixture(t *testing.T) {
+	// The invalid fixture trips semantic validation, not strict decoding:
+	// the error must stay meaningful (AC-4).
+	_, err := LoadSpec("../../testdata/invalid_spec.yaml")
+	if err == nil {
+		t.Fatal("invalid_spec.yaml should not load")
+	}
+	if !contains(err.Error(), "invalid CIDR") {
+		t.Fatalf("semantic error should name the bad CIDR, got: %v", err)
+	}
+}
+
+func TestLoadSpec_UnknownFieldRejected(t *testing.T) {
+	// The public LoadSpec path (temp file) rejects unknown fields (AC-6).
+	path := filepath.Join(t.TempDir(), "spec.yaml")
+	data := []byte(`version: 1
+site: test
+assertions:
+  - type: network_health
+    target: 10.0.40.1
+    expect_latncy_ms: 1
+`)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatalf("writing spec: %v", err)
+	}
+	if _, err := LoadSpec(path); err == nil {
+		t.Fatal("LoadSpec should reject the unknown field expect_latncy_ms")
+	}
+}

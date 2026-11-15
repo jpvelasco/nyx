@@ -2,7 +2,10 @@
 package intent
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 
@@ -137,10 +140,31 @@ func LoadSpec(path string) (*Spec, error) {
 	return ParseSpec(data)
 }
 
-// ParseSpec parses YAML bytes into a Spec
+// ParseSpec parses YAML bytes into a Spec.
+//
+// Unknown fields are rejected: the YAML must contain exactly one document
+// whose keys all match a known spec field (free-form map keys, such as
+// inventory network_gateways, are exempt — they are data, not structure).
+// The decoder reports the unknown key and its line. To correct a parse
+// error, fix or remove the offending key and re-run the command.
 func ParseSpec(data []byte) (*Spec, error) {
 	var spec Spec
-	if err := yaml.Unmarshal(data, &spec); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	// Empty input decodes to the zero spec so ValidateSpec produces its
+	// usual semantic error instead of an obscure empty-document message.
+	if err := dec.Decode(&spec); err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("parsing spec YAML: %w", err)
+	}
+	// A second decode must reach the end of input: any extra document
+	// (even an empty one after a trailing ---) or malformed trailing
+	// input is invalid, never silently ignored.
+	var extra interface{}
+	err := dec.Decode(&extra)
+	if err == nil {
+		return nil, fmt.Errorf("parsing spec YAML: expected exactly one document; found extra content after the first")
+	}
+	if !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parsing spec YAML: %w", err)
 	}
 	if err := ValidateSpec(&spec); err != nil {
