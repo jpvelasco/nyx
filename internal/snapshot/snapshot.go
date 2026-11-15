@@ -298,7 +298,8 @@ func ComputeDrift(baseline, current *Snapshot) *DriftResult {
 		CurrentStatus:  current.Status,
 	}
 
-	// Build lookup maps keyed by a composite of check_type + target + summary
+	// Build lookup maps keyed by check_type + runner + target (+
+	// type-specific disambiguators)
 	baselineMap := buildLookup(baseline.Findings)
 	currentMap := buildLookup(current.Findings)
 
@@ -367,37 +368,53 @@ func ComputeDrift(baseline, current *Snapshot) *DriftResult {
 	return dr
 }
 
-// buildLookup creates a map keyed by check_type + target, with type-specific
-// disambiguators to avoid collisions (e.g. two port_check assertions on the
-// same target but different ports, or two isolation assertions with the same
-// from→to but different expect values).
-func buildLookup(findings []models.CheckResult) map[string]models.CheckResult {
-	lookup := make(map[string]models.CheckResult)
-	for _, f := range findings {
-		key := fmt.Sprintf("%s:%s", f.CheckType, f.Target)
-		// Disambiguate by expected values when target alone is insufficient
-		switch f.CheckType {
-		case "port_check":
-			if ports, ok := f.Expected["ports"]; ok {
-				key = fmt.Sprintf("%s:%v", key, ports)
-			}
-		case "dns_check":
-			if query, ok := f.Expected["query"]; ok {
-				key = fmt.Sprintf("%s:%v", key, query)
-			}
-		case "isolation":
-			if expect, ok := f.Expected["expect"]; ok {
-				key = fmt.Sprintf("%s:%v", key, expect)
-			}
-		case "subnet_discovery":
-			if hostsMin, ok := f.Expected["expect_hosts_min"]; ok {
-				key = fmt.Sprintf("%s:%v", key, hostsMin)
-			}
-			if hostsMax, ok := f.Expected["expect_hosts_max"]; ok {
-				key = fmt.Sprintf("%s:%v", key, hostsMax)
-			}
+// findingKey builds the canonical drift-matching key for one finding:
+// check type, runner identity, target, and the type-specific disambiguators
+// (port lists, DNS query, isolation expectation, discovery host bounds).
+// The runner distinguishes findings for the same target from different
+// vantage points, so a degradation on one probe can never be masked by a
+// stable result on another. The empty runner and "local" are the same local
+// vantage point and collapse to one token, keeping persisted findings that
+// recorded either form matchable.
+func findingKey(f models.CheckResult) string {
+	runner := f.Runner
+	if runner == "" || runner == "local" {
+		runner = "local"
+	}
+	key := fmt.Sprintf("%s:%s:%s", f.CheckType, runner, f.Target)
+	// Disambiguate by expected values when target alone is insufficient
+	switch f.CheckType {
+	case "port_check":
+		if ports, ok := f.Expected["ports"]; ok {
+			key = fmt.Sprintf("%s:%v", key, ports)
 		}
-		lookup[key] = f
+	case "dns_check":
+		if query, ok := f.Expected["query"]; ok {
+			key = fmt.Sprintf("%s:%v", key, query)
+		}
+	case "isolation":
+		if expect, ok := f.Expected["expect"]; ok {
+			key = fmt.Sprintf("%s:%v", key, expect)
+		}
+	case "subnet_discovery":
+		if hostsMin, ok := f.Expected["expect_hosts_min"]; ok {
+			key = fmt.Sprintf("%s:%v", key, hostsMin)
+		}
+		if hostsMax, ok := f.Expected["expect_hosts_max"]; ok {
+			key = fmt.Sprintf("%s:%v", key, hostsMax)
+		}
+	}
+	return key
+}
+
+// buildLookup creates a map keyed by the finding's canonical key
+// (findingKey), with type-specific disambiguators to avoid collisions (e.g.
+// two port_check assertions on the same target but different ports, or the
+// same target checked from two different probes).
+func buildLookup(findings []models.CheckResult) map[string]models.CheckResult {
+	lookup := make(map[string]models.CheckResult, len(findings))
+	for _, f := range findings {
+		lookup[findingKey(f)] = f
 	}
 	return lookup
 }

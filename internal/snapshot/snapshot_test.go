@@ -1157,6 +1157,221 @@ func TestComputeDrift_PortCheckDisambiguation(t *testing.T) {
 	}
 }
 
+// TestComputeDrift_TwoRunnersSameTarget reproduces #271: two findings for
+// the same target from different probes collided on the check_type+target
+// key, so one probe's PASS→FAIL transition was masked by the other
+// probe's stable result. Each runner must be matched independently,
+// regardless of finding order in either snapshot.
+func TestComputeDrift_TwoRunnersSameTarget(t *testing.T) {
+	findings := func(iot, trusted models.Status) []models.CheckResult {
+		return []models.CheckResult{
+			{CheckType: "network_health", Runner: "iot-probe", Target: "10.0.40.1", Status: iot,
+				Summary: "health ok"},
+			{CheckType: "network_health", Runner: "trusted-probe", Target: "10.0.40.1", Status: trusted,
+				Summary: "health ok"},
+		}
+	}
+	reverse := func(fs []models.CheckResult) []models.CheckResult {
+		return []models.CheckResult{fs[1], fs[0]}
+	}
+
+	for _, baseReversed := range []bool{false, true} {
+		for _, curReversed := range []bool{false, true} {
+			bName, cName := "fwd", "fwd"
+			if baseReversed {
+				bName = "rev"
+			}
+			if curReversed {
+				cName = "rev"
+			}
+			t.Run(bName+"/"+cName, func(t *testing.T) {
+				baseFindings := findings(models.StatusPass, models.StatusPass)
+				curFindings := findings(models.StatusFail, models.StatusPass)
+				if baseReversed {
+					baseFindings = reverse(baseFindings)
+				}
+				if curReversed {
+					curFindings = reverse(curFindings)
+				}
+				base := &Snapshot{
+					RunAt:    time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+					Status:   models.StatusPass,
+					Summary:  models.ReportSummary{Pass: 2},
+					Findings: baseFindings,
+				}
+				current := &Snapshot{
+					RunAt:    time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+					Status:   models.StatusFail,
+					Summary:  models.ReportSummary{Pass: 1, Fail: 1},
+					Findings: curFindings,
+				}
+
+				dr := ComputeDrift(base, current)
+				if len(dr.Degraded) != 1 {
+					t.Fatalf("expected exactly 1 degraded check (iot-probe pass→fail), got %d", len(dr.Degraded))
+				}
+				if dr.Degraded[0].Runner != "iot-probe" || dr.Degraded[0].Status != models.StatusFail {
+					t.Errorf("degraded = runner %q status %s, want iot-probe fail", dr.Degraded[0].Runner, dr.Degraded[0].Status)
+				}
+				if len(dr.NewFailures) != 0 {
+					t.Errorf("expected 0 new failures (iot-probe exists in baseline), got %d", len(dr.NewFailures))
+				}
+				if len(dr.FixedFailures) != 0 || len(dr.Improved) != 0 {
+					t.Errorf("expected no fixed/improved entries, got %d fixed / %d improved", len(dr.FixedFailures), len(dr.Improved))
+				}
+			})
+		}
+	}
+}
+
+// TestComputeDrift_RunnerIdentityPortAndDNS pins that differently named
+// probes stay distinct for port/DNS checks: the same target (and, for
+// port_check, the same ports) checked from two probes must not collide,
+// and each probe's transition is reported on its own.
+func TestComputeDrift_RunnerIdentityPortAndDNS(t *testing.T) {
+	base := &Snapshot{
+		RunAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Status:  models.StatusPass,
+		Summary: models.ReportSummary{Pass: 4},
+		Findings: []models.CheckResult{
+			{CheckType: "port_check", Runner: "iot-probe", Target: "10.0.0.1", Status: models.StatusPass,
+				Expected: map[string]interface{}{"expect": "open", "ports": []int{80}}},
+			{CheckType: "port_check", Runner: "trusted-probe", Target: "10.0.0.1", Status: models.StatusPass,
+				Expected: map[string]interface{}{"expect": "open", "ports": []int{80}}},
+			{CheckType: "dns_check", Runner: "iot-probe", Target: "ns1", Status: models.StatusPass,
+				Expected: map[string]interface{}{"query": "example.com"}},
+			{CheckType: "dns_check", Runner: "trusted-probe", Target: "ns1", Status: models.StatusPass,
+				Expected: map[string]interface{}{"query": "example.com"}},
+		},
+	}
+	current := &Snapshot{
+		RunAt:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Status:  models.StatusFail,
+		Summary: models.ReportSummary{Pass: 2, Fail: 2},
+		Findings: []models.CheckResult{
+			{CheckType: "port_check", Runner: "iot-probe", Target: "10.0.0.1", Status: models.StatusFail,
+				Expected: map[string]interface{}{"expect": "open", "ports": []int{80}}},
+			{CheckType: "port_check", Runner: "trusted-probe", Target: "10.0.0.1", Status: models.StatusPass,
+				Expected: map[string]interface{}{"expect": "open", "ports": []int{80}}},
+			{CheckType: "dns_check", Runner: "iot-probe", Target: "ns1", Status: models.StatusFail,
+				Expected: map[string]interface{}{"query": "example.com"}},
+			{CheckType: "dns_check", Runner: "trusted-probe", Target: "ns1", Status: models.StatusPass,
+				Expected: map[string]interface{}{"query": "example.com"}},
+		},
+	}
+
+	dr := ComputeDrift(base, current)
+	if len(dr.Degraded) != 2 {
+		t.Fatalf("expected 2 degraded checks (one per iot-probe check), got %d", len(dr.Degraded))
+	}
+	byType := map[string]models.CheckResult{}
+	for _, d := range dr.Degraded {
+		byType[d.CheckType] = d
+	}
+	for _, wantType := range []string{"port_check", "dns_check"} {
+		d, ok := byType[wantType]
+		if !ok {
+			t.Errorf("expected a degraded %s from iot-probe, got %v", wantType, byType)
+			continue
+		}
+		if d.Runner != "iot-probe" {
+			t.Errorf("degraded %s runner = %q, want iot-probe", wantType, d.Runner)
+		}
+	}
+	if len(dr.NewFailures) != 0 || len(dr.FixedFailures) != 0 {
+		t.Errorf("expected no new/fixed entries (both probes exist in both snapshots), got %d new / %d fixed", len(dr.NewFailures), len(dr.FixedFailures))
+	}
+}
+
+// TestComputeDrift_EmptyRunnerMatchesLocal pins persisted compatibility:
+// an empty runner and the literal "local" are the same local vantage
+// point, so findings that recorded either form must match instead of
+// reporting phantom new/gone entries.
+func TestComputeDrift_EmptyRunnerMatchesLocal(t *testing.T) {
+	base := &Snapshot{
+		RunAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Status:  models.StatusPass,
+		Summary: models.ReportSummary{Pass: 1},
+		Findings: []models.CheckResult{
+			{CheckType: "network_health", Runner: "", Target: "10.0.0.1", Status: models.StatusPass},
+		},
+	}
+	current := &Snapshot{
+		RunAt:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		Status:  models.StatusPass,
+		Summary: models.ReportSummary{Pass: 1},
+		Findings: []models.CheckResult{
+			{CheckType: "network_health", Runner: "local", Target: "10.0.0.1", Status: models.StatusPass},
+		},
+	}
+
+	dr := ComputeDrift(base, current)
+	for name, got := range map[string]int{
+		"new failures": len(dr.NewFailures),
+		"new warnings": len(dr.NewWarnings),
+		"fixed":        len(dr.FixedFailures),
+		"degraded":     len(dr.Degraded),
+		"improved":     len(dr.Improved),
+	} {
+		if got != 0 {
+			t.Errorf("empty-runner/local mismatch produced %d %s", got, name)
+		}
+	}
+	if dr.Summary.NetChange != "no change" {
+		t.Errorf("expected 'no change', got %q", dr.Summary.NetChange)
+	}
+}
+
+// TestComputeDrift_RunnerIdentityJSONRoundTrip pins that a saved/loaded
+// baseline matches equivalent in-memory current findings: expected values
+// deserialize into different concrete Go container types (e.g. []int →
+// []interface{} of float64), and the key must stay stable across that
+// round trip so probe identity and port disambiguation still hold.
+func TestComputeDrift_RunnerIdentityJSONRoundTrip(t *testing.T) {
+	baseReport := makeReport(models.StatusPass, 4, 0, 0, 0)
+	baseReport.Findings = []models.CheckResult{
+		{CheckType: "network_health", Runner: "iot-probe", Target: "10.0.40.1", Status: models.StatusPass},
+		{CheckType: "network_health", Runner: "trusted-probe", Target: "10.0.40.1", Status: models.StatusPass},
+		{CheckType: "port_check", Runner: "iot-probe", Target: "10.0.0.1", Status: models.StatusPass,
+			Expected: map[string]interface{}{"expect": "open", "ports": []int{80, 443}}},
+		{CheckType: "dns_check", Runner: "trusted-probe", Target: "ns1", Status: models.StatusPass,
+			Expected: map[string]interface{}{"query": "example.com"}},
+	}
+	if err := SetBaseline("baseline.spec", baseReport); err != nil {
+		t.Fatalf("SetBaseline: %v", err)
+	}
+	loadedBase, err := LoadBaseline()
+	if err != nil {
+		t.Fatalf("LoadBaseline: %v", err)
+	}
+
+	current := &Snapshot{
+		RunAt:   time.Now(),
+		Status:  models.StatusFail,
+		Summary: models.ReportSummary{Pass: 3, Fail: 1},
+		Findings: []models.CheckResult{
+			{CheckType: "network_health", Runner: "iot-probe", Target: "10.0.40.1", Status: models.StatusFail},
+			{CheckType: "network_health", Runner: "trusted-probe", Target: "10.0.40.1", Status: models.StatusPass},
+			{CheckType: "port_check", Runner: "iot-probe", Target: "10.0.0.1", Status: models.StatusPass,
+				Expected: map[string]interface{}{"expect": "open", "ports": []int{80, 443}}},
+			{CheckType: "dns_check", Runner: "trusted-probe", Target: "ns1", Status: models.StatusPass,
+				Expected: map[string]interface{}{"query": "example.com"}},
+		},
+	}
+
+	dr := ComputeDrift(loadedBase, current)
+	if len(dr.Degraded) != 1 {
+		t.Fatalf("expected exactly 1 degraded check (iot-probe health), got %d", len(dr.Degraded))
+	}
+	if dr.Degraded[0].Runner != "iot-probe" || dr.Degraded[0].CheckType != "network_health" {
+		t.Errorf("degraded = %s/%q, want network_health from iot-probe", dr.Degraded[0].CheckType, dr.Degraded[0].Runner)
+	}
+	if len(dr.NewFailures) != 0 || len(dr.NewWarnings) != 0 || len(dr.FixedFailures) != 0 || len(dr.Improved) != 0 {
+		t.Errorf("expected no other drift entries (container-type stable keys), got %d new failures / %d new warnings / %d fixed / %d improved",
+			len(dr.NewFailures), len(dr.NewWarnings), len(dr.FixedFailures), len(dr.Improved))
+	}
+}
+
 func TestComputeDrift_GoneEntirely(t *testing.T) {
 	base := &Snapshot{
 		RunAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -1257,10 +1472,10 @@ func TestBuildLookup_Basic(t *testing.T) {
 	if len(lookup) != 2 {
 		t.Errorf("expected 2 entries, got %d", len(lookup))
 	}
-	if r, ok := lookup["subnet_discovery:10.0.0.0/24"]; !ok || r.Status != models.StatusPass {
+	if r, ok := lookup["subnet_discovery:local:10.0.0.0/24"]; !ok || r.Status != models.StatusPass {
 		t.Error("expected subnet_discovery entry with pass status")
 	}
-	if r, ok := lookup["port_check:10.0.0.1"]; !ok || r.Status != models.StatusFail {
+	if r, ok := lookup["port_check:local:10.0.0.1"]; !ok || r.Status != models.StatusFail {
 		t.Error("expected port_check entry with fail status")
 	}
 }
@@ -1336,8 +1551,60 @@ func TestBuildLookup_DuplicateOverwrite(t *testing.T) {
 		t.Errorf("expected 1 entry (duplicate overwritten), got %d", len(lookup))
 	}
 	// Last writer wins
-	if lookup["subnet_discovery:10.0.0.0/24"].Status != models.StatusFail {
+	if lookup["subnet_discovery:local:10.0.0.0/24"].Status != models.StatusFail {
 		t.Error("expected last writer to win")
+	}
+}
+
+// TestBuildLookup_RunnerIdentity pins the canonical key's runner segment:
+// the same check type and target from differently named probes must
+// produce distinct keys.
+func TestBuildLookup_RunnerIdentity(t *testing.T) {
+	findings := []models.CheckResult{
+		{CheckType: "network_health", Runner: "iot-probe", Target: "10.0.40.1", Status: models.StatusPass},
+		{CheckType: "network_health", Runner: "trusted-probe", Target: "10.0.40.1", Status: models.StatusFail},
+	}
+	lookup := buildLookup(findings)
+	if len(lookup) != 2 {
+		t.Fatalf("expected 2 entries (one per runner), got %d", len(lookup))
+	}
+	pass, ok := lookup["network_health:iot-probe:10.0.40.1"]
+	if !ok || pass.Status != models.StatusPass {
+		t.Error("expected iot-probe entry with pass status")
+	}
+	fail, ok := lookup["network_health:trusted-probe:10.0.40.1"]
+	if !ok || fail.Status != models.StatusFail {
+		t.Error("expected trusted-probe entry with fail status")
+	}
+}
+
+func TestBuildLookup_PortCheckDisambiguationPerRunner(t *testing.T) {
+	// Same target AND same ports from two probes: the port disambiguator
+	// alone cannot separate them — the runner must.
+	findings := []models.CheckResult{
+		{CheckType: "port_check", Runner: "iot-probe", Target: "10.0.0.1", Status: models.StatusPass,
+			Expected: map[string]interface{}{"ports": []int{80}}},
+		{CheckType: "port_check", Runner: "trusted-probe", Target: "10.0.0.1", Status: models.StatusFail,
+			Expected: map[string]interface{}{"ports": []int{80}}},
+	}
+	lookup := buildLookup(findings)
+	if len(lookup) != 2 {
+		t.Errorf("expected 2 entries (same target+ports, different runners), got %d", len(lookup))
+	}
+}
+
+func TestBuildLookup_EmptyRunnerEqualsLocal(t *testing.T) {
+	findings := []models.CheckResult{
+		{CheckType: "network_health", Runner: "", Target: "10.0.0.1", Status: models.StatusPass},
+		{CheckType: "network_health", Runner: "local", Target: "10.0.0.1", Status: models.StatusFail},
+	}
+	lookup := buildLookup(findings)
+	// Empty and "local" are the same vantage point — one key, last wins.
+	if len(lookup) != 1 {
+		t.Fatalf("expected 1 entry (empty runner == local), got %d", len(lookup))
+	}
+	if got := lookup["network_health:local:10.0.0.1"].Status; got != models.StatusFail {
+		t.Errorf("expected last writer (local) to win, got %s", got)
 	}
 }
 
