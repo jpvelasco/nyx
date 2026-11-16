@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.6.1] - 2026-11-15
+
+**Patch release.** Improves probe safety and result accuracy, tightens spec validation, and reorganizes audit and provider services.
+
+### Fixed
+
+- **Probe host-key verification.** Verify SSH probe host keys against `known_hosts` before connecting.
+- **Remote port checks.** Evaluate every requested port instead of stopping before all targets are checked.
+- **Audit and drift results.** Surface MTU backend errors in network-health verdicts and preserve probe-runner identity when matching drift findings.
+
+### Changed
+
+- **Spec validation.** Reject unknown YAML fields and DNSSEC expectations that probe runners cannot evaluate.
+
+### Other
+
+- **Internal refactoring and dependencies.** Split the audit, Omada, and OPNsense service implementations into domain files; update CodeQL and Go dependencies and align the MCP test server timeout with production.
+
 ## [0.6.0] - 2026-11-04
 
 **Feature release.** The MCP server gains a loopback HTTP transport (streamable HTTP + bearer auth); telemetry can be exported to any OTLP collector; a port-forward playbook routes NAT mutations by live topology; Omada NAT plan/apply ships as an honest, evidenced hold.
@@ -55,8 +75,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Other
 
 - **CI and release dependencies.** Updates CodeQL actions to 4.39.0, GoReleaser action to 7.3.0, upload-artifact to 7.0.2, and download-artifact to 8.0.2.
-
-## [Unreleased]
 
 ## [0.5.2] - 2026-10-11
 
@@ -385,7 +403,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.6.1
 [0.6.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.6.0
 [0.5.3]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.3
 [0.5.2]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.2
