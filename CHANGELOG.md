@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-11-15
+
+**Patch release.** Restores Windows npm installation from PowerShell 7 environments.
+
+### Fixed
+
+- **Windows npm installation.** Extract release binaries without loading an incompatible PowerShell archive module, and report extraction failures instead of a misleading missing-binary error.
+
+### Verification
+
+- **Installer regression coverage.** Exercise Windows ZIP and Unix tar.gz extraction, quoted paths, binary contents, executable permissions, and cleanup.
+
 ## [Unreleased]
 
 ## [0.6.1] - 2026-11-15
@@ -403,7 +415,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/jpvelasco/nyx/releases/tag/v0.6.2
 [0.6.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.6.1
 [0.6.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.6.0
 [0.5.3]: https://github.com/jpvelasco/nyx/releases/tag/v0.5.3
