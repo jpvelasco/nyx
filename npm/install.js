@@ -152,12 +152,16 @@ function extract(buffer, archiveName, binDir) {
           "powershell",
           [
             "-NoProfile",
+            "-NonInteractive",
             "-Command",
-            `Expand-Archive -Force -Path '${psEscape(
+            // Avoid loading a PowerShell 7 archive module into Windows PowerShell.
+            "$ErrorActionPreference = 'Stop'; " +
+            "Add-Type -AssemblyName System.IO.Compression.FileSystem; " +
+            `[System.IO.Compression.ZipFile]::ExtractToDirectory('${psEscape(
               archivePath
-            )}' -DestinationPath '${psEscape(tmpDir)}'`,
+            )}', '${psEscape(tmpDir)}')`,
           ],
-          "Expand-Archive"
+          "ZIP extraction"
         );
       } else {
         spawnOrFail("unzip", ["-o", archivePath, "-d", tmpDir], "unzip");
@@ -220,4 +224,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { getArchiveName, getExpectedChecksum, verifyChecksum };
+module.exports = { getArchiveName, getExpectedChecksum, verifyChecksum, extract };
