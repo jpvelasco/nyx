@@ -2,6 +2,8 @@ package audit
 
 import (
 	"context"
+	"net"
+	"slices"
 	"strings"
 	"testing"
 
@@ -12,6 +14,72 @@ import (
 )
 
 // --- runIsolation ---
+
+func testRunnerInFromnet(spec *intent.Spec) runnerContext {
+	return matchNetworks([]system.PingSource{{IP: net.ParseIP(spec.NetworkByName("fromnet").Gateway), Interface: "eth0"}}, spec)
+}
+
+func TestRunIsolation_Multihomed(t *testing.T) {
+	spec := &intent.Spec{Networks: []intent.Network{
+		{Name: "management", Zone: "management", CIDR: "10.0.11.0/24", Gateway: "10.0.11.1"},
+		{Name: "iot", Zone: "devices", CIDR: "10.0.60.0/24", Gateway: "10.0.60.1"},
+		{Name: "servers", CIDR: "10.0.40.0/24", Gateway: "10.0.40.1"},
+	}}
+	wired := system.PingSource{IP: net.ParseIP("10.0.11.20"), Interface: "ethernet"}
+	wifi := system.PingSource{IP: net.ParseIP("10.0.60.15"), Interface: "wifi"}
+	for _, tc := range []struct {
+		name, from string
+		addresses  []system.PingSource
+		pingErr    error
+		want       models.Status
+		wantSource bool
+	}{
+		{"match by zone", "devices", []system.PingSource{wired, wifi}, nil, models.StatusPass, true},
+		{"match by network", "iot", []system.PingSource{wired, wifi}, nil, models.StatusPass, true},
+		{"selected interface", "iot", []system.PingSource{wifi}, nil, models.StatusPass, true},
+		{"selected interface outside source", "iot", []system.PingSource{wired}, nil, models.StatusWarn, false},
+		{"binding unavailable", "iot", []system.PingSource{wired, wifi}, backends.BackendError("bind failed"), models.StatusWarn, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := NewEngine(spec)
+			eng.runnerCtx = matchNetworks(tc.addresses, spec)
+			var gateways []string
+			eng.Backend = &backends.MockBackend{PingErr: tc.pingErr, PingResultFunc: func(gateway string, source *system.PingSource) *system.PingResult {
+				gateways = append(gateways, gateway)
+				if (source != nil) != tc.wantSource {
+					t.Fatalf("unexpected source %v", source)
+				}
+				if source != nil && (!source.IP.Equal(wifi.IP) || source.Interface != wifi.Interface) {
+					t.Fatalf("got source %v, want %v", source, wifi)
+				}
+				// The default route can reach both gateways. Traffic from IoT cannot.
+				return &system.PingResult{Reachable: source == nil}
+			}}
+			result, err := eng.runIsolation(context.Background(), intent.Assertion{From: tc.from, To: "management,servers", Expect: "deny"})
+			if err != nil || result.Status != tc.want {
+				t.Fatalf("got %v, %v; want %v", result, err, tc.want)
+			}
+			if !slices.Equal(gateways, []string{"10.0.11.1", "10.0.40.1"}) {
+				t.Errorf("gateways = %v", gateways)
+			}
+		})
+	}
+}
+
+func TestRunIsolation_PartiallyMeasured(t *testing.T) {
+	spec := &intent.Spec{Networks: []intent.Network{
+		{Name: "iot", CIDR: "10.0.60.0/24"},
+		{Name: "servers", CIDR: "10.0.40.0/24", Gateway: "10.0.40.1"},
+		{Name: "media", CIDR: "10.0.50.0/24"},
+	}}
+	eng := NewEngine(spec)
+	eng.runnerCtx = matchNetworks([]system.PingSource{{IP: net.ParseIP("10.0.60.15"), Interface: "wifi"}}, spec)
+	eng.Backend = &backends.MockBackend{PingResult: &system.PingResult{}}
+	result, err := eng.runIsolation(context.Background(), intent.Assertion{From: "iot", To: "servers,media", Expect: "deny"})
+	if err != nil || result.Status != models.StatusWarn {
+		t.Fatalf("got %v, %v; want warn", result, err)
+	}
+}
 
 func TestRunIsolation_DenyConfirmed(t *testing.T) {
 	spec := &intent.Spec{
@@ -27,7 +95,7 @@ func TestRunIsolation_DenyConfirmed(t *testing.T) {
 	}
 	eng := NewEngine(spec)
 	eng.Backend = mock
-	eng.runnerCtx = models.RunnerContext{Networks: []string{"fromnet"}}
+	eng.runnerCtx = testRunnerInFromnet(spec)
 	result, err := eng.runIsolation(context.Background(), spec.Assertions[0])
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -51,7 +119,7 @@ func TestRunIsolation_AllowConfirmed(t *testing.T) {
 	}
 	eng := NewEngine(spec)
 	eng.Backend = mock
-	eng.runnerCtx = models.RunnerContext{Networks: []string{"fromnet"}}
+	eng.runnerCtx = testRunnerInFromnet(spec)
 	result, err := eng.runIsolation(context.Background(), spec.Assertions[0])
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -135,7 +203,7 @@ func TestRunIsolation_DefinitiveInZone(t *testing.T) {
 			}
 			eng := NewEngine(spec)
 			eng.Backend = mock
-			eng.runnerCtx = models.RunnerContext{Networks: []string{"fromnet"}}
+			eng.runnerCtx = testRunnerInFromnet(spec)
 			result, err := eng.runIsolation(context.Background(), spec.Assertions[0])
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)

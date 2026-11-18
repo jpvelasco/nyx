@@ -31,8 +31,8 @@ func (d *defaultBackend) PortScan(ctx context.Context, target string, ports []in
 
 // --- System ---
 
-func (d *defaultBackend) Ping(ctx context.Context, target string) (*system.PingResult, error) {
-	return system.Ping(ctx, target)
+func (d *defaultBackend) Ping(ctx context.Context, target string, source *system.PingSource) (*system.PingResult, error) {
+	return system.PingFrom(ctx, target, source)
 }
 
 func (d *defaultBackend) GetRouteToTarget(ctx context.Context, target string) (*system.Route, error) {

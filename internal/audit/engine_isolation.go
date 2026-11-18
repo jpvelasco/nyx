@@ -45,19 +45,28 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 		return result, nil
 	}
 
+	// Only a ping bound to an address on the requested network measures
+	// isolation from that network on a multihomed runner.
+	var source *system.PingSource
+	for _, n := range e.Spec.Networks {
+		if addr, ok := e.runnerCtx.sources[n.Name]; ok && (n.Zone == a.From || n.Name == a.From) {
+			source = &addr
+			break
+		}
+	}
 	// For each target network, ping the gateway to check reachability
 	allBlocked := true
-	anyTested := false
+	tested := 0
 	for _, targetNet := range toNets {
 		if targetNet.Gateway == "" {
 			continue
 		}
-		pingResult, err := e.Backend.Ping(ctx, targetNet.Gateway)
+		pingResult, err := e.Backend.Ping(ctx, targetNet.Gateway, source)
 		if err != nil {
 			result.Evidence = append(result.Evidence, fmt.Sprintf("ping to %s failed: %v", targetNet.Gateway, err))
 			continue
 		}
-		anyTested = true
+		tested++
 		if pingResult.Reachable {
 			allBlocked = false
 			result.Evidence = append(result.Evidence, fmt.Sprintf("gateway %s is reachable", targetNet.Gateway))
@@ -66,55 +75,37 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 		}
 	}
 
-	// Check if nyx is running from within the source zone. Isolation checks are
-	// only definitive when the runner is actually in the "from" network.
-	runnerInFromZone := false
-	for _, netName := range e.runnerCtx.Networks {
-		n := e.Spec.NetworkByName(netName)
-		if n != nil && (n.Zone == a.From || n.Name == a.From) {
-			runnerInFromZone = true
-			break
-		}
+	expectDeny := a.Expect == "deny"
+	kind := "isolation"
+	if !expectDeny {
+		kind = "connectivity"
 	}
 
-	expectDeny := a.Expect == "deny"
-
 	// Determine isolation status with structured branching.
-	// The runnerInFromZone check is unique to the direct (non-probe) case —
+	// The source zone check is unique to the direct (non-probe) case —
 	// when the runner isn't in the source zone, allBlocked could mean
 	// isolation OR just no route from this host.
-	if !anyTested {
+	if tested == 0 {
 		result.Status = models.StatusWarn
-		if expectDeny {
-			result.Summary = fmt.Sprintf(
-				"isolation unverifiable: %s → %s (target zone not routable from this host; use runner: <probe> from inside the %s zone)",
-				a.From, a.To, a.From,
-			)
-		} else {
-			result.Summary = fmt.Sprintf(
-				"connectivity unverifiable: %s → %s (target zone not routable from this host)",
-				a.From, a.To,
-			)
-		}
-	} else if !runnerInFromZone {
+		result.Summary = fmt.Sprintf("%s unverifiable: %s → %s (no gateway could be tested; use runner: <probe> from inside the %s zone)", kind, a.From, a.To, a.From)
+	} else if source == nil {
 		// None of the four outcomes is definitive when the runner is outside
 		// the source zone: reachable gateways may be the runner's own network
 		// (e.g. a runner inside the destination zone pings its own gateway),
 		// and unreachable gateways may simply mean this host has no route.
 		// Report what was observed without a hard verdict.
 		result.Status = models.StatusWarn
-		prefix := "isolation"
-		if !expectDeny {
-			prefix = "connectivity"
-		}
 		state := "unreachable"
 		if !allBlocked {
 			state = "reachable"
 		}
 		result.Summary = fmt.Sprintf(
 			"%s unconfirmed: %s → %s gateways %s, but nyx is not running from inside the %s zone — use runner: <probe> for a definitive check",
-			prefix, a.From, a.To, state, a.From,
+			kind, a.From, a.To, state, a.From,
 		)
+	} else if allBlocked && tested < len(toNets) {
+		result.Status = models.StatusWarn
+		result.Summary = fmt.Sprintf("%s partially verified: %d gateway(s) could not be tested from %s", kind, len(toNets)-tested, a.From)
 	} else if expectDeny && allBlocked {
 		result.Status = models.StatusPass
 		result.Summary = fmt.Sprintf("isolation confirmed: %s cannot reach %s", a.From, a.To)

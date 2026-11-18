@@ -20,7 +20,7 @@ type Backend interface {
 	PortScan(ctx context.Context, target string, ports []int, protocol string, opts nmap.ScanOptions) (*models.CheckResult, error)
 
 	// --- System ---
-	Ping(ctx context.Context, target string) (*system.PingResult, error)
+	Ping(ctx context.Context, target string, source *system.PingSource) (*system.PingResult, error)
 	GetRouteToTarget(ctx context.Context, target string) (*system.Route, error)
 	GetInterfaces(ctx context.Context) ([]system.Interface, error)
 	CheckVPNInterface(ctx context.Context, device string) (bool, error)

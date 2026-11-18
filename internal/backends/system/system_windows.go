@@ -157,8 +157,9 @@ func GetRouteToTarget(ctx context.Context, target string) (*Route, error) {
 // -----------------------------------------------------------------------
 
 var (
-	rePktLossWindows = regexp.MustCompile(`\((\d+)% loss\)`)
-	reAvgRTTWindows  = regexp.MustCompile(`Average = (\d+)ms`)
+	rePktLossWindows   = regexp.MustCompile(`\((\d+)% loss\)`)
+	reEchoReplyWindows = regexp.MustCompile(`(?i)\bTTL=\d+\b`)
+	reAvgRTTWindows    = regexp.MustCompile(`Average = (\d+)ms`)
 )
 
 // whatLoss derives the packet-loss figure from ping.exe output. The English
@@ -176,15 +177,15 @@ func whatLoss(out string, reachable bool) float64 {
 	return 100
 }
 
-func Ping(ctx context.Context, target string) (*PingResult, error) {
-	if err := checkPingTarget(target); err != nil {
-		return nil, err
-	}
-	out, err := runCmd(ctx, "ping", "-n", "3", "-w", "2000", target)
-	if err != nil && ctx.Err() != nil {
-		return nil, fmt.Errorf("ping cancelled: %w", ctx.Err())
-	}
+const (
+	pingCountFlag   = "-n"
+	pingTimeoutFlag = "-w"
+	pingTimeout     = "2000"
+)
 
+func (s PingSource) bindArgs() []string { return []string{"-S", s.IP.String()} }
+
+func parsePingResult(target, out string, err error, bound bool) (*PingResult, error) {
 	pr := &PingResult{}
 	// ping.exe's exit codes are locale-independent: 0 = at least one
 	// reply, 1 = no reply, anything else = a usage or execution error.
@@ -195,9 +196,20 @@ func Ping(ctx context.Context, target string) (*PingResult, error) {
 		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
 			return nil, fmt.Errorf("ping %s failed: %w", target, err)
 		}
+		// A local transmit or source-selection failure can also exit 1 and
+		// print 100% loss. Only actual timeouts establish a negative result.
+		// Unknown localized messages leave the bound check unverifiable.
+		if bound && strings.Count(out, "Request timed out.") != pingCount {
+			return nil, fmt.Errorf("source-bound ping to %s failed: %w", target, err)
+		}
 		pr.Reachable = false
 		pr.PacketLoss = 100
 		return pr, nil
+	}
+	// An ICMP error from the local adapter or an intermediate router can
+	// exit 0. An IPv4 echo reply includes a TTL.
+	if bound && !reEchoReplyWindows.MatchString(out) {
+		return nil, fmt.Errorf("source-bound ping to %s returned no echo reply", target)
 	}
 	pr.Reachable = true
 	pr.PacketLoss = whatLoss(out, true)

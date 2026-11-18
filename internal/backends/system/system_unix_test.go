@@ -4,6 +4,7 @@ package system
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -72,5 +73,25 @@ func TestUnixPingRejectsOptionTargets(t *testing.T) {
 		if _, err := Ping(context.Background(), bad); err == nil {
 			t.Errorf("Ping(%q) should have been rejected by checkPingTarget", bad)
 		}
+	}
+}
+
+func TestBoundPingUnixVerdict(t *testing.T) {
+	for _, tc := range []struct {
+		name, out        string
+		err              error
+		reachable, valid bool
+	}{
+		{"echo reply", "3 packets transmitted, 3 received, 0% packet loss", nil, true, true},
+		{"no replies", "3 packets transmitted, 0 received, 100% packet loss", errors.New("no replies"), false, true},
+		{"bind failure", "", errors.New("bind failed"), false, false},
+		{"no observations", "", nil, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parsePingResult("10.0.11.1", tc.out, tc.err, true)
+			if (err == nil) != tc.valid || (got != nil && got.Reachable != tc.reachable) {
+				t.Errorf("ping = %v, %v", got, err)
+			}
+		})
 	}
 }
