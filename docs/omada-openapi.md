@@ -185,6 +185,79 @@ from controller-provided mDNS strings in all inventory formats.
 
 [TP-Link hardware controller 6.3.0 operation schema](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/getMdnsGrid.json)
 
+## AP channel inventory
+
+`nyx omada ap-channel-info` lists managed access points and reads their current
+radio channels and candidate channels. `--json` produces one row per AP and
+retains the controller's candidate list. Both reads use the Open API under
+`sites/{siteId}/aps/{apMac}` (`radios` and `available-channel`). On OC200
+firmware 6.3.0.45, the site-wide `aps/channel-info` path was registered in the
+controller package and returned error `-1600` on the appliance.
+[Read-only endpoint observations](https://github.com/jpvelasco/nyx/issues/315)
+
+## Switch ACL readback
+
+Switch ACL listings preserve `biDirectional` when the controller returns it and
+use `name` when `description` is empty. A missing flag means the value was
+unavailable. The published Open API does not expose switch-side ACL installation
+state or a device resync timestamp that can be compared with the ACL edit. ACL
+listings therefore flag device application as unverified and advise checking
+actual enforcement after resync.
+
+An Omada `acl_check` with `expect: enforced` can set `expect_bidirectional: true`
+(or `false`). A differing controller value fails the assertion. A missing value
+or a matching value whose device application cannot be verified produces a warning.
+
+### Device firmware lifecycle
+
+Device inventory reports `up_to_date` when current and latest versions agree,
+`update_available` when the controller reports a newer firmware or sets its
+upgrade flag, and `eol_or_current-unknown` when the controller only knows the
+current firmware. The inventory uses `latest-firmware-info` as a read-only
+fallback within a five-second total lookup budget. Partial and unavailable
+responses leave device inventory usable.
+
+`eol` means regular maintenance has ended under the published regional policy.
+The current built-in entry covers EAP620 HD US revisions 1.0 and 1.6 only. The
+vendor's US EOS list records 2022-09-30, and its non-campus policy gives a
+regular maintenance end date of 2025-09-30. The advisory suggests a supported
+replacement class and the EAP650 as one option. Regional variants without an
+explicit match remain eligible for the ordinary firmware states.
+
+- [TP-Link US EOL policy](https://www.tp-link.com/us/landing/business-product-eol/)
+- [TP-Link US EOS list](https://www.omadanetworks.com/us/document/132177/)
+- [Published firmware operation](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.4.0/operations/getFirmwareInfo.json)
+
+## Site configuration drift
+
+Run `nyx omada site-config snapshot` to save a baseline of the selected site's
+LAN networks, switch ACLs, WLAN groups, and SSIDs. Run
+`nyx omada site-config drift` to report added, removed, or modified objects,
+using the normal provider flags on either command. The comparison leaves the
+baseline in place. Run `snapshot` again after an intentional change to reset it.
+
+Every baseline contains a SHA-256 hash and the full resource JSON returned by
+the Open API list endpoints. Nyx writes the baseline locally under
+`~/.nyx/snapshots/omada-site-config/` with owner-only file permissions. Keep
+these private files out of source control and shared reports. The text and
+`--json` drift reports show the resource kind, change, and a reference that
+matches its key in the local baseline. The report never includes configuration
+values. Site config drift measures the state returned by these endpoints, with
+no dependency on controller audit log retention.
+
+### Controller firmware checks
+
+`nyx omada controller-firmware` checks hardware-controller firmware through the
+controller's authenticated Global Other Setting View Only API. A failure or
+incomplete response produces `check_unreachable`, including when the controller
+cannot contact TP-Link. An exact hardware and market match may produce
+`newer_available` from the embedded published version. A reference match leaves
+freshness unknown. The command never installs firmware. Hardware end of
+maintenance is a separate lifecycle concern.
+
+- [Controller firmware check](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.4.0/operations/checkForHwcUpdateV2.json)
+- [OC200 3.4.25 release note](https://static.tp-link.com/upload/firmware/2026/202610/20261016/Release%20Note%20OC200%28UN%29_v3_3.4.25%20Build%2020261013.pdf)
+
 ## WLAN optimization history
 
 Use `nyx omada wlan-optimization` to list site history and

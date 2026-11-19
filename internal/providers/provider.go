@@ -13,13 +13,14 @@ import (
 // ClientID/ClientSecret carry the vendor's credential pair: for Omada the
 // Open API client credentials, for OPNsense the API key/secret.
 type ImportOptions struct {
-	Host          string
-	ClientID      string
-	ClientSecret  string
-	Site          string
-	Debug         bool
-	SkipTLSVerify bool
-	CACertPath    string
+	Host                   string
+	ClientID               string
+	ClientSecret           string
+	Site                   string
+	Debug                  bool
+	SkipTLSVerify          bool
+	CACertPath             string
+	IncludeFirewallDetails bool
 	// Logger receives structured operation events (token mint, retries,
 	// refresh) from provider clients. Never contains credentials.
 	Logger *slog.Logger
@@ -49,13 +50,30 @@ type AuditResult struct {
 	Warnings []string
 }
 
+// ObservedACL names a stored rule in its controller collection, including disabled rules.
+type ObservedACL struct {
+	Name  string
+	Scope string
+}
+
+// ACLObservation keeps unread collections distinct from successfully enumerated empty lists.
+type ACLObservation struct {
+	Rules         []ObservedACL
+	UnknownScopes []string
+}
+
+type ACLObserver interface {
+	ObserveACLs(context.Context, ImportOptions, []intent.Network) (ACLObservation, error)
+}
+
 // ACLCheckRequest holds the policy details needed for ACL enforcement checking.
 type ACLCheckRequest struct {
-	PolicyName     string
-	From           string
-	To             string
-	Action         string // "allow" or "deny"
-	ExpectEnforced bool
+	PolicyName          string
+	From                string
+	To                  string
+	Action              string // "allow" or "deny"
+	ExpectEnforced      bool
+	ExpectBidirectional *bool
 }
 
 // ACLApplyRequest describes a single desired ACL policy change: ensure a
@@ -97,6 +115,7 @@ type ACLApplyResult struct {
 // scopes and their rule counts, and the active client count. Human is a
 // stable, human-readable rendering.
 type ProviderInventory struct {
+	Details     any               `json:"details,omitempty"`
 	Site        string            `json:"site"`
 	Human       string            `json:"human"`
 	Inventory   *intent.Inventory `json:"inventory"`

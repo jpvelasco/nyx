@@ -67,6 +67,14 @@ func intsContain(set []int, want int) bool {
 // ACLType is the controller's ACL scope: gateway, switch, or EAP.
 type ACLType int
 
+// Scope is the collection label for a fetched ACL type.
+func (t ACLType) Scope() string {
+	if t == ACLTypeGateway {
+		return "gateway"
+	}
+	return "switch"
+}
+
 // ScopeFromLabel maps an agent-facing scope label to its ACL type. EAP
 // rules are not supported by the mutation surface (their wire shape has not
 // been observed), so it is deliberately not accepted here.
@@ -218,12 +226,37 @@ type ACLRule struct {
 	// 2 = all switch VLAN, 3 = custom switch VLAN). The controller
 	// rejects switch-scope creates that omit it (errorCode -1); it is
 	// absent on gateway-scope rules and reads as 0.
-	BindingType int `json:"bindingType"`
+	BindingType   int   `json:"bindingType"`
+	BiDirectional *bool `json:"biDirectional,omitempty"`
 
 	// Resolved from LAN networks; omitted on the wire.
 	SourceName string `json:"-"`
 	DestName   string `json:"-"`
 }
+
+// UnmarshalJSON accepts name as a fallback for the published description field.
+func (r *ACLRule) UnmarshalJSON(data []byte) error {
+	type wireRule ACLRule
+	wire := struct {
+		*wireRule
+		Name string `json:"name"`
+	}{wireRule: (*wireRule)(r)}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	r.Name = normalizeACLName(r.Name)
+	if r.Name == "" {
+		r.Name = normalizeACLName(wire.Name)
+	}
+	return nil
+}
+
+func normalizeACLName(name string) string {
+	return strings.Join(strings.Fields(stripControllerFormatting(name)), " ")
+}
+
+// SwitchACLAppliedStateHint describes the limit of controller ACL readback.
+const SwitchACLAppliedStateHint = "unverified on device; verify enforcement after resync"
 
 // ACLList is a typed fetch of one ACL scope. The Open API carries no scope
 // capability flags, so a list is just the scope type and its rules.
@@ -236,9 +269,12 @@ type ACLList struct {
 // switch rules, osg-acls for gateway rules. An empty list is success (no
 // rules in that scope).
 func (c *Client) FetchACLs(ctx context.Context, siteID string, typ ACLType) (ACLList, error) {
-	rules, _, err := fetchPaged[ACLRule](ctx, c, aclScopePath(siteID, typ), defaultPageSize)
+	rules, total, err := fetchPaged[ACLRule](ctx, c, aclScopePath(siteID, typ), defaultPageSize)
 	if err != nil {
 		return ACLList{}, fmt.Errorf("fetching ACL rules (type %d): %w", typ, err)
+	}
+	if total > len(rules) {
+		return ACLList{}, fmt.Errorf("incomplete %s ACL inventory: %d of %d rows", typ.Scope(), len(rules), total)
 	}
 	if rules == nil {
 		rules = []ACLRule{}

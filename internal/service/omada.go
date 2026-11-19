@@ -98,6 +98,19 @@ func (s *OmadaService) Info(ctx context.Context, opts OmadaOptions) (*OmadaInfo,
 	}, nil
 }
 
+// ControllerFirmware checks global controller firmware without selecting a site.
+func (s *OmadaService) ControllerFirmware(ctx context.Context, opts OmadaOptions) (omadabackend.ControllerFirmware, error) {
+	client, err := s.newClient(ctx, opts)
+	if err != nil {
+		return omadabackend.ControllerFirmware{}, err
+	}
+	if err := client.Login(ctx, opts.ClientID, opts.ClientSecret); err != nil {
+		return omadabackend.ControllerFirmware{}, err
+	}
+	defer client.Logout(ctx) //nolint:errcheck
+	return client.CheckControllerFirmware(ctx), nil
+}
+
 // ListNetworks returns the LAN networks of the selected site.
 func (s *OmadaService) ListNetworks(ctx context.Context, opts OmadaOptions) ([]OmadaNetwork, error) {
 	client, site, err := s.session(ctx, opts)
