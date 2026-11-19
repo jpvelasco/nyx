@@ -275,3 +275,30 @@ func TestTopologyFingerprint(t *testing.T) {
 		t.Fatalf("segments or warnings = %+v", f)
 	}
 }
+
+func TestTopologyFingerprintPartialOPNsense(t *testing.T) {
+	server := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody("automatic"))
+		case "/api/firewall/d_nat/search_rule", "/api/firewall/one_to_one/search_rule", "/api/firewall/source_nat/search_rule":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"rows":[{"identifier":"opt1","addr4":"10.0.10.1/24","device":"vlan01"}]}`)
+		case "/api/interfaces/vlan_settings/search_item":
+			testutil.WriteBody(w, `{"total":2,"rows":[{"uuid":"fixture1","tag":"10","vlanif":"vlan01"},{"uuid":"fixture2","tag":"10","vlanif":"vlan02"}]}`)
+		case "/api/interfaces/bridge_settings/search_item", "/api/firewall/filter/search_rule":
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	})
+	rep, err := NewTopologyService().Report(t.Context(), TopologyOptions{Opnsense: &OpnsenseOptions{Host: server.URL, APIKey: "key1", APISecret: "secret1", SkipTLSVerify: true}, Fingerprint: true})
+	if err != nil || rep.Fingerprint == nil {
+		t.Fatalf("report = %+v, %v", rep, err)
+	}
+	f := rep.Fingerprint
+	if len(f.Warnings) != 2 || len(f.Segments) != 2 || f.Segments[1].Gateway != "opnsense" || f.Devices[0].Role != "enforcer" {
+		t.Fatalf("fingerprint = %+v", f)
+	}
+}
