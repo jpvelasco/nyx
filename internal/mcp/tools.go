@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -1478,6 +1479,10 @@ func (s *Server) toolOpnsenseFirewallLog(ctx context.Context, args map[string]in
 	if msg != "" {
 		return errResult(msg)
 	}
+	metadataOnly := argBoolDefault(args, "metadata_only", true)
+	if !metadataOnly && !firewallDetailsAllowed() {
+		return errResult("Firewall details require operator opt-in via NYX_MCP_ALLOW_FIREWALL_DETAILS=true")
+	}
 	query := service.OpnsenseFirewallLogQuery{
 		Before: argString(args, "before"), Source: argString(args, "src"),
 		Destination: argString(args, "dst"), Action: argString(args, "action"),
@@ -1492,7 +1497,7 @@ func (s *Server) toolOpnsenseFirewallLog(ctx context.Context, args map[string]in
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense firewall log request failed: %v", err))
 	}
-	if argBoolDefault(args, "metadata_only", true) {
+	if metadataOnly {
 		return firewallLogResult(map[string]any{"row_count": len(rows.Rows), "next_before": rows.NextBefore})
 	}
 	return firewallLogResult(rows)
@@ -1503,6 +1508,10 @@ func (s *Server) toolOpnsenseFirewallLogStats(ctx context.Context, args map[stri
 	if msg != "" {
 		return errResult(msg)
 	}
+	metadataOnly := argBoolDefault(args, "metadata_only", true)
+	if !metadataOnly && !firewallDetailsAllowed() {
+		return errResult("Firewall details require operator opt-in via NYX_MCP_ALLOW_FIREWALL_DETAILS=true")
+	}
 	limit, err := firewallLogLimit(args, 5000)
 	if err != nil {
 		return errResult(err.Error())
@@ -1511,10 +1520,14 @@ func (s *Server) toolOpnsenseFirewallLogStats(ctx context.Context, args map[stri
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense firewall log stats request failed: %v", err))
 	}
-	if argBoolDefault(args, "metadata_only", true) {
+	if metadataOnly {
 		return firewallLogResult(map[string]int{"group_count": len(rows)})
 	}
 	return firewallLogResult(rows)
+}
+
+func firewallDetailsAllowed() bool {
+	return os.Getenv("NYX_MCP_ALLOW_FIREWALL_DETAILS") == "true"
 }
 
 func firewallLogResult(data any) toolDispatchResult {
