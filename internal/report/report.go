@@ -5,11 +5,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/recommendations"
 )
+
+// OmitControllerACLNames returns an audit projection without live ACL labels.
+func OmitControllerACLNames(source *models.AuditReport) *models.AuditReport {
+	projected := *source
+	projected.Findings = slices.Clone(source.Findings)
+	for i := range projected.Findings {
+		finding := &projected.Findings[i]
+		names, present := finding.Observed["live_but_undeclared"].([]string)
+		if finding.CheckType == "acl_drift" && present {
+			finding.Observed = maps.Clone(finding.Observed)
+			delete(finding.Observed, "live_but_undeclared")
+			finding.Observed["live_but_undeclared_count"] = len(names)
+		}
+	}
+	return &projected
+}
 
 // RenderJSON writes the report as JSON
 func RenderJSON(w io.Writer, report *models.AuditReport) error {

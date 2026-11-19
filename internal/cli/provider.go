@@ -210,7 +210,7 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: fmt.Sprintf("Import from %s and immediately run a live audit", p.Name()),
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			dur, err := parseTimeoutFlag(timeout)
 			if err != nil {
 				return err
@@ -241,6 +241,10 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 			if outputPath != "" {
 				defer w.Close()
 			}
+			includeACLNames, _ := cmd.Flags().GetBool("include-acl-names")
+			if !includeACLNames {
+				result.Report = report.OmitControllerACLNames(result.Report)
+			}
 			if jsonOutput {
 				return renderAuditReport(w, result.Report)
 			}
@@ -249,6 +253,7 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 		},
 	}
 	addProviderFlags(cmd, p.Name())
+	cmd.Flags().Bool("include-acl-names", false, "Include private controller ACL labels in the audit report")
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name")
 	cmd.Flags().BoolVar(&providerDebug, "debug", false, "Print raw API responses to stderr")
 	return cmd

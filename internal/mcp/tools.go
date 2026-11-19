@@ -15,6 +15,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
+	reportpkg "github.com/jpvelasco/nyx/internal/report"
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/storepath"
 )
@@ -248,19 +249,7 @@ func (s *Server) toolRunAudit(ctx context.Context, args map[string]interface{}) 
 	if err != nil {
 		return errResult(fmt.Sprintf("audit failed: %v", err))
 	}
-	omitControllerACLNames(report)
-	return okResult(toJSON(report))
-}
-
-func omitControllerACLNames(report *models.AuditReport) {
-	for i := range report.Findings {
-		finding := &report.Findings[i]
-		if finding.CheckType == "acl_drift" {
-			names, _ := finding.Observed["live_but_undeclared"].([]string)
-			delete(finding.Observed, "live_but_undeclared")
-			finding.Observed["live_but_undeclared_count"] = len(names)
-		}
-	}
+	return okResult(toJSON(reportpkg.OmitControllerACLNames(report)))
 }
 
 func (s *Server) toolLoadSpec(_ context.Context, args map[string]interface{}) toolDispatchResult {
