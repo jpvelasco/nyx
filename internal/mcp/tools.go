@@ -56,6 +56,7 @@ var toolHandlers = map[string]toolHandler{
 	"omada_get_dhcp_server_info":       (*Server).toolOmadaGetDHCPServerInfo,
 	"omada_get_dhcp_snoop_status":      (*Server).toolOmadaGetDHCPSnoopStatus,
 	"omada_list_dhcp_snoops":           (*Server).toolOmadaListDHCPSnoops,
+	"omada_list_logs":                  (*Server).toolOmadaListLogs,
 	"omada_list_lan_multicasts":        (*Server).toolOmadaListLANMulticasts,
 	"omada_plan_port":                  (*Server).toolOmadaPlanPort,
 	"omada_apply_port_profile":         (*Server).toolOmadaApplyPortProfile,
@@ -1462,4 +1463,15 @@ func (s *Server) toolApplyPortForward(ctx context.Context, args map[string]inter
 		return errResult(fmt.Sprintf("port-forward playbook failed: %v", err))
 	}
 	return okResult(toJSON(plan))
+}
+
+func (s *Server) toolOmadaListLogs(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	query := service.OmadaEventLogQuery{
+		Module: argString(args, "module"), Since: argString(args, "since"),
+		TimeStart: argString(args, "time_start"), TimeEnd: argString(args, "time_end"),
+		Page: argIntDefault(args, "page", 1), PageSize: argIntDefault(args, "page_size", 50),
+	}
+	return s.omadaJSON(ctx, args, "omada event log request failed", func(opts service.OmadaOptions) (any, error) {
+		return s.omadaSvc.ListEventLogs(ctx, opts, query)
+	})
 }

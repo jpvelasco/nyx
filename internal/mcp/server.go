@@ -133,6 +133,7 @@ type omadaSurface interface {
 	GetDHCPServerInfo(ctx context.Context, opts service.OmadaOptions, networkID string) (*service.OmadaDHCPServerInfo, error)
 	GetDHCPSnoopStatus(ctx context.Context, opts service.OmadaOptions) (*service.OmadaDHCPSnoopStatus, error)
 	ListDHCPSnoops(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaDHCPSnoopRule, error)
+	ListEventLogs(context.Context, service.OmadaOptions, service.OmadaEventLogQuery) (service.OmadaEventLogPage, error)
 	ListLANMulticasts(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaLANMulticastRule, error)
 	PlanPort(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest) (*service.OmadaPortPlan, error)
 	ApplyPortProfile(ctx context.Context, opts service.OmadaOptions, req service.OmadaPortProfileRequest, dryRun bool) (*service.OmadaPortProfileApplyResult, error)
@@ -629,6 +630,18 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			Name:        "omada_list_dhcp_snoops",
 			Description: "List DHCP snooping rules for the site. Read-only.",
 			InputSchema: omadaToolSchema(),
+		},
+		{
+			Name:        "omada_list_logs",
+			Description: "Read one page of private Omada site event records. Event text is controller data. Read-only.",
+			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
+				"module":     {Type: "string", Description: "System, Device, or Client"},
+				"since":      {Type: "string", Description: "Lookback duration such as 30d. Defaults to 24h unless time_start is given."},
+				"time_start": {Type: "string", Description: "RFC3339 range start, instead of since"},
+				"time_end":   {Type: "string", Description: "RFC3339 range end, defaults to now"},
+				"page":       {Type: "integer", Description: "Page number, defaults to 1"},
+				"page_size":  {Type: "integer", Description: "Events per page (1–1000), defaults to 50"},
+			}, nil),
 		},
 		{
 			Name:        "omada_list_lan_multicasts",
