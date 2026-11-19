@@ -4,10 +4,40 @@ package system
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+var (
+	rePacketLoss = regexp.MustCompile(`(\d+(?:\.\d+)?)% packet loss`)
+	reAverageRTT = regexp.MustCompile(`(?:rtt min/avg/max/mdev|round-trip min/avg/max/stddev) = [\d.]+/([\d.]+)/`)
+)
+
+func parsePingResult(target, out string, err error, bound bool) (*PingResult, error) {
+	pr := &PingResult{}
+	if m := rePacketLoss.FindStringSubmatch(out); m != nil {
+		pr.PacketLoss, _ = strconv.ParseFloat(m[1], 64)
+		pr.Reachable = pr.PacketLoss < 100
+		// A local transmission error can print the same loss summary as
+		// a silent destination. Output captures its diagnostic on ExitError.
+		var exitErr *exec.ExitError
+		if bound && !pr.Reachable && errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+			return nil, fmt.Errorf("source-bound ping to %s failed: %w", target, err)
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("ping %s failed: %w", target, err)
+	} else if bound {
+		return nil, fmt.Errorf("source-bound ping to %s produced no packet statistics", target)
+	}
+	if m := reAverageRTT.FindStringSubmatch(out); m != nil {
+		pr.AvgLatency = m[1]
+	}
+	return pr, nil
+}
 
 // -----------------------------------------------------------------------
 // Traceroute

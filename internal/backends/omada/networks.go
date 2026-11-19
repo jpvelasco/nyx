@@ -151,6 +151,23 @@ func (p *lanPurpose) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// dhcpGuardEnabled decodes both the 6.2 boolean and the 6.3 object.
+type dhcpGuardEnabled bool
+
+func (g *dhcpGuardEnabled) UnmarshalJSON(data []byte) error {
+	if data[0] != '{' {
+		return json.Unmarshal(data, (*bool)(g))
+	}
+	var guard struct {
+		Enable bool `json:"enable"`
+	}
+	if err := json.Unmarshal(data, &guard); err != nil {
+		return err
+	}
+	*g = dhcpGuardEnabled(guard.Enable)
+	return nil
+}
+
 // rawNetwork is the wire shape of a network entry (Open API). There is no
 // top-level "dhcpEnabled" field — the DHCP switch is nested under
 // "dhcpSettingsVO"; deviceMac is optional.
@@ -168,15 +185,15 @@ type rawNetwork struct {
 		LeaseTime   int    `json:"leasetime"`
 		DHCPNS      string `json:"dhcpns"`
 	} `json:"dhcpSettingsVO"`
-	DeviceMac         string `json:"deviceMac"`
-	IGMPSnoopEnable   bool   `json:"igmpSnoopEnable"`
-	MLDSnoopEnable    bool   `json:"mldSnoopEnable"`
-	DHCPL2RelayEnable bool   `json:"dhcpL2RelayEnable"`
-	DHCPGuard         bool   `json:"dhcpGuard"`
-	DHCPv6Guard       bool   `json:"dhcpv6Guard"`
-	Portal            bool   `json:"portal"`
-	AllLan            bool   `json:"allLan"`
-	Primary           bool   `json:"primary"`
+	DeviceMac         string           `json:"deviceMac"`
+	IGMPSnoopEnable   bool             `json:"igmpSnoopEnable"`
+	MLDSnoopEnable    bool             `json:"mldSnoopEnable"`
+	DHCPL2RelayEnable bool             `json:"dhcpL2RelayEnable"`
+	DHCPGuard         dhcpGuardEnabled `json:"dhcpGuard"`
+	DHCPv6Guard       dhcpGuardEnabled `json:"dhcpv6Guard"`
+	Portal            bool             `json:"portal"`
+	AllLan            bool             `json:"allLan"`
+	Primary           bool             `json:"primary"`
 }
 
 // UnmarshalJSON decodes the wire shape so the nested DHCP switch
@@ -202,8 +219,8 @@ func (n *Network) UnmarshalJSON(data []byte) error {
 		IGMPSnoop:     raw.IGMPSnoopEnable,
 		MLDSnoop:      raw.MLDSnoopEnable,
 		DHCPL2Relay:   raw.DHCPL2RelayEnable,
-		DHCPGuard:     raw.DHCPGuard,
-		DHCPv6Guard:   raw.DHCPv6Guard,
+		DHCPGuard:     bool(raw.DHCPGuard),
+		DHCPv6Guard:   bool(raw.DHCPv6Guard),
 		Portal:        raw.Portal,
 		AllLan:        raw.AllLan,
 		Primary:       raw.Primary,
