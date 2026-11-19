@@ -19,10 +19,10 @@ type EventLogQuery struct {
 }
 
 type EventLog struct {
-	ID      string `json:"id"`
-	Key     string `json:"key"`
+	ID      string `json:"id,omitempty"`
+	Key     string `json:"key,omitempty"`
 	Module  string `json:"module"`
-	Content string `json:"content"`
+	Content string `json:"content,omitempty"`
 	Time    int64  `json:"time"`
 }
 

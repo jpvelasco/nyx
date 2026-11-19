@@ -3,14 +3,17 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/jpvelasco/nyx/internal/audit"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/logger"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/service"
@@ -1472,6 +1475,38 @@ func (s *Server) toolOmadaListLogs(ctx context.Context, args map[string]interfac
 		Page: argIntDefault(args, "page", 1), PageSize: argIntDefault(args, "page_size", 50),
 	}
 	return s.omadaJSON(ctx, args, "omada event log request failed", func(opts service.OmadaOptions) (any, error) {
-		return s.omadaSvc.ListEventLogs(ctx, opts, query)
+		page, err := s.omadaSvc.ListEventLogs(ctx, opts, query)
+		if err != nil {
+			return nil, err
+		}
+		page.Data = slices.Clone(page.Data)
+		includeContent := argBoolDefault(args, "include_content", false)
+		for i := range page.Data {
+			event := &page.Data[i]
+			event.ID = ""
+			event.Key = ""
+			switch event.Module {
+			case "System", "Device", "Client":
+			default:
+				event.Module = "Other"
+			}
+			if includeContent {
+				event.Content = scrubOmadaEventContent(event.Content)
+			} else {
+				event.Content = ""
+			}
+		}
+		return page, nil
 	})
+}
+
+// scrubOmadaEventContent applies the shared logger redactor to plain text.
+func scrubOmadaEventContent(content string) string {
+	clean := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return ' '
+		}
+		return r
+	}, content)
+	return strings.TrimSpace(string(logger.ScrubLine([]byte(clean))))
 }

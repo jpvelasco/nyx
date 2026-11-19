@@ -3293,16 +3293,26 @@ func TestDispatchPortForwardPlaybook(t *testing.T) {
 }
 
 func (s *stubOmadaSvc) ListEventLogs(_ context.Context, _ service.OmadaOptions, _ service.OmadaEventLogQuery) (service.OmadaEventLogPage, error) {
-	return service.OmadaEventLogPage{TotalRows: 2}, s.err
+	var page service.OmadaEventLogPage
+	if err := json.Unmarshal([]byte(`{"totalRows":2,"data":[{"id":"private-id","key":"private-key","module":"System","content":"Client connected from 10.0.10.123"},{"module":"private-module","content":"untrusted test text"}]}`), &page); err != nil {
+		return page, err
+	}
+	return page, s.err
 }
 
 func TestDispatchOmadaListLogs(t *testing.T) {
 	stub := &stubOmadaSvc{}
 	server := serverWithOmadaStub(stub)
-	text, failed := server.DispatchToolForTest(t.Context(), "omada_list_logs", map[string]interface{}{
+	args := map[string]interface{}{
 		"host": "controller.example", "client_id": "fixture-client", "client_secret": "fixture-secret", "since": "30d",
-	})
-	if failed || !strings.Contains(text, `"totalRows": 2`) {
-		t.Fatalf("event log dispatch = %q (failed=%v)", text, failed)
+	}
+	text, failed := server.DispatchToolForTest(t.Context(), "omada_list_logs", args)
+	if failed || !strings.Contains(text, `"totalRows": 2`) || !strings.Contains(text, `"module": "Other"`) || strings.Contains(text, `"content"`) || strings.Contains(text, "private-") {
+		t.Fatalf("event log metadata = %q (failed=%v)", text, failed)
+	}
+	args["include_content"] = true
+	text, failed = server.DispatchToolForTest(t.Context(), "omada_list_logs", args)
+	if failed || !strings.Contains(text, "Client connected from") || strings.Contains(text, "10.0.10.123") || strings.Contains(text, "private-") {
+		t.Fatalf("redacted event log text = %q (failed=%v)", text, failed)
 	}
 }
