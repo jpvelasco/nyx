@@ -37,3 +37,11 @@ func TestControllerFirmware(t *testing.T) {
 		})
 	}
 }
+
+func TestFirmwareVersionOlder(t *testing.T) {
+	for _, version := range []string{"3.4", "3.4.11-preview", "3.4.25", "3.4.26", "4.0.0"} {
+		if firmwareVersionOlder(version, "3.4.25") {
+			t.Errorf("%q must not be classified older", version)
+		}
+	}
+}
