@@ -135,6 +135,8 @@ func opnsenseServer(t *testing.T, leases string) *httptest.Server {
 			]}`)
 		case "/api/dnsmasq/settings/get":
 			testutil.WriteBody(w, enabledDnsmasqFixture)
+		case "/api/firewall/alias/search_item":
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"a1","name":"trusted_hosts","type":"host","content":"192.0.2.1","enabled":"1"}]}`)
 		case "/api/dnsmasq/leases/search":
 			testutil.WriteBody(w, leases)
 		case "/api/core/service/search":
@@ -733,6 +735,14 @@ func TestProviderInventory(t *testing.T) {
 		if len(res.Warnings) != 0 {
 			t.Errorf("Warnings = %v, want none on a clean fetch", res.Warnings)
 		}
+		details, err := json.Marshal(res.Details)
+		if err != nil || !strings.Contains(string(details), `"firewall_rules_ok":true`) || !strings.Contains(string(details), `"configured_members":["192.0.2.1"]`) {
+			t.Errorf("firewall details = %s, err = %v", details, err)
+		}
+		if !strings.Contains(res.Human, `"trusted_hosts" ("host"): ["192.0.2.1"]`) {
+			t.Errorf("missing alias render: %s", res.Human)
+		}
+
 		if !strings.Contains(res.Human, "== Networks (2) ==") || !strings.Contains(res.Human, "2 active clients") {
 			t.Errorf("Human render missing sections:\n%s", res.Human)
 		}
@@ -764,8 +774,8 @@ func TestProviderInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Inventory: %v (only interfaces is fatal)", err)
 		}
-		if len(res.Warnings) != 11 {
-			t.Errorf("Warnings = %v, want 11 (system, rules, leases, services, gateways + 6 recon reads)", res.Warnings)
+		if len(res.Warnings) != 12 {
+			t.Errorf("Warnings = %v, want 12 (system, rules, aliases, leases, services, gateways + 6 recon reads)", res.Warnings)
 		}
 		if len(res.Inventory.Devices) != 1 {
 			t.Errorf("Devices = %+v, want 1 (interfaces still fetched)", res.Inventory.Devices)
