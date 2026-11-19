@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
 func TestOpnsenseBlocklist(t *testing.T) {
@@ -50,7 +52,7 @@ func TestOpnsenseBlocklist(t *testing.T) {
 						t.Errorf("body = %v, %v", body, err)
 					}
 				}
-				w.Write([]byte(tc.reply))
+				testutil.WriteBody(w, tc.reply)
 			}))
 			t.Cleanup(ts.Close)
 			cmd := buildOpnsenseBlocklistCmd()
