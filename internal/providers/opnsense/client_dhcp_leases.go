@@ -14,13 +14,6 @@ const (
 	keaV6LeasesPath     = "/kea/leases6/search"
 )
 
-var dhcpPrivileges = map[string]string{
-	dnsmasqSettingsPath: "Services: Dnsmasq DNS/DHCP: Settings",
-	dnsmasqLeasesPath:   "Services: Dnsmasq DNS/DHCP: Settings",
-	keaV4LeasesPath:     "Services: DHCP: Kea(v4)",
-	keaV6LeasesPath:     "Services: DHCP: Kea(v6)",
-}
-
 // GetDHCPLeases returns active DHCP leases from the configured provider.
 func (c *Client) GetDHCPLeases(ctx context.Context) ([]DHCPLease, error) {
 	settings, err := c.GetDnsmasqSettings(ctx)
