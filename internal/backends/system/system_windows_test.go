@@ -365,22 +365,11 @@ func TestBoundPingWindowsVerdict(t *testing.T) {
 		t.Fatal("expected exit status 1")
 	}
 	summary := "Packets: Sent = 3, Received = 0, Lost = 3 (100% loss)"
-	for _, tc := range []struct {
-		name, out        string
-		err              error
-		reachable, valid bool
-	}{
+	checkBoundPingCases(t, []boundPingCase{
 		{"echo reply", "Reply from 10.0.11.1: bytes=32 time=1ms TTL=64", nil, true, true},
 		{"ICMP error", "Reply from 10.0.60.15: Destination host unreachable.", nil, false, false},
 		{"no replies", strings.Repeat("Request timed out.\n", 3) + summary, exitOne, false, true},
 		{"transmit failure", "PING: transmit failed. General failure.\n" + summary, exitOne, false, false},
 		{"binding rejected", "Bad source address", exitOne, false, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := parsePingResult("10.0.11.1", tc.out, tc.err, true)
-			if (err == nil) != tc.valid || (got != nil && got.Reachable != tc.reachable) {
-				t.Errorf("ping = %v, %v", got, err)
-			}
-		})
-	}
+	})
 }

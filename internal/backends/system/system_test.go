@@ -219,3 +219,22 @@ func TestPingArgs_SourceBinding(t *testing.T) {
 		}
 	}
 }
+
+// Platform fixtures share the same contract for a definitive isolation result.
+type boundPingCase struct {
+	name, out        string
+	err              error
+	reachable, valid bool
+}
+
+func checkBoundPingCases(t *testing.T, cases []boundPingCase) {
+	t.Helper()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parsePingResult("10.0.11.1", tc.out, tc.err, true)
+			if (err == nil) != tc.valid || (got != nil) != tc.valid || (got != nil && got.Reachable != tc.reachable) {
+				t.Fatalf("ping = %v, %v", got, err)
+			}
+		})
+	}
+}

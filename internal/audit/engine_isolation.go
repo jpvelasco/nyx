@@ -103,19 +103,22 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 			"%s unconfirmed: %s → %s gateways %s, but nyx is not running from inside the %s zone — use runner: <probe> for a definitive check",
 			kind, a.From, a.To, state, a.From,
 		)
-	} else if allBlocked && tested < len(toNets) {
+	} else if allBlocked == expectDeny && tested < len(toNets) {
+		// As with a remote probe, incomplete coverage can only establish a
+		// failure. A passing observation must cover the remaining gateways.
 		result.Status = models.StatusWarn
 		result.Summary = fmt.Sprintf("%s partially verified: %d gateway(s) could not be tested from %s", kind, len(toNets)-tested, a.From)
-	} else if expectDeny && allBlocked {
+	} else if allBlocked == expectDeny {
 		result.Status = models.StatusPass
-		result.Summary = fmt.Sprintf("isolation confirmed: %s cannot reach %s", a.From, a.To)
-	} else if expectDeny && !allBlocked {
+		if expectDeny {
+			result.Summary = fmt.Sprintf("isolation confirmed: %s cannot reach %s", a.From, a.To)
+		} else {
+			result.Summary = fmt.Sprintf("connectivity confirmed: %s can reach %s", a.From, a.To)
+		}
+	} else if expectDeny {
 		result.Status = models.StatusFail
 		result.Summary = fmt.Sprintf("isolation violation: %s can reach %s", a.From, a.To)
 		result.Violations = append(result.Violations, "expected deny but traffic is reachable")
-	} else if !expectDeny && !allBlocked {
-		result.Status = models.StatusPass
-		result.Summary = fmt.Sprintf("connectivity confirmed: %s can reach %s", a.From, a.To)
 	} else {
 		result.Status = models.StatusFail
 		result.Summary = fmt.Sprintf("connectivity failure: %s cannot reach %s", a.From, a.To)

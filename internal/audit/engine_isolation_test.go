@@ -74,10 +74,21 @@ func TestRunIsolation_PartiallyMeasured(t *testing.T) {
 	}}
 	eng := NewEngine(spec)
 	eng.runnerCtx = matchNetworks([]system.PingSource{{IP: net.ParseIP("10.0.60.15"), Interface: "wifi"}}, spec)
-	eng.Backend = &backends.MockBackend{PingResult: &system.PingResult{}}
-	result, err := eng.runIsolation(context.Background(), intent.Assertion{From: "iot", To: "servers,media", Expect: "deny"})
-	if err != nil || result.Status != models.StatusWarn {
-		t.Fatalf("got %v, %v; want warn", result, err)
+	for _, tc := range []struct {
+		expect    string
+		reachable bool
+		want      models.Status
+	}{
+		{"deny", false, models.StatusWarn},
+		{"deny", true, models.StatusFail},
+		{"allow", false, models.StatusFail},
+		{"allow", true, models.StatusWarn},
+	} {
+		eng.Backend = &backends.MockBackend{PingResult: &system.PingResult{Reachable: tc.reachable}}
+		result, err := eng.runIsolation(t.Context(), intent.Assertion{From: "iot", To: "servers,media", Expect: tc.expect})
+		if err != nil || result.Status != tc.want {
+			t.Errorf("expect %s, reachable %t: got %v, %v; want %v", tc.expect, tc.reachable, result, err, tc.want)
+		}
 	}
 }
 

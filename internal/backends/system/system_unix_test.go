@@ -5,6 +5,7 @@ package system
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"testing"
 )
 
@@ -77,21 +78,14 @@ func TestUnixPingRejectsOptionTargets(t *testing.T) {
 }
 
 func TestBoundPingUnixVerdict(t *testing.T) {
-	for _, tc := range []struct {
-		name, out        string
-		err              error
-		reachable, valid bool
-	}{
+	const loss = "3 packets transmitted, 0 received, 100% packet loss"
+	noReplies := &exec.ExitError{}
+	sendFailure := &exec.ExitError{Stderr: []byte("sendto: Network is unreachable")}
+	checkBoundPingCases(t, []boundPingCase{
 		{"echo reply", "3 packets transmitted, 3 received, 0% packet loss", nil, true, true},
-		{"no replies", "3 packets transmitted, 0 received, 100% packet loss", errors.New("no replies"), false, true},
+		{"no replies", loss, noReplies, false, true},
+		{"local send failure with loss statistics", loss, sendFailure, false, false},
 		{"bind failure", "", errors.New("bind failed"), false, false},
 		{"no observations", "", nil, false, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := parsePingResult("10.0.11.1", tc.out, tc.err, true)
-			if (err == nil) != tc.valid || (got != nil && got.Reachable != tc.reachable) {
-				t.Errorf("ping = %v, %v", got, err)
-			}
-		})
-	}
+	})
 }
