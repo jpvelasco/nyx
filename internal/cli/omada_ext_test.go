@@ -490,3 +490,14 @@ func TestOmadaAPChannelsCmd(t *testing.T) {
 		}
 	}
 }
+
+func TestOmadaAPChannelsCmd_InventoryError(t *testing.T) {
+	saveRestoreOmadaExtGlobals(t)
+	cmd := buildOmadaAPChannelsCmd()
+	providerHost = omadaExtFakeController(t, false, false, false, true).URL
+	providerSkipTLS = true
+	err := cmd.RunE(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "controller error -1005") {
+		t.Fatalf("error = %v, want controller permission error", err)
+	}
+}

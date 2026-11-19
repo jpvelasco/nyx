@@ -60,3 +60,16 @@ func TestGetAPChannelsReadError(t *testing.T) {
 		})
 	}
 }
+
+func TestGetAPChannelsInventoryError(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/openapi/v1/abc123/sites/s1/networks/devices" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		writeEnvelope(w, -1005, "No permission.", `null`)
+	}))
+	rows, err := c.GetAPChannels(context.Background(), "s1")
+	if rows != nil || err == nil || !strings.Contains(err.Error(), "controller error -1005") {
+		t.Fatalf("rows = %v, error = %v", rows, err)
+	}
+}
