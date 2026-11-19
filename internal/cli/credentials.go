@@ -309,7 +309,13 @@ var (
 		return err
 	}
 	liveOpnsense = func(ctx context.Context, opts service.OpnsenseOptions) error {
-		_, err := service.NewOpnsenseService().Info(ctx, opts)
+		rows, err := service.NewOpnsenseService().CheckPrivileges(ctx, opts)
+		if len(rows) > 0 {
+			fmt.Println("OPNsense endpoint\tAccess")
+			for _, row := range rows {
+				fmt.Println(row)
+			}
+		}
 		return err
 	}
 	liveProbe = func(ctx context.Context, p probe.Probe) error {

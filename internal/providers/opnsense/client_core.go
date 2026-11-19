@@ -134,25 +134,37 @@ func (c *Client) classifyStatus(resp *http.Response, path string) error {
 		return nil
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
-		return &stableError{fmt.Errorf("authentication failed — check API key and secret")}
+		return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("authentication failed — check API key and secret")}}
 	}
 	if resp.StatusCode == http.StatusForbidden {
-		return &stableError{fmt.Errorf("permission denied: %s on OPNsense at %s — the API user lacks the privilege for this endpoint; grant the matching page privilege to the user (System ‣ Access ‣ Users)", path, c.host)}
+		privilege := opnsensePagePrivilege(path)
+		if privilege == "" {
+			privilege = "the matching page privilege"
+		}
+		return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("permission denied: %s on OPNsense at %s — grant %s to the API user (System ‣ Access ‣ Users)", path, c.host, privilege)}}
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return &stableError{fmt.Errorf("resource not found: %s on OPNsense at %s", path, c.host)}
+		return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("resource not found: %s on OPNsense at %s", path, c.host)}}
 	}
 	if resp.StatusCode >= http.StatusInternalServerError {
 		return fmt.Errorf("unexpected status %d from OPNsense for %s", resp.StatusCode, path)
 	}
-	return &stableError{fmt.Errorf("unexpected status %d from OPNsense for %s", resp.StatusCode, path)}
+	return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("unexpected status %d from OPNsense for %s", resp.StatusCode, path)}}
 }
+
+type apiStatusError struct {
+	code int
+	err  error
+}
+
+func (e *apiStatusError) Error() string { return e.err.Error() }
 
 // stableError marks a failure that must not be retried: the failure is
 // deterministic (bad credentials, missing resource, client-side 4xx).
 type stableError struct{ err error }
 
 func (e *stableError) Error() string { return e.err.Error() }
+func (e *stableError) Unwrap() error { return e.err }
 
 // retryAction describes how the client responds to a failed request.
 type retryAction int
