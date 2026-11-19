@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
