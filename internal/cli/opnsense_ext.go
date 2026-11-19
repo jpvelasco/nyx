@@ -17,6 +17,7 @@ import (
 
 func buildOpnsenseExtraCommands() []*cobra.Command {
 	return []*cobra.Command{
+		buildOpnsenseBlocklistCmd(),
 		buildOpnsenseListCmd("list-vlans", "List configured VLAN devices", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 			return service.NewOpnsenseService().ListVLANs(ctx, opts)
 		}),
