@@ -58,21 +58,18 @@ func TestHostCountFrom(t *testing.T) {
 	}
 }
 
-// fakeNmapOnPATH installs an inert executable named nmap on the test PATH.
-// It exits 0 with empty output: the scanner's discovery reports no hosts
-// (init tolerates that) without any real network activity.
-func fakeNmapOnPATH(t *testing.T) {
+// fakeCommandOnPATH installs a platform-specific command fixture for a CLI test.
+func fakeCommandOnPATH(t *testing.T, name, unixBody, windowsBody string) {
 	t.Helper()
 	dir := t.TempDir()
-	name := "nmap"
-	script := "#!/bin/sh\nexit 0\n"
+	script := "#!/bin/sh\n" + unixBody + "\n"
 	if runtime.GOOS == "windows" {
-		name = "nmap.bat"
-		script = "@echo off\r\nexit /b 0\r\n"
+		name += ".bat"
+		script = "@echo off\r\n" + windowsBody + "\r\n"
 	}
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil { // nosemgrep — the shim needs its owner execute bit
-		t.Fatalf("writing fake nmap: %v", err)
+		t.Fatalf("writing fake %s: %v", name, err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
@@ -82,7 +79,7 @@ func fakeNmapOnPATH(t *testing.T) {
 // The file is only replaced atomically after a successful generation.
 func TestInitCmd_FailedInitPreservesExistingSpec(t *testing.T) {
 	saveRestoreGlobals(t)
-	fakeNmapOnPATH(t)
+	fakeCommandOnPATH(t, "nmap", "exit 0", "exit /b 0")
 
 	existing := filepath.Join(t.TempDir(), "nyx.yaml")
 	const original = "# my existing spec — must survive a failed init\n"
@@ -125,7 +122,7 @@ func TestInitCmd_FailedInitPreservesExistingSpec(t *testing.T) {
 // temporary sibling remains.
 func TestInitCmd_SuccessWritesOutputAtomically(t *testing.T) {
 	saveRestoreGlobals(t)
-	fakeNmapOnPATH(t)
+	fakeCommandOnPATH(t, "nmap", "exit 0", "exit /b 0")
 
 	outPath := filepath.Join(t.TempDir(), "nyx.yaml")
 	initOutput = outPath

@@ -1,6 +1,7 @@
 package opnsense
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -65,10 +66,13 @@ type PfStatistics struct {
 
 // KernelRoute is one row from GET /api/diagnostics/interface/get_routes.
 type KernelRoute struct {
-	Destination string `json:"destination"`
-	Gateway     string `json:"gateway,omitempty"`
-	Netif       string `json:"netif,omitempty"`
-	Flags       string `json:"flags,omitempty"`
+	Proto                string `json:"proto,omitempty"`
+	MTU                  string `json:"mtu,omitempty"`
+	InterfaceDescription string `json:"intf_description,omitempty"`
+	Destination          string `json:"destination"`
+	Gateway              string `json:"gateway,omitempty"`
+	Netif                string `json:"netif,omitempty"`
+	Flags                string `json:"flags,omitempty"`
 }
 
 // GetBridgeSettings returns configured bridges (GET search_item). A 403 is
@@ -130,12 +134,30 @@ func (c *Client) GetDnsmasqSettings(ctx context.Context) (*DnsmasqSettings, erro
 }
 
 // GetPfStatistics returns the pf state-table summary
-// (GET /diagnostics/firewall/pf_statistics). A 403 is the stable
-// page-privilege error.
+// from the legacy statistics object or the newer states endpoint.
+// A 403 is the stable page-privilege error.
 func (c *Client) GetPfStatistics(ctx context.Context) (*PfStatistics, error) {
 	raw, err := getRaw(ctx, c, "/diagnostics/firewall/pf_statistics")
 	if err != nil {
 		return nil, err
+	}
+	if bytes.HasPrefix(bytes.TrimSpace(raw), []byte("[")) && json.Valid(raw) {
+		// OPNsense 26 returns an array when no statistics section is selected.
+		raw, err = getRaw(ctx, c, "/diagnostics/firewall/pf_states")
+		if err != nil {
+			return nil, err
+		}
+		var states struct {
+			Current *int `json:"current,string"`
+			Limit   *int `json:"limit,string"`
+		}
+		if err := json.Unmarshal(raw, &states); err != nil {
+			return nil, fmt.Errorf("decoding pf states response: %w", err)
+		}
+		if states.Current == nil || states.Limit == nil {
+			return nil, fmt.Errorf("decoding pf states response: missing current or limit")
+		}
+		return &PfStatistics{StateCount: *states.Current, Limit: *states.Limit}, nil
 	}
 	stats, err := parsePfStatistics(raw)
 	if err != nil {
@@ -273,17 +295,15 @@ func parseDnsmasqSettings(raw []byte) (*DnsmasqSettings, error) {
 }
 
 func parsePfStatistics(raw []byte) (*PfStatistics, error) {
-	var flat struct {
+	type counters struct {
 		Current     int `json:"current"`
 		StateCount  int `json:"state_count"`
 		SourceCount int `json:"source_count"`
 		Limit       int `json:"limit"`
-		Info        struct {
-			Current     int `json:"current"`
-			StateCount  int `json:"state_count"`
-			SourceCount int `json:"source_count"`
-			Limit       int `json:"limit"`
-		} `json:"info"`
+	}
+	var flat struct {
+		counters
+		Info   counters `json:"info"`
 		States struct {
 			Current int `json:"current"`
 			Limit   int `json:"limit"`
@@ -301,6 +321,11 @@ func parsePfStatistics(raw []byte) (*PfStatistics, error) {
 }
 
 func parseKernelRoutes(raw []byte) ([]KernelRoute, error) {
+	if bytes.HasPrefix(bytes.TrimSpace(raw), []byte("[")) {
+		var routes []KernelRoute
+		err := json.Unmarshal(raw, &routes)
+		return routes, err
+	}
 	var env struct {
 		Rows   []KernelRoute `json:"rows"`
 		Routes []KernelRoute `json:"routes"`

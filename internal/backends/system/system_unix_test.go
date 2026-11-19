@@ -4,6 +4,8 @@ package system
 
 import (
 	"context"
+	"errors"
+	"os/exec"
 	"testing"
 )
 
@@ -73,4 +75,17 @@ func TestUnixPingRejectsOptionTargets(t *testing.T) {
 			t.Errorf("Ping(%q) should have been rejected by checkPingTarget", bad)
 		}
 	}
+}
+
+func TestBoundPingUnixVerdict(t *testing.T) {
+	const loss = "3 packets transmitted, 0 received, 100% packet loss"
+	noReplies := &exec.ExitError{}
+	sendFailure := &exec.ExitError{Stderr: []byte("sendto: Network is unreachable")}
+	checkBoundPingCases(t, []boundPingCase{
+		{"echo reply", "3 packets transmitted, 3 received, 0% packet loss", nil, true, true},
+		{"no replies", loss, noReplies, false, true},
+		{"local send failure with loss statistics", loss, sendFailure, false, false},
+		{"bind failure", "", errors.New("bind failed"), false, false},
+		{"no observations", "", nil, false, false},
+	})
 }

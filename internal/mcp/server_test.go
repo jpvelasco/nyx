@@ -1853,7 +1853,7 @@ type errBackend struct {
 	backends.Backend
 }
 
-func (e errBackend) Ping(ctx context.Context, target string) (*system.PingResult, error) {
+func (e errBackend) Ping(ctx context.Context, target string, source *system.PingSource) (*system.PingResult, error) {
 	return nil, errors.New("ping unavailable")
 }
 
