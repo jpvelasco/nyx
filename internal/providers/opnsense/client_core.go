@@ -59,9 +59,19 @@ func (c *Client) logEvent(event string, fields map[string]interface{}) {
 // 401 (stateless API key/secret: retrying cannot repair bad credentials),
 // 404, and other 4xx — fail immediately without retry.
 func (c *Client) do(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
+	return c.doWithReplay(ctx, method, path, body, true)
+}
+
+func (c *Client) doWithReplay(ctx context.Context, method, path string, body []byte, replay bool) (*http.Response, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	client := c.httpClient
+	if !replay {
+		singleRequest := *client
+		singleRequest.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		client = &singleRequest
+	}
 	url := fmt.Sprintf("https://%s/api%s", c.host, path)
 	var lastErr error
 	for attempt := 0; ; attempt++ {
@@ -79,7 +89,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) (*htt
 			req.Header.Set("Content-Type", "application/json")
 		}
 
-		resp, err := c.httpClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			// http.Client wraps transport failures in *url.Error; a
 			// context deadline mid-flight surfaces as the context error.
@@ -107,6 +117,9 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) (*htt
 		// error. Idempotent operations (set/del/toggle/apply) and reads
 		// (search/get, including POST-based search endpoints) keep their
 		// transient retries (#185).
+		if action == retryBackoff && !replay {
+			return nil, fmt.Errorf("state operation outcome is uncertain: %w", lastErr)
+		}
 		if action == retryBackoff && isCreatePath(path) {
 			return nil, fmt.Errorf("%w (uncertain outcome: the controller may have committed the create — verify before retrying)", lastErr)
 		}
