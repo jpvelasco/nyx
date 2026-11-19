@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -444,4 +445,78 @@ type failingRoundTripper struct{}
 
 func (failingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, errors.New("connection refused")
+}
+
+// roundTripFunc adapts a function to http.RoundTripper so perform and
+// executeDownload can be tested without a server.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+type readErrorBody struct{}
+
+func (readErrorBody) Read([]byte) (int, error) { return 0, errors.New("synthetic body failure") }
+func (readErrorBody) Close() error             { return nil }
+
+// A body that fails mid-read must surface as a body-read error from perform,
+// with the transport details kept internal to the error wrap.
+func TestPerformBodyReadFailure(t *testing.T) {
+	c := &Client{httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{},
+			Body:       readErrorBody{},
+			Request:    req,
+		}, nil
+	})}}
+	req, err := http.NewRequest(http.MethodGet, "https://omada.invalid/openapi/v1/abc123/sites", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if _, _, err := c.perform(req); err == nil || !strings.Contains(err.Error(), "reading response body") {
+		t.Fatalf("perform = %v, want body-read failure", err)
+	}
+}
+
+// With Debug on, executeDownload prints one stderr line naming the method,
+// status, and byte count — the attachment bytes themselves stay out.
+func TestExecuteDownloadDebugLine(t *testing.T) {
+	c := &Client{
+		Debug: true,
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Disposition": []string{"attachment; filename=LogList_1.zip"}},
+				Body:       io.NopCloser(strings.NewReader("PK")),
+				Request:    req,
+			}, nil
+		})},
+	}
+	req, err := http.NewRequest(http.MethodPost, "https://omada.invalid/openapi/v1/abc123/logs/export", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+	filename, data, err := c.executeDownload(req)
+	if err != nil {
+		t.Fatalf("executeDownload: %v", err)
+	}
+	if filename != "LogList_1.zip" || string(data) != "PK" {
+		t.Fatalf("download = %q %q, want the attachment", filename, data)
+	}
+	_ = w.Close()
+	raw, _ := io.ReadAll(r)
+	line := string(raw)
+	if !strings.Contains(line, "[omada debug] POST") || !strings.Contains(line, "-> 200 (2 bytes)") {
+		t.Errorf("debug line = %q, want POST with status and byte count", line)
+	}
+	if strings.Contains(line, "PK") {
+		t.Errorf("debug line = %q, want no attachment bytes", line)
+	}
 }

@@ -196,6 +196,26 @@ the enforcing gateway for runtime entries, reasons, and expiry.
 administrative block for one client. For runtime attack-defense blocks, use the
 gateway's own administrative tools.
 
+## Log export
+
+`nyx omada logs export` downloads the controller's log archive for one site
+through `POST /openapi/v1/{controllerId}/logs/export` with the body
+`{"siteIds": ["<siteId>"], "format": 0}` — `0` for the CSV export, `1` for the
+xlsx export. The controller answers `200` with
+`Content-Type: application/zip` and a `Content-Disposition` attachment whose
+name it supplies (for example `LogList_<timestamp>.zip`). The CSV archive
+contains a single spreadsheet with the columns `LOG TYPE`, `TIME`, and
+`CONTENT`.
+
+The endpoint requires the `GLOBAL_DATA_EXPORT` privilege. A JSON body in
+response to the export request is the error envelope, so the client treats any
+JSON answer as failure — a zip attachment can never parse as JSON. `--out`
+writes the archive to an explicit path, replacing any existing file. Without
+`--out`, the attachment name is used only when it matches the controller's
+export shape `LogList_<digits>.zip`; anything else — including a missing
+header — falls back to `omada-log-export.zip` in the working directory. The
+default path is created fresh and never overwrites an existing file.
+
 ## AP channel inventory
 
 `nyx omada ap-channel-info` lists managed access points and reads their current
