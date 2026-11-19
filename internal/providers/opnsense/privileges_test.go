@@ -30,3 +30,18 @@ func TestCheckPrivileges(t *testing.T) {
 		t.Errorf("rows = %q, want complete privilege report", rows)
 	}
 }
+
+func TestCheckPrivilegesStopsOnUnauthorized(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/firewall/alias/get" {
+			t.Errorf("unexpected request after authentication failure: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	rows, err := NewClient(server.URL, "fixture-key", "fixture-secret", true, "").CheckPrivileges(t.Context())
+	if err == nil || len(rows) != 0 {
+		t.Fatalf("rows = %q, error = %v. Want an authentication failure before reporting rows", rows, err)
+	}
+}
