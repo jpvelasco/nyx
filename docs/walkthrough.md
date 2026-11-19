@@ -225,3 +225,18 @@ An explicit `provider` must agree with the edge when a network is selected.
 Assertions without a network keep their existing provider selection.
 `nyx opnsense inventory --spec <file>` includes the declared edge and observer
 relationships alongside observed inventory. The same flag works with Omada.
+
+### Inspect OPNsense firewall states
+
+`nyx opnsense states list` queries one page of the pf state table. Use
+`--search`, `--rule-id`, `--sort age:desc`, `--page`, or `--page-size` to narrow
+or sort the result. `states rule-ids` and `states capacity` report rule labels
+and state-table usage, subject to the account's diagnostics privileges.
+
+`states kill --state <creator/state> --confirm` removes a specific state.
+`states kill --filter <tokens> --confirm` or `states kill --rule-id <id>
+--confirm` removes matching states. The kill filter accepts text the controller
+preserves. Use `states list --search` to find CIDR or port matches and select
+an exact state ID when the kill filter cannot preserve the search expression.
+`states flush-states --confirm` clears all states and can interrupt active
+connections. `states flush-sources --confirm` clears pf source tracking.

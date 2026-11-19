@@ -52,6 +52,7 @@ func buildOpnsenseExtraCommands() []*cobra.Command {
 		buildOpnsenseListCmd("unbound-status", "Show whether Unbound is running", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 			return service.NewOpnsenseService().GetUnboundStatus(ctx, opts)
 		}),
+		buildOpnsenseStatesCmd(),
 		buildOpnsensePlanNatCmd(),
 		buildOpnsenseApplyNatCmd(),
 		buildOpnsensePlanVLANCmd(),
