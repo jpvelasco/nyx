@@ -194,3 +194,16 @@ retains the controller's candidate list. Both reads use the Open API under
 firmware 6.3.0.45, the site-wide `aps/channel-info` path was registered in the
 controller package and returned error `-1600` on the appliance.
 [Read-only endpoint observations](https://github.com/jpvelasco/nyx/issues/315)
+
+## Switch ACL readback
+
+Switch ACL listings preserve `biDirectional` when the controller returns it and
+use `name` when `description` is empty. A missing flag means the value was
+unavailable. The published Open API does not expose switch-side ACL installation
+state or a device resync timestamp that can be compared with the ACL edit. ACL
+listings therefore flag device application as unverified and advise checking
+actual enforcement after resync.
+
+An Omada `acl_check` with `expect: enforced` can set `expect_bidirectional: true`
+(or `false`). A differing controller value fails the assertion. A missing value
+or a matching value whose device application cannot be verified produces a warning.

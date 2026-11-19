@@ -1124,3 +1124,21 @@ assertions:
 		}
 	}
 }
+
+func TestValidateACLCheckBidirectional(t *testing.T) {
+	bidirectional := false
+	for _, tc := range []struct {
+		provider string
+		expect   string
+		valid    bool
+	}{
+		{"omada", "enforced", true},
+		{"omada", "not_enforced", false},
+		{"opnsense", "enforced", false},
+	} {
+		a := Assertion{Type: "acl_check", Provider: tc.provider, Policy: "test-policy", Expect: tc.expect, ExpectBidirectional: &bidirectional}
+		if err := validateACLCheckAssertion(0, &a); (err == nil) != tc.valid {
+			t.Errorf("provider %s and expect %s: validation = %v, want valid %t", tc.provider, tc.expect, err, tc.valid)
+		}
+	}
+}

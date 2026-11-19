@@ -226,12 +226,37 @@ type ACLRule struct {
 	// 2 = all switch VLAN, 3 = custom switch VLAN). The controller
 	// rejects switch-scope creates that omit it (errorCode -1); it is
 	// absent on gateway-scope rules and reads as 0.
-	BindingType int `json:"bindingType"`
+	BindingType   int   `json:"bindingType"`
+	BiDirectional *bool `json:"biDirectional,omitempty"`
 
 	// Resolved from LAN networks; omitted on the wire.
 	SourceName string `json:"-"`
 	DestName   string `json:"-"`
 }
+
+// UnmarshalJSON accepts name as a fallback for the published description field.
+func (r *ACLRule) UnmarshalJSON(data []byte) error {
+	type wireRule ACLRule
+	wire := struct {
+		*wireRule
+		Name string `json:"name"`
+	}{wireRule: (*wireRule)(r)}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	r.Name = normalizeACLName(r.Name)
+	if r.Name == "" {
+		r.Name = normalizeACLName(wire.Name)
+	}
+	return nil
+}
+
+func normalizeACLName(name string) string {
+	return strings.Join(strings.Fields(stripControllerFormatting(name)), " ")
+}
+
+// SwitchACLAppliedStateHint describes the limit of controller ACL readback.
+const SwitchACLAppliedStateHint = "unverified on device; verify enforcement after resync"
 
 // ACLList is a typed fetch of one ACL scope. The Open API carries no scope
 // capability flags, so a list is just the scope type and its rules.
