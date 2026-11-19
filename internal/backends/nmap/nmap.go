@@ -179,6 +179,35 @@ func Discover(ctx context.Context, cidr string) (*models.CheckResult, error) {
 	return DiscoverWithOptions(ctx, cidr, DefaultScanOptions)
 }
 
+// runNmap executes nmap and classifies the outcome:
+//
+//   - clean: exit 0; out is nmap's stdout
+//   - warn: non-zero exit but stdout was produced (for example "no hosts
+//     found"); out is still usable and err carries the exit status
+//   - hard: context cancellation, or non-zero exit with empty stdout; out is
+//     empty and err explains the failure, including nmap's stderr so the
+//     cause (for example "need root to do a UDP scan") is visible
+func runNmap(ctx context.Context, nmapPath string, args []string) (out string, err error, warned bool) {
+	cmd := exec.CommandContext(ctx, nmapPath, args...) // nosemgrep
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	stdout, runErr := cmd.Output()
+	if runErr == nil {
+		return string(stdout), nil, false
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err(), false
+	}
+	if len(stdout) == 0 {
+		detail := strings.TrimSpace(stderr.String())
+		if detail != "" {
+			return "", fmt.Errorf("nmap error: %w: %s", runErr, detail), false
+		}
+		return "", fmt.Errorf("nmap error: %w", runErr), false
+	}
+	return string(stdout), runErr, true
+}
+
 // DiscoverWithOptions runs an nmap ping sweep with explicit ScanOptions.
 func DiscoverWithOptions(ctx context.Context, cidr string, opts ScanOptions) (*models.CheckResult, error) {
 	result := models.NewCheckResult("nmap", "subnet_discovery", "nmap", cidr)
@@ -203,10 +232,8 @@ func DiscoverWithOptions(ctx context.Context, cidr string, opts ScanOptions) (*m
 
 	// Build args: nmap -sn [-PR|-PE] [-Tn] [--min-rate N] [--max-rate N] <cidr>
 	args := buildDiscoverArgs(opts, cidr)
-	// #nosec G204 — nmap is hardcoded, args from spec
-	cmd := exec.CommandContext(ctx, nmapPath, args...) // nosemgrep
-	out, err := cmd.Output()
-	if err != nil {
+	out, err, warned := runNmap(ctx, nmapPath, args)
+	if err != nil && !warned {
 		// Context cancellation manifests as an error here
 		if ctx.Err() != nil {
 			result.Status = models.StatusError
@@ -214,20 +241,18 @@ func DiscoverWithOptions(ctx context.Context, cidr string, opts ScanOptions) (*m
 			result.Finish()
 			return result, ctx.Err()
 		}
-		// nmap exits non-zero on some conditions (e.g. no hosts found) –
-		// treat as a warning rather than a hard error when there is output.
-		if len(out) == 0 {
-			result.Status = models.StatusError
-			result.Summary = fmt.Sprintf("nmap exited with error: %v", err)
-			result.Finish()
-			return result, fmt.Errorf("nmap error: %w", err)
-		}
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("nmap exited with error: %v", err)
+		result.Finish()
+		return result, err
+	}
+	if warned {
 		result.Status = models.StatusWarn
 		result.Summary = fmt.Sprintf("nmap exited with warning: %v", err)
 	}
 
-	hosts := parseNmapOutput(string(out))
-	done := parseDoneLine(string(out))
+	hosts := parseNmapOutput(out)
+	done := parseDoneLine(out)
 
 	dr := DiscoveryResult{
 		Hosts: hosts,
@@ -249,7 +274,7 @@ func DiscoverWithOptions(ctx context.Context, cidr string, opts ScanOptions) (*m
 	result.Summary = discoverySummary(len(hosts), unresponsiveFrom(done), cidr)
 
 	// Attach raw nmap output as evidence
-	result.Evidence = append(result.Evidence, strings.TrimSpace(string(out)))
+	result.Evidence = append(result.Evidence, strings.TrimSpace(out))
 
 	result.Finish()
 	return result, nil
@@ -489,33 +514,31 @@ func PortScan(ctx context.Context, target string, ports []int, protocol string, 
 
 	args := buildPortScanArgs(opts, target, ports, protocol)
 
-	// #nosec G204 — nmap is hardcoded, args from spec
-	cmd := exec.CommandContext(ctx, nmapPath, args...) // nosemgrep
-	out, err := cmd.Output()
-	if err != nil {
+	out, err, warned := runNmap(ctx, nmapPath, args)
+	if err != nil && !warned {
 		if ctx.Err() != nil {
 			result.Status = models.StatusError
 			result.Summary = fmt.Sprintf("nmap timed out: %v", ctx.Err())
 			result.Finish()
 			return result, ctx.Err()
 		}
-		if len(out) == 0 {
-			result.Status = models.StatusError
-			result.Summary = fmt.Sprintf("nmap exited with error: %v", err)
-			result.Finish()
-			return result, fmt.Errorf("nmap error: %w", err)
-		}
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("nmap exited with error: %v", err)
+		result.Finish()
+		return result, err
+	}
+	if warned {
 		result.Status = models.StatusWarn
 		result.Summary = fmt.Sprintf("nmap exited with warning: %v", err)
 	}
 
-	portStates := parsePortScanOutput(string(out), ports, protocol)
+	portStates := parsePortScanOutput(out, ports, protocol)
 
 	psJSON, _ := json.Marshal(PortScanResult{Ports: portStates})
 	var psMap map[string]interface{}
 	_ = json.Unmarshal(psJSON, &psMap)
 	result.Observed = psMap
-	result.Evidence = append(result.Evidence, strings.TrimSpace(string(out)))
+	result.Evidence = append(result.Evidence, strings.TrimSpace(out))
 
 	if err == nil {
 		result.Status = models.StatusPass

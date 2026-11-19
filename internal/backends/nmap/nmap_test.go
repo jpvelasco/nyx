@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1100,12 +1103,56 @@ func TestPortScan_UDP(t *testing.T) {
 	if !Available() {
 		t.Skip("nmap not available")
 	}
+	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
+		t.Skip("UDP scans need raw sockets (root) on Linux; CI runners are unprivileged")
+	}
 	result, err := PortScan(context.Background(), "127.0.0.1", []int{53}, "udp", PoliteScanOptions)
 	if err != nil {
 		t.Fatalf("PortScan udp failed: %v", err)
 	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
+	}
+}
+
+// writeFailingNmap places a fake nmap first on PATH that fails with an
+// empty stdout and a diagnostic on stderr, mimicking nmap refusing a
+// privileged scan.
+func writeFailingNmap(t *testing.T, dir string) {
+	t.Helper()
+	var (
+		name    string
+		content string
+	)
+	if runtime.GOOS == "windows" {
+		name = "nmap.bat"
+		content = "@echo off\r\necho need root to do a UDP scan 1>&2\r\nexit /b 1\r\n"
+	} else {
+		name = "nmap"
+		content = "#!/bin/sh\necho 'need root to do a UDP scan' >&2\nexit 1\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o755); err != nil {
+		t.Fatalf("write fake nmap: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestPortScan_FailureIncludesStderr checks that a nmap failure with no
+// stdout surfaces nmap's stderr in the error, so callers see the cause
+// (for example a missing-privileges refusal) instead of a bare exit status.
+func TestPortScan_FailureIncludesStderr(t *testing.T) {
+	dir := t.TempDir()
+	writeFailingNmap(t, dir)
+
+	result, err := PortScan(context.Background(), "127.0.0.1", []int{53}, "udp", PoliteScanOptions)
+	if err == nil {
+		t.Fatal("expected an error from the failing nmap")
+	}
+	if !strings.Contains(err.Error(), "need root to do a UDP scan") {
+		t.Fatalf("error should include nmap's stderr, got: %v", err)
+	}
+	if result == nil || result.Status != models.StatusError {
+		t.Fatalf("expected StatusError result, got: %+v", result)
 	}
 }
 
