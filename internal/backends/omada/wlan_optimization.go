@@ -12,9 +12,13 @@ import (
 )
 
 // WLANOptimizationRun is a row from the site planning-history collection.
+// Time is the controller's epoch milliseconds for when the run happened;
+// Mode is 0 for a scheduled run and 1 for a manual trigger.
 type WLANOptimizationRun struct {
 	ID          string `json:"planningHistroyId"`
 	APCount     int    `json:"apNum"`
+	Time        int64  `json:"time"`
+	Mode        int    `json:"mode"`
 	ScanSuccess bool   `json:"isScanSuccess"`
 	MessageType int    `json:"msgType"`
 	Message     string `json:"msg"`
@@ -23,12 +27,39 @@ type WLANOptimizationRun struct {
 	Failed6G    string `json:"failedMacs6g"`
 }
 
+// RFPlanningOccurrence describes when the scheduled optimization fires.
+// TimingType 1 is daily; other values (e.g. weekly) are not modelled yet.
+type RFPlanningOccurrence struct {
+	TimingType int `json:"timingType"`
+	Hour       int `json:"hour"`
+	Minute     int `json:"minute"`
+}
+
+// RFPlanning is the site's scheduled WLAN optimization configuration.
+type RFPlanning struct {
+	ScheduleEnable bool                 `json:"scheduleEnable"`
+	Occurrence     RFPlanningOccurrence `json:"occurrence"`
+}
+
+// GetRFPlanning reads the site's scheduled WLAN optimization configuration.
+func (c *Client) GetRFPlanning(ctx context.Context, siteID string) (RFPlanning, error) {
+	var planning RFPlanning
+	if siteID == "" || siteID == "." || siteID == ".." {
+		return planning, errors.New("invalid site id")
+	}
+	if err := c.get(ctx, "sites/"+url.PathEscape(siteID)+"/rfPlanning", &planning); err != nil {
+		return planning, err
+	}
+	return planning, nil
+}
+
 // WLANOptimizationStatus describes the known controller status codes.
 func WLANOptimizationStatus(code int) string {
 	return wlanOptimizationStatuses[code]
 }
 
 var wlanOptimizationStatuses = map[int]string{
+	7:      "No APs available for WLAN Optimization.",
 	-34800: "No SSIDs are available on the band.",
 	-34804: "No connected APs are available.",
 	-34805: "No wired APs are available.",

@@ -133,7 +133,9 @@ func ImportSpec(ctx context.Context, host, clientID, clientSecret, siteName stri
 	spec.Policies = PoliciesFromRules(allRules, omadaNets)
 
 	// Generate assertions
-	spec.Assertions = append(buildAssertions(spec.Networks, omadaNets, clients, allRules, netsByID), intent.Assertion{Type: "acl_drift", Provider: "omada"})
+	spec.Assertions = append(buildAssertions(spec.Networks, omadaNets, clients, allRules, netsByID),
+		intent.Assertion{Type: "acl_drift", Provider: "omada"},
+		intent.Assertion{Type: "wlan_schedule_liveness", Provider: "omada"})
 
 	// Inventory snapshot: what the controller's devices and ACL scopes look
 	// like right now, so audits can flag drift (e.g. ACL rule count).

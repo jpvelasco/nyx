@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jpvelasco/nyx/internal/audit"
 	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
@@ -170,6 +171,45 @@ func (o *OmadaProvider) ObserveACLs(ctx context.Context, opts providers.ImportOp
 			observed.Rules = append(observed.Rules, providers.ObservedACL{Name: name, Scope: label})
 		}
 	}
+	return observed, nil
+}
+
+// ObserveWLANSchedule reads the RF planning schedule and the newest
+// optimization history row (any trigger mode) from the controller.
+// ControllerNow is the Date header of the last response, so schedule math
+// runs in the controller's own wall clock and local clock drift cancels.
+func (o *OmadaProvider) ObserveWLANSchedule(ctx context.Context, opts providers.ImportOptions) (providers.WLANScheduleObservation, error) {
+	var observed providers.WLANScheduleObservation
+	client, site, err := openACLSite(ctx, opts)
+	if err != nil {
+		return observed, err
+	}
+	defer client.Logout(ctx)
+	planning, err := client.GetRFPlanning(ctx, site.EffectiveID())
+	if err != nil {
+		return observed, fmt.Errorf("reading rf planning: %w", err)
+	}
+	runs, err := client.ListWLANOptimizationHistory(ctx, site.EffectiveID())
+	if err != nil {
+		return observed, fmt.Errorf("reading optimization history: %w", err)
+	}
+	observed.ScheduleEnabled = planning.ScheduleEnable
+	observed.TimingType = planning.Occurrence.TimingType
+	observed.OccurrenceHour = planning.Occurrence.Hour
+	observed.OccurrenceMinute = planning.Occurrence.Minute
+	var newest *omadabackend.WLANOptimizationRun
+	for i := range runs {
+		if newest == nil || runs[i].Time > newest.Time {
+			newest = &runs[i]
+		}
+	}
+	if newest != nil {
+		observed.LastRunTime = time.UnixMilli(newest.Time).UTC()
+		observed.LastRunAPCount = newest.APCount
+		observed.LastRunMessageType = newest.MessageType
+		observed.LastRunReason = omadabackend.WLANOptimizationStatus(newest.MessageType)
+	}
+	observed.ControllerNow = client.ControllerNow()
 	return observed, nil
 }
 

@@ -175,6 +175,39 @@ type Client struct {
 
 	maxRetries int
 	retryBase  time.Duration
+
+	// clockMu guards lastControllerNow. It is separate from c.mu because
+	// the log-export path performs requests without holding c.mu.
+	clockMu           sync.RWMutex
+	lastControllerNow time.Time
+}
+
+// ControllerNow reports the controller's wall clock from the Date header
+// of the most recent response, including its timezone. It is zero when no
+// response has been observed yet (not logged in, or the controller
+// omitted the header).
+func (c *Client) ControllerNow() time.Time {
+	c.clockMu.RLock()
+	defer c.clockMu.RUnlock()
+	return c.lastControllerNow
+}
+
+// noteControllerClock records the controller's wall clock from a response
+// Date header. Missing or unparseable headers keep the previous value.
+// http.ParseTime only accepts the canonical GMT zone; the RFC 1123
+// fallback also accepts numeric zones like +0000, so a zone-format change
+// degrades to a known warning instead of a silent "clock unknown".
+func (c *Client) noteControllerClock(date string) {
+	t, err := http.ParseTime(date)
+	if err != nil {
+		t, err = time.Parse(time.RFC1123, date)
+		if err != nil {
+			return
+		}
+	}
+	c.clockMu.Lock()
+	c.lastControllerNow = t
+	c.clockMu.Unlock()
 }
 
 // NewClient creates an Omada client for the given controller host.
@@ -565,6 +598,7 @@ func (c *Client) perform(req *http.Request) (*http.Response, []byte, error) {
 	if err != nil {
 		return nil, nil, tlsutil.Annotate(fmt.Errorf("http request to %s: %w", req.URL.Path, err))
 	}
+	c.noteControllerClock(resp.Header.Get("Date"))
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized {
