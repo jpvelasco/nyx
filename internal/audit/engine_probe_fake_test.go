@@ -115,6 +115,15 @@ func TestRunViaProbe_RemoteSuccess(t *testing.T) {
 	if result.Summary != want {
 		t.Errorf("summary = %q, want %q", result.Summary, want)
 	}
+	assertProbeOutputWithheld(t, result, fakePingOutput("10.0.0.5", false))
+}
+
+func assertProbeOutputWithheld(t *testing.T, result *models.CheckResult, output string) {
+	t.Helper()
+	want := fmt.Sprintf("remote output: %d bytes (content withheld)", len(output))
+	if !slices.Contains(result.Evidence, want) || slices.Contains(result.Evidence, output) {
+		t.Errorf("evidence = %q, want size only (%q)", result.Evidence, want)
+	}
 }
 
 // Every gateway tested and blocked confirms isolation from the probe.
@@ -155,6 +164,7 @@ func TestRunIsolationViaProbe_AllGatewaysBlocked(t *testing.T) {
 	if !slices.Contains(result.Evidence, "gateway 10.0.0.1: blocked") {
 		t.Errorf("evidence missing blocked gateway marker: %v", result.Evidence)
 	}
+	assertProbeOutputWithheld(t, result, fakePingOutput("10.0.0.1", true))
 }
 
 // A reachable gateway against a deny expectation is a violation.

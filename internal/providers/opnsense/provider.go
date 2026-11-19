@@ -157,7 +157,7 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 	if leasesErr != nil {
 		warnings = append(warnings,
 			"DHCP leases unavailable: "+leasesErr.Error()+
-				" — client count is estimated as 0; grant the Diagnostics: DHCP page privilege (System ‣ Access ‣ Users) to the API user to count leases")
+				" — client count is estimated as 0")
 	}
 
 	// Build networks from interfaces

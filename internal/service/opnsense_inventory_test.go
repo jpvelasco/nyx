@@ -13,6 +13,10 @@ func TestOpnsenseServiceListClients(t *testing.T) {
 	for _, shape := range []string{"leases", "rows"} {
 		t.Run(shape, func(t *testing.T) {
 			ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/dnsmasq/settings/get" {
+					testutil.WriteBody(w, `{"dnsmasq":{"enable":"1"}}`)
+					return
+				}
 				if r.URL.Path != "/api/dnsmasq/leases/search" {
 					t.Errorf("path = %s, want dnsmasq/leases/search", r.URL.Path)
 				}
@@ -20,7 +24,7 @@ func TestOpnsenseServiceListClients(t *testing.T) {
 					testutil.WriteBody(w, `{"leases":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","hostname":"nas"}]}`)
 					return
 				}
-				testutil.WriteBody(w, `{"rows":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","hostname":"nas"}]}`)
+				testutil.WriteBody(w, `{"total":1,"rows":[{"hwaddr":"aa:bb:cc:dd:ee:ff","address":"10.0.10.5","hostname":"nas"}]}`)
 			})
 
 			clients, err := NewOpnsenseService().ListClients(context.Background(), opnsenseOptions(ts))
@@ -47,8 +51,10 @@ func TestOpnsenseServiceInventory(t *testing.T) {
 				}}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":2,"rows":[{"uuid":"u1","enabled":"1","action":"block"},{"uuid":"u2","enabled":"1","action":"pass"}]}`)
-			case "/api/dnsmasq/leases/search":
-				testutil.WriteBody(w, `{"leases":[{"mac":"aa","ip":"10.0.10.5","hostname":"nas"},{"mac":"bb","ip":"10.0.20.5","hostname":"cam"}]}`)
+			case "/api/kea/leases4/search":
+				testutil.WriteBody(w, `{"total":1,"rows":[{"hwaddr":"aa","address":"10.0.10.5","hostname":"nas","state":0}]}`)
+			case "/api/kea/leases6/search":
+				testutil.WriteBody(w, `{"total":1,"rows":[{"hwaddr":"bb","address":"2001:db8::10","hostname":"cam","state":0}]}`)
 			case "/api/core/service/search":
 				testutil.WriteBody(w, `{"total":1,"rows":[{"name":"dnsmasq","running":"1","description":"Dnsmasq DNS/DHCP"}]}`)
 			case "/api/routes/gateway/status":
@@ -129,6 +135,8 @@ func TestOpnsenseServiceInventory(t *testing.T) {
 				testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.10.1/24"}}}`)
 			case "/api/firewall/filter/search_rule":
 				w.WriteHeader(http.StatusInternalServerError)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, `{"dnsmasq":{"enable":"1"}}`)
 			case "/api/dnsmasq/leases/search":
 				w.WriteHeader(http.StatusInternalServerError)
 			default:

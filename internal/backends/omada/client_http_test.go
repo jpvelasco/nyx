@@ -255,8 +255,9 @@ func TestGetErrorCodes(t *testing.T) {
 		{"token expired", -44112, "access token expired"},
 		{"not logged in", -1000, "session expired"},
 		{"bad credentials", -44106, "invalid client credentials"},
-		{"forbidden", -1005, "operation forbidden"},
-		{"unsupported path", -1600, "unsupported request path"},
+		{"forbidden", -1005, "operation forbidden: check the token’s account, site, and required privileges (controller error -1005: boom)"},
+		{"unsupported path", -1600, "unsupported request path: check this controller version’s Open API endpoint registry (controller error -1600: boom)"},
+		{"not applicable", -1, "operation failed: check whether this endpoint applies to the site or edition (controller error -1: boom)"},
 		{"other", -7, "controller error -7"},
 	}
 	for _, tc := range cases {

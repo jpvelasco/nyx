@@ -97,8 +97,8 @@ func TestRenderInventoryUnknownScopes(t *testing.T) {
 	if !strings.Contains(out, "unknown (fetch failed)") {
 		t.Errorf("rules fetch failure must render unknown:\n%s", out)
 	}
-	if !strings.Contains(out, "0 active clients") {
-		t.Errorf("lease fetch failure must render 0 clients:\n%s", out)
+	if !strings.Contains(out, "active clients unknown (fetch failed)") {
+		t.Errorf("lease fetch failure must render unknown:\n%s", out)
 	}
 	if strings.Contains(out, "Controller: ") {
 		t.Errorf("no system info → no Controller line at all:\n%s", out)

@@ -11,7 +11,7 @@ import (
 type OpnsenseClient struct {
 	MAC      string `json:"mac"`
 	IP       string `json:"ip"`
-	Hostname string `json:"hostname"`
+	Hostname string `json:"hostname,omitempty"`
 }
 
 // OpnsenseInventory is the firewall's point-in-time observation in a flat,
