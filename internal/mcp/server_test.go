@@ -1624,6 +1624,7 @@ func TestDispatchOpnsenseWireGuard(t *testing.T) {
 }
 
 func TestDispatchOpnsenseInventory(t *testing.T) {
+	t.Setenv("NYX_MCP_ALLOW_FIREWALL_DETAILS", "")
 	stub := &stubOpnsenseSvc{inventory: &service.OpnsenseInventory{
 		Host:              "fw.local",
 		ControllerVersion: "24.7.11_2",
@@ -1651,9 +1652,17 @@ func TestDispatchOpnsenseInventory(t *testing.T) {
 	if stub.lastOpts.IncludeFirewallDetails {
 		t.Fatal("MCP inventory included private details by default")
 	}
-	_, _ = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_inventory", map[string]interface{}{
-		"host": "fw.local", "api_key": "key1", "api_secret": "secret1", "include_firewall_details": true,
-	})
+	args := map[string]interface{}{"host": "fw.local", "api_key": "key1", "api_secret": "secret1", "include_firewall_details": true}
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_inventory", args)
+	if !isErr || !strings.Contains(text, "operator opt-in") || stub.lastOpts.IncludeFirewallDetails {
+		t.Fatalf("inventory bypassed operator gate: %s", text)
+	}
+	t.Setenv("NYX_MCP_ALLOW_FIREWALL_DETAILS", "true")
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_inventory", args)
+	if isErr {
+		t.Fatalf("unexpected opt-in error: %s", text)
+	}
+
 	if !stub.lastOpts.IncludeFirewallDetails {
 		t.Fatal("MCP inventory did not forward the explicit opt-in")
 	}

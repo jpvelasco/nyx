@@ -1061,6 +1061,9 @@ func (s *Server) toolOpnsenseInventory(ctx context.Context, args map[string]inte
 		return errResult(msg)
 	}
 	opts.IncludeFirewallDetails = argBoolDefault(args, "include_firewall_details", false)
+	if opts.IncludeFirewallDetails && !firewallDetailsAllowed() {
+		return errResult("Firewall details require operator opt-in via NYX_MCP_ALLOW_FIREWALL_DETAILS=true")
+	}
 	inv, err := s.opnsenseSvc.Inventory(ctx, opts)
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense inventory request failed: %v", err))
