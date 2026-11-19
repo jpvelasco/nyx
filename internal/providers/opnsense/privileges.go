@@ -16,6 +16,8 @@ func opnsensePagePrivilege(path string) string {
 		return "Firewall: Rules [new]"
 	case path == "diagnostics/firewall/log":
 		return "Diagnostics: Logs: Firewall: Live View"
+	case path == "diagnostics/firewall/stats":
+		return "Diagnostics: Logs: Firewall: Summary View"
 	case path == "core/system/status":
 		return "System: Status"
 	case path == "kea/leases4/search":

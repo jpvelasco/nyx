@@ -88,7 +88,8 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) (*htt
 			}
 			lastErr = tlsutil.Annotate(fmt.Errorf("connecting to OPNsense at %s: %w", c.host, err))
 		} else {
-			if c.Debug {
+			endpoint := strings.TrimPrefix(req.URL.Path, "/api")
+			if c.Debug && endpoint != firewallLogPath && endpoint != firewallStatsPath {
 				c.debugDump(resp, method, path)
 			}
 			lastErr = classifyStatus(resp, path)
