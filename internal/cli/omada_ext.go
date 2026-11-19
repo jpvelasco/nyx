@@ -26,6 +26,7 @@ func buildOmadaExtraCommands() []*cobra.Command {
 	return []*cobra.Command{
 		buildOmadaUplinkInfoCmd(),
 		buildOmadaSwitchPortsCmd(),
+		buildOmadaAPChannelsCmd(),
 		buildOmadaLanProfilesCmd(),
 		buildOmadaListSSIDsCmd(),
 		buildOmadaPlanCmd(),

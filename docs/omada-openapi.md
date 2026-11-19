@@ -167,3 +167,13 @@ tests) — do not port the old PowerShell probe scripts verbatim.
   `lan-networks` rows carry `purpose` as `integer(int32)` (0: VLAN,
   1: interface) — pinned in BDD S3.3; `acls/osw-acls` and `acls/osg-acls`
   work without a `type` query.
+
+## AP channel inventory
+
+`nyx omada ap-channel-info` lists managed access points and reads their current
+radio channels and candidate channels. `--json` produces one row per AP and
+retains the controller's candidate list. Both reads use the Open API under
+`sites/{siteId}/aps/{apMac}` (`radios` and `available-channel`). On OC200
+firmware 6.3.0.45, the site-wide `aps/channel-info` path was registered in the
+controller package and returned error `-1600` on the appliance.
+[Read-only endpoint observations](https://github.com/jpvelasco/nyx/issues/315)
