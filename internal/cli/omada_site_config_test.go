@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
 func TestOmadaSiteConfigCommands(t *testing.T) {
@@ -35,7 +37,9 @@ func TestOmadaSiteConfigCommands(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		fmt.Fprintf(w, `{"errorCode":0,"result":%s}`, result)
+		if _, err := testutil.WriteBody(w, `{"errorCode":0,"result":`+result+`}`); err != nil {
+			t.Errorf("writing fixture response: %v", err)
+		}
 	}))
 	defer ts.Close()
 	cmd := buildOmadaSiteConfigCmd()

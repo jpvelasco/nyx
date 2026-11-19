@@ -57,7 +57,8 @@ func SaveOmadaSiteConfig(state omada.SiteConfigState) error {
 	if err != nil {
 		return fmt.Errorf("serializing site configuration: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil { // nosemgrep: private directory requires execute for traversal
+	// Owner-only execute permission allows traversal of the private directory.
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil { // nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		return fmt.Errorf("creating site configuration directory: %w", err)
 	}
 	return filewrite.Write(path, bytes.NewReader(data))
