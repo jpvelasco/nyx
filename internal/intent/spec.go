@@ -158,6 +158,8 @@ type Assertion struct {
 	Policy          string  `yaml:"policy,omitempty" json:"policy,omitempty"`
 	NatMode         string  `yaml:"nat_mode,omitempty" json:"nat_mode,omitempty"`
 	Runner          string  `yaml:"runner,omitempty" json:"runner,omitempty"`
+
+	ExpectBidirectional *bool `yaml:"expect_bidirectional,omitempty" json:"expect_bidirectional,omitempty"`
 }
 
 // LoadSpec reads and parses a YAML spec file
@@ -473,6 +475,9 @@ func validateACLCheckAssertion(i int, a *Assertion) error {
 	}
 	if a.Expect == "" {
 		return fmt.Errorf("assertion[%d]: acl_check requires 'expect' (enforced or not_enforced)", i)
+	}
+	if a.ExpectBidirectional != nil && (a.Provider != "omada" || a.Expect != "enforced") {
+		return fmt.Errorf("assertion[%d]: expect_bidirectional requires provider omada and expect enforced", i)
 	}
 	if !aclCheckExpects[a.Expect] {
 		return fmt.Errorf("assertion[%d]: acl_check expect must be 'enforced' or 'not_enforced', got %q", i, a.Expect)

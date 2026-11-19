@@ -15,16 +15,18 @@ import (
 
 // OmadaACLRule is a switch or gateway ACL rule in a flat, agent-friendly shape.
 type OmadaACLRule struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Enabled    bool   `json:"enabled"`
-	Policy     string `json:"policy"`
-	Protocols  string `json:"protocols"`
-	SourceType string `json:"source_type"`
-	SourceName string `json:"source_name"`
-	DestType   string `json:"dest_type"`
-	DestName   string `json:"dest_name"`
-	Index      int    `json:"index"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Enabled       bool   `json:"enabled"`
+	Policy        string `json:"policy"`
+	Protocols     string `json:"protocols"`
+	SourceType    string `json:"source_type"`
+	SourceName    string `json:"source_name"`
+	DestType      string `json:"dest_type"`
+	DestName      string `json:"dest_name"`
+	Index         int    `json:"index"`
+	BiDirectional *bool  `json:"bi_directional,omitempty"`
+	AppliedState  string `json:"applied_state,omitempty"`
 }
 
 // OmadaPolicyDiff describes one policy pair in a plan: unchanged, to add, to
@@ -122,7 +124,7 @@ func (s *OmadaService) ListACLs(ctx context.Context, opts OmadaOptions) ([]Omada
 
 	out := make([]OmadaACLRule, 0, len(all))
 	for _, r := range all {
-		out = append(out, OmadaACLRule{
+		rule := OmadaACLRule{
 			ID:         r.ID,
 			Name:       r.Name,
 			Enabled:    r.Status,
@@ -133,7 +135,12 @@ func (s *OmadaService) ListACLs(ctx context.Context, opts OmadaOptions) ([]Omada
 			DestType:   r.DestType.String(),
 			DestName:   r.DestName,
 			Index:      r.Index,
-		})
+		}
+		if r.Type == omadabackend.ACLTypeSwitch {
+			rule.BiDirectional = r.BiDirectional
+			rule.AppliedState = omadabackend.SwitchACLAppliedStateHint
+		}
+		out = append(out, rule)
 	}
 	return out, nil
 }

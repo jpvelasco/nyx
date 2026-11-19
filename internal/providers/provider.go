@@ -68,11 +68,12 @@ type ACLObserver interface {
 
 // ACLCheckRequest holds the policy details needed for ACL enforcement checking.
 type ACLCheckRequest struct {
-	PolicyName     string
-	From           string
-	To             string
-	Action         string // "allow" or "deny"
-	ExpectEnforced bool
+	PolicyName          string
+	From                string
+	To                  string
+	Action              string // "allow" or "deny"
+	ExpectEnforced      bool
+	ExpectBidirectional *bool
 }
 
 // ACLApplyRequest describes a single desired ACL policy change: ensure a

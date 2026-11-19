@@ -542,7 +542,7 @@ assertions:
                     <i class="fa-solid fa-server text-xl text-indigo-500"></i>
                     <div class="font-semibold text-slate-900 dark:text-white">acl_check</div>
                 </div>
-                <div class="text-sm text-slate-600 dark:text-slate-100">Verifies that a policy is actually enforced by a supported controller (Omada, future OPNsense).</div>
+                <div class="text-sm text-slate-600 dark:text-slate-100">Checks configured ACL policy state. On Omada, optional <code>expect_bidirectional</code> compares the controller value for a named switch rule and warns if device enforcement cannot be verified.</div>
                 <div class="mt-4 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-100 p-3 rounded-2xl">
                     provider, policy, expect: enforced
                 </div>

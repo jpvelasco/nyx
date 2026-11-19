@@ -211,7 +211,7 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 	siteID := site.EffectiveID()
 
 	// Fetch both ACL scopes. The Open API has no scope enable/disable
-	// flag, so an enabled matching rule is enforced.
+	// flag. The list establishes controller configuration only.
 	swList, swErr := client.FetchACLs(ctx, siteID, omadabackend.ACLTypeSwitch)
 	gwList, gwErr := client.FetchACLs(ctx, siteID, omadabackend.ACLTypeGateway)
 	if swErr != nil {
@@ -267,9 +267,34 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 
 	// A negative verdict is only trustworthy when every ACL scope responded:
 	// a gateway-scoped rule that could not be fetched would flip it.
-	if gwErr != nil && result.Status == models.StatusFail {
+	if gwErr != nil && result.Status == models.StatusFail && req.ExpectBidirectional == nil {
 		result.Status = models.StatusWarn
 		result.Summary += " (gateway ACLs unverified — check the controller for gateway-scoped rules)"
+	}
+
+	var bidirectional *bool
+	if match != nil && match.Rule.Type == omadabackend.ACLTypeSwitch {
+		result.Observed["applied_state"] = omadabackend.SwitchACLAppliedStateHint
+		bidirectional = match.Rule.BiDirectional
+		if bidirectional != nil {
+			result.Observed["bi_directional"] = *bidirectional
+		}
+	}
+	if req.ExpectBidirectional != nil {
+		result.Expected["bi_directional"] = *req.ExpectBidirectional
+		if result.Status == models.StatusPass {
+			switch {
+			case bidirectional == nil:
+				result.Status = models.StatusWarn
+				result.Summary = "switch ACL bidirectional setting was unavailable in controller readback"
+			case *bidirectional != *req.ExpectBidirectional:
+				result.Status = models.StatusFail
+				result.Summary = "controller switch ACL bidirectional setting differs from the expectation"
+			default:
+				result.Status = models.StatusWarn
+				result.Summary = "controller switch ACL bidirectional setting matches; " + omadabackend.SwitchACLAppliedStateHint
+			}
+		}
 	}
 
 	result.Finish()
@@ -374,7 +399,7 @@ type aclCheckMatch struct {
 func lookupACLMatch(rules []omadabackend.ACLRule, req providers.ACLCheckRequest) *aclCheckMatch {
 	for i := range rules {
 		r := rules[i]
-		if !r.Status {
+		if !r.Status || (req.ExpectBidirectional != nil && r.Type != omadabackend.ACLTypeSwitch) {
 			continue
 		}
 		if !strings.EqualFold(omadabackend.SanitizeName(r.Name), req.PolicyName) {
@@ -392,6 +417,9 @@ func lookupACLMatch(rules []omadabackend.ACLRule, req providers.ACLCheckRequest)
 		if r.Policy.MatchesAction(req.Action) {
 			return &aclCheckMatch{Rule: r, MatchedBy: "name"}
 		}
+	}
+	if req.ExpectBidirectional != nil {
+		return nil
 	}
 	for i := range rules {
 		r := rules[i]

@@ -115,11 +115,12 @@ func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.C
 	wantEnforced := expect == "enforced"
 
 	req := providers.ACLCheckRequest{
-		PolicyName:     a.Policy,
-		From:           policy.From,
-		To:             policy.To,
-		Action:         policy.Action,
-		ExpectEnforced: wantEnforced,
+		PolicyName:          a.Policy,
+		From:                policy.From,
+		To:                  policy.To,
+		Action:              policy.Action,
+		ExpectEnforced:      wantEnforced,
+		ExpectBidirectional: a.ExpectBidirectional,
 	}
 
 	return p.CheckACL(ctx, req, opts)
