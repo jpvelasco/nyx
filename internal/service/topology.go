@@ -14,19 +14,21 @@ import (
 // either one alone. The credentials come from the per-provider options —
 // this struct only says what to ask each one for.
 type TopologyOptions struct {
-	Omada    *OmadaOptions    // nil = do not observe Omada
-	Opnsense *OpnsenseOptions // nil = do not observe OPNsense
+	Omada       *OmadaOptions    // nil = do not observe Omada
+	Opnsense    *OpnsenseOptions // nil = do not observe OPNsense
+	Fingerprint bool
 }
 
 // TopologyReport is the agent-facing topology assessment: per-provider NAT
 // posture plus the combined double-NAT risk. The NAT summaries are the
 // evidence; the risk verdict is derived from them.
 type TopologyReport struct {
-	Omada    *OmadaNatFacts          `json:"omada,omitempty"`
-	Opnsense *OpnsenseNatSummary     `json:"opnsense,omitempty"`
-	Devices  []topology.DeviceReport `json:"devices"`
-	Risk     string                  `json:"risk"`
-	Reason   string                  `json:"reason"`
+	Omada       *OmadaNatFacts          `json:"omada,omitempty"`
+	Opnsense    *OpnsenseNatSummary     `json:"opnsense,omitempty"`
+	Devices     []topology.DeviceReport `json:"devices"`
+	Risk        string                  `json:"risk"`
+	Reason      string                  `json:"reason"`
+	Fingerprint *topology.Fingerprint   `json:"fingerprint,omitempty"`
 }
 
 // TopologyService composes the Omada and OPNsense observation surfaces into
@@ -57,10 +59,11 @@ func (s *TopologyService) Report(ctx context.Context, opts TopologyOptions) (*To
 	rep := &TopologyReport{Devices: []topology.DeviceReport{}}
 	var facts []topology.DeviceFacts
 	var omadaFacts *OmadaNatFacts
+	var opnsenseInterfaces []OpnsenseInterface
 
 	if opts.Omada != nil {
 		var err error
-		omadaFacts, err = s.Omada.NatFacts(ctx, *opts.Omada)
+		omadaFacts, err = s.Omada.natFacts(ctx, *opts.Omada, opts.Fingerprint)
 		if err != nil {
 			return nil, fmt.Errorf("observing omada: %w", err)
 		}
@@ -89,8 +92,8 @@ func (s *TopologyService) Report(ctx context.Context, opts TopologyOptions) (*To
 		// Path membership is best-effort: a missing interfaces read
 		// leaves the device on-path (conservative). Addresses stay
 		// in this function — they never enter DeviceFacts.
-		if ifaces, err := s.Opnsense.ListInterfaces(ctx, *opts.Opnsense); err == nil &&
-			omadaFacts != nil && addrsOverlap(omadaFacts.gatewayIPs, interfaceGateways(ifaces)) {
+		opnsenseInterfaces, _ = s.Opnsense.ListInterfaces(ctx, *opts.Opnsense)
+		if omadaFacts != nil && addrsOverlap(omadaFacts.gatewayIPs, interfaceGateways(opnsenseInterfaces)) {
 			opnsenseFacts.DownstreamOfManagedGateway = true
 		}
 		facts = append(facts, opnsenseFacts)
@@ -100,6 +103,9 @@ func (s *TopologyService) Report(ctx context.Context, opts TopologyOptions) (*To
 	rep.Devices = classified.Devices
 	rep.Risk = string(classified.Risk)
 	rep.Reason = classified.Reason
+	if opts.Fingerprint {
+		rep.Fingerprint = s.fingerprint(ctx, opts, rep, opnsenseInterfaces)
+	}
 	return rep, nil
 }
 

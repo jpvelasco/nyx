@@ -78,13 +78,18 @@ type OmadaNatFacts struct {
 
 	// gatewayIPs are the managed-gateway addresses used only to decide
 	// path membership. They are never serialized or printed.
-	gatewayIPs []string
+	gatewayIPs  []string
+	fingerprint *omadaFingerprintFacts
 }
 
 // NatFacts gathers the Omada-side NAT observations in a single session.
 // Every read must succeed: a partial picture would mislead the double-NAT
 // verdict, so a failure is a hard error.
 func (s *OmadaService) NatFacts(ctx context.Context, opts OmadaOptions) (*OmadaNatFacts, error) {
+	return s.natFacts(ctx, opts, false)
+}
+
+func (s *OmadaService) natFacts(ctx context.Context, opts OmadaOptions, fingerprint bool) (*OmadaNatFacts, error) {
 	client, site, err := s.session(ctx, opts)
 	if err != nil {
 		return nil, err
@@ -135,6 +140,9 @@ func (s *OmadaService) NatFacts(ctx context.Context, opts OmadaOptions) (*OmadaN
 				facts.gatewayIPs = append(facts.gatewayIPs, d.IP)
 			}
 		}
+	}
+	if fingerprint {
+		facts.fingerprint = readOmadaFingerprint(ctx, client, siteID, devices)
 	}
 	return facts, nil
 }
