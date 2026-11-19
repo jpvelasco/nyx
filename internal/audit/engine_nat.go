@@ -16,7 +16,10 @@ import (
 // path. Credentials resolve env → store, like acl_check; missing
 // credentials surface as a StatusError result, never a Go error.
 func (e *Engine) runNatCheck(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
-	providerName := a.Provider
+	providerName, err := e.Spec.AssertionProvider(a)
+	if err != nil {
+		return natCheckErrorResult(a.Provider, err.Error()), nil
+	}
 	p := providers.Get(providerName)
 	if p == nil {
 		return natCheckErrorResult(providerName, fmt.Sprintf("provider %q not found in registry", providerName)), nil
