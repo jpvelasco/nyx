@@ -205,3 +205,38 @@ When an `acl_check` fails, read `inventory.acl_scopes` first: `rule_count: 0` me
 - **Names are roles, not identities.** Specs, docs, and examples in this repo use the generic role names shown here (`trusted`, `management`, `iot`, ...) and `10.0.x` test addresses. When you copy them into your own spec, rename the roles to match your real topology — but keep real hostnames, subnets, and MACs out of shared files. See `docs/naming.md`.
 
 - **Drift is your friend.** A "no drift" report is the best feeling. It means everything is still holding.
+
+### Declare the edge provider
+
+Set `edge: opnsense` on a network when OPNsense owns its firewall and NAT.
+Set `observer: omada` on the same network when Omada only observes it.
+For example, the `trusted` segment can declare the following relationship.
+
+```yaml
+networks:
+  - name: trusted
+    cidr: 10.0.10.0/24
+    edge: opnsense
+    observer: omada
+```
+
+An `acl_check` or `nat_check` with `network: trusted` uses that segment's edge.
+An explicit `provider` must agree with the edge when a network is selected.
+Assertions without a network keep their existing provider selection.
+`nyx opnsense inventory --spec <file>` includes the declared edge and observer
+relationships alongside observed inventory. The same flag works with Omada.
+
+### Inspect OPNsense firewall states
+
+`nyx opnsense states list` queries one page of the pf state table. Use
+`--search`, `--rule-id`, `--sort age:desc`, `--page`, or `--page-size` to narrow
+or sort the result. `states rule-ids` and `states capacity` report rule labels
+and state-table usage, subject to the account's diagnostics privileges.
+
+`states kill --state <creator/state> --confirm` removes a specific state.
+`states kill --filter <tokens> --confirm` or `states kill --rule-id <id>
+--confirm` removes matching states. The kill filter accepts text the controller
+preserves. Use `states list --search` to find CIDR or port matches and select
+an exact state ID when the kill filter cannot preserve the search expression.
+`states flush-states --confirm` clears all states and can interrupt active
+connections. `states flush-sources --confirm` clears pf source tracking.

@@ -24,6 +24,7 @@ type OpnsenseFirewallRule struct {
 	Direction   string   `json:"direction,omitempty"`
 	IPProtocol  string   `json:"ipprotocol,omitempty"`
 	Label       string   `json:"label"`
+	Categories  []string `json:"categories,omitempty"`
 }
 
 // OpnsenseAlias is a firewall address alias.
@@ -76,6 +77,7 @@ func flattenFirewallRule(r opnsensebackend.FirewallRule) OpnsenseFirewallRule {
 		Direction:   r.Direction,
 		IPProtocol:  r.IPProtocol,
 		Label:       r.Label,
+		Categories:  r.Categories,
 	}
 }
 

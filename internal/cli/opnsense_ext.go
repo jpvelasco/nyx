@@ -17,6 +17,15 @@ import (
 
 func buildOpnsenseExtraCommands() []*cobra.Command {
 	return []*cobra.Command{
+		buildOpnsenseFirewallLogCmd(),
+		buildOpnsenseFirewallLogStatsCmd(),
+		buildOpnsenseListCmd("list-aliases", "List configured firewall aliases", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+			return service.NewOpnsenseService().ListAliases(ctx, opts)
+		}),
+		buildOpnsenseListCmd("list-firewall-rules", "List firewall filter rules", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+			return service.NewOpnsenseService().ListFirewallRules(ctx, opts)
+		}),
+		buildOpnsenseBlocklistCmd(),
 		buildOpnsenseListCmd("list-vlans", "List configured VLAN devices", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 			return service.NewOpnsenseService().ListVLANs(ctx, opts)
 		}),
@@ -44,6 +53,7 @@ func buildOpnsenseExtraCommands() []*cobra.Command {
 		buildOpnsenseListCmd("unbound-status", "Show whether Unbound is running", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 			return service.NewOpnsenseService().GetUnboundStatus(ctx, opts)
 		}),
+		buildOpnsenseStatesCmd(),
 		buildOpnsensePlanNatCmd(),
 		buildOpnsenseApplyNatCmd(),
 		buildOpnsensePlanVLANCmd(),

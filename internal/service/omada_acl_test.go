@@ -30,7 +30,7 @@ func TestOmadaServiceListACLs(t *testing.T) {
 		case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"g1","description":"Deny Guest","status":false,"policy":0,"protocols":[6],"sourceType":"network","sourceIds":["n3"],"destinationType":"network","destinationIds":["n1"],"index":5}]}`)
 		case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
-			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","description":"Block IoT","status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":1}]}`)
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"a1","description":"Block IoT","biDirectional":true,"status":true,"policy":0,"protocols":[256],"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"],"index":1}]}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -51,6 +51,9 @@ func TestOmadaServiceListACLs(t *testing.T) {
 	}
 	if sw.SourceType != "network" || sw.SourceName != "IoT" || sw.DestName != "Trusted" || sw.Index != 1 {
 		t.Errorf("switch rule endpoints = %+v", sw)
+	}
+	if sw.BiDirectional == nil || !*sw.BiDirectional || sw.AppliedState == "" {
+		t.Errorf("switch rule = %+v, want controller flag and unverified device state", sw)
 	}
 	gw := rules[1]
 	if gw.Name != "Deny Guest" || gw.Enabled || gw.Protocols != "6" || gw.Index != 5 {
@@ -725,5 +728,17 @@ func TestOmadaACLHelpers(t *testing.T) {
 	}
 	if got := dedupeNames(nil); len(got) != 0 {
 		t.Errorf("dedupeNames(nil) = %v, want empty", got)
+	}
+}
+
+func TestACLDisplayLabel(t *testing.T) {
+	if got := aclDisplayLabel("  Gérer <IoT> [ACL] / trusted (1)\n"); got != "Gérer IoT ACL / trusted (1)" {
+		t.Errorf("label=%q", got)
+	}
+	if got := aclDisplayLabel(strings.Repeat("é", 127) + " x"); got != strings.Repeat("é", 127) {
+		t.Errorf("unexpected truncated label %q", got)
+	}
+	if got := aclDisplayLabel(" <> "); got != "" {
+		t.Errorf("label=%q", got)
 	}
 }

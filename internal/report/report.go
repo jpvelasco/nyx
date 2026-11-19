@@ -5,11 +5,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/recommendations"
 )
+
+// OmitControllerACLNames returns an audit projection without live ACL labels.
+func OmitControllerACLNames(source *models.AuditReport) *models.AuditReport {
+	projected := *source
+	projected.Findings = slices.Clone(source.Findings)
+	for i := range projected.Findings {
+		finding := &projected.Findings[i]
+		names, present := finding.Observed["live_but_undeclared"].([]string)
+		if finding.CheckType == "acl_drift" && present {
+			finding.Observed = maps.Clone(finding.Observed)
+			delete(finding.Observed, "live_but_undeclared")
+			finding.Observed["live_but_undeclared_count"] = len(names)
+		}
+	}
+	return &projected
+}
 
 // RenderJSON writes the report as JSON
 func RenderJSON(w io.Writer, report *models.AuditReport) error {
@@ -37,15 +55,8 @@ func RenderHuman(w io.Writer, report *models.AuditReport) {
 		fmt.Fprintf(w, "--- %d assertions, evaluated from this vantage point ---\n", len(report.Findings))
 	}
 
-	for _, f := range report.Findings {
-		tag := statusTag(f.Status)
-		fmt.Fprintf(w, "%s %s: %s\n", tag, f.CheckType, f.Summary)
-		for _, v := range f.Violations {
-			fmt.Fprintf(w, "       ↳ %s\n", v)
-		}
-		for _, e := range f.Evidence {
-			printEvidence(w, e)
-		}
+	for i := range report.Findings {
+		RenderResultHuman(w, &report.Findings[i])
 	}
 
 	fmt.Fprintf(w, "\nSummary: %d passed, %d failed, %d warnings, %d errors, %d skipped\n",
@@ -69,6 +80,14 @@ func RenderResultHuman(w io.Writer, result *models.CheckResult) {
 	}
 	for _, e := range result.Evidence {
 		printEvidence(w, e)
+	}
+	// Controller labels live in structured observation data for JSON/MCP.
+	// Quote them only at the text boundary, where operators need their names.
+	if result.CheckType == "acl_drift" {
+		names, _ := result.Observed["live_but_undeclared"].([]string)
+		for _, name := range names {
+			fmt.Fprintf(w, "       • live but undeclared: %q\n", name)
+		}
 	}
 }
 

@@ -101,9 +101,9 @@ func TestRunNatCheck_OpnsenseEnvMapping(t *testing.T) {
 	t.Setenv("OPNSENSE_API_KEY", "key")
 	t.Setenv("OPNSENSE_API_SECRET", "secret")
 
-	eng := NewEngine(&intent.Spec{Version: 1, Site: "test"})
+	eng := NewEngine(&intent.Spec{Version: 1, Site: "test", Networks: []intent.Network{{Name: "trusted", Edge: "opnsense", Observer: "omada"}}})
 	result, err := eng.runNatCheck(context.Background(), intent.Assertion{
-		Type: "nat_check", Provider: "opnsense", NatMode: "disabled",
+		Type: "nat_check", Network: "trusted", NatMode: "disabled",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -119,6 +119,10 @@ func TestRunNatCheck_OpnsenseEnvMapping(t *testing.T) {
 	}
 	if rec.req.ExpectMode != "disabled" {
 		t.Errorf("ExpectMode = %q, want disabled", rec.req.ExpectMode)
+	}
+	conflict, err := eng.runNatCheck(t.Context(), intent.Assertion{Type: "nat_check", Network: "trusted", Provider: "omada", NatMode: "disabled"})
+	if err != nil || conflict.Status != models.StatusError {
+		t.Fatalf("provider mismatch result=%+v err=%v", conflict, err)
 	}
 }
 
