@@ -17,12 +17,12 @@ func TestFetchMDNSInventoryPages(t *testing.T) {
 		switch r.URL.Query().Get("page") {
 		case "1":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"currentPage":1,"data":[{
-				"id":"m1","name":"media\n\u001b","status":true,"profileIds":["p1"],"type":1,
-				"osg":{"serviceNetworks":["n1"],"clientNetworks":["n2","n3"]}}]}`)
+				"id":"m\t1","name":"me\ndia\u001b","status":true,"profileIds":["p\u202e1"],"type":1,
+				"osg":{"serviceNetworks":["n\r1"],"clientNetworks":["n\u007f2","n3"]}}]}`)
 		case "2":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"currentPage":2,"data":[{
 				"id":"m2","name":"gaming","status":false,"profileIds":[],"type":0,
-				"ap":{"serviceVlan":"30","clientVlan":"10-11,20"}}]}`)
+				"ap":{"serviceVlan":"3\u00000","clientVlan":"10-\t11,20"}}]}`)
 		default:
 			t.Errorf("unexpected page %s", r.URL.RawQuery)
 			w.WriteHeader(http.StatusBadRequest)
@@ -32,10 +32,13 @@ func TestFetchMDNSInventoryPages(t *testing.T) {
 	if inv.Status != mdnsAvailable || len(inv.Rules) != 2 {
 		t.Fatalf("mDNS inventory = %+v, want two available rules", inv)
 	}
+	if inv.Rules[0].Name != "media" || inv.Rules[0].ID != "m1" || inv.Rules[0].ProfileIDs[0] != "p1" {
+		t.Errorf("structured fields retain controller control characters: %+v", inv.Rules[0])
+	}
 	out := RenderInventory(&InventorySnapshot{MDNS: inv}, "HQ")
 	for _, want := range []string{
 		"2 rules",
-		`"media\n\x1b" ("m1") enabled=true  service network IDs: "n1"  client network IDs: "n2, n3"  Bonjour profile IDs: "p1"`,
+		`"media" ("m1") enabled=true  service network IDs: "n1"  client network IDs: "n2, n3"  Bonjour profile IDs: "p1"`,
 		`"gaming" ("m2") enabled=false  service VLAN: "30"  client VLANs: "10-11,20"`,
 	} {
 		if !strings.Contains(out, want) {

@@ -180,6 +180,7 @@ assignment or runtime verification.
 successful empty response is reported as zero rules. A controller that rejects
 the documented operation with `-1600` reports `mdns: api-unavailable (UI-only;
 configuration unknown)`. Other read failures report `unknown`. The remaining
-inventory is still returned.
+inventory is still returned. Control and formatting characters are removed
+from controller-provided mDNS strings in all inventory formats.
 
 [TP-Link hardware controller 6.3.0 operation schema](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/getMdnsGrid.json)
