@@ -49,6 +49,8 @@ func TestOmadaServiceInventory(t *testing.T) {
 			writeOmadaEnvelope(w, 0, `[
 				{"id":"d1","name":"GW-CORE","model":"GW-CORE","type":"gateway","mac":"aa:bb:cc:dd:ee:00","ip":"10.0.0.254","firmwareVersion":"2.2.3","needUpgrade":true},
 				{"id":"d2","name":"SW-2428P","model":"SW-2428P","type":"switch","mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.253"}]`)
+		case "/openapi/v1/abc123/sites/s1/devices/AA-BB-CC-DD-EE-01/latest-firmware-info":
+			writeOmadaEnvelope(w, 0, `{"curFwVer":"1.2.3"}`)
 		case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"g1","description":"Trusted Deny","status":true,"policy":0}]}`)
 		case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
@@ -76,6 +78,9 @@ func TestOmadaServiceInventory(t *testing.T) {
 	}
 	if len(inv.Devices) != 2 || inv.Devices[0].Name != "GW-CORE" || inv.Devices[0].Type != "gateway" {
 		t.Errorf("devices = %+v, want gateway first (sorted)", inv.Devices)
+	}
+	if inv.Devices[0].FirmwareStatus != "update_available" || inv.Devices[1].FirmwareStatus != "eol_or_current-unknown" {
+		t.Errorf("firmware statuses = %q, %q; want update and current-only unknown", inv.Devices[0].FirmwareStatus, inv.Devices[1].FirmwareStatus)
 	}
 	if len(inv.Devices[0].Networks) != 2 || inv.Devices[0].Networks[0] != "trusted" {
 		t.Errorf("gateway networks = %v, want [trusted iot] via deviceMac binding", inv.Devices[0].Networks)
