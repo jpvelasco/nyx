@@ -24,6 +24,7 @@ var (
 // buildOmadaExtraCommands builds the omada-only extra subcommands.
 func buildOmadaExtraCommands() []*cobra.Command {
 	return []*cobra.Command{
+		buildOmadaFirmwareCmd(),
 		buildOmadaUplinkInfoCmd(),
 		buildOmadaSwitchPortsCmd(),
 		buildOmadaLanProfilesCmd(),
