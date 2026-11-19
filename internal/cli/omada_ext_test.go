@@ -501,3 +501,57 @@ func TestOmadaAPChannelsCmd_InventoryError(t *testing.T) {
 		t.Fatalf("error = %v, want controller permission error", err)
 	}
 }
+
+func TestOmadaControllerFirmwareCmd(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		json      bool
+		invalid   bool
+		tokenFail bool
+		want      string
+	}{
+		{"human", false, false, false, `Latest: "3.4.25"`},
+		{"json", true, false, false, `"status": "up_to_date"`},
+		{"bad controller info", false, true, false, "fetching controller info"},
+		{"login failure", false, false, true, "mint"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			saveRestoreOmadaExtGlobals(t)
+			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/info":
+					if tc.invalid {
+						w.Write([]byte(`{"errorCode":-1}`))
+						return
+					}
+					w.Write([]byte(`{"errorCode":0,"result":{"controllerVer":"6.4.5.1","omadacId":"abc123"}}`))
+				case "/openapi/authorize/token":
+					if tc.tokenFail {
+						w.Write([]byte(`{"errorCode":-1}`))
+						return
+					}
+					w.Write([]byte(`{"errorCode":0,"result":{"accessToken":"tok"}}`))
+				case "/openapi/v1/abc123/system/setting/hardware/check-firmware":
+					w.Write([]byte(`{"errorCode":0,"result":{"update":false,"currentVersion":"3.4.25","latestVersion":"3.4.25"}}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(ts.Close)
+			jsonOutput = tc.json
+			cmd := buildOmadaControllerFirmwareCmd()
+			providerHost, providerSkipTLS = ts.URL, true
+			var err error
+			out := captureStdout(func() { err = cmd.RunE(cmd, nil) })
+			if tc.invalid || tc.tokenFail {
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("error = %v, want %q", err, tc.want)
+				}
+				return
+			}
+			if err != nil || !strings.Contains(out, tc.want) {
+				t.Fatalf("output = %q, error = %v; want %q", out, err, tc.want)
+			}
+		})
+	}
+}
