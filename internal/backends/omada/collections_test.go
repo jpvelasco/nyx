@@ -132,6 +132,15 @@ func TestGetNetworksDHCPPosture(t *testing.T) {
 	}
 }
 
+func TestGetNetworksRejectsMalformedDHCPGuard(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"dhcpGuard":{"enable":"true"}}]}`)
+	}))
+	if _, err := c.GetNetworks(context.Background(), "s1"); err == nil {
+		t.Fatal("GetNetworks accepted a non-boolean DHCP guard enable value")
+	}
+}
+
 func TestCreateUpdateDeleteLANNetwork(t *testing.T) {
 	var gotMethod, gotPath string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
