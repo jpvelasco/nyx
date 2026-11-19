@@ -142,6 +142,46 @@ func TestGetPfStatistics(t *testing.T) {
 			t.Fatalf("stats = %+v", got)
 		}
 	})
+	for _, tt := range []struct {
+		name    string
+		body    string
+		status  int
+		wantErr string
+	}{
+		{name: "26.x state counters", body: `{"current":"0","limit":"100000"}`},
+		{name: "26.x failed state fetch", body: `{"result":"failed"}`, wantErr: "missing current or limit"},
+		{name: "26.x malformed state counters", body: `{"current":"invalid","limit":"100000"}`, wantErr: "decoding pf states response"},
+		{name: "26.x forbidden states endpoint", status: http.StatusForbidden, wantErr: "permission denied"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/diagnostics/firewall/pf_statistics":
+					testutil.WriteBody(w, `[]`)
+				case "/api/diagnostics/firewall/pf_states":
+					if tt.status != 0 {
+						w.WriteHeader(tt.status)
+						return
+					}
+					testutil.WriteBody(w, tt.body)
+				default:
+					t.Errorf("unexpected path %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			got, err := c.GetPfStatistics(context.Background())
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("stats = %+v, error = %v, want error containing %q", got, err, tt.wantErr)
+				}
+				return
+			}
+			want := PfStatistics{Limit: 100000}
+			if err != nil || *got != want {
+				t.Fatalf("stats = %+v, error = %v, want %+v", got, err, want)
+			}
+		})
+	}
 	t.Run("403", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusForbidden)
@@ -179,6 +219,16 @@ func TestGetKernelRoutes(t *testing.T) {
 		}
 		if len(got) != 1 || got[0].Destination != "10.0.10.0/24" {
 			t.Fatalf("routes = %+v", got)
+		}
+	})
+	t.Run("26.x bare array", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `[{"proto":"ipv4","destination":"default","gateway":"203.0.113.1","flags":"UGS","mtu":"1500","netif":"igb1","intf_description":"WAN"}]`)
+		}))
+		got, err := c.GetKernelRoutes(context.Background())
+		want := KernelRoute{Proto: "ipv4", Destination: "default", Gateway: "203.0.113.1", Flags: "UGS", MTU: "1500", Netif: "igb1", InterfaceDescription: "WAN"}
+		if err != nil || len(got) != 1 || got[0] != want {
+			t.Fatalf("routes = %+v, error = %v, want %+v", got, err, want)
 		}
 	})
 	t.Run("403", func(t *testing.T) {
