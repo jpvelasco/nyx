@@ -184,3 +184,16 @@ inventory is still returned. Control and formatting characters are removed
 from controller-provided mDNS strings in all inventory formats.
 
 [TP-Link hardware controller 6.3.0 operation schema](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/getMdnsGrid.json)
+
+### Controller firmware checks
+
+`nyx omada controller-firmware` checks hardware-controller firmware through the
+controller's authenticated Global Other Setting View Only API. A failure or
+incomplete response produces `check_unreachable`, including when the controller
+cannot contact TP-Link. An exact hardware and market match may produce
+`newer_available` from the embedded published version. A reference match leaves
+freshness unknown. The command never installs firmware. Hardware end of
+maintenance is a separate lifecycle concern.
+
+- [Controller firmware check](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.4.0/operations/checkForHwcUpdateV2.json)
+- [OC200 3.4.25 release note](https://static.tp-link.com/upload/firmware/2026/202610/20261016/Release%20Note%20OC200%28UN%29_v3_3.4.25%20Build%2020261013.pdf)
