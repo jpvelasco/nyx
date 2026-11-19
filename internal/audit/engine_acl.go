@@ -3,7 +3,6 @@ package audit
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
@@ -24,7 +23,8 @@ func aclCheckErrorResult(provider, policy string, summary string) *models.CheckR
 // fillFromCredentialStores overlays the provider's Windows Credential Manager
 // entry, then its encrypted store entry. Values supplied by the environment win.
 func fillFromCredentialStores(opts providers.ImportOptions, provider, path string) providers.ImportOptions {
-	if provider == "omada" {
+	switch provider {
+	case "omada":
 		opts.ClientID, opts.ClientSecret = credmanager.OverlayOmada(opts.Host, opts.ClientID, opts.ClientSecret)
 	}
 	fields := credentials.Fields{
@@ -71,7 +71,10 @@ func (e *Engine) controllerOptions(providerName string) providers.ImportOptions 
 }
 
 func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
-	providerName := a.Provider
+	providerName, err := e.Spec.AssertionProvider(a)
+	if err != nil {
+		return aclCheckErrorResult(a.Provider, a.Policy, err.Error()), nil
+	}
 	if providerName == "" {
 		providerName = "omada"
 	}
@@ -106,9 +109,7 @@ func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.C
 		if providerName == "omada" {
 			hint = credmanager.Hint(opts.Host)
 		}
-		return aclCheckErrorResult(providerName, a.Policy,
-			"acl_check requires OMADA_HOST, OMADA_CLIENT_ID, OMADA_CLIENT_SECRET environment variables"+
-				hint+", or stored credentials (see `nyx credentials set omada`)"), nil
+		return aclCheckErrorResult(providerName, a.Policy, "acl_check requires OMADA_HOST, OMADA_CLIENT_ID, OMADA_CLIENT_SECRET environment variables"+hint+", or stored credentials (see `nyx credentials set omada`)"), nil
 	}
 
 	expect := a.Expect // "enforced" or "not_enforced"

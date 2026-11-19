@@ -89,11 +89,13 @@ type ACLScopeStatus struct {
 
 // Network defines a named CIDR block
 type Network struct {
-	Name    string `yaml:"name" json:"name"`
-	CIDR    string `yaml:"cidr" json:"cidr"`
-	Gateway string `yaml:"gateway" json:"gateway"`
-	Zone    string `yaml:"zone" json:"zone"`
-	VLAN    int    `yaml:"vlan,omitempty" json:"vlan,omitempty"`
+	Name     string `yaml:"name" json:"name"`
+	CIDR     string `yaml:"cidr" json:"cidr"`
+	Gateway  string `yaml:"gateway" json:"gateway"`
+	Zone     string `yaml:"zone" json:"zone"`
+	VLAN     int    `yaml:"vlan,omitempty" json:"vlan,omitempty"`
+	Edge     string `yaml:"edge,omitempty" json:"edge,omitempty"`
+	Observer string `yaml:"observer,omitempty" json:"observer,omitempty"`
 }
 
 // VPNConfig defines expected VPN behavior
@@ -232,12 +234,18 @@ func ValidateSpec(spec *Spec) error {
 	if err := validateInventory(spec.Inventory); err != nil {
 		return err
 	}
-	return validateAssertions(spec.Assertions, probeNames)
+	return validateAssertions(spec, probeNames)
 }
 
 func validateNetworks(networks []Network) error {
 	names := make(map[string]bool)
 	for i, n := range networks {
+		if n.Edge != "" && n.Edge != "omada" && n.Edge != "opnsense" {
+			return fmt.Errorf("network[%d]: edge must be omada or opnsense", i)
+		}
+		if n.Observer != "" && (n.Edge == "" || n.Observer == n.Edge || (n.Observer != "omada" && n.Observer != "opnsense")) {
+			return fmt.Errorf("network[%d]: observer must be a supported provider distinct from edge", i)
+		}
 		if n.Name == "" {
 			return fmt.Errorf("network[%d]: name is required", i)
 		}
@@ -515,14 +523,18 @@ var natCheckModes = map[string]bool{
 	"unknown": true, "present": true,
 }
 
-func validateAssertions(assertions []Assertion, probeNames map[string]bool) error {
-	for i := range assertions {
-		a := &assertions[i]
+func validateAssertions(spec *Spec, probeNames map[string]bool) error {
+	for i, a := range spec.Assertions {
+		provider, err := spec.AssertionProvider(a)
+		if err != nil {
+			return fmt.Errorf("assertion[%d]: %w", i, err)
+		}
+		a.Provider = provider
 		validate, known := assertionValidators[a.Type]
 		if !known {
 			return fmt.Errorf("assertion[%d]: unknown type %q", i, a.Type)
 		}
-		if err := validate(i, a); err != nil {
+		if err := validate(i, &a); err != nil {
 			return err
 		}
 		// Validate runner references a declared probe
@@ -572,4 +584,39 @@ func (s *Spec) ProbeByName(name string) *Probe {
 		}
 	}
 	return nil
+}
+
+// AssertionProvider resolves a segment-bound controller assertion to its edge.
+func (s *Spec) AssertionProvider(a Assertion) (string, error) {
+	if a.Network == "" || (a.Type != "acl_check" && a.Type != "nat_check") {
+		return a.Provider, nil
+	}
+	network := s.NetworkByName(a.Network)
+	if network == nil || network.Edge == "" {
+		if a.Provider != "" {
+			return a.Provider, nil
+		}
+		return "", fmt.Errorf("network %q requires a declared edge provider for %s", a.Network, a.Type)
+	}
+	if a.Provider != "" && a.Provider != network.Edge {
+		return "", fmt.Errorf("provider %q conflicts with edge %q for network %q", a.Provider, network.Edge, a.Network)
+	}
+	return network.Edge, nil
+}
+
+// SegmentEdge is the declared edge and optional observer for one network.
+type SegmentEdge struct {
+	Network  string `json:"network"`
+	Edge     string `json:"edge"`
+	Observer string `json:"observer,omitempty"`
+}
+
+func (s *Spec) SegmentEdges() []SegmentEdge {
+	var edges []SegmentEdge
+	for _, network := range s.Networks {
+		if network.Edge != "" {
+			edges = append(edges, SegmentEdge{network.Name, network.Edge, network.Observer})
+		}
+	}
+	return edges
 }
