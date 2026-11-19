@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
 	"github.com/jpvelasco/nyx/internal/intent"
@@ -126,7 +127,7 @@ func (s *OmadaService) ListACLs(ctx context.Context, opts OmadaOptions) ([]Omada
 	for _, r := range all {
 		rule := OmadaACLRule{
 			ID:         r.ID,
-			Name:       r.Name,
+			Name:       aclDisplayLabel(r.Name),
 			Enabled:    r.Status,
 			Policy:     r.Policy.String(),
 			Protocols:  omadabackend.ProtocolsLabel(r.Protocols),
@@ -458,4 +459,35 @@ func diffFromPolicy(p intent.Policy, currentAction, proposedAction string) Omada
 		return OmadaPolicyDiff{Name: p.Name, From: p.From, To: p.To, Action: proposedAction}
 	}
 	return OmadaPolicyDiff{Name: p.Name, From: p.From, To: p.To, CurrentAction: currentAction, ProposedAction: proposedAction}
+}
+
+// aclDisplayLabel bounds the untrusted controller label at the display boundary.
+func aclDisplayLabel(label string) string {
+	const maxLabelRunes = 128
+	var clean strings.Builder
+	count := 0
+	space := false
+	for _, r := range label {
+		if unicode.IsSpace(r) {
+			space = clean.Len() > 0
+			continue
+		}
+		if !unicode.IsLetter(r) && !unicode.IsNumber(r) && !strings.ContainsRune("-_.:/()", r) {
+			continue
+		}
+		if space && count+1 == maxLabelRunes {
+			break
+		}
+		if space {
+			clean.WriteByte(' ')
+			count++
+			space = false
+		}
+		clean.WriteRune(r)
+		count++
+		if count == maxLabelRunes {
+			break
+		}
+	}
+	return clean.String()
 }

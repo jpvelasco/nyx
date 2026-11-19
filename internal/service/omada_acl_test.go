@@ -730,3 +730,15 @@ func TestOmadaACLHelpers(t *testing.T) {
 		t.Errorf("dedupeNames(nil) = %v, want empty", got)
 	}
 }
+
+func TestACLDisplayLabel(t *testing.T) {
+	if got := aclDisplayLabel("  Gérer <IoT> [ACL] / trusted (1)\n"); got != "Gérer IoT ACL / trusted (1)" {
+		t.Errorf("label=%q", got)
+	}
+	if got := aclDisplayLabel(strings.Repeat("é", 127) + " x"); got != strings.Repeat("é", 127) {
+		t.Errorf("unexpected truncated label %q", got)
+	}
+	if got := aclDisplayLabel(" <> "); got != "" {
+		t.Errorf("label=%q", got)
+	}
+}
