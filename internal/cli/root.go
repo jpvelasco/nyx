@@ -56,6 +56,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "Enable verbose output")
 	rootCmd.PersistentFlags().StringVar(&timeout, "timeout", "120s", "Timeout for operations")
 	rootCmd.PersistentFlags().StringVar(&interfaceOpt, "interface", "", "Network interface to use for local checks (e.g. \"Ethernet\", \"Wi-Fi\"). Leave empty for automatic selection.")
+	auditCmd.Flags().Bool("include-acl-names", false, "Include private controller ACL labels in audit reports and snapshots")
 	auditCmd.Flags().BoolVar(&warnVirtual, "warn-virtual", false, "Always warn on virtual subnets, even if previously acknowledged")
 	auditCmd.Flags().BoolVar(&skipHostKeyVerify, "skip-host-key-verify", false, "Skip SSH host key verification for probes (like ssh -o StrictHostKeyChecking=no)")
 	auditCmd.Flags().BoolVar(&skipTLSVerify, "skip-tls-verify", false, "Skip TLS certificate verification for controller checks (like curl -k)")

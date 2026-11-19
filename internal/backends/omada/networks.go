@@ -79,7 +79,7 @@ func (c *Client) CreateLANNetwork(ctx context.Context, siteID string, w LANWrite
 	var res struct {
 		ID string `json:"id"`
 	}
-	if err := c.postCreate(ctx, fmt.Sprintf("sites/%s/lan-networks", siteID), w, &res); err != nil {
+	if err := c.postCreate(ctx, lanNetworksPath(siteID), w, &res); err != nil {
 		return "", fmt.Errorf("creating LAN %q: %w", w.Name, err)
 	}
 	if res.ID == "" {
@@ -278,9 +278,13 @@ func (c *Client) GetSites(ctx context.Context) ([]Site, error) {
 // GetNetworks returns all LAN networks for the given site, walking every page
 // of the sites/{id}/lan-networks endpoint.
 func (c *Client) GetNetworks(ctx context.Context, siteID string) ([]Network, error) {
-	nets, _, err := fetchPaged[Network](ctx, c, fmt.Sprintf("sites/%s/lan-networks", siteID), defaultPageSize)
+	nets, _, err := fetchPaged[Network](ctx, c, lanNetworksPath(siteID), defaultPageSize)
 	if err != nil {
 		return nil, fmt.Errorf("could not fetch networks for site %q: %w", siteID, err)
 	}
 	return nets, nil
+}
+
+func lanNetworksPath(siteID string) string {
+	return fmt.Sprintf("sites/%s/lan-networks", siteID)
 }

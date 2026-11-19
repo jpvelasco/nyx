@@ -276,8 +276,9 @@ func TestProviderCheckACL(t *testing.T) {
 			case "/openapi/v1/abc123/sites/s1/acls/osg-acls":
 				writeEnvelope(w, 0, "", `{"totalRows":0,"data":[]}`)
 			case "/openapi/v1/abc123/sites/s1/acls/osw-acls":
-				writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
-					{"id":"a1","description":"Deny Lan to IoT","status":true,"policy":0,"sourceType":"network","sourceIds":["n-lan"],"destinationType":"network","destinationIds":["n-iot"]},
+				writeEnvelope(w, 0, "", `{"totalRows":3,"data":[
+					{"id":"a3","description":"other","status":true,"policy":0},
+					{"id":"a1","description":"Deny Lan to IoT","biDirectional":true,"status":true,"policy":0,"sourceType":"network","sourceIds":["n-lan"],"destinationType":"network","destinationIds":["n-iot"]},
 					{"id":"a2","description":"Disabled rule","status":false,"policy":0,"sourceType":"network","sourceIds":["n-lan"],"destinationType":"network","destinationIds":["n-iot"]}
 				]}`)
 			default:
@@ -304,10 +305,33 @@ func TestProviderCheckACL(t *testing.T) {
 		if res.Status != "pass" {
 			t.Errorf("status = %s, want pass (got summary %q)", res.Status, res.Summary)
 		}
-		if res.Observed["rule_count"] != 2 {
-			t.Errorf("rule_count = %v, want 2", res.Observed["rule_count"])
+		if res.Observed["rule_count"] != 3 {
+			t.Errorf("rule_count = %v, want 3", res.Observed["rule_count"])
 		}
 	})
+
+	for _, tc := range []struct {
+		name              string
+		policy            string
+		wantBidirectional bool
+		wantStatus        string
+	}{
+		{"matching readback", "deny-lan-to-iot", true, "warn"},
+		{"mismatched readback", "deny-lan-to-iot", false, "fail"},
+		{"missing readback", "other", true, "warn"},
+		{"missing named rule", "missing", true, "fail"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, p := newServer()
+			res, err := p.CheckACL(context.Background(), providers.ACLCheckRequest{
+				PolicyName: tc.policy, From: "lan", To: "iot", Action: "deny", ExpectEnforced: true,
+				ExpectBidirectional: &tc.wantBidirectional,
+			}, opts(ts))
+			if err != nil || string(res.Status) != tc.wantStatus {
+				t.Fatalf("CheckACL = %v, %v; want %s", res, err, tc.wantStatus)
+			}
+		})
+	}
 
 	t.Run("enforced and not found", func(t *testing.T) {
 		ts, p := newServer()

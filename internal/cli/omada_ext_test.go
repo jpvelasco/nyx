@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -58,6 +59,12 @@ func omadaExtFakeController(t *testing.T, uplinkEmpty, switchEmpty, profilesEmpt
 			} else {
 				w.Write([]byte(`{"errorCode":0,"msg":"","result":` + profilesPopulated + `}`))
 			}
+		case "/openapi/v1/abc123/sites/s1/networks/devices":
+			w.Write([]byte(`{"errorCode":0,"result":[{"type":"ap","name":"AP-01","mac":"AA-BB-CC-DD-EE-01"}]}`))
+		case "/openapi/v1/abc123/sites/s1/aps/aa-bb-cc-dd-ee-01/radios":
+			w.Write([]byte(`{"errorCode":0,"result":{"wp2g":{"actualChannel":"11  / 2462MHz"}}}`))
+		case "/openapi/v1/abc123/sites/s1/aps/aa-bb-cc-dd-ee-01/available-channel":
+			w.Write([]byte(`{"errorCode":0,"result":{"wp2g":[1,6,11]}}`))
 		case "/openapi/v1/abc123/sites/s1/lan-networks":
 			w.Write([]byte(`{"errorCode":0,"msg":"","result":` + nets + `}`))
 		default:
@@ -453,5 +460,98 @@ func TestJoinOrDash(t *testing.T) {
 	}
 	if got := joinOrDash([]string{"a", "b", "c"}); got != "a+b+c" {
 		t.Errorf("joinOrDash(many) = %q, want a+b+c", got)
+	}
+}
+
+func TestOmadaAPChannelsCmd(t *testing.T) {
+	saveRestoreOmadaExtGlobals(t)
+	cmd := buildOmadaAPChannelsCmd()
+	providerHost = omadaExtFakeController(t, false, false, false, false).URL
+	providerSkipTLS = true
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"AP-01", "wp2g: 11  / 2462MHz", `Available channels: {"wp2g":[1,6,11]}`} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("text output missing %q", want)
+		}
+	}
+	jsonOutput = true
+	jsonText := captureStdout(func() {
+		if err := cmd.RunE(cmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, want := range []string{`"current_channels"`, `"available_channels"`, `"mac": "AA-BB-CC-DD-EE-01"`} {
+		if !strings.Contains(jsonText, want) {
+			t.Errorf("JSON output missing %q", want)
+		}
+	}
+}
+
+func TestOmadaAPChannelsCmd_InventoryError(t *testing.T) {
+	saveRestoreOmadaExtGlobals(t)
+	cmd := buildOmadaAPChannelsCmd()
+	providerHost = omadaExtFakeController(t, false, false, false, true).URL
+	providerSkipTLS = true
+	err := cmd.RunE(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "controller error -1005") {
+		t.Fatalf("error = %v, want controller permission error", err)
+	}
+}
+
+func TestOmadaControllerFirmwareCmd(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		json      bool
+		invalid   bool
+		tokenFail bool
+		want      string
+	}{
+		{"human", false, false, false, `Latest: "3.4.25"`},
+		{"json", true, false, false, `"status": "up_to_date"`},
+		{"bad controller info", false, true, false, "fetching controller info"},
+		{"login failure", false, false, true, "mint"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			saveRestoreOmadaExtGlobals(t)
+			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/info":
+					if tc.invalid {
+						w.Write([]byte(`{"errorCode":-1}`))
+						return
+					}
+					w.Write([]byte(`{"errorCode":0,"result":{"controllerVer":"6.4.5.1","omadacId":"abc123"}}`))
+				case "/openapi/authorize/token":
+					if tc.tokenFail {
+						w.Write([]byte(`{"errorCode":-1}`))
+						return
+					}
+					w.Write([]byte(`{"errorCode":0,"result":{"accessToken":"tok"}}`))
+				case "/openapi/v1/abc123/system/setting/hardware/check-firmware":
+					w.Write([]byte(`{"errorCode":0,"result":{"update":false,"currentVersion":"3.4.25","latestVersion":"3.4.25"}}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(ts.Close)
+			jsonOutput = tc.json
+			cmd := buildOmadaControllerFirmwareCmd()
+			providerHost, providerSkipTLS = ts.URL, true
+			var err error
+			out := captureStdout(func() { err = cmd.RunE(cmd, nil) })
+			if tc.invalid || tc.tokenFail {
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("error = %v, want %q", err, tc.want)
+				}
+				return
+			}
+			if err != nil || !strings.Contains(out, tc.want) {
+				t.Fatalf("output = %q, error = %v; want %q", out, err, tc.want)
+			}
+		})
 	}
 }

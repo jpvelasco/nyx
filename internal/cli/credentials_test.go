@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -470,5 +472,36 @@ func TestCredentialsVerifyLiveZeroTimeout(t *testing.T) {
 	}
 	if !sawDeadline {
 		t.Fatal("expected a ~30s live deadline when --timeout is 0")
+	}
+}
+
+func TestLiveOpnsenseReportsPagePrivileges(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	var err error
+	output := captureStdout(func() {
+		err = liveOpnsense(t.Context(), service.OpnsenseOptions{
+			Host: server.URL, APIKey: "fixture-key", APISecret: "fixture-secret", SkipTLSVerify: true,
+		})
+	})
+	if err == nil {
+		t.Fatal("expected forbidden endpoint errors")
+	}
+	for _, want := range []string{
+		"OPNsense endpoint\tAccess",
+		"/firewall/alias/get\tblocked by privilege\n",
+		"/diagnostics/firewall/log?limit=1\tblocked by privilege (Diagnostics: Logs: Firewall: Live View)",
+		"/core/system/status\tblocked by privilege (System: Status)",
+		"/kea/leases4/search\tblocked by privilege (Services: DHCP: Kea(v4))",
+		"/kea/leases6/search\tblocked by privilege (Services: DHCP: Kea(v6))",
+		"/dnsmasq/settings/get\tblocked by privilege (Services: Dnsmasq DNS/DHCP: Settings)",
+		"/firewall/alias_util/aliases\tblocked by privilege (Diagnostics: PF Table IP addresses)",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("privilege report missing %q: %s", want, output)
+		}
 	}
 }
