@@ -143,7 +143,7 @@ func TestACLDrift_ProviderDiagnosticsAndRuleText(t *testing.T) {
 		t.Fatalf("provider error exposed: %v", result)
 	}
 	r := compareACLs("opnsense", nil, providers.ACLObservation{Rules: []providers.ObservedACL{{Scope: "filter", Name: "two\nlines"}}})
-	if len(r.Evidence) != 1 || strings.ContainsRune(r.Evidence[0], '\n') || r.Observed["live_but_undeclared"].([]string)[0] != "filter/two\nlines" {
-		t.Fatalf("rule name was not rendered as a single quoted value: %v", r.Evidence)
+	if len(r.Evidence) != 0 || r.Observed["live_but_undeclared"].([]string)[0] != "filter/two\nlines" {
+		t.Fatalf("rule name must stay in the structured observation: %v", r.Evidence)
 	}
 }

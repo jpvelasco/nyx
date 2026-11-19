@@ -37,15 +37,8 @@ func RenderHuman(w io.Writer, report *models.AuditReport) {
 		fmt.Fprintf(w, "--- %d assertions, evaluated from this vantage point ---\n", len(report.Findings))
 	}
 
-	for _, f := range report.Findings {
-		tag := statusTag(f.Status)
-		fmt.Fprintf(w, "%s %s: %s\n", tag, f.CheckType, f.Summary)
-		for _, v := range f.Violations {
-			fmt.Fprintf(w, "       ↳ %s\n", v)
-		}
-		for _, e := range f.Evidence {
-			printEvidence(w, e)
-		}
+	for i := range report.Findings {
+		RenderResultHuman(w, &report.Findings[i])
 	}
 
 	fmt.Fprintf(w, "\nSummary: %d passed, %d failed, %d warnings, %d errors, %d skipped\n",
@@ -69,6 +62,14 @@ func RenderResultHuman(w io.Writer, result *models.CheckResult) {
 	}
 	for _, e := range result.Evidence {
 		printEvidence(w, e)
+	}
+	// Controller labels live in structured observation data for JSON/MCP.
+	// Quote them only at the text boundary, where operators need their names.
+	if result.CheckType == "acl_drift" {
+		names, _ := result.Observed["live_but_undeclared"].([]string)
+		for _, name := range names {
+			fmt.Fprintf(w, "       • live but undeclared: %q\n", name)
+		}
 	}
 }
 

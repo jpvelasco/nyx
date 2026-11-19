@@ -129,9 +129,7 @@ func compareACLs(provider string, policies []intent.Policy, live providers.ACLOb
 	for _, name := range absent {
 		result.Violations = append(result.Violations, "declared but absent: "+strconv.Quote(name))
 	}
-	for _, name := range extra {
-		result.Evidence = append(result.Evidence, "live but undeclared: "+strconv.Quote(name))
-	}
+
 	result.Finish()
 	return result
 }

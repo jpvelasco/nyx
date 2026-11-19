@@ -928,3 +928,13 @@ func TestRenderHuman_CRLFInEvidence_BulletCount(t *testing.T) {
 		t.Errorf("expected 2 bullets from CRLF evidence, got %d: %s", bulletCount, output)
 	}
 }
+
+func TestRenderACLDriftRuleNames(t *testing.T) {
+	r := models.NewCheckResult("opnsense", "acl_drift", "opnsense", "opnsense")
+	r.Observed["live_but_undeclared"] = []string{"filter/two\nlines"}
+	var text bytes.Buffer
+	RenderHuman(&text, &models.AuditReport{Findings: []models.CheckResult{*r}})
+	if !strings.Contains(text.String(), `live but undeclared: "filter/two\nlines"`) {
+		t.Fatalf("human output %q", text.String())
+	}
+}
