@@ -91,7 +91,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) (*htt
 			if c.Debug {
 				c.debugDump(resp, method, path)
 			}
-			lastErr = c.classifyStatus(resp, path)
+			lastErr = classifyStatus(resp, path)
 			if lastErr == nil {
 				return resp, nil
 			}
@@ -129,7 +129,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) (*htt
 // classifyStatus turns a non-2xx response into a typed error, or nil when the
 // response is a plain success. The response body is left open — the caller
 // owns it and must drain/close on error.
-func (c *Client) classifyStatus(resp *http.Response, path string) error {
+func classifyStatus(resp *http.Response, path string) error {
 	if resp.StatusCode == http.StatusOK {
 		return nil
 	}
@@ -141,15 +141,15 @@ func (c *Client) classifyStatus(resp *http.Response, path string) error {
 		if privilege == "" {
 			privilege = "the matching page privilege"
 		}
-		return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("permission denied: %s on OPNsense at %s — the API user lacks the privilege for this endpoint. Grant %s to the API user (System ‣ Access ‣ Users)", path, c.host, privilege)}}
+		return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("permission denied: %q on OPNsense — the API user lacks the privilege for this endpoint. Grant %s to the API user (System ‣ Access ‣ Users)", path, privilege)}}
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("resource not found: %s on OPNsense at %s", path, c.host)}}
+		return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("resource not found: %q on OPNsense", path)}}
 	}
 	if resp.StatusCode >= http.StatusInternalServerError {
-		return fmt.Errorf("unexpected status %d from OPNsense for %s", resp.StatusCode, path)
+		return fmt.Errorf("unexpected status %d from OPNsense for %q", resp.StatusCode, path)
 	}
-	return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("unexpected status %d from OPNsense for %s", resp.StatusCode, path)}}
+	return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("unexpected status %d from OPNsense for %q", resp.StatusCode, path)}}
 }
 
 type apiStatusError struct {
