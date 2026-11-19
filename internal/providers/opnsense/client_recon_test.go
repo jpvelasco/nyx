@@ -142,6 +142,38 @@ func TestGetPfStatistics(t *testing.T) {
 			t.Fatalf("stats = %+v", got)
 		}
 	})
+	for _, tt := range []struct {
+		name string
+		body string
+		want PfStatistics
+	}{
+		{name: "26.x state counters", body: `{"current":"0","limit":"100000"}`, want: PfStatistics{Limit: 100000}},
+		{name: "26.x failed state fetch", body: `{"result":"failed"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/diagnostics/firewall/pf_statistics":
+					testutil.WriteBody(w, `[]`)
+				case "/api/diagnostics/firewall/pf_states":
+					testutil.WriteBody(w, tt.body)
+				default:
+					t.Errorf("unexpected path %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			got, err := c.GetPfStatistics(context.Background())
+			if tt.want == (PfStatistics{}) {
+				if err == nil || !strings.Contains(err.Error(), "missing current or limit") {
+					t.Fatalf("stats = %+v, error = %v", got, err)
+				}
+				return
+			}
+			if err != nil || *got != tt.want {
+				t.Fatalf("stats = %+v, error = %v, want %+v", got, err, tt.want)
+			}
+		})
+	}
 	t.Run("403", func(t *testing.T) {
 		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusForbidden)
@@ -179,6 +211,16 @@ func TestGetKernelRoutes(t *testing.T) {
 		}
 		if len(got) != 1 || got[0].Destination != "10.0.10.0/24" {
 			t.Fatalf("routes = %+v", got)
+		}
+	})
+	t.Run("26.x bare array", func(t *testing.T) {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteBody(w, `[{"proto":"ipv4","destination":"default","gateway":"203.0.113.1","flags":"UGS","mtu":"1500","netif":"igb1","intf_description":"WAN"}]`)
+		}))
+		got, err := c.GetKernelRoutes(context.Background())
+		want := KernelRoute{Proto: "ipv4", Destination: "default", Gateway: "203.0.113.1", Flags: "UGS", MTU: "1500", Netif: "igb1", InterfaceDescription: "WAN"}
+		if err != nil || len(got) != 1 || got[0] != want {
+			t.Fatalf("routes = %+v, error = %v, want %+v", got, err, want)
 		}
 	})
 	t.Run("403", func(t *testing.T) {
