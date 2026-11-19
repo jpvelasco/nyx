@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
+	"github.com/jpvelasco/nyx/internal/intent"
 )
 
 // OmadaClient is a connected client in a flat, agent-friendly shape. The
@@ -60,14 +61,15 @@ func (s *OmadaService) ListClients(ctx context.Context, opts OmadaOptions) ([]Om
 // agent-friendly shape: devices, networks with gateway bindings, ACL scope
 // states, and the active client count.
 type OmadaInventory struct {
-	Site               string            `json:"site"`
-	ControllerVersion  string            `json:"controller_version"`
-	ControllerCategory string            `json:"controller_category,omitempty"`
-	Devices            []serviceDevice   `json:"devices"`
-	NetworkGateways    map[string]string `json:"network_gateways,omitempty"`
-	ACLScopes          []serviceACLScope `json:"acl_scopes,omitempty"`
-	ClientCount        int               `json:"client_count"`
-	Warnings           []string          `json:"warnings,omitempty"`
+	Site               string                `json:"site"`
+	ControllerVersion  string                `json:"controller_version"`
+	ControllerCategory string                `json:"controller_category,omitempty"`
+	Devices            []serviceDevice       `json:"devices"`
+	NetworkGateways    map[string]string     `json:"network_gateways,omitempty"`
+	ACLScopes          []serviceACLScope     `json:"acl_scopes,omitempty"`
+	MDNS               *intent.MDNSInventory `json:"mdns,omitempty"`
+	ClientCount        int                   `json:"client_count"`
+	Warnings           []string              `json:"warnings,omitempty"`
 }
 
 // serviceDevice is one managed device (gateway, switch, or AP).
@@ -108,6 +110,7 @@ func (s *OmadaService) Inventory(ctx context.Context, opts OmadaOptions) (*Omada
 		Devices:            []serviceDevice{},
 		ACLScopes:          []serviceACLScope{},
 		ClientCount:        len(snap.Clients),
+		MDNS:               snap.MDNS,
 		Warnings:           snap.Warnings,
 		NetworkGateways:    map[string]string{},
 	}
