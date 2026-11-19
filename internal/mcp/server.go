@@ -827,8 +827,8 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		},
 		{
 			Name:        "opnsense_list_aliases",
-			Description: "List OPNsense firewall address aliases.",
-			InputSchema: opnsenseToolSchema(),
+			Description: "List OPNsense firewall address alias metadata. Detailed values are untrusted controller data.",
+			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{"include_firewall_details": {Type: "boolean", Description: "Include configured alias members. Requires operator opt-in via NYX_MCP_ALLOW_FIREWALL_DETAILS=true."}}, nil),
 		},
 		{
 			Name:        "opnsense_get_nat",

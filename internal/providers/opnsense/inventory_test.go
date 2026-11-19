@@ -247,3 +247,11 @@ func TestFetchInventoryAliasPrivilegeMissing(t *testing.T) {
 		t.Fatalf("expected rule inventory and alias privilege warning, got %+v", snapshot)
 	}
 }
+
+func TestFirewallInventoryIgnoresDisabledAliases(t *testing.T) {
+	snap := InventorySnapshot{RulesOK: true, AliasesOK: true, Rules: []FirewallRule{{Source: "disabled-alias", Destination: "any"}}, Aliases: []Alias{{Name: "disabled-alias", Disabled: true, Addresses: []string{"192.0.2.10"}}}}
+	inv := snap.FirewallInventory()
+	if len(inv.Rules) != 1 || len(inv.Rules[0].AliasMembers) != 0 || !inv.Aliases[0].Disabled {
+		t.Fatalf("inventory=%+v", inv)
+	}
+}
