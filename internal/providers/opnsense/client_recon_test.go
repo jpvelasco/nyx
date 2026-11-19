@@ -143,12 +143,15 @@ func TestGetPfStatistics(t *testing.T) {
 		}
 	})
 	for _, tt := range []struct {
-		name string
-		body string
-		want PfStatistics
+		name    string
+		body    string
+		status  int
+		wantErr string
 	}{
-		{name: "26.x state counters", body: `{"current":"0","limit":"100000"}`, want: PfStatistics{Limit: 100000}},
-		{name: "26.x failed state fetch", body: `{"result":"failed"}`},
+		{name: "26.x state counters", body: `{"current":"0","limit":"100000"}`},
+		{name: "26.x failed state fetch", body: `{"result":"failed"}`, wantErr: "missing current or limit"},
+		{name: "26.x malformed state counters", body: `{"current":"invalid","limit":"100000"}`, wantErr: "decoding pf states response"},
+		{name: "26.x forbidden states endpoint", status: http.StatusForbidden, wantErr: "permission denied"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -156,6 +159,10 @@ func TestGetPfStatistics(t *testing.T) {
 				case "/api/diagnostics/firewall/pf_statistics":
 					testutil.WriteBody(w, `[]`)
 				case "/api/diagnostics/firewall/pf_states":
+					if tt.status != 0 {
+						w.WriteHeader(tt.status)
+						return
+					}
 					testutil.WriteBody(w, tt.body)
 				default:
 					t.Errorf("unexpected path %s", r.URL.Path)
@@ -163,14 +170,15 @@ func TestGetPfStatistics(t *testing.T) {
 				}
 			}))
 			got, err := c.GetPfStatistics(context.Background())
-			if tt.want == (PfStatistics{}) {
-				if err == nil || !strings.Contains(err.Error(), "missing current or limit") {
-					t.Fatalf("stats = %+v, error = %v", got, err)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("stats = %+v, error = %v, want error containing %q", got, err, tt.wantErr)
 				}
 				return
 			}
-			if err != nil || *got != tt.want {
-				t.Fatalf("stats = %+v, error = %v, want %+v", got, err, tt.want)
+			want := PfStatistics{Limit: 100000}
+			if err != nil || *got != want {
+				t.Fatalf("stats = %+v, error = %v, want %+v", got, err, want)
 			}
 		})
 	}
