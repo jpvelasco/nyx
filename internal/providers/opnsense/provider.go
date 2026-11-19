@@ -93,7 +93,11 @@ func (o *Provider) Inventory(ctx context.Context, opts providers.ImportOptions) 
 		return nil, err
 	}
 	return &providers.ProviderInventory{
-		Site:        "opnsense-firewall",
+		Site: "opnsense-firewall",
+		Details: struct {
+			FirewallInventory
+			FirewallRulesOK bool `json:"firewall_rules_ok"`
+		}{snap.FirewallInventory(), snap.RulesOK},
 		Human:       RenderInventory(snap, "opnsense-firewall"),
 		Inventory:   BuildSpecInventory(snap),
 		ClientCount: snap.LeaseCount(),

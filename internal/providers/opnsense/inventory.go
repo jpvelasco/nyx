@@ -3,7 +3,9 @@ package opnsense
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 
@@ -27,6 +29,8 @@ type InventorySnapshot struct {
 	Interfaces       []Interface
 	Rules            []FirewallRule
 	RulesOK          bool
+	Aliases          []Alias
+	AliasesOK        bool
 	Leases           []DHCPLease
 	LeasesOK         bool
 	Services         []Service
@@ -80,6 +84,14 @@ func (c *Client) FetchInventory(ctx context.Context) (*InventorySnapshot, error)
 	} else {
 		snap.Rules = rules
 		snap.RulesOK = true
+	}
+
+	aliases, err := c.GetAliases(ctx)
+	if err != nil {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("firewall aliases unavailable: %v", err))
+	} else {
+		snap.Aliases = aliases
+		snap.AliasesOK = true
 	}
 
 	svcs, err := c.GetServices(ctx)
@@ -271,9 +283,30 @@ func RenderInventory(snap *InventorySnapshot, site string) string {
 	if snap.RulesOK {
 		fmt.Fprintf(&b, "\n== Firewall rules (%d) ==\n", len(snap.Rules))
 		fmt.Fprintf(&b, "  %d rule%s\n", len(snap.Rules), plural(len(snap.Rules)))
+		for _, row := range snap.FirewallInventory().Rules {
+			state := "enabled"
+			if row.Disabled {
+				state = "disabled"
+			}
+			fmt.Fprintf(&b, "  %s %q %q %q → %q categories=%q\n", state, row.Action, row.Label, row.Source, row.Destination, row.Categories)
+			for _, name := range slices.Sorted(maps.Keys(row.AliasMembers)) {
+				fmt.Fprintf(&b, "    %q: %q\n", name, row.AliasMembers[name])
+			}
+		}
 	} else {
 		fmt.Fprintf(&b, "\n== Firewall rules ==\n")
 		fmt.Fprintf(&b, "  unknown (fetch failed)\n")
+	}
+
+	if snap.AliasesOK {
+		fmt.Fprintf(&b, "\n== Firewall aliases (%d) ==\n", len(snap.Aliases))
+		for _, alias := range snap.Aliases {
+			state := "enabled"
+			if alias.Disabled {
+				state = "disabled"
+			}
+			fmt.Fprintf(&b, "  %s %q (%q): %q\n", state, alias.Name, alias.Type, alias.Addresses)
+		}
 	}
 
 	fmt.Fprintf(&b, "\n== Clients ==\n")

@@ -143,6 +143,7 @@ func classifyStatus(resp *http.Response, path string) error {
 			privilege = "the matching page privilege"
 		}
 		return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("permission denied: %q on OPNsense — the API user lacks the privilege for this endpoint. Grant %s to the API user (System ‣ Access ‣ Users)", path, privilege)}}
+
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		detail := ""

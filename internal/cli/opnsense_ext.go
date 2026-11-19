@@ -19,6 +19,12 @@ func buildOpnsenseExtraCommands() []*cobra.Command {
 	return []*cobra.Command{
 		buildOpnsenseFirewallLogCmd(),
 		buildOpnsenseFirewallLogStatsCmd(),
+		buildOpnsenseListCmd("list-aliases", "List configured firewall aliases", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+			return service.NewOpnsenseService().ListAliases(ctx, opts)
+		}),
+		buildOpnsenseListCmd("list-firewall-rules", "List firewall filter rules", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+			return service.NewOpnsenseService().ListFirewallRules(ctx, opts)
+		}),
 		buildOpnsenseListCmd("list-vlans", "List configured VLAN devices", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 			return service.NewOpnsenseService().ListVLANs(ctx, opts)
 		}),

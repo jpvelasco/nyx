@@ -113,6 +113,7 @@ type ACLApplyResult struct {
 // scopes and their rule counts, and the active client count. Human is a
 // stable, human-readable rendering.
 type ProviderInventory struct {
+	Details     any               `json:"details,omitempty"`
 	Site        string            `json:"site"`
 	Human       string            `json:"human"`
 	Inventory   *intent.Inventory `json:"inventory"`
