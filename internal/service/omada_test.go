@@ -203,6 +203,28 @@ func TestOmadaServiceListNetworks(t *testing.T) {
 	}
 }
 
+func TestOmadaServiceListAPChannels_EmptySite(t *testing.T) {
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openapi/authorize/token":
+			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
+		case "/openapi/v1/abc123/sites":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"siteId":"s1","name":"HQ"}]}`)
+		case "/openapi/v1/abc123/sites/s1/networks/devices":
+			writeOmadaEnvelope(w, 0, `[{"type":"gateway","name":"gateway"}]`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+	rows, err := NewOmadaService().ListAPChannels(context.Background(), OmadaOptions{
+		Host: ts.URL, ClientID: "admin", ClientSecret: "pw", SkipTLSVerify: true,
+	})
+	if err != nil || rows == nil || len(rows) != 0 {
+		t.Fatalf("rows = %v, error = %v; want empty inventory", rows, err)
+	}
+}
+
 func TestOmadaServiceListGatewayDHCPUsers(t *testing.T) {
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -460,6 +482,10 @@ func TestOmadaService_SessionFailures(t *testing.T) {
 		}},
 		{"uplink/connect-fail", connectOpts, "fetching controller info", func(opts OmadaOptions) error {
 			_, err := NewOmadaService().GetUplinkInfo(context.Background(), opts, []string{"aa:bb:cc:dd:ee:01"})
+			return err
+		}},
+		{"ap-channel-info/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {
+			_, err := NewOmadaService().ListAPChannels(context.Background(), opts)
 			return err
 		}},
 		{"switch-ports/login-fail", authOpts, "token mint failed", func(opts OmadaOptions) error {

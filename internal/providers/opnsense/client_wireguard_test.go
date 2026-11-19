@@ -229,7 +229,7 @@ func TestRenderInventoryWireGuardOff(t *testing.T) {
 		WireGuardStatus:  &WireGuardStatus{Running: false},
 		WireGuardOK:      true,
 	}
-	out := RenderInventory(snap, "opnsense-firewall")
+	out := RenderInventory(snap, "opnsense-firewall", false)
 	if !strings.Contains(out, "off, 2 servers, 0 peers") {
 		t.Fatalf("render = %s", out)
 	}
