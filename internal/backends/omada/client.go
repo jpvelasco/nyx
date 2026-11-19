@@ -425,7 +425,7 @@ func (c *Client) doCreate(ctx context.Context, method, path string, body []byte,
 func (c *Client) doRequestKind(ctx context.Context, method, path string, body []byte, dest interface{}, create bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.doRequestLocked(ctx, method, c.requestURL(path), path, body, dest, true, create)
+	return c.doRequestLocked(ctx, method, c.requestURL(path), path, "application/json", body, dest, true, create)
 }
 
 // doRequestLocked executes a request, retrying transient failures with
@@ -433,7 +433,7 @@ func (c *Client) doRequestKind(ctx context.Context, method, path string, body []
 // logPath is the request path used in retry log entries — the log must
 // never carry the controller address. allowReauth is false for the token
 // mint itself, so a failed mint can never trigger a recursive re-mint.
-func (c *Client) doRequestLocked(ctx context.Context, method, reqURL, logPath string, body []byte, dest interface{}, allowReauth, create bool) error {
+func (c *Client) doRequestLocked(ctx context.Context, method, reqURL, logPath, contentType string, body []byte, dest interface{}, allowReauth, create bool) error {
 	reauthUsed := false
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, method, reqURL, bytes.NewReader(body))
@@ -441,7 +441,7 @@ func (c *Client) doRequestLocked(ctx context.Context, method, reqURL, logPath st
 			return err
 		}
 		if method == http.MethodPost || method == http.MethodPatch || method == http.MethodPut {
-			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Content-Type", contentType)
 		}
 		c.addAuthHeaders(req)
 
@@ -509,7 +509,7 @@ func (c *Client) mintToken(ctx context.Context) error {
 	var result struct {
 		AccessToken string `json:"accessToken"`
 	}
-	if err := c.doRequestLocked(ctx, http.MethodPost, c.mintURL(), tokenEndpoint, body, &result, false, false); err != nil {
+	if err := c.doRequestLocked(ctx, http.MethodPost, c.mintURL(), tokenEndpoint, "application/json", body, &result, false, false); err != nil {
 		return err
 	}
 	c.token = result.AccessToken

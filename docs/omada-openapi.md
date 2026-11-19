@@ -273,3 +273,17 @@ exclusions. Search the local controller log with the following command.
 ```sh
 rg 'RFPlanning' server.log | rg -i 'do not support channel deploy|error ecsp first version|does not have available channels|the ssid of ap'
 ```
+
+### Managed-device firmware upgrades
+
+`nyx omada firmware upgrade --file <image.bin> --mac <device-mac> --expected-version <version>`
+previews a single managed-device upgrade. To upload and start the upgrade, add
+`--confirm-reboot` and set `--timeout` long enough for the device to reboot. The
+workflow uses the documented site firmware upload and manual task endpoints. It
+confirms completion by polling the task and then reading the target's exact
+`firmwareVersion` and the controller's `/api/info` version. A timeout or uncertain
+start reports an unverified outcome. Inspect the controller before retrying.
+
+These site endpoints target managed devices. Use the controller UI to install
+an image on the controller itself. The published hardware-controller update
+operation does not accept a local image.
