@@ -105,6 +105,43 @@ func TestRunDiscovery_BackendError(t *testing.T) {
 	}
 }
 
+func TestRunDiscovery_InvalidCIDR(t *testing.T) {
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Networks:   []intent.Network{{Name: "bad", CIDR: "not-a-cidr"}},
+		Assertions: []intent.Assertion{{Type: "subnet_discovery", Network: "bad"}},
+	}
+	eng := NewEngine(spec)
+	eng.Backend = &backends.MockBackend{}
+	_, err := eng.runDiscovery(context.Background(), spec.Assertions[0])
+	if err == nil {
+		t.Fatal("expected probe-set selection error for invalid CIDR")
+	}
+}
+
+func TestRunDiscovery_ProbeSetForRoutedNetwork(t *testing.T) {
+	// 203.0.113.0/24 is documentation space — never directly-attached, so
+	// the engine must pick the ICMP echo probe set for it.
+	spec := &intent.Spec{
+		Version: 1, Site: "test",
+		Networks:   []intent.Network{{Name: "routed", CIDR: "203.0.113.0/24"}},
+		Assertions: []intent.Assertion{{Type: "subnet_discovery", Network: "routed"}},
+	}
+	eng := NewEngine(spec)
+	eng.Backend = &backends.MockBackend{
+		DiscoverResultFunc: func(string) *models.CheckResult {
+			return mockDiscoverResult(1, "203.0.113.0/24")
+		},
+	}
+	result, err := eng.runDiscovery(context.Background(), spec.Assertions[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != models.StatusPass {
+		t.Errorf("expected pass, got %s: %s", result.Status, result.Summary)
+	}
+}
+
 func TestRunDiscovery_ScanModeOverride(t *testing.T) {
 	spec := &intent.Spec{
 		Version: 1, Site: "test",

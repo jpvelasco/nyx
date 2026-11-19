@@ -27,6 +27,13 @@ func (e *Engine) runDiscovery(ctx context.Context, a intent.Assertion) (*models.
 	if a.ScanMinRate > 0 {
 		opts.MinRate = a.ScanMinRate
 	}
+	// ARP for directly-attached networks, ICMP echo for routed ones, so the
+	// sweep never relies on nmap's default probe set.
+	probeSet, err := nmap.ChooseProbeSet(net.CIDR)
+	if err != nil {
+		return nil, err
+	}
+	opts.ProbeSet = probeSet
 
 	result, err := e.Backend.Discover(ctx, net.CIDR, opts)
 	if err != nil {

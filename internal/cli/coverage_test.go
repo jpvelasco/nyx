@@ -36,6 +36,7 @@ func saveRestoreGlobals(t *testing.T) {
 		isolationFrom        string
 		isolationTo          string
 		discoverSubnet       string
+		discoverProbes       string
 		discoverTiming       int
 		discoverMinRate      int
 		providerHost         string
@@ -56,7 +57,7 @@ func saveRestoreGlobals(t *testing.T) {
 		verbose: verbose, timeout: timeout, interfaceOpt: interfaceOpt,
 		routeTarget: routeTarget, vpnTarget: vpnTarget, vpnExpect: vpnExpect,
 		isolationFrom: isolationFrom, isolationTo: isolationTo,
-		discoverSubnet: discoverSubnet, discoverTiming: discoverTiming, discoverMinRate: discoverMinRate,
+		discoverSubnet: discoverSubnet, discoverProbes: discoverProbes, discoverTiming: discoverTiming, discoverMinRate: discoverMinRate,
 		providerHost: providerHost, providerClientID: providerClientID, providerClientSecret: providerClientSecret,
 		providerSite: providerSite, providerDebug: providerDebug, providerOutFile: providerOutFile,
 		providerSkipTLS: providerSkipTLS, providerCACertPth: providerCACertPath,
@@ -69,7 +70,7 @@ func saveRestoreGlobals(t *testing.T) {
 		verbose, timeout, interfaceOpt = saved.verbose, saved.timeout, saved.interfaceOpt
 		routeTarget, vpnTarget, vpnExpect = saved.routeTarget, saved.vpnTarget, saved.vpnExpect
 		isolationFrom, isolationTo = saved.isolationFrom, saved.isolationTo
-		discoverSubnet, discoverTiming, discoverMinRate = saved.discoverSubnet, saved.discoverTiming, saved.discoverMinRate
+		discoverSubnet, discoverProbes, discoverTiming, discoverMinRate = saved.discoverSubnet, saved.discoverProbes, saved.discoverTiming, saved.discoverMinRate
 		providerHost, providerClientID, providerClientSecret = saved.providerHost, saved.providerClientID, saved.providerClientSecret
 		providerSite, providerDebug, providerOutFile = saved.providerSite, saved.providerDebug, saved.providerOutFile
 		providerSkipTLS, providerCACertPath = saved.providerSkipTLS, saved.providerCACertPth

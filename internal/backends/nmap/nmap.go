@@ -41,6 +41,9 @@ var (
 
 	// "MAC Address: AA:BB:CC:DD:EE:FF (Vendor Name)"
 	reMAC = regexp.MustCompile(`(?m)^MAC Address: ([0-9A-Fa-f:]{17})`)
+
+	// "Nmap done: 256 IP addresses (12 hosts up) scanned in 3.42s"
+	reDone = regexp.MustCompile(`(?m)^Nmap done: (\d+) IP address(?:es)? \((\d+) hosts? up\) scanned`)
 )
 
 // ScanOptions controls nmap scan behaviour.
@@ -53,6 +56,97 @@ type ScanOptions struct {
 	MinRate int
 	// MaxRate sets --max-rate (packets/sec). 0 means no limit.
 	MaxRate int
+	// ProbeSet selects the host-discovery probe set for discovery scans.
+	// The zero value keeps nmap's default probe set.
+	ProbeSet ProbeSet
+}
+
+// ProbeSet selects the host-discovery probe set for discovery scans.
+type ProbeSet string
+
+const (
+	// ProbeSetDefault keeps nmap's default host-discovery probes. On hosts
+	// with raw-socket access that set includes an ICMP timestamp request,
+	// which edge-gateway attack-defense may classify as an attack.
+	ProbeSetDefault ProbeSet = ""
+	// ProbeSetARP uses ARP ping only. It requires a directly-attached
+	// subnet and generates no IP probes.
+	ProbeSetARP ProbeSet = "arp"
+	// ProbeSetICMP uses an ICMP echo request only.
+	ProbeSetICMP ProbeSet = "icmp"
+)
+
+// ParseProbeSet converts a user-supplied probe set name to a ProbeSet.
+// The empty string and "default" both keep nmap's default probe set.
+func ParseProbeSet(s string) (ProbeSet, error) {
+	switch s {
+	case "":
+		return ProbeSetDefault, nil
+	case "arp":
+		return ProbeSetARP, nil
+	case "icmp":
+		return ProbeSetICMP, nil
+	case "default":
+		return ProbeSetDefault, nil
+	}
+	return ProbeSetDefault, fmt.Errorf("unknown probe set %q (want arp, icmp, or default)", s)
+}
+
+// flag returns the nmap host-discovery flag for the probe set, or the empty
+// string when the probe set stays nmap's default.
+func (p ProbeSet) flag() string {
+	switch p {
+	case ProbeSetARP:
+		return "-PR"
+	case ProbeSetICMP:
+		return "-PE"
+	}
+	return ""
+}
+
+// DirectlyAttached reports whether the local machine holds an IPv4 address
+// inside the given CIDR. Only such subnets can be probed with ARP.
+func DirectlyAttached(cidr string) (bool, error) {
+	_, ipnet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return false, fmt.Errorf("invalid CIDR %q: %w", cidr, err)
+	}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return false, fmt.Errorf("reading network interfaces: %w", err)
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ipNet, ok := a.(*net.IPNet)
+			if !ok || ipNet.IP.To4() == nil {
+				continue
+			}
+			if ipnet.Contains(ipNet.IP) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// ChooseProbeSet selects ARP for directly-attached subnets and ICMP echo for
+// routed ones, so a sweep never relies on nmap's default probe set.
+func ChooseProbeSet(cidr string) (ProbeSet, error) {
+	attached, err := DirectlyAttached(cidr)
+	if err != nil {
+		return ProbeSetDefault, err
+	}
+	if attached {
+		return ProbeSetARP, nil
+	}
+	return ProbeSetICMP, nil
 }
 
 // PoliteScanOptions is safe for use on SDN controllers with flood detection.
@@ -85,6 +179,35 @@ func Discover(ctx context.Context, cidr string) (*models.CheckResult, error) {
 	return DiscoverWithOptions(ctx, cidr, DefaultScanOptions)
 }
 
+// runNmap executes nmap and classifies the outcome:
+//
+//   - clean: exit 0; out is nmap's stdout
+//   - warn: non-zero exit but stdout was produced (for example "no hosts
+//     found"); out is still usable and err carries the exit status
+//   - hard: context cancellation, or non-zero exit with empty stdout; out is
+//     empty and err explains the failure, including nmap's stderr so the
+//     cause (for example "need root to do a UDP scan") is visible
+func runNmap(ctx context.Context, nmapPath string, args []string) (out string, err error, warned bool) {
+	cmd := exec.CommandContext(ctx, nmapPath, args...) // nosemgrep
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	stdout, runErr := cmd.Output()
+	if runErr == nil {
+		return string(stdout), nil, false
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err(), false
+	}
+	if len(stdout) == 0 {
+		detail := strings.TrimSpace(stderr.String())
+		if detail != "" {
+			return "", fmt.Errorf("nmap error: %w: %s", runErr, detail), false
+		}
+		return "", fmt.Errorf("nmap error: %w", runErr), false
+	}
+	return string(stdout), runErr, true
+}
+
 // DiscoverWithOptions runs an nmap ping sweep with explicit ScanOptions.
 func DiscoverWithOptions(ctx context.Context, cidr string, opts ScanOptions) (*models.CheckResult, error) {
 	result := models.NewCheckResult("nmap", "subnet_discovery", "nmap", cidr)
@@ -107,22 +230,10 @@ func DiscoverWithOptions(ctx context.Context, cidr string, opts ScanOptions) (*m
 		return result, installErr
 	}
 
-	// Build args: nmap -sn [-Tn] [--min-rate N] [--max-rate N] <cidr>
-	args := []string{"-sn"}
-	if opts.TimingTemplate > 0 {
-		args = append(args, fmt.Sprintf("-T%d", opts.TimingTemplate))
-	}
-	if opts.MinRate > 0 {
-		args = append(args, "--min-rate", fmt.Sprintf("%d", opts.MinRate))
-	}
-	if opts.MaxRate > 0 {
-		args = append(args, "--max-rate", fmt.Sprintf("%d", opts.MaxRate))
-	}
-	args = append(args, cidr)
-	// #nosec G204 — nmap is hardcoded, args from spec
-	cmd := exec.CommandContext(ctx, nmapPath, args...) // nosemgrep
-	out, err := cmd.Output()
-	if err != nil {
+	// Build args: nmap -sn [-PR|-PE] [-Tn] [--min-rate N] [--max-rate N] <cidr>
+	args := buildDiscoverArgs(opts, cidr)
+	out, err, warned := runNmap(ctx, nmapPath, args)
+	if err != nil && !warned {
 		// Context cancellation manifests as an error here
 		if ctx.Err() != nil {
 			result.Status = models.StatusError
@@ -130,19 +241,18 @@ func DiscoverWithOptions(ctx context.Context, cidr string, opts ScanOptions) (*m
 			result.Finish()
 			return result, ctx.Err()
 		}
-		// nmap exits non-zero on some conditions (e.g. no hosts found) –
-		// treat as a warning rather than a hard error when there is output.
-		if len(out) == 0 {
-			result.Status = models.StatusError
-			result.Summary = fmt.Sprintf("nmap exited with error: %v", err)
-			result.Finish()
-			return result, fmt.Errorf("nmap error: %w", err)
-		}
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("nmap exited with error: %v", err)
+		result.Finish()
+		return result, err
+	}
+	if warned {
 		result.Status = models.StatusWarn
 		result.Summary = fmt.Sprintf("nmap exited with warning: %v", err)
 	}
 
-	hosts := parseNmapOutput(string(out))
+	hosts := parseNmapOutput(out)
+	done := parseDoneLine(out)
 
 	dr := DiscoveryResult{
 		Hosts: hosts,
@@ -154,12 +264,17 @@ func DiscoverWithOptions(ctx context.Context, cidr string, opts ScanOptions) (*m
 		"hosts": dr.Hosts,
 		"total": dr.Total,
 	}
+	if done != nil {
+		result.Observed["addresses_scanned"] = done.Addresses
+		result.Observed["hosts_up"] = done.HostsUp
+		result.Observed["unresponsive"] = unresponsiveFrom(done)
+	}
 
 	result.Status = discoveryVerdict(len(hosts), err)
-	result.Summary = discoverySummary(len(hosts), cidr)
+	result.Summary = discoverySummary(len(hosts), unresponsiveFrom(done), cidr)
 
 	// Attach raw nmap output as evidence
-	result.Evidence = append(result.Evidence, strings.TrimSpace(string(out)))
+	result.Evidence = append(result.Evidence, strings.TrimSpace(out))
 
 	result.Finish()
 	return result, nil
@@ -176,12 +291,99 @@ func discoveryVerdict(hostCount int, scanErr error) models.Status {
 	return models.StatusPass
 }
 
-// discoverySummary renders the human summary line for a discovery result.
-func discoverySummary(hostCount int, cidr string) string {
-	if hostCount == 0 {
-		return fmt.Sprintf("no hosts discovered in %s", cidr)
+// doneLine is nmap's final scan summary, for example
+// "Nmap done: 256 IP addresses (12 hosts up) scanned in 3.42s".
+type doneLine struct {
+	Addresses int
+	HostsUp   int
+}
+
+// parseDoneLine reads the final summary line from raw nmap output. It
+// returns nil when the line is absent (nmap failed before finishing).
+func parseDoneLine(output string) *doneLine {
+	m := reDone.FindStringSubmatch(output)
+	if m == nil {
+		return nil
 	}
-	return fmt.Sprintf("discovered %d host(s) in %s", hostCount, cidr)
+	addresses, err := strconv.Atoi(m[1])
+	if err != nil {
+		return nil
+	}
+	hostsUp, err := strconv.Atoi(m[2])
+	if err != nil {
+		return nil
+	}
+	return &doneLine{Addresses: addresses, HostsUp: hostsUp}
+}
+
+// unresponsiveFrom counts addresses that produced no host-discovery
+// response. Those are down or probes filtered — reported separately from
+// the discovered host list, which only contains responders.
+func unresponsiveFrom(done *doneLine) int {
+	if done == nil {
+		return 0
+	}
+	if n := done.Addresses - done.HostsUp; n > 0 {
+		return n
+	}
+	return 0
+}
+
+// buildDiscoverArgs assembles the nmap argument list for a ping sweep.
+func buildDiscoverArgs(opts ScanOptions, cidr string) []string {
+	args := []string{"-sn"}
+	if pf := opts.ProbeSet.flag(); pf != "" {
+		args = append(args, pf)
+	}
+	if opts.TimingTemplate > 0 {
+		args = append(args, fmt.Sprintf("-T%d", opts.TimingTemplate))
+	}
+	if opts.MinRate > 0 {
+		args = append(args, "--min-rate", fmt.Sprintf("%d", opts.MinRate))
+	}
+	if opts.MaxRate > 0 {
+		args = append(args, "--max-rate", fmt.Sprintf("%d", opts.MaxRate))
+	}
+	return append(args, cidr)
+}
+
+// buildPortScanArgs assembles the nmap argument list for a port scan.
+func buildPortScanArgs(opts ScanOptions, target string, ports []int, protocol string) []string {
+	portList := make([]string, len(ports))
+	for i, p := range ports {
+		portList[i] = fmt.Sprintf("%d", p)
+	}
+
+	// -Pn skips host discovery: the target is already a known host, and
+	// re-discovery would re-send the probe set at every target.
+	args := []string{"-sV", "--open", "-Pn"}
+	if protocol == "udp" {
+		args = append(args, "-sU")
+	} else {
+		args = append(args, "-sT")
+	}
+	if opts.TimingTemplate > 0 {
+		args = append(args, fmt.Sprintf("-T%d", opts.TimingTemplate))
+	}
+	if opts.MinRate > 0 {
+		args = append(args, "--min-rate", fmt.Sprintf("%d", opts.MinRate))
+	}
+	if opts.MaxRate > 0 {
+		args = append(args, "--max-rate", fmt.Sprintf("%d", opts.MaxRate))
+	}
+	return append(args, "-p", strings.Join(portList, ","), target)
+}
+
+// discoverySummary renders the human summary line for a discovery result.
+func discoverySummary(hostCount, unresponsive int, cidr string) string {
+	suffix := ""
+	if unresponsive > 0 {
+		suffix = fmt.Sprintf(" — %d addresses unresponsive: down or probes filtered", unresponsive)
+	}
+	if hostCount == 0 {
+		return fmt.Sprintf("no hosts discovered in %s%s", cidr, suffix)
+	}
+	return fmt.Sprintf("discovered %d host(s) in %s%s", hostCount, cidr, suffix)
 }
 
 // parseNmapOutput converts raw nmap -sn text into a slice of Host records.
@@ -310,55 +512,33 @@ func PortScan(ctx context.Context, target string, ports []int, protocol string, 
 		return result, fmt.Errorf("ports list is empty")
 	}
 
-	portList := make([]string, len(ports))
-	for i, p := range ports {
-		portList[i] = fmt.Sprintf("%d", p)
-	}
+	args := buildPortScanArgs(opts, target, ports, protocol)
 
-	args := []string{"-sV", "--open"}
-	if protocol == "udp" {
-		args = append(args, "-sU")
-	} else {
-		args = append(args, "-sT")
-	}
-	if opts.TimingTemplate > 0 {
-		args = append(args, fmt.Sprintf("-T%d", opts.TimingTemplate))
-	}
-	if opts.MinRate > 0 {
-		args = append(args, "--min-rate", fmt.Sprintf("%d", opts.MinRate))
-	}
-	if opts.MaxRate > 0 {
-		args = append(args, "--max-rate", fmt.Sprintf("%d", opts.MaxRate))
-	}
-	args = append(args, "-p", strings.Join(portList, ","), target)
-
-	// #nosec G204 — nmap is hardcoded, args from spec
-	cmd := exec.CommandContext(ctx, nmapPath, args...) // nosemgrep
-	out, err := cmd.Output()
-	if err != nil {
+	out, err, warned := runNmap(ctx, nmapPath, args)
+	if err != nil && !warned {
 		if ctx.Err() != nil {
 			result.Status = models.StatusError
 			result.Summary = fmt.Sprintf("nmap timed out: %v", ctx.Err())
 			result.Finish()
 			return result, ctx.Err()
 		}
-		if len(out) == 0 {
-			result.Status = models.StatusError
-			result.Summary = fmt.Sprintf("nmap exited with error: %v", err)
-			result.Finish()
-			return result, fmt.Errorf("nmap error: %w", err)
-		}
+		result.Status = models.StatusError
+		result.Summary = fmt.Sprintf("nmap exited with error: %v", err)
+		result.Finish()
+		return result, err
+	}
+	if warned {
 		result.Status = models.StatusWarn
 		result.Summary = fmt.Sprintf("nmap exited with warning: %v", err)
 	}
 
-	portStates := parsePortScanOutput(string(out), ports, protocol)
+	portStates := parsePortScanOutput(out, ports, protocol)
 
 	psJSON, _ := json.Marshal(PortScanResult{Ports: portStates})
 	var psMap map[string]interface{}
 	_ = json.Unmarshal(psJSON, &psMap)
 	result.Observed = psMap
-	result.Evidence = append(result.Evidence, strings.TrimSpace(string(out)))
+	result.Evidence = append(result.Evidence, strings.TrimSpace(out))
 
 	if err == nil {
 		result.Status = models.StatusPass

@@ -138,6 +138,25 @@ func (s *Server) toolDiscoverSubnet(ctx context.Context, args map[string]interfa
 	if r, ok := args["scan_min_rate"].(float64); ok && r > 0 {
 		opts.MinRate = int(r)
 	}
+	if p, ok := args["scan_probes"].(string); ok && p != "" {
+		probeSet, err := nmap.ParseProbeSet(p)
+		if err != nil {
+			return errResult(err.Error())
+		}
+		if probeSet == nmap.ProbeSetARP {
+			attached, err := nmap.DirectlyAttached(subnet)
+			if err != nil {
+				return errResult(err.Error())
+			}
+			if !attached {
+				return errResult("probe set \"arp\" requires a directly-attached subnet")
+			}
+		}
+		opts.ProbeSet = probeSet
+	} else if probeSet, err := nmap.ChooseProbeSet(subnet); err == nil {
+		// ARP for directly-attached subnets, ICMP echo for routed ones.
+		opts.ProbeSet = probeSet
+	}
 	result, err := nmap.DiscoverWithOptions(ctx, subnet, opts)
 	if err != nil {
 		return errResult(fmt.Sprintf("discovery failed: %v", err))

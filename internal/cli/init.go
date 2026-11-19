@@ -85,10 +85,18 @@ then write a nyx.yaml spec you can customize.`,
 			dur = 300 * time.Second
 		}
 
+		// localCIDRs are directly-attached by construction, so ARP ping
+		// generates no IP probes for the gateway to see.
+		initOpts := nmap.ScanOptions{
+			TimingTemplate: nmap.PoliteScanOptions.TimingTemplate,
+			MinRate:        nmap.PoliteScanOptions.MinRate,
+			MaxRate:        nmap.PoliteScanOptions.MaxRate,
+			ProbeSet:       nmap.ProbeSetARP,
+		}
 		for _, c := range localCIDRs {
 			fmt.Fprintf(os.Stderr, "Scanning %s — this may take a moment...\n", c.cidr)
 			ctx, cancel := context.WithTimeout(context.Background(), dur)
-			result, err := nmap.DiscoverWithOptions(ctx, c.cidr, nmap.PoliteScanOptions)
+			result, err := nmap.DiscoverWithOptions(ctx, c.cidr, initOpts)
 			cancel()
 
 			hostCount := 0

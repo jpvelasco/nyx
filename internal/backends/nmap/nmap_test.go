@@ -5,6 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -372,11 +377,222 @@ func TestDiscoveryVerdict(t *testing.T) {
 }
 
 func TestDiscoverySummary(t *testing.T) {
-	if got := discoverySummary(0, "10.0.0.0/24"); got != "no hosts discovered in 10.0.0.0/24" {
+	if got := discoverySummary(0, 0, "10.0.0.0/24"); got != "no hosts discovered in 10.0.0.0/24" {
 		t.Errorf("empty summary = %q", got)
 	}
-	if got := discoverySummary(3, "10.0.0.0/24"); got != "discovered 3 host(s) in 10.0.0.0/24" {
+	if got := discoverySummary(3, 0, "10.0.0.0/24"); got != "discovered 3 host(s) in 10.0.0.0/24" {
 		t.Errorf("hosts summary = %q", got)
+	}
+}
+
+func TestDiscoverySummary_UnresponsiveSuffix(t *testing.T) {
+	if got := discoverySummary(3, 2, "10.0.0.0/24"); got != "discovered 3 host(s) in 10.0.0.0/24 — 2 addresses unresponsive: down or probes filtered" {
+		t.Errorf("hosts+unresponsive summary = %q", got)
+	}
+	if got := discoverySummary(0, 254, "10.0.0.0/24"); got != "no hosts discovered in 10.0.0.0/24 — 254 addresses unresponsive: down or probes filtered" {
+		t.Errorf("empty+unresponsive summary = %q", got)
+	}
+}
+
+// ─── probe set tests ───
+
+func TestParseProbeSet(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"", ""},
+		{"default", ""},
+		{"arp", "arp"},
+		{"icmp", "icmp"},
+	} {
+		got, err := ParseProbeSet(tc.in)
+		if err != nil {
+			t.Errorf("ParseProbeSet(%q) error = %v", tc.in, err)
+		}
+		if string(got) != tc.want {
+			t.Errorf("ParseProbeSet(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	for _, bad := range []string{"bogus", "ARP", "ICMP", "  arp"} {
+		if _, err := ParseProbeSet(bad); err == nil {
+			t.Errorf("ParseProbeSet(%q) should error", bad)
+		}
+	}
+}
+
+func TestProbeSetFlag(t *testing.T) {
+	if got := ProbeSetARP.flag(); got != "-PR" {
+		t.Errorf("arp flag = %q", got)
+	}
+	if got := ProbeSetICMP.flag(); got != "-PE" {
+		t.Errorf("icmp flag = %q", got)
+	}
+	if got := ProbeSetDefault.flag(); got != "" {
+		t.Errorf("default flag = %q", got)
+	}
+}
+
+func TestBuildDiscoverArgs(t *testing.T) {
+	defaults := buildDiscoverArgs(DefaultScanOptions, "10.0.0.0/24")
+	want := []string{"-sn", "-T4", "--min-rate", "500", "10.0.0.0/24"}
+	if !reflect.DeepEqual(defaults, want) {
+		t.Errorf("default args = %v, want %v", defaults, want)
+	}
+
+	arp := buildDiscoverArgs(ScanOptions{TimingTemplate: 4, MinRate: 500, ProbeSet: ProbeSetARP}, "10.0.0.0/24")
+	want = []string{"-sn", "-PR", "-T4", "--min-rate", "500", "10.0.0.0/24"}
+	if !reflect.DeepEqual(arp, want) {
+		t.Errorf("arp args = %v, want %v", arp, want)
+	}
+
+	icmp := buildDiscoverArgs(ScanOptions{TimingTemplate: 2, MinRate: 50, MaxRate: 100, ProbeSet: ProbeSetICMP}, "10.0.20.0/24")
+	want = []string{"-sn", "-PE", "-T2", "--min-rate", "50", "--max-rate", "100", "10.0.20.0/24"}
+	if !reflect.DeepEqual(icmp, want) {
+		t.Errorf("icmp args = %v, want %v", icmp, want)
+	}
+
+	zero := buildDiscoverArgs(ScanOptions{}, "10.0.0.0/24")
+	want = []string{"-sn", "10.0.0.0/24"}
+	if !reflect.DeepEqual(zero, want) {
+		t.Errorf("zero opts args = %v, want %v", zero, want)
+	}
+}
+
+func TestBuildPortScanArgs(t *testing.T) {
+	got := buildPortScanArgs(ScanOptions{TimingTemplate: 3, MinRate: 200}, "10.0.0.1", []int{22, 80, 443}, "tcp")
+	want := []string{"-sV", "--open", "-Pn", "-sT", "-T3", "--min-rate", "200", "-p", "22,80,443", "10.0.0.1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("tcp args = %v, want %v", got, want)
+	}
+
+	udp := buildPortScanArgs(ScanOptions{}, "10.0.0.1", []int{53}, "udp")
+	want = []string{"-sV", "--open", "-Pn", "-sU", "-p", "53", "10.0.0.1"}
+	if !reflect.DeepEqual(udp, want) {
+		t.Errorf("udp args = %v, want %v", udp, want)
+	}
+
+	capped := buildPortScanArgs(ScanOptions{TimingTemplate: 3, MinRate: 200, MaxRate: 1000}, "10.0.0.1", []int{80}, "tcp")
+	want = []string{"-sV", "--open", "-Pn", "-sT", "-T3", "--min-rate", "200", "--max-rate", "1000", "-p", "80", "10.0.0.1"}
+	if !reflect.DeepEqual(capped, want) {
+		t.Errorf("max-rate args = %v, want %v", capped, want)
+	}
+}
+
+func TestParseDoneLine(t *testing.T) {
+	done := parseDoneLine("Nmap done: 256 IP addresses (12 hosts up) scanned in 3.42s")
+	if done == nil || done.Addresses != 256 || done.HostsUp != 12 {
+		t.Errorf("plural done line = %+v", done)
+	}
+
+	single := parseDoneLine("Nmap done: 1 IP address (1 host up) scanned in 0.02s")
+	if single == nil || single.Addresses != 1 || single.HostsUp != 1 {
+		t.Errorf("singular done line = %+v", single)
+	}
+
+	embedded := parseDoneLine("Starting Nmap 7.94 ( https://nmap.org )\nNmap scan report for 10.0.0.1\nNmap done: 3 IP addresses (1 host up) scanned in 0.5s\n")
+	if embedded == nil || embedded.Addresses != 3 || embedded.HostsUp != 1 {
+		t.Errorf("embedded done line = %+v", embedded)
+	}
+
+	if got := parseDoneLine("Nmap scan report for 10.0.0.1"); got != nil {
+		t.Errorf("absent done line = %+v, want nil", got)
+	}
+
+	// Counts that overflow int64 are unparseable — treat like an absent line.
+	if got := parseDoneLine("Nmap done: 99999999999999999999 IP addresses (5 hosts up) scanned in 1.00s"); got != nil {
+		t.Errorf("overflowing address count = %+v, want nil", got)
+	}
+	if got := parseDoneLine("Nmap done: 256 IP addresses (99999999999999999999 hosts up) scanned in 1.00s"); got != nil {
+		t.Errorf("overflowing hosts-up count = %+v, want nil", got)
+	}
+}
+
+func TestUnresponsiveFrom(t *testing.T) {
+	if got := unresponsiveFrom(nil); got != 0 {
+		t.Errorf("nil done = %d", got)
+	}
+	if got := unresponsiveFrom(&doneLine{Addresses: 256, HostsUp: 12}); got != 244 {
+		t.Errorf("unresponsive = %d, want 244", got)
+	}
+	if got := unresponsiveFrom(&doneLine{Addresses: 3, HostsUp: 3}); got != 0 {
+		t.Errorf("all up = %d, want 0", got)
+	}
+	if got := unresponsiveFrom(&doneLine{Addresses: 2, HostsUp: 3}); got != 0 {
+		t.Errorf("clamped = %d, want 0", got)
+	}
+}
+
+// attachedCIDR24 builds a /24 around a non-loopback IPv4 on this host, so the
+// subnet is guaranteed directly-attached regardless of where the test runs.
+func attachedCIDR24(t *testing.T) string {
+	t.Helper()
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		t.Skipf("reading interfaces: %v", err)
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ipNet, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipNet.IP.To4()
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			return fmt.Sprintf("%d.%d.%d.0/24", ip[0], ip[1], ip[2])
+		}
+	}
+	t.Skip("no non-loopback IPv4 address on this host")
+	return ""
+}
+
+func TestDirectlyAttached(t *testing.T) {
+	attached, err := DirectlyAttached(attachedCIDR24(t))
+	if err != nil {
+		t.Fatalf("DirectlyAttached error: %v", err)
+	}
+	if !attached {
+		t.Error("local /24 should be directly-attached")
+	}
+
+	routed, err := DirectlyAttached("203.0.113.0/24")
+	if err != nil {
+		t.Fatalf("DirectlyAttached(203.0.113.0/24) error: %v", err)
+	}
+	if routed {
+		t.Error("documentation-range /24 should not be directly-attached")
+	}
+
+	if _, err := DirectlyAttached("not-a-cidr"); err == nil {
+		t.Error("expected error for invalid CIDR")
+	}
+}
+
+func TestChooseProbeSet(t *testing.T) {
+	got, err := ChooseProbeSet(attachedCIDR24(t))
+	if err != nil {
+		t.Fatalf("ChooseProbeSet error: %v", err)
+	}
+	if got != ProbeSetARP {
+		t.Errorf("attached = %q, want arp", got)
+	}
+
+	got, err = ChooseProbeSet("203.0.113.0/24")
+	if err != nil {
+		t.Fatalf("ChooseProbeSet(203.0.113.0/24) error: %v", err)
+	}
+	if got != ProbeSetICMP {
+		t.Errorf("routed = %q, want icmp", got)
+	}
+
+	if _, err := ChooseProbeSet("not-a-cidr"); err == nil {
+		t.Error("expected error for invalid CIDR")
 	}
 }
 
@@ -887,12 +1103,56 @@ func TestPortScan_UDP(t *testing.T) {
 	if !Available() {
 		t.Skip("nmap not available")
 	}
+	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
+		t.Skip("UDP scans need raw sockets (root) on Linux; CI runners are unprivileged")
+	}
 	result, err := PortScan(context.Background(), "127.0.0.1", []int{53}, "udp", PoliteScanOptions)
 	if err != nil {
 		t.Fatalf("PortScan udp failed: %v", err)
 	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
+	}
+}
+
+// writeFailingNmap places a fake nmap first on PATH that fails with an
+// empty stdout and a diagnostic on stderr, mimicking nmap refusing a
+// privileged scan.
+func writeFailingNmap(t *testing.T, dir string) {
+	t.Helper()
+	var (
+		name    string
+		content string
+	)
+	if runtime.GOOS == "windows" {
+		name = "nmap.bat"
+		content = "@echo off\r\necho need root to do a UDP scan 1>&2\r\nexit /b 1\r\n"
+	} else {
+		name = "nmap"
+		content = "#!/bin/sh\necho 'need root to do a UDP scan' >&2\nexit 1\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o700); err != nil {
+		t.Fatalf("write fake nmap: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestPortScan_FailureIncludesStderr checks that a nmap failure with no
+// stdout surfaces nmap's stderr in the error, so callers see the cause
+// (for example a missing-privileges refusal) instead of a bare exit status.
+func TestPortScan_FailureIncludesStderr(t *testing.T) {
+	dir := t.TempDir()
+	writeFailingNmap(t, dir)
+
+	result, err := PortScan(context.Background(), "127.0.0.1", []int{53}, "udp", PoliteScanOptions)
+	if err == nil {
+		t.Fatal("expected an error from the failing nmap")
+	}
+	if !strings.Contains(err.Error(), "need root to do a UDP scan") {
+		t.Fatalf("error should include nmap's stderr, got: %v", err)
+	}
+	if result == nil || result.Status != models.StatusError {
+		t.Fatalf("expected StatusError result, got: %+v", result)
 	}
 }
 
