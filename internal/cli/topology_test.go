@@ -472,3 +472,20 @@ func TestTopologyCmd_RunE_ReportError(t *testing.T) {
 		t.Fatalf("err = %v, want observing-opnsense prefix", err)
 	}
 }
+
+func TestPrintTopologyFingerprint(t *testing.T) {
+	var buf bytes.Buffer
+	printTopologyReport(&buf, &service.TopologyReport{Fingerprint: &topology.Fingerprint{
+		Devices: []topology.FingerprintDevice{
+			{Provider: "omada", Role: "enforcer", WhereToLook: "Inspect firewall rules."},
+			{Provider: "opnsense", Role: "observer", ManagedUpstream: "omada"},
+		},
+		Segments: []topology.FingerprintSegment{{VLAN: 10, Gateway: "omada"}, {VLAN: 20}},
+		Warnings: []string{"Optional inventory unavailable"},
+	}})
+	for _, want := range []string{"Architecture fingerprint", "opnsense: observer -> omada", "Inspect firewall rules.", "VLAN 10 -> omada", "VLAN 20 -> unknown", "Optional inventory unavailable"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing %q in %s", want, buf.String())
+		}
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/storepath"
+	"github.com/jpvelasco/nyx/internal/topology"
 	"github.com/spf13/cobra"
 )
 
@@ -67,9 +68,11 @@ produce a confidently wrong verdict.`,
 				"or run `nyx credentials set <provider> --set host=...`")
 		}
 
+		fingerprint, _ := cmd.Flags().GetBool("fingerprint")
 		rep, err := service.NewTopologyService().Report(ctx, service.TopologyOptions{
-			Omada:    omadaOpts,
-			Opnsense: opnsOpts,
+			Omada:       omadaOpts,
+			Opnsense:    opnsOpts,
+			Fingerprint: fingerprint,
 		})
 		if err != nil {
 			return err
@@ -172,6 +175,9 @@ func resolveOpnsenseTopologyOpts() (*service.OpnsenseOptions, error) {
 // as "unknown" — the mode key may be absent (version drift) and must not be
 // guessed.
 func printTopologyReport(w io.Writer, rep *service.TopologyReport) {
+	if rep.Fingerprint != nil {
+		printTopologyFingerprint(w, rep.Fingerprint)
+	}
 	fmt.Fprintf(w, "Double-NAT risk: %s\n", rep.Risk)
 	fmt.Fprintf(w, "Reason:          %s\n\n", rep.Reason)
 	for _, d := range rep.Devices {
@@ -201,7 +207,33 @@ func printTopologyReport(w io.Writer, rep *service.TopologyReport) {
 	}
 }
 
+func printTopologyFingerprint(w io.Writer, fingerprint *topology.Fingerprint) {
+	fmt.Fprintln(w, "Architecture fingerprint")
+	for _, device := range fingerprint.Devices {
+		fmt.Fprintf(w, "  %s: %s", device.Provider, device.Role)
+		if device.ManagedUpstream != "" {
+			fmt.Fprintf(w, " -> %s", device.ManagedUpstream)
+		}
+		fmt.Fprintln(w)
+		if device.WhereToLook != "" {
+			fmt.Fprintf(w, "    %s\n", device.WhereToLook)
+		}
+	}
+	for _, segment := range fingerprint.Segments {
+		gateway := segment.Gateway
+		if gateway == "" {
+			gateway = "unknown"
+		}
+		fmt.Fprintf(w, "  VLAN %d -> %s\n", segment.VLAN, gateway)
+	}
+	for _, warning := range fingerprint.Warnings {
+		fmt.Fprintf(w, "  Warning: %s\n", warning)
+	}
+	fmt.Fprintln(w)
+}
+
 func init() {
+	topologyCmd.Flags().Bool("fingerprint", false, "Infer architecture from configured provider inventory without probing the network")
 	topologyCmd.Flags().StringVar(&topoOmadaHost, "omada-host", "", "Omada controller IP or hostname (omit to skip Omada)")
 	topologyCmd.Flags().StringVar(&topoOmadaClientID, "omada-client-id", "", "Omada Open API client ID")
 	topologyCmd.Flags().StringVar(&topoOmadaClientSecret, "omada-client-secret", "", "Omada Open API client secret")

@@ -34,6 +34,10 @@ func omadaGatewayServer(t *testing.T) *httptest.Server {
 			writeOmadaEnvelope(w, 0, `{"ftp":true}`)
 		case "/openapi/v1/abc123/sites/s1/firewall":
 			writeOmadaEnvelope(w, 0, `{"icmp":30}`)
+		case "/openapi/v1/abc123/sites/s1/lan-networks":
+			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[{"id":"n1","vlan":10,"gatewaySubnet":"10.0.10.1/24"},{"id":"n2","vlan":20}]}`)
+		case "/openapi/v1/abc123/sites/s1/acls/osg-acls", "/openapi/v1/abc123/sites/s1/acls/osw-acls":
+			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
 		default:
 			t.Errorf("unexpected omada path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -68,6 +72,12 @@ func opnsenseNatObserver(t *testing.T, snatMode, wanGateway string, dNatNotFound
 				"lan":{"description":"LAN","dhcp":false,"ipv4":"10.0.40.1/24","ipv4_gateway":""},
 				"wan":{"description":"WAN","dhcp":true,"ipv4":"10.0.0.10/24","ipv4_gateway":%q}
 			}}`, wanGateway))
+		case "/api/interfaces/bridge_settings/search_item":
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"bridge","members":"lan,wan"}]}`)
+		case "/api/firewall/filter/search_rule":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/interfaces/vlan_settings/search_item":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
 		default:
 			t.Errorf("unexpected opnsense path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -244,4 +254,51 @@ func TestTopologyServiceReport(t *testing.T) {
 			t.Errorf("err = %v, want observing-opnsense prefix", err)
 		}
 	})
+}
+
+func TestTopologyFingerprint(t *testing.T) {
+	om := omadaGatewayServer(t)
+	op := opnsenseDownstreamServer(t, "disabled", "10.0.10.1")
+	rep, err := NewTopologyService().Report(context.Background(), TopologyOptions{
+		Omada:       &OmadaOptions{Host: om.URL, ClientID: "a", ClientSecret: "b", SkipTLSVerify: true},
+		Opnsense:    &OpnsenseOptions{Host: op.URL, APIKey: "key1", APISecret: "secret1", SkipTLSVerify: true},
+		Fingerprint: true,
+	})
+	if err != nil || rep.Fingerprint == nil {
+		t.Fatalf("fingerprint = %v, %v", rep, err)
+	}
+	f := rep.Fingerprint
+	if len(f.Devices) != 2 || f.Devices[0].Role != "enforcer" || f.Devices[1].Role != "observer" || f.Devices[1].ManagedUpstream != "omada" {
+		t.Fatalf("device roles = %+v", f.Devices)
+	}
+	if len(f.Segments) != 2 || f.Segments[0].VLAN != 10 || f.Segments[0].Gateway != "omada" || f.Segments[1].Gateway != "" || len(f.Warnings) != 0 {
+		t.Fatalf("segments or warnings = %+v", f)
+	}
+}
+
+func TestTopologyFingerprintPartialOPNsense(t *testing.T) {
+	server := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody("automatic"))
+		case "/api/firewall/d_nat/search_rule", "/api/firewall/one_to_one/search_rule", "/api/firewall/source_nat/search_rule":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"rows":[{"identifier":"opt1","addr4":"10.0.10.1/24","device":"vlan01"}]}`)
+		case "/api/interfaces/vlan_settings/search_item":
+			testutil.WriteBody(w, `{"total":2,"rows":[{"uuid":"fixture1","tag":"10","vlanif":"vlan01"},{"uuid":"fixture2","tag":"10","vlanif":"vlan02"}]}`)
+		case "/api/interfaces/bridge_settings/search_item", "/api/firewall/filter/search_rule":
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	})
+	rep, err := NewTopologyService().Report(t.Context(), TopologyOptions{Opnsense: &OpnsenseOptions{Host: server.URL, APIKey: "key1", APISecret: "secret1", SkipTLSVerify: true}, Fingerprint: true})
+	if err != nil || rep.Fingerprint == nil {
+		t.Fatalf("report = %+v, %v", rep, err)
+	}
+	f := rep.Fingerprint
+	if len(f.Warnings) != 2 || len(f.Segments) != 2 || f.Segments[1].Gateway != "opnsense" || f.Devices[0].Role != "enforcer" {
+		t.Fatalf("fingerprint = %+v", f)
+	}
 }
