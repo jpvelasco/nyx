@@ -319,6 +319,7 @@ func TestProviderCheckACL(t *testing.T) {
 		{"matching readback", "deny-lan-to-iot", true, "warn"},
 		{"mismatched readback", "deny-lan-to-iot", false, "fail"},
 		{"missing readback", "other", true, "warn"},
+		{"missing named rule", "missing", true, "fail"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ts, p := newServer()

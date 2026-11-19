@@ -532,3 +532,12 @@ func TestLANMatchesWrite_DHCPLeaseAndDNSChangesCount(t *testing.T) {
 		t.Error("dhcp-dns-only change must not be a no-op")
 	}
 }
+
+func TestGetACLRulesRejectsInvalidBidirectional(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","biDirectional":"invalid"}]}`)
+	}))
+	if _, err := c.GetACLRules(context.Background(), "s1"); err == nil {
+		t.Fatal("GetACLRules accepted an invalid biDirectional value")
+	}
+}
