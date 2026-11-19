@@ -184,3 +184,19 @@ inventory is still returned. Control and formatting characters are removed
 from controller-provided mDNS strings in all inventory formats.
 
 [TP-Link hardware controller 6.3.0 operation schema](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/getMdnsGrid.json)
+
+## WLAN optimization history
+
+Use `nyx omada wlan-optimization` to list site history and
+`nyx omada wlan-optimization <history-id>` to inspect the AP details for a run.
+Both use the site-scoped Open API `planningHistory` GET routes. The list reports
+failed AP counts by band. The detail reports the recorded AP and radio error
+codes, with APs numbered in response order.
+
+A run with `msgType=-34806` and `apNum=0` can occur when APs are present and every
+band's candidate list is empty. The controller log records the per-device
+exclusions. Search the local controller log with the following command.
+
+```sh
+rg 'RFPlanning' server.log | rg -i 'do not support channel deploy|error ecsp first version|does not have available channels|the ssid of ap'
+```
