@@ -1131,7 +1131,7 @@ func writeFailingNmap(t *testing.T, dir string) {
 		name = "nmap"
 		content = "#!/bin/sh\necho 'need root to do a UDP scan' >&2\nexit 1\n"
 	}
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o700); err != nil {
 		t.Fatalf("write fake nmap: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
