@@ -141,7 +141,7 @@ func (c *Client) classifyStatus(resp *http.Response, path string) error {
 		if privilege == "" {
 			privilege = "the matching page privilege"
 		}
-		return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("permission denied: %s on OPNsense at %s — grant %s to the API user (System ‣ Access ‣ Users)", path, c.host, privilege)}}
+		return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("permission denied: %s on OPNsense at %s — the API user lacks the privilege for this endpoint. Grant %s to the API user (System ‣ Access ‣ Users)", path, c.host, privilege)}}
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("resource not found: %s on OPNsense at %s", path, c.host)}}
