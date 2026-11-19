@@ -95,6 +95,7 @@ func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, p
 	result := models.NewCheckResult("probe", "isolation", a.Runner, fmt.Sprintf("%s -> %s", a.From, a.To))
 	result.Evidence = append(result.Evidence, fmt.Sprintf("probe: %s@%s", probeP.User, probeP.Host))
 
+	var unreachable []string
 	allBlocked := true
 	anyTested := false
 	unreached := 0
@@ -117,12 +118,21 @@ func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, p
 
 		anyTested = true
 		if err != nil || isPingBlocked(output) {
+			var remoteErr *probe.RemoteError
+			if isPingBlocked(output) && (err == nil || (errors.As(err, &remoteErr) && remoteErr.Status() == 1)) && endpointCovers(e.Spec, a.From, probeP.VLAN) {
+				unreachable = append(unreachable, gw)
+			}
 			// Remote exit non-zero (e.g. 100% loss) or output confirms loss.
 			result.Evidence = append(result.Evidence, fmt.Sprintf("gateway %s: blocked", gw))
 		} else {
 			allBlocked = false
 			result.Evidence = append(result.Evidence, fmt.Sprintf("gateway %s: reachable", gw))
 		}
+	}
+
+	if len(unreachable) > 0 {
+		result.Observed["unreachable_gateways"] = unreachable
+		result.Observed["source_network"] = probeP.VLAN
 	}
 
 	expectDeny := a.Expect == "deny"

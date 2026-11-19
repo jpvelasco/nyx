@@ -49,6 +49,22 @@ type AuditResult struct {
 	Warnings []string
 }
 
+// ObservedACL names a stored rule in its controller collection, including disabled rules.
+type ObservedACL struct {
+	Name  string
+	Scope string
+}
+
+// ACLObservation keeps unread collections distinct from successfully enumerated empty lists.
+type ACLObservation struct {
+	Rules         []ObservedACL
+	UnknownScopes []string
+}
+
+type ACLObserver interface {
+	ObserveACLs(context.Context, ImportOptions, []intent.Network) (ACLObservation, error)
+}
+
 // ACLCheckRequest holds the policy details needed for ACL enforcement checking.
 type ACLCheckRequest struct {
 	PolicyName     string

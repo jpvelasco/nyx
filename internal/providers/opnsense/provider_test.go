@@ -1416,3 +1416,59 @@ func TestMatchACLRule_NamedRuleMustCoverRequestedEndpoints(t *testing.T) {
 		t.Errorf("name-only request should match by name, got %+v", m)
 	}
 }
+
+func TestObserveACLs_FilterRules(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		wantErr    bool
+	}{
+		{"rules", `{"rows":[{"uuid":"one","description":"IoT Deny","enabled":"0"}]}`, false},
+		{"empty", `{"rows":[]}`, false},
+		{"bad row", `{"rows":["bad"]}`, true},
+		{"missing rows", `{}`, true},
+		{"incomplete", `{"total":2,"rows":[]}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "GET" || r.URL.Path != "/api/firewall/filter/search_rule" {
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				}
+				testutil.WriteBody(w, tc.body)
+			})
+			obs, err := (&Provider{}).ObserveACLs(t.Context(), providers.ImportOptions{Host: srv.URL, ClientID: "fixture", ClientSecret: "fixture", SkipTLSVerify: true}, nil)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("unexpected error %v", err)
+			}
+			if tc.name == "rules" && (len(obs.Rules) != 1 || obs.Rules[0] != (providers.ObservedACL{Name: "iot deny", Scope: "filter"})) {
+				t.Fatalf("unexpected rules %v", obs.Rules)
+			}
+		})
+	}
+}
+
+func TestObserveACLs_UnnamedFilterRules(t *testing.T) {
+	for _, denied := range []bool{false, true} {
+		_, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/firewall/filter/search_rule":
+				testutil.WriteBody(w, `{"rows":[{"uuid":"first","action":"block","source_net":"trusted_net","destination_net":"iot"},{"uuid":"second","action":"other"}]}`)
+			case "/api/firewall/alias/search_item":
+				if denied {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				testutil.WriteBody(w, `{"rows":[{"name":"trusted_net","type":"net","address":"10.0.10.0/24","enabled":"1"}]}`)
+			default:
+				t.Errorf("unexpected endpoint %s", r.URL.Path)
+			}
+		})
+		networks := []intent.Network{{Name: "trusted", Zone: "trusted", CIDR: "10.0.10.0/24"}, {Name: "iot", Zone: "iot", CIDR: "10.0.60.0/24"}}
+		obs, err := (&Provider{}).ObserveACLs(t.Context(), providers.ImportOptions{Host: srv.URL, ClientID: "fixture", ClientSecret: "fixture", SkipTLSVerify: true}, networks)
+		if (err != nil) != denied {
+			t.Fatalf("aliases denied %t: %v", denied, err)
+		}
+		if !denied && (len(obs.Rules) != 2 || obs.Rules[0].Name != "deny-trusted-to-iot" || obs.Rules[1].Name != "second") {
+			t.Fatalf("rules: %v", obs.Rules)
+		}
+	}
+}

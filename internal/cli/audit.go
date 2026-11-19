@@ -21,7 +21,7 @@ var auditCmd = &cobra.Command{
 	Short: "Run a full audit from a YAML spec",
 	Example: `  nyx audit --spec homelab.yaml
   nyx audit --spec homelab.yaml --json`,
-	RunE: func(_ *cobra.Command, _ []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		if specFile == "" {
 			// First Contact mode: orient the user immediately
 			brief := GetEnvironmentBriefing(nil)
@@ -61,6 +61,11 @@ var auditCmd = &cobra.Command{
 		auditReport, err := engine.Run(ctx)
 		if err != nil {
 			return fmt.Errorf("audit failed: %w", err)
+		}
+
+		includeACLNames, _ := cmd.Flags().GetBool("include-acl-names")
+		if !includeACLNames {
+			auditReport = report.OmitControllerACLNames(auditReport)
 		}
 
 		// Cache the report for snapshot/drift commands

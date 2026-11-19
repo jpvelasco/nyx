@@ -15,6 +15,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
+	reportpkg "github.com/jpvelasco/nyx/internal/report"
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/storepath"
 )
@@ -248,7 +249,7 @@ func (s *Server) toolRunAudit(ctx context.Context, args map[string]interface{}) 
 	if err != nil {
 		return errResult(fmt.Sprintf("audit failed: %v", err))
 	}
-	return okResult(toJSON(report))
+	return okResult(toJSON(reportpkg.OmitControllerACLNames(report)))
 }
 
 func (s *Server) toolLoadSpec(_ context.Context, args map[string]interface{}) toolDispatchResult {
