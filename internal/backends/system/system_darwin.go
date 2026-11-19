@@ -97,37 +97,13 @@ func GetRouteToTarget(ctx context.Context, target string) (*Route, error) {
 // Ping
 // -----------------------------------------------------------------------
 
-var (
-	rePktLossDarwin = regexp.MustCompile(`(\d+(?:\.\d+)?)% packet loss`)
-	reAvgRTTDarwin  = regexp.MustCompile(`round-trip min/avg/max/stddev = [\d.]+/([\d.]+)/`)
+const (
+	pingCountFlag   = "-c"
+	pingTimeoutFlag = "-t"
+	pingTimeout     = "2"
 )
 
-func Ping(ctx context.Context, target string) (*PingResult, error) {
-	if err := checkPingTarget(target); err != nil {
-		return nil, err
-	}
-	// macOS uses -t for timeout (seconds), not -W
-	out, err := runCmd(ctx, "ping", "-c", "3", "-t", "2", target)
-	if err != nil && ctx.Err() != nil {
-		return nil, fmt.Errorf("ping cancelled: %w", ctx.Err())
-	}
-
-	pr := &PingResult{}
-	if m := rePktLossDarwin.FindStringSubmatch(out); m != nil {
-		loss, _ := strconv.ParseFloat(m[1], 64)
-		pr.PacketLoss = loss
-		pr.Reachable = loss < 100
-	} else if err != nil {
-		// The command failed without reportable loss statistics: that is a
-		// usage or execution error, not evidence of an unreachable host —
-		// report it instead of fabricating 100% packet loss.
-		return nil, fmt.Errorf("ping %s failed: %w", target, err)
-	}
-	if m := reAvgRTTDarwin.FindStringSubmatch(out); m != nil {
-		pr.AvgLatency = m[1]
-	}
-	return pr, nil
-}
+func (s PingSource) bindArgs() []string { return []string{"-b", s.Interface, "-S", s.IP.String()} }
 
 // -----------------------------------------------------------------------
 // GetInterfaces

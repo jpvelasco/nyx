@@ -4,6 +4,8 @@ package system
 
 import (
 	"context"
+	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -354,5 +356,20 @@ func TestCheckVPNInterface(t *testing.T) {
 			t.Fatalf("unexpected error for %q: %v", vpnName, err)
 		}
 		_ = vpn // value depends on interface state; no error is the contract
+	})
+}
+
+func TestBoundPingWindowsVerdict(t *testing.T) {
+	exitOne := exec.CommandContext(t.Context(), "cmd", "/c", "exit 1").Run()
+	if exitOne == nil {
+		t.Fatal("expected exit status 1")
+	}
+	summary := "Packets: Sent = 3, Received = 0, Lost = 3 (100% loss)"
+	checkBoundPingCases(t, []boundPingCase{
+		{"echo reply", "Reply from 10.0.11.1: bytes=32 time=1ms TTL=64", nil, true, true},
+		{"ICMP error", "Reply from 10.0.60.15: Destination host unreachable.", nil, false, false},
+		{"no replies", strings.Repeat("Request timed out.\n", 3) + summary, exitOne, false, true},
+		{"transmit failure", "PING: transmit failed. General failure.\n" + summary, exitOne, false, false},
+		{"binding rejected", "Bad source address", exitOne, false, false},
 	})
 }

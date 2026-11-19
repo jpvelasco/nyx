@@ -7,7 +7,9 @@ package system
 import (
 	"context"
 	"fmt"
+	"net"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -27,6 +29,12 @@ type Interface struct {
 	State string   `json:"state"`
 	Addrs []string `json:"addrs"`
 	Type  string   `json:"type,omitempty"` // e.g., "wireguard", "ethernet"
+}
+
+// PingSource identifies the local IPv4 address and adapter for an isolation check.
+type PingSource struct {
+	IP        net.IP
+	Interface string
 }
 
 // PingResult captures the outcome of a ping test.
@@ -71,6 +79,41 @@ func checkPingTarget(target string) error {
 		return fmt.Errorf("ping target %q must not contain whitespace or NUL", target)
 	}
 	return nil
+}
+
+// Ping checks reachability using the system's default route.
+func Ping(ctx context.Context, target string) (*PingResult, error) {
+	return PingFrom(ctx, target, nil)
+}
+
+// PingFrom pins the probe to source when provided. A binding failure is never
+// retried on the default route, which may measure a different source network.
+func PingFrom(ctx context.Context, target string, source *PingSource) (*PingResult, error) {
+	args, err := pingArgs(target, source)
+	if err != nil {
+		return nil, err
+	}
+	out, err := runCmd(ctx, "ping", args...)
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("ping cancelled: %w", ctx.Err())
+	}
+	return parsePingResult(target, out, err, source != nil)
+}
+
+const pingCount = 3
+
+func pingArgs(target string, source *PingSource) ([]string, error) {
+	if err := checkPingTarget(target); err != nil {
+		return nil, err
+	}
+	args := []string{pingCountFlag, strconv.Itoa(pingCount), pingTimeoutFlag, pingTimeout}
+	if source != nil {
+		if source.IP.To4() == nil || source.IP.IsUnspecified() || source.Interface == "" {
+			return nil, fmt.Errorf("ping source requires a local IPv4 address and interface")
+		}
+		args = append(args, source.bindArgs()...)
+	}
+	return append(args, target), nil
 }
 
 // runCmd executes a command with the supplied context and returns stdout.

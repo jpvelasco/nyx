@@ -15,6 +15,11 @@ import (
 	"github.com/jpvelasco/nyx/internal/probe"
 )
 
+// Record only the size because probe output can contain untrusted instructions.
+func probeOutputSize(output string) string {
+	return fmt.Sprintf("remote output: %d bytes (content withheld)", len(output))
+}
+
 func (e *Engine) runViaProbe(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
 	p := e.Spec.ProbeByName(a.Runner)
 	if p == nil {
@@ -49,7 +54,7 @@ func (e *Engine) runViaProbe(ctx context.Context, a intent.Assertion) (*models.C
 	result := models.NewCheckResult("probe", a.Type, a.Runner, probeTarget(a))
 	result.Evidence = append(result.Evidence, fmt.Sprintf("probe: %s@%s", p.User, p.Host))
 	result.Evidence = append(result.Evidence, fmt.Sprintf("command: %s", strings.Join(cmd, " ")))
-	result.Evidence = append(result.Evidence, output)
+	result.Evidence = append(result.Evidence, probeOutputSize(output))
 
 	if err != nil {
 		var remoteErr *probe.RemoteError
@@ -99,7 +104,7 @@ func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, p
 		result.Evidence = append(result.Evidence, fmt.Sprintf("command: %s", strings.Join(cmd, " ")))
 
 		output, err := probe.Run(ctx, probeP, cmd, e.SkipHostKeyVerify)
-		result.Evidence = append(result.Evidence, output)
+		result.Evidence = append(result.Evidence, probeOutputSize(output))
 
 		if probe.IsUnreachable(err) || ctx.Err() != nil {
 			// The probe never executed the ping — SSH, auth, or session
@@ -190,7 +195,7 @@ func (e *Engine) runPortCheckViaProbe(ctx context.Context, a intent.Assertion, p
 			// attacker-controlled, and audit results feed agent surfaces
 			// (MCP) where labeling or quoting cannot neutralize it
 			// deterministically.
-			result.Evidence = append(result.Evidence, fmt.Sprintf("remote output: %d bytes (content withheld)", len(output)))
+			result.Evidence = append(result.Evidence, probeOutputSize(output))
 		}
 
 		state := classifyPortProbeResult(err)
