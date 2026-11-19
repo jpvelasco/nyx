@@ -34,6 +34,8 @@ func buildOmadaExtraCommands() []*cobra.Command {
 		buildOmadaSiteConfigCmd(),
 		buildOmadaListSSIDsCmd(),
 		buildOmadaWLANOptimizationCmd(),
+		buildOmadaAttackDefenseCmd(),
+		buildOmadaUnblockClientCmd(),
 		buildOmadaPlanCmd(),
 		buildOmadaApplyACLCmd(),
 		buildOmadaPlanPortCmd(),
