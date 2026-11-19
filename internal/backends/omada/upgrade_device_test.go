@@ -3,11 +3,13 @@ package omada
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/testutil"
@@ -118,5 +120,23 @@ func TestUpgradeDeviceFailures(t *testing.T) {
 				t.Fatalf("upgrade = %+v, %v; want %q", got, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestUpgradeDeviceReadFailures(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/networks/devices") {
+			writeEnvelope(w, -1005, "forbidden", `null`)
+			return
+		}
+		t.Errorf("unexpected path %s", r.URL.Path)
+	})
+	readErr := errors.New("fixture read failure")
+	if _, err := client.uploadDeviceFirmware(t.Context(), "s1", iotest.ErrReader(readErr)); !errors.Is(err, readErr) {
+		t.Fatalf("upload error = %v, want %v", err, readErr)
+	}
+	result := DeviceUpgrade{Device: "aa:bb:cc:dd:ee:00"}
+	if client.verifyDeviceFirmware(t.Context(), "s1", &result) {
+		t.Fatal("verified firmware despite denied inventory")
 	}
 }
