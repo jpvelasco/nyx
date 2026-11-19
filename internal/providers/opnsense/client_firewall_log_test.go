@@ -1,6 +1,7 @@
 package opnsense
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -55,8 +56,13 @@ func TestGetFirewallLogErrors(t *testing.T) {
 					w.WriteHeader(http.StatusBadRequest)
 					return
 				}
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.status)
-				_, _ = w.Write([]byte(tt.body))
+				if tt.body != "" {
+					if err := json.NewEncoder(w).Encode(json.RawMessage(tt.body)); err != nil {
+						t.Errorf("encode fixture: %v", err)
+					}
+				}
 			})
 			_, err := c.GetFirewallLog(t.Context(), tt.query)
 			if err == nil || !strings.Contains(err.Error(), tt.message) {
