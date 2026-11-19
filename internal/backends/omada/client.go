@@ -434,6 +434,36 @@ func (c *Client) doRequestKind(ctx context.Context, method, path string, body []
 // never carry the controller address. allowReauth is false for the token
 // mint itself, so a failed mint can never trigger a recursive re-mint.
 func (c *Client) doRequestLocked(ctx context.Context, method, reqURL, logPath, contentType string, body []byte, dest interface{}, allowReauth, create bool) error {
+	return c.doRequestLockedExec(ctx, method, reqURL, logPath, contentType, body, allowReauth, create, func(req *http.Request) error {
+		return c.execute(req, dest)
+	})
+}
+
+// doDownloadLocked runs a binary-attachment request through the same retry
+// and re-mint policy as doRequestLocked. Each attempt decodes either a JSON
+// error envelope or the attachment bytes; on success the filename advertised
+// in Content-Disposition and the raw body come back.
+func (c *Client) doDownloadLocked(ctx context.Context, method, reqURL, logPath, contentType string, body []byte) (string, []byte, error) {
+	var (
+		filename string
+		data     []byte
+	)
+	err := c.doRequestLockedExec(ctx, method, reqURL, logPath, contentType, body, true, false, func(req *http.Request) error {
+		fn, d, err := c.executeDownload(req)
+		if err != nil {
+			return err
+		}
+		filename, data = fn, d
+		return nil
+	})
+	return filename, data, err
+}
+
+// doRequestLockedExec holds the request loop shared by JSON-envelope reads
+// and attachment downloads. exec performs one attempt and returns a
+// classified error; the loop only decides whether to retry, re-mint, or
+// surface the failure.
+func (c *Client) doRequestLockedExec(ctx context.Context, method, reqURL, logPath, contentType string, body []byte, allowReauth, create bool, exec func(*http.Request) error) error {
 	reauthUsed := false
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, method, reqURL, bytes.NewReader(body))
@@ -445,7 +475,7 @@ func (c *Client) doRequestLocked(ctx context.Context, method, reqURL, logPath, c
 		}
 		c.addAuthHeaders(req)
 
-		err = c.execute(req, dest)
+		err = exec(req)
 		if err == nil {
 			return nil
 		}
@@ -526,21 +556,36 @@ func (c *Client) addAuthHeaders(req *http.Request) {
 // execute performs a single HTTP request, checks the Omada error envelope,
 // and decodes the result. Errors are returned as *apiError so the retry
 // policy can classify them. Callers must hold c.mu.
-func (c *Client) execute(req *http.Request, dest interface{}) error {
+// perform sends the request and returns the response plus the full body.
+// It fails on 401 and HTTP 5xx. The caller prints the debug line: the body
+// may be binary, and the call sites describe it differently.
+func (c *Client) perform(req *http.Request) (*http.Response, []byte, error) {
 	// #nosec G704 — user-specified controller host, not a third-party redirect
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return tlsutil.Annotate(fmt.Errorf("http request to %s: %w", req.URL.Path, err))
+		return nil, nil, tlsutil.Annotate(fmt.Errorf("http request to %s: %w", req.URL.Path, err))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		return &apiError{StatusCode: resp.StatusCode, Msg: "not authenticated — call Login first"}
+		return nil, nil, &apiError{StatusCode: resp.StatusCode, Msg: "not authenticated — call Login first"}
 	}
 
 	rawBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("reading response body: %w", err)
+		return nil, nil, fmt.Errorf("reading response body: %w", err)
+	}
+
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return nil, nil, &apiError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("controller returned HTTP %d", resp.StatusCode)}
+	}
+	return resp, rawBody, nil
+}
+
+func (c *Client) execute(req *http.Request, dest interface{}) error {
+	resp, rawBody, err := c.perform(req)
+	if err != nil {
+		return err
 	}
 
 	if c.Debug {
@@ -548,13 +593,25 @@ func (c *Client) execute(req *http.Request, dest interface{}) error {
 			req.Method, req.URL.String(), resp.StatusCode, string(rawBody))
 	}
 
-	if resp.StatusCode >= http.StatusInternalServerError {
-		return &apiError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("controller returned HTTP %d", resp.StatusCode)}
+	env, err := c.decodeEnvelope(req.URL.Path, rawBody)
+	if err != nil {
+		return err
 	}
+	if dest != nil && len(env.Result) > 0 {
+		if err := json.Unmarshal(env.Result, dest); err != nil {
+			return fmt.Errorf("decoding result from %s: %w", req.URL.Path, err)
+		}
+	}
+	return nil
+}
 
+// decodeEnvelope parses the Omada error envelope from a raw JSON response
+// and returns the parsed envelope plus a classified *apiError when it
+// signals failure (nil error on success).
+func (c *Client) decodeEnvelope(reqPath string, rawBody []byte) (*apiResponse, error) {
 	var env apiResponse
 	if err := json.Unmarshal(rawBody, &env); err != nil {
-		return fmt.Errorf("decoding response from %s: %w", req.URL.Path, err)
+		return nil, fmt.Errorf("decoding response from %s: %w", reqPath, err)
 	}
 
 	var guidance string
@@ -562,11 +619,11 @@ func (c *Client) execute(req *http.Request, dest interface{}) error {
 	case 0:
 		// success
 	case -44112:
-		return &apiError{ErrorCode: env.ErrorCode, Msg: "access token expired"}
+		return &env, &apiError{ErrorCode: env.ErrorCode, Msg: "access token expired"}
 	case -1000:
-		return &apiError{ErrorCode: env.ErrorCode, Msg: fmt.Sprintf("session expired or not logged in (errorCode %d)", env.ErrorCode)}
+		return &env, &apiError{ErrorCode: env.ErrorCode, Msg: fmt.Sprintf("session expired or not logged in (errorCode %d)", env.ErrorCode)}
 	case -44106:
-		return &apiError{ErrorCode: env.ErrorCode, Msg: "invalid client credentials — check OMADA_CLIENT_ID and OMADA_CLIENT_SECRET"}
+		return &env, &apiError{ErrorCode: env.ErrorCode, Msg: "invalid client credentials — check OMADA_CLIENT_ID and OMADA_CLIENT_SECRET"}
 	case -1005:
 		guidance = "operation forbidden: check the token’s account, site, and required privileges"
 	case -1600:
@@ -574,19 +631,41 @@ func (c *Client) execute(req *http.Request, dest interface{}) error {
 	case -1:
 		guidance = "operation failed: check whether this endpoint applies to the site or edition"
 	default:
-		return &apiError{ErrorCode: env.ErrorCode, Msg: fmt.Sprintf("controller error %d: %s", env.ErrorCode, env.Msg)}
+		return &env, &apiError{ErrorCode: env.ErrorCode, Msg: fmt.Sprintf("controller error %d: %s", env.ErrorCode, env.Msg)}
 	}
 
 	if guidance != "" {
-		return &apiError{ErrorCode: env.ErrorCode, Msg: fmt.Sprintf("%s (controller error %d: %s)", guidance, env.ErrorCode, env.Msg)}
+		return &env, &apiError{ErrorCode: env.ErrorCode, Msg: fmt.Sprintf("%s (controller error %d: %s)", guidance, env.ErrorCode, env.Msg)}
+	}
+	return &env, nil
+}
+
+// executeDownload performs a single HTTP request whose success response is
+// a binary attachment (JSON envelopes carry errors only). A JSON body is
+// the error envelope — a zip attachment can never parse as JSON, so the
+// shape of the body discriminates the two. The attachment filename comes
+// from the Content-Disposition header; an absent or unparseable header
+// yields an empty name. Errors are returned as *apiError so the retry
+// policy can classify them. Callers must hold c.mu.
+func (c *Client) executeDownload(req *http.Request) (string, []byte, error) {
+	resp, rawBody, err := c.perform(req)
+	if err != nil {
+		return "", nil, err
 	}
 
-	if dest != nil && len(env.Result) > 0 {
-		if err := json.Unmarshal(env.Result, dest); err != nil {
-			return fmt.Errorf("decoding result from %s: %w", req.URL.Path, err)
-		}
+	if c.Debug {
+		fmt.Fprintf(os.Stderr, "[omada debug] %s %s -> %d (%d bytes)\n",
+			req.Method, req.URL.String(), resp.StatusCode, len(rawBody))
 	}
-	return nil
+
+	var env apiResponse
+	if json.Unmarshal(rawBody, &env) == nil {
+		if _, derr := c.decodeEnvelope(req.URL.Path, rawBody); derr != nil {
+			return "", nil, derr
+		}
+		return "", nil, errNoAttachment
+	}
+	return attachmentFilename(resp.Header.Get("Content-Disposition")), rawBody, nil
 }
 
 // isVersionSupported returns true if the controller version is at least
