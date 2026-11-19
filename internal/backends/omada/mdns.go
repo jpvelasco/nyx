@@ -45,13 +45,13 @@ func renderMDNSInventory(b *strings.Builder, inv *intent.MDNSInventory) {
 		fmt.Fprintf(b, "  %d rule%s\n", len(inv.Rules), plural(len(inv.Rules)))
 	}
 	for _, rule := range inv.Rules {
-		fmt.Fprintf(b, "  %s (%s) enabled=%t", rule.Name, rule.ID, rule.Enabled)
+		fmt.Fprintf(b, "  %q (%q) enabled=%t", rule.Name, rule.ID, rule.Enabled)
 		switch {
 		case rule.Type == 0 && rule.AP != nil:
-			fmt.Fprintf(b, "  service VLAN: %s  client VLANs: %s", rule.AP.Service, rule.AP.Client)
+			fmt.Fprintf(b, "  service VLAN: %q  client VLANs: %q", rule.AP.Service, rule.AP.Client)
 		case rule.Type == 1 && rule.Gateway != nil:
-			fmt.Fprintf(b, "  service network IDs: %s  client network IDs: %s", strings.Join(rule.Gateway.Service, ", "), strings.Join(rule.Gateway.Client, ", "))
+			fmt.Fprintf(b, "  service network IDs: %q  client network IDs: %q", strings.Join(rule.Gateway.Service, ", "), strings.Join(rule.Gateway.Client, ", "))
 		}
-		fmt.Fprintf(b, "  Bonjour profile IDs: %s\n", strings.Join(rule.ProfileIDs, ", "))
+		fmt.Fprintf(b, "  Bonjour profile IDs: %q\n", strings.Join(rule.ProfileIDs, ", "))
 	}
 }

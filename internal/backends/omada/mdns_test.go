@@ -17,7 +17,7 @@ func TestFetchMDNSInventoryPages(t *testing.T) {
 		switch r.URL.Query().Get("page") {
 		case "1":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"currentPage":1,"data":[{
-				"id":"m1","name":"media","status":true,"profileIds":["p1"],"type":1,
+				"id":"m1","name":"media\n\u001b","status":true,"profileIds":["p1"],"type":1,
 				"osg":{"serviceNetworks":["n1"],"clientNetworks":["n2","n3"]}}]}`)
 		case "2":
 			writeEnvelope(w, 0, "", `{"totalRows":2,"currentPage":2,"data":[{
@@ -35,8 +35,8 @@ func TestFetchMDNSInventoryPages(t *testing.T) {
 	out := RenderInventory(&InventorySnapshot{MDNS: inv}, "HQ")
 	for _, want := range []string{
 		"2 rules",
-		"media (m1) enabled=true  service network IDs: n1  client network IDs: n2, n3  Bonjour profile IDs: p1",
-		"gaming (m2) enabled=false  service VLAN: 30  client VLANs: 10-11,20",
+		`"media\n\x1b" ("m1") enabled=true  service network IDs: "n1"  client network IDs: "n2, n3"  Bonjour profile IDs: "p1"`,
+		`"gaming" ("m2") enabled=false  service VLAN: "30"  client VLANs: "10-11,20"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("inventory missing %q:\n%s", want, out)
