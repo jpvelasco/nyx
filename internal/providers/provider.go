@@ -4,6 +4,7 @@ package providers
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
@@ -149,6 +150,32 @@ type NatCheckRequest struct {
 // ACLApplier); a provider without it is refused with a clear error.
 type NatChecker interface {
 	NatCheck(ctx context.Context, req NatCheckRequest, opts ImportOptions) (*models.CheckResult, error)
+}
+
+// WLANScheduleObservation is one point-in-time reading of the controller's
+// scheduled WLAN optimization: the configured occurrence, the controller's
+// own wall clock, and the newest history row regardless of trigger mode.
+// Zero times mean "no information" (no Date header, empty history).
+// LastRunReason is the controller's status sentence for that row, empty
+// when the code is unknown or the run succeeded.
+type WLANScheduleObservation struct {
+	ScheduleEnabled    bool
+	TimingType         int // 1 = daily
+	OccurrenceHour     int
+	OccurrenceMinute   int
+	ControllerNow      time.Time
+	LastRunTime        time.Time
+	LastRunAPCount     int
+	LastRunMessageType int
+	LastRunReason      string
+}
+
+// WLANScheduleObserver is the optional read-only surface behind the
+// wlan_schedule_liveness assertion. The audit engine looks it up with a
+// type assertion (like NatChecker); a provider without it is refused with
+// a clear warning.
+type WLANScheduleObserver interface {
+	ObserveWLANSchedule(ctx context.Context, opts ImportOptions) (WLANScheduleObservation, error)
 }
 
 // Provider is implemented by each vendor backend.

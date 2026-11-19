@@ -554,6 +554,17 @@ assertions:
                 <p>Audits with policies or an ACL comparison also warn when a measured isolation gateway is unreachable in a direction without a declared policy. The measurement comes from an existing isolation assertion. Silence alone cannot identify the cause.</p>
             </div>
 
+            <div class="spec-card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+                <div class="flex items-center gap-x-3 mb-3">
+                    <i class="fa-solid fa-clock text-xl text-violet-500"></i>
+                    <div class="font-semibold text-slate-900 dark:text-white">wlan_schedule_liveness</div>
+                </div>
+                <div class="text-sm text-slate-600 dark:text-slate-100">Checks that the Omada controller's scheduled WLAN optimization actually ran. Compares the newest optimization history row against the configured daily occurrence using the controller's own wall clock, so local clock drift cancels. A missing run warns with the candidate causes: no online APs at fire time, an in-progress channel deployment holding the RF optimization lock, or schedule configuration lost after a controller reboot.</div>
+                <div class="mt-4 text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-100 p-3 rounded-2xl">
+                    provider: omada
+                </div>
+            </div>
+
         </div>
     </div>
 

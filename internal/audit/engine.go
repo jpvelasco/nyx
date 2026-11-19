@@ -387,6 +387,8 @@ func (e *Engine) runAssertion(ctx context.Context, a intent.Assertion) (*models.
 		return e.runNetworkHealth(assertCtx, a)
 	case "acl_drift":
 		return e.runACLDrift(assertCtx, a.Provider)
+	case "wlan_schedule_liveness":
+		return e.runWLANScheduleLiveness(assertCtx, a.Provider)
 	case "acl_check":
 		return e.runACLCheck(assertCtx, a)
 	case "nat_check":

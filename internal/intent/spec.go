@@ -339,16 +339,17 @@ func validateInventory(inv *Inventory) error {
 // assertionValidators maps each supported assertion type to its field
 // requirements. Every entry must stay in sync with validAssertionTypes.
 var assertionValidators = map[string]func(int, *Assertion) error{
-	"subnet_discovery": validateSubnetDiscoveryAssertion,
-	"isolation":        validateIsolationAssertion,
-	"vpn_route":        validateVPNRouteAssertion,
-	"route_check":      validateRouteCheckAssertion,
-	"port_check":       validatePortCheckAssertion,
-	"dns_check":        validateDNSCheckAssertion,
-	"network_health":   validateNetworkHealthAssertion,
-	"acl_check":        validateACLCheckAssertion,
-	"acl_drift":        validateACLDriftAssertion,
-	"nat_check":        validateNatCheckAssertion,
+	"subnet_discovery":       validateSubnetDiscoveryAssertion,
+	"isolation":              validateIsolationAssertion,
+	"vpn_route":              validateVPNRouteAssertion,
+	"route_check":            validateRouteCheckAssertion,
+	"port_check":             validatePortCheckAssertion,
+	"dns_check":              validateDNSCheckAssertion,
+	"network_health":         validateNetworkHealthAssertion,
+	"acl_check":              validateACLCheckAssertion,
+	"acl_drift":              validateACLDriftAssertion,
+	"nat_check":              validateNatCheckAssertion,
+	"wlan_schedule_liveness": validateWLANScheduleLivenessAssertion,
 }
 
 func validateSubnetDiscoveryAssertion(i int, a *Assertion) error {
@@ -473,6 +474,19 @@ func validateACLDriftAssertion(i int, a *Assertion) error {
 	}
 	if a.Runner != "" && a.Runner != "local" {
 		return fmt.Errorf("assertion[%d]: acl_drift reads controller rules locally", i)
+	}
+	return nil
+}
+
+// validateWLANScheduleLivenessAssertion enforces the wlan_schedule_liveness
+// field contract: an omada provider (the RF planning schedule exists only
+// on Omada controllers) and a local runner.
+func validateWLANScheduleLivenessAssertion(i int, a *Assertion) error {
+	if a.Provider != "omada" {
+		return fmt.Errorf("assertion[%d]: wlan_schedule_liveness requires provider omada", i)
+	}
+	if a.Runner != "" && a.Runner != "local" {
+		return fmt.Errorf("assertion[%d]: wlan_schedule_liveness reads controller state locally", i)
 	}
 	return nil
 }

@@ -1125,6 +1125,28 @@ assertions:
 	}
 }
 
+func TestWLANScheduleLivenessSpec(t *testing.T) {
+	yaml := `version: 1
+site: test
+assertions:
+  - {type: wlan_schedule_liveness, provider: omada}
+`
+	for _, tc := range []struct {
+		input string
+		valid bool
+	}{
+		{yaml, true},
+		{strings.Replace(yaml, "provider: omada", "provider: omada, runner: local", 1), true},
+		{strings.Replace(yaml, "omada", "opnsense", 1), false},
+		{strings.Replace(yaml, "omada", "missing", 1), false},
+		{strings.Replace(yaml, "provider: omada", "provider: omada, runner: remote", 1), false},
+	} {
+		if _, err := ParseSpec([]byte(tc.input)); (err == nil) != tc.valid {
+			t.Errorf("input %q valid=%t: %v", tc.input, tc.valid, err)
+		}
+	}
+}
+
 func TestValidateACLCheckBidirectional(t *testing.T) {
 	bidirectional := false
 	for _, tc := range []struct {

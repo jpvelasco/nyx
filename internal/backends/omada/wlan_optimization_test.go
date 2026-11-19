@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 type wlanTestTransport func(*http.Request) (*http.Response, error)
@@ -20,7 +21,7 @@ func TestWLANOptimizationReads(t *testing.T) {
 		var body string
 		switch r.URL.RequestURI() {
 		case "/openapi/v1/controller/sites/site/planningHistory?page=1&pageSize=200":
-			body = `{"errorCode":0,"result":{"totalRows":2,"data":[{"planningHistroyId":"run-one","apNum":0,"isScanSuccess":false,"msgType":-34806,"failedMacs2g":"00-00-00-00-00-01"}]}}`
+			body = `{"errorCode":0,"result":{"totalRows":2,"data":[{"planningHistroyId":"run-one","apNum":0,"isScanSuccess":false,"msgType":-34806,"failedMacs2g":"00-00-00-00-00-01","time":1763446618000,"mode":0}]}}`
 		case "/openapi/v1/controller/sites/site/planningHistory?page=2&pageSize=200":
 			body = `{"errorCode":0,"result":{"data":[{"planningHistroyId":"run-two","apNum":1,"isScanSuccess":true}]}}`
 		case "/openapi/v1/controller/sites/site/planningHistory/run-one":
@@ -38,6 +39,9 @@ func TestWLANOptimizationReads(t *testing.T) {
 	if err != nil || len(rows) != 2 || rows[0].MessageType != -34806 || rows[0].ID != "run-one" || !rows[1].ScanSuccess {
 		t.Fatalf("history=%+v err=%v", rows, err)
 	}
+	if rows[0].Time != 1763446618000 || rows[0].Mode != 0 {
+		t.Fatalf("run-one time/mode = %d/%d", rows[0].Time, rows[0].Mode)
+	}
 	empty, err := c.GetWLANOptimizationHistory(t.Context(), "site", "run-one")
 	if err != nil || len(empty.Devices) != 0 {
 		t.Fatalf("empty detail=%+v err=%v", empty, err)
@@ -53,6 +57,53 @@ func TestWLANOptimizationReads(t *testing.T) {
 	_, err = c.GetWLANOptimizationHistory(t.Context(), "site", "missing")
 	if err == nil || !strings.Contains(err.Error(), "-34825") || strings.Contains(err.Error(), "raw controller detail") {
 		t.Fatalf("unexpected error %v", err)
+	}
+}
+
+func TestGetRFPlanning(t *testing.T) {
+	newClient := func(date string) *Client {
+		c := &Client{host: "controller.example", omadaCID: "controller", token: "test-token"}
+		c.httpClient = &http.Client{Transport: wlanTestTransport(func(r *http.Request) (*http.Response, error) {
+			if r.Method != http.MethodGet || r.URL.RequestURI() != "/openapi/v1/controller/sites/site/rfPlanning" {
+				t.Fatalf("unexpected request %s %s", r.Method, r.URL.RequestURI())
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Date": []string{date}},
+				Body:       io.NopCloser(strings.NewReader(`{"errorCode":0,"result":{"scheduleEnable":true,"occurrence":{"timingType":1,"hour":10,"minute":0}}}`)),
+			}, nil
+		})}
+		return c
+	}
+	// The Date header is the controller's own wall clock; schedule math
+	// uses it so local/controller clock drift cancels out. The first value
+	// is the format a live controller sends.
+	for _, tc := range []struct {
+		date string
+		want string // empty means the clock must stay unknown
+	}{
+		{"Thu, 19 Nov 2026 09:30:00 GMT", "2026-11-19T09:30:00Z"},
+		{"Thu, 19 Nov 2026 09:30:00 +0000", "2026-11-19T09:30:00Z"},
+		{"not a date", ""},
+	} {
+		c := newClient(tc.date)
+		planning, err := c.GetRFPlanning(t.Context(), "site")
+		if err != nil || !planning.ScheduleEnable || planning.Occurrence.TimingType != 1 || planning.Occurrence.Hour != 10 || planning.Occurrence.Minute != 0 {
+			t.Fatalf("date %q: planning=%+v err=%v", tc.date, planning, err)
+		}
+		got := c.ControllerNow()
+		if tc.want == "" {
+			if !got.IsZero() {
+				t.Fatalf("date %q: controller now = %v, want zero", tc.date, got)
+			}
+			continue
+		}
+		if got.UTC().Format(time.RFC3339) != tc.want {
+			t.Fatalf("date %q: controller now = %v, want %s", tc.date, got, tc.want)
+		}
+	}
+	if _, err := newClient("Thu, 19 Nov 2026 09:30:00 GMT").GetRFPlanning(t.Context(), ".."); err == nil {
+		t.Fatal("expected invalid site id error")
 	}
 }
 
