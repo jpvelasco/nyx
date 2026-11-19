@@ -1080,10 +1080,7 @@ func (s *Server) toolOpnsenseInventory(ctx context.Context, args map[string]inte
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense inventory request failed: %v", err))
 	}
-	if opts.IncludeFirewallDetails {
-		return firewallDataResult(inv, "Firewall inventory data")
-	}
-	return okResult(toJSON(inv))
+	return firewallDataResult(inv, "Firewall inventory data")
 }
 
 // opnsenseNatRequestFromArgs assembles the NAT mutation request from tool

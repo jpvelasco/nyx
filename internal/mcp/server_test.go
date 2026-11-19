@@ -1643,6 +1643,7 @@ func TestDispatchOpnsenseInventory(t *testing.T) {
 	if !strings.Contains(text, `"controller_version": "24.7.11_2"`) ||
 		!strings.Contains(text, `"client_count": 2`) ||
 		!strings.Contains(text, `"firewall_rule_count": 3`) ||
+		!strings.Contains(text, `"untrusted_data": true`) ||
 		!strings.Contains(text, `"network_gateways"`) {
 		t.Errorf("expected inventory JSON, got: %s", text)
 	}
