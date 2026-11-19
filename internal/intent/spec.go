@@ -75,6 +75,9 @@ type InventoryDevice struct {
 	Firmware string   `yaml:"firmware,omitempty" json:"firmware,omitempty"`
 	Upgrade  bool     `yaml:"upgrade_available,omitempty" json:"upgrade_available,omitempty"`
 	Networks []string `yaml:"networks,omitempty" json:"networks,omitempty"`
+
+	FirmwareStatus   string `yaml:"firmware_status,omitempty" json:"firmware_status,omitempty"`
+	FirmwareAdvisory string `yaml:"firmware_advisory,omitempty" json:"firmware_advisory,omitempty"`
 }
 
 // ACLScopeStatus captures the rule count of a controller ACL scope. The

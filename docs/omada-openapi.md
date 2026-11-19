@@ -207,3 +207,23 @@ actual enforcement after resync.
 An Omada `acl_check` with `expect: enforced` can set `expect_bidirectional: true`
 (or `false`). A differing controller value fails the assertion. A missing value
 or a matching value whose device application cannot be verified produces a warning.
+
+### Device firmware lifecycle
+
+Device inventory reports `up_to_date` when current and latest versions agree,
+`update_available` when the controller reports a newer firmware or sets its
+upgrade flag, and `eol_or_current-unknown` when the controller only knows the
+current firmware. The inventory uses `latest-firmware-info` as a read-only
+fallback within a five-second total lookup budget. Partial and unavailable
+responses leave device inventory usable.
+
+`eol` means regular maintenance has ended under the published regional policy.
+The current built-in entry covers EAP620 HD US revisions 1.0 and 1.6 only. The
+vendor's US EOS list records 2022-09-30, and its non-campus policy gives a
+regular maintenance end date of 2025-09-30. The advisory suggests a supported
+replacement class and the EAP650 as one option. Regional variants without an
+explicit match remain eligible for the ordinary firmware states.
+
+- [TP-Link US EOL policy](https://www.tp-link.com/us/landing/business-product-eol/)
+- [TP-Link US EOS list](https://www.omadanetworks.com/us/document/132177/)
+- [Published firmware operation](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.4.0/operations/getFirmwareInfo.json)
