@@ -1,11 +1,12 @@
 package opnsense
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
 func TestGetFirewallLog(t *testing.T) {
@@ -48,6 +49,8 @@ func TestGetFirewallLogErrors(t *testing.T) {
 		{name: "since", query: FirewallLogQuery{Since: "yesterday"}, message: "RFC3339 timestamp"},
 		{name: "missing cursor", status: 200, body: `[]`, query: FirewallLogQuery{Before: "0123456789abcdef0123456789abcdef"}, message: "outside the newest 5000"},
 		{name: "missing digest", status: 200, body: `[{}]`, message: "invalid final digest"},
+		{name: "invalid timestamp", status: 200, body: `[{"__digest__":"0123456789abcdef0123456789abcdef","__timestamp__":"invalid"}]`, query: FirewallLogQuery{Since: "2026-11-18T12:00:00Z"}, message: "unrecognized firewall log timestamp"},
+		{name: "oversized response", status: 200, body: `[` + strings.Repeat(" ", 8<<20) + `]`, message: "response exceeds 8 MiB"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
@@ -59,7 +62,7 @@ func TestGetFirewallLogErrors(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.status)
 				if tt.body != "" {
-					if err := json.NewEncoder(w).Encode(json.RawMessage(tt.body)); err != nil {
+					if _, err := testutil.WriteBody(w, tt.body); err != nil {
 						t.Errorf("encode fixture: %v", err)
 					}
 				}
@@ -111,5 +114,17 @@ func TestParseFirewallLogTimestamp(t *testing.T) {
 		if err != nil || timestamp.Format(time.RFC3339) != tt.want {
 			t.Errorf("%q: timestamp = %v, error = %v", tt.input, timestamp, err)
 		}
+	}
+}
+
+func TestFirewallLogStatsInvalidInputs(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		testutil.WriteBody(w, `[{"label":{},"value":1}]`)
+	})
+	if _, err := client.GetFirewallLogStats(t.Context(), -1, ""); err == nil || !strings.Contains(err.Error(), "limit must be") {
+		t.Fatalf("invalid limit error = %v", err)
+	}
+	if _, err := client.GetFirewallLogStats(t.Context(), 0, ""); err == nil || !strings.Contains(err.Error(), "invalid firewall statistic label") {
+		t.Fatalf("invalid label error = %v", err)
 	}
 }
