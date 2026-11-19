@@ -120,6 +120,10 @@ func TestRunNatCheck_OpnsenseEnvMapping(t *testing.T) {
 	if rec.req.ExpectMode != "disabled" {
 		t.Errorf("ExpectMode = %q, want disabled", rec.req.ExpectMode)
 	}
+	conflict, err := eng.runNatCheck(t.Context(), intent.Assertion{Type: "nat_check", Network: "trusted", Provider: "omada", NatMode: "disabled"})
+	if err != nil || conflict.Status != models.StatusError {
+		t.Fatalf("provider mismatch result=%+v err=%v", conflict, err)
+	}
 }
 
 func TestRunNatCheck_VaultFallback(t *testing.T) {
