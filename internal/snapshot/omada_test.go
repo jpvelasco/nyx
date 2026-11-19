@@ -77,3 +77,64 @@ func TestOmadaSiteConfigRoundTrip(t *testing.T) {
 		t.Fatal("accepted a baseline with the wrong hash")
 	}
 }
+
+func TestOmadaSiteConfigRejectsInvalidStorage(t *testing.T) {
+	setHome := func(t *testing.T, home string) {
+		t.Helper()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
+	state := omada.SiteConfigState{Scope: sha256.Sum256([]byte("synthetic-site")), Resources: omada.SiteConfig{"network": {"ref": json.RawMessage(`{}`)}}}
+	t.Run("home unavailable", func(t *testing.T) {
+		setHome(t, "")
+		if err := SaveOmadaSiteConfig(state); err == nil {
+			t.Error("saved with no home directory")
+		}
+		if _, err := CompareOmadaSiteConfig(state); err == nil {
+			t.Error("compared with no home directory")
+		}
+	})
+	t.Run("invalid resource encoding", func(t *testing.T) {
+		setHome(t, t.TempDir())
+		bad := state
+		bad.Resources = omada.SiteConfig{"network": {"ref": json.RawMessage(`{`)}}
+		if err := SaveOmadaSiteConfig(bad); err == nil {
+			t.Fatal("saved malformed resource JSON")
+		}
+	})
+	t.Run("invalid baseline path", func(t *testing.T) {
+		setHome(t, t.TempDir())
+		path, err := omadaSiteBaselinePath(state.Scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(filepath.Dir(path)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Dir(path), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := SaveOmadaSiteConfig(state); err == nil {
+			t.Fatal("saved with a file blocking the baseline directory")
+		}
+		if _, err := CompareOmadaSiteConfig(state); err == nil {
+			t.Fatal("compared with a file blocking the baseline directory")
+		}
+	})
+	t.Run("malformed baseline", func(t *testing.T) {
+		setHome(t, t.TempDir())
+		if err := SaveOmadaSiteConfig(state); err != nil {
+			t.Fatal(err)
+		}
+		path, err := omadaSiteBaselinePath(state.Scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(`{`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := CompareOmadaSiteConfig(state); err == nil {
+			t.Fatal("accepted malformed baseline JSON")
+		}
+	})
+}

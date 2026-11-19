@@ -83,4 +83,16 @@ func TestOmadaSiteConfigCommands(t *testing.T) {
 	if !strings.Contains(output, `"status": "modified"`) || strings.Contains(output, "private-example") {
 		t.Fatalf("unexpected output %q", output)
 	}
+	if output := captureStdout(func() {
+		if err := save.RunE(save, nil); err != nil {
+			t.Fatal(err)
+		}
+	}); !strings.Contains(output, `"saved": true`) {
+		t.Fatalf("JSON snapshot output = %q", output)
+	}
+	providerHost = ""
+	if err := drift.RunE(drift, nil); err == nil {
+		t.Fatal("drift accepted a missing provider host")
+	}
+
 }
