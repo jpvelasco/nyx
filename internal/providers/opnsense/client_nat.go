@@ -182,6 +182,7 @@ type aliasRow struct {
 	Name        string   `json:"name"`
 	Type        string   `json:"type"`
 	Address     string   `json:"address"`
+	Content     string   `json:"content"`
 	Details     []string `json:"details"`
 	Enabled     string   `json:"enabled"`
 	Disabled    bool     `json:"disabled"`
@@ -211,6 +212,8 @@ func (c *Client) GetAliases(ctx context.Context) ([]Alias, error) {
 			alias.Disabled = row.Enabled != "1"
 		}
 		switch {
+		case row.Content != "":
+			alias.Addresses = splitCSV(strings.NewReplacer("\r\n", ",", "\n", ",").Replace(row.Content))
 		case len(row.Details) > 0:
 			alias.Addresses = row.Details
 		case row.Address != "":

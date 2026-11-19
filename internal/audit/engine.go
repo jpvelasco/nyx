@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -136,7 +137,7 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 		e.Logger.Warn("couldn't place your current network inside any spec network; you're likely multi-homed. Use --interface to pick which adapter to scan from. (Run 'nyx interfaces' to see the list.)")
 	}
 
-	assertions := e.Spec.Assertions
+	assertions := withACLDrift(e.Spec.Assertions)
 	findings := make([]models.CheckResult, len(assertions))
 
 	var wg sync.WaitGroup
@@ -211,6 +212,24 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 	}
 
 	wg.Wait()
+	if len(e.Spec.Policies) > 0 || slices.ContainsFunc(assertions, func(a intent.Assertion) bool { return a.Type == "acl_drift" }) {
+		for _, direction := range uncoveredDirections(e.Spec, findings) {
+			r := models.NewCheckResult("audit", "uncovered_direction", "local", direction)
+			r.Status = models.StatusWarn
+			r.Summary = "gateway unreachable on a direction with no declared policy: " + direction
+			r.Finish()
+			findings = append(findings, *r)
+		}
+	}
+
+	// Isolation observations are only needed to derive uncovered directions.
+	// Keep raw correlation fields out of public reports and snapshots.
+	for i := range findings {
+		if findings[i].CheckType == "isolation" {
+			delete(findings[i].Observed, "unreachable_gateways")
+			delete(findings[i].Observed, "source_network")
+		}
+	}
 
 	// Telemetry: one counter per finding (type + status) and the run
 	// duration, recorded centrally after the findings settle (#137).
@@ -366,6 +385,8 @@ func (e *Engine) runAssertion(ctx context.Context, a intent.Assertion) (*models.
 		return e.runDNSCheck(assertCtx, a)
 	case "network_health":
 		return e.runNetworkHealth(assertCtx, a)
+	case "acl_drift":
+		return e.runACLDrift(assertCtx, a.Provider)
 	case "acl_check":
 		return e.runACLCheck(assertCtx, a)
 	case "nat_check":

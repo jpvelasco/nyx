@@ -81,6 +81,9 @@ type serviceDevice struct {
 	Firmware string   `json:"firmware,omitempty"`
 	Upgrade  bool     `json:"upgrade_available,omitempty"`
 	Networks []string `json:"networks,omitempty"`
+
+	FirmwareStatus   string `json:"firmware_status,omitempty"`
+	FirmwareAdvisory string `json:"firmware_advisory,omitempty"`
 }
 
 // serviceACLScope is the rule count of one ACL scope (gateway | switch).
@@ -118,13 +121,15 @@ func (s *OmadaService) Inventory(ctx context.Context, opts OmadaOptions) (*Omada
 	inv.NetworkGateways = specInv.NetworkGateways
 	for _, d := range specInv.Devices {
 		inv.Devices = append(inv.Devices, serviceDevice{
-			Type:     d.Type,
-			Name:     d.Name,
-			Model:    d.Model,
-			IP:       d.IP,
-			Firmware: d.Firmware,
-			Upgrade:  d.Upgrade,
-			Networks: d.Networks,
+			Type:             d.Type,
+			Name:             d.Name,
+			Model:            d.Model,
+			IP:               d.IP,
+			Firmware:         d.Firmware,
+			Upgrade:          d.Upgrade,
+			Networks:         d.Networks,
+			FirmwareStatus:   d.FirmwareStatus,
+			FirmwareAdvisory: d.FirmwareAdvisory,
 		})
 	}
 	for _, sc := range specInv.ACLScopes {

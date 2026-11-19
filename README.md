@@ -411,6 +411,12 @@ nyx opnsense check --host 10.0.11.1 --api-key <key> --api-secret <secret> --spec
 nyx opnsense inventory --host 10.0.11.1 --api-key <key> --api-secret <secret>
 ```
 
+`nyx opnsense blocklist` has `list-tables`, `list <table> [--search <text>]`,
+`references <ip>`, `unblock <table> <ip-or-cidr>`, and `flush <table>` commands.
+The last two preview by default and execute only with `--confirm`. The API key
+needs the **Diagnostics: PF Table IP addresses** privilege. The firewall may
+persist removal from a configured static alias as well as its runtime table.
+
 ## Project Structure
 
 ```

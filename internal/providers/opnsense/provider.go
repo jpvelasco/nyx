@@ -92,9 +92,21 @@ func (o *Provider) Inventory(ctx context.Context, opts providers.ImportOptions) 
 	if err != nil {
 		return nil, err
 	}
+	details := struct {
+		*FirewallInventory
+		FirewallRulesOK    bool `json:"firewall_rules_ok"`
+		FirewallAliasesOK  bool `json:"firewall_aliases_ok"`
+		FirewallRuleCount  int  `json:"firewall_rule_count"`
+		FirewallAliasCount int  `json:"firewall_alias_count"`
+	}{FirewallRulesOK: snap.RulesOK, FirewallAliasesOK: snap.AliasesOK, FirewallRuleCount: len(snap.Rules), FirewallAliasCount: len(snap.Aliases)}
+	if opts.IncludeFirewallDetails {
+		configuration := snap.FirewallInventory()
+		details.FirewallInventory = &configuration
+	}
 	return &providers.ProviderInventory{
 		Site:        "opnsense-firewall",
-		Human:       RenderInventory(snap, "opnsense-firewall"),
+		Details:     details,
+		Human:       RenderInventory(snap, "opnsense-firewall", opts.IncludeFirewallDetails),
 		Inventory:   BuildSpecInventory(snap),
 		ClientCount: snap.LeaseCount(),
 		Warnings:    snap.Warnings,
@@ -157,7 +169,7 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 	if leasesErr != nil {
 		warnings = append(warnings,
 			"DHCP leases unavailable: "+leasesErr.Error()+
-				" — client count is estimated as 0; grant the Diagnostics: DHCP page privilege (System ‣ Access ‣ Users) to the API user to count leases")
+				" — client count is estimated as 0")
 	}
 
 	// Build networks from interfaces
@@ -235,12 +247,9 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		if from == "" || to == "" {
 			continue
 		}
-		name := rule.Label
-		if name == "" {
-			name = fmt.Sprintf("%s-%s-to-%s", action, from, to)
-		}
 		policies = append(policies, intent.Policy{
-			Name:   strings.ToLower(name),
+			Name:   filterPolicyName(rule, from, to),
+			Scope:  "filter",
 			From:   from,
 			To:     to,
 			Action: action,
@@ -270,7 +279,7 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		Site:       "opnsense-firewall",
 		Networks:   networks,
 		Policies:   policies,
-		Assertions: assertions,
+		Assertions: append(assertions, intent.Assertion{Type: "acl_drift", Provider: ProviderName}),
 	}
 
 	if len(networks) == 0 {
@@ -319,6 +328,40 @@ func (o *Provider) Check(ctx context.Context, opts providers.ImportOptions) (*pr
 		Report:   report,
 		Warnings: imported.Warnings,
 	}, nil
+}
+
+func filterPolicyName(rule FirewallRule, from, to string) string {
+	if rule.Label != "" {
+		return strings.ToLower(rule.Label)
+	}
+	if action := policyAction(rule.Action); action != "" && from != "" && to != "" {
+		return fmt.Sprintf("%s-%s-to-%s", action, from, to)
+	}
+	return rule.RuleUUID
+}
+
+func (o *Provider) ObserveACLs(ctx context.Context, opts providers.ImportOptions, networks []intent.Network) (providers.ACLObservation, error) {
+	var observed providers.ACLObservation
+	client := newProviderClient(opts)
+	rules, err := client.GetFirewallRules(ctx)
+	if err != nil {
+		return observed, err
+	}
+	var aliases []Alias
+	for _, r := range rules {
+		if r.Label == "" {
+			aliases, err = client.GetAliases(ctx)
+			if err != nil {
+				return observed, fmt.Errorf("resolving unnamed filter rules: %w", err)
+			}
+			break
+		}
+	}
+	for _, r := range rules {
+		name := filterPolicyName(r, resolveEndpointZone(r.Source, networks, aliases), resolveEndpointZone(r.Destination, networks, aliases))
+		observed.Rules = append(observed.Rules, providers.ObservedACL{Name: name, Scope: "filter"})
+	}
+	return observed, nil
 }
 
 // CheckACL evaluates a from/to pair against listed filter rules (and

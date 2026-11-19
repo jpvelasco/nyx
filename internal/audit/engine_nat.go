@@ -3,7 +3,6 @@ package audit
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
 	"github.com/jpvelasco/nyx/internal/intent"
@@ -17,7 +16,10 @@ import (
 // path. Credentials resolve env → store, like acl_check; missing
 // credentials surface as a StatusError result, never a Go error.
 func (e *Engine) runNatCheck(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {
-	providerName := a.Provider
+	providerName, err := e.Spec.AssertionProvider(a)
+	if err != nil {
+		return natCheckErrorResult(a.Provider, err.Error()), nil
+	}
 	p := providers.Get(providerName)
 	if p == nil {
 		return natCheckErrorResult(providerName, fmt.Sprintf("provider %q not found in registry", providerName)), nil
@@ -28,25 +30,7 @@ func (e *Engine) runNatCheck(ctx context.Context, a intent.Assertion) (*models.C
 			fmt.Sprintf("provider %q does not support nat_check", providerName)), nil
 	}
 
-	opts := providers.ImportOptions{
-		Host:          os.Getenv("OMADA_HOST"),
-		ClientID:      os.Getenv("OMADA_CLIENT_ID"),
-		ClientSecret:  os.Getenv("OMADA_CLIENT_SECRET"),
-		Site:          os.Getenv("OMADA_SITE"),
-		SkipTLSVerify: e.SkipTLSVerify,
-		CACertPath:    e.CACertPath,
-	}
-	if providerName == "opnsense" {
-		// OPNsense env vars carry the API key/secret pair in the generic
-		// ClientID/ClientSecret fields.
-		opts.Host = os.Getenv("OPNSENSE_HOST")
-		opts.ClientID = os.Getenv("OPNSENSE_API_KEY")
-		opts.ClientSecret = os.Getenv("OPNSENSE_API_SECRET")
-		opts.Site = ""
-	}
-	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
-		opts = fillFromCredentialStores(opts, providerName, e.CredentialsPath)
-	}
+	opts := e.controllerOptions(providerName)
 	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
 		hint := ""
 		if providerName == "omada" {

@@ -222,11 +222,12 @@ Given `GET /api/firewall/filter/get_rule/<uuid>` → a single rule object
 When `GetFirewallRule` is called with the UUID
 Then the rule is returned with `Disabled` derived the same way
 
-### S2.5 DHCP leases (dual-backend route probing)
-Given the active DHCP backend's route is probed in order: `GET /api/dnsmasq/leases/search` (26.x default), then `GET /api/dhcpd/leases` (pre-26.x), each returning either `{"leases":[...]}` or paged `{"rows":[...]}`
+### S2.5 Active DHCP leases
+Given `GET /api/dnsmasq/settings/get` reports `dnsmasq.enable`
 When `GetDHCPLeases` is called
-Then the first route that answers (a success or a stable non-404) wins; a 404 falls through to the next route, and a 403/401/other 4xx is returned immediately as the stable privilege/credential error (never retried, masked, or hidden behind a fallback)
-And both response shapes decode to the same lease list
+Then an enabled Dnsmasq service uses `POST /api/dnsmasq/leases/search`. A disabled Dnsmasq service uses `POST /api/kea/leases4/search` and `POST /api/kea/leases6/search` and includes rows whose state is zero.
+And the search requests select all leases with `rowCount: -1` and sort by `expire` descending. Rows normalize `address`, `hwaddr`, and `hostname` to the lease representation. The older `leases` envelope still decodes.
+And an empty result reports zero active clients. A 403 names the missing page privilege and a 404 identifies an unavailable endpoint. Inventory reports a failed count as unknown.
 
 ### S2.6 Port forward rules (destination NAT)
 Given `GET /api/firewall/d_nat/search_rule?current=1&rowCount=500` →
@@ -285,7 +286,7 @@ And the test: `TestImportSpecPrivilegeDegradation` (both routes 403 → zero-pol
 Given the OPNsense provider's read endpoints
 When an API user is scoped with the smallest page-privilege set that keeps each surface usable
 Then `info` and `inventory` require the **Dashboard** page only (both `system_information` and `interfaces_info` are covered by it; the firmware endpoints need the separate System: Firmware privilege and are never read)
-And a full `import` additionally requires **Firewall: Filter** (rules → policies) and the **Diagnostics: DHCP** page (leases → client estimate); a user missing either still gets a usable, warned import per S2.12 instead of a fatal error
+And a full `import` additionally requires **Firewall: Filter** (rules → policies) and **Services: Dnsmasq DNS/DHCP: Settings** (backend selection and Dnsmasq leases). Kea lease reads additionally require **Services: DHCP: Kea(v4)** and **Services: DHCP: Kea(v6)**. A missing page privilege produces a warned import per S2.12
 And the `nat_check` surface requires the **Firewall: NAT** page (outbound mode plus the NAT rule listings) on top of the Dashboard-only set
 
 ## §3 Mutations (S3.1–S3.6 + S3.9 Implemented; S3.7–S3.8 Planned)

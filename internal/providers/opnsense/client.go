@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -147,6 +146,7 @@ type FirewallRule struct {
 	Direction   string   `json:"direction,omitempty"`
 	IPProtocol  string   `json:"ipprotocol,omitempty"`
 	Label       string   `json:"description"`
+	Categories  []string `json:"categories,omitempty"`
 	// Disabled is derived from Enabled after decoding.
 	Disabled bool
 }
@@ -467,70 +467,43 @@ func decodeLooseBool(raw json.RawMessage) bool {
 // an unreachable controller would hide the real problem.
 func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
 	var raw []json.RawMessage
-	if _, err := fetchPagedList(ctx, c, "/firewall/filter/search_rule", listPageSize, &raw); err != nil {
+	total, err := fetchPagedList(ctx, c, "/firewall/filter/search_rule", listPageSize, &raw)
+	if err != nil {
 		return nil, remapPagedDecode(err, "decoding firewall rules response")
+	}
+	if raw == nil {
+		return nil, fmt.Errorf("firewall rule inventory has no rows array")
+	}
+	if total > len(raw) {
+		return nil, fmt.Errorf("incomplete firewall rule inventory: %d of %d rows", len(raw), total)
 	}
 	out := make([]FirewallRule, 0, len(raw))
 	for _, row := range raw {
-		var rule FirewallRule
-		if err := json.Unmarshal(row, &rule); err != nil {
-			continue
+		var fields struct {
+			*FirewallRule
+			Interface  json.RawMessage `json:"interface"`
+			Categories json.RawMessage `json:"categories"`
+			Enabled    json.RawMessage `json:"enabled"`
 		}
-		rule.Disabled = rule.Enabled != "1"
+		var rule FirewallRule
+		fields.FirewallRule = &rule
+		if err := json.Unmarshal(row, &fields); err != nil {
+			return nil, fmt.Errorf("decoding firewall rule: %w", err)
+		}
+		if rule.RuleUUID == "" && rule.Action == "" {
+			return nil, fmt.Errorf("firewall rule inventory has an invalid row")
+		}
+		rule.Interface = decodeStringList(fields.Interface)
+		rule.Categories = decodeStringList(fields.Categories)
+		rule.Disabled = !decodeLooseBool(fields.Enabled)
+		if rule.Disabled {
+			rule.Enabled = "0"
+		} else {
+			rule.Enabled = "1"
+		}
 		out = append(out, rule)
 	}
 	return out, nil
-}
-
-// leaseRoutes lists the DHCP lease endpoints per active DHCP backend. The
-// 26.x generation ships dnsmasq as the default backend, so its route is
-// probed first; pre-26.x used the dhcpd backend. Probing order distinguishes
-// a missing route (404, skip and try the next) from a present route the API
-// user lacks the page privilege for (403, stable — the actionable
-// permission-denied error is returned, never retried or masked).
-var leaseRoutes = []string{"/dnsmasq/leases/search", "/kea/leases/search", "/dhcpd/leases"}
-
-// GetDHCPLeases returns all DHCP leases from OPNsense. The active DHCP
-// backend's route is probed in order (see leaseRoutes); a 404 falls through
-// to the next route, a 403 fails immediately with the privilege error.
-// Accepts both the {"leases": [...]} and paged {"rows": [...]} response
-// shapes.
-func (c *Client) GetDHCPLeases(ctx context.Context) ([]DHCPLease, error) {
-	var lastErr error
-	for _, path := range leaseRoutes {
-		resp, err := c.doRequest(ctx, path)
-		if err != nil {
-			var notFound *stableError
-			if errors.As(err, &notFound) && strings.Contains(err.Error(), "resource not found") {
-				lastErr = err
-				continue
-			}
-			return nil, err
-		}
-		defer resp.Body.Close()
-		leases, derr := decodeDHCPLeases(resp.Body)
-		if derr != nil {
-			return nil, derr
-		}
-		return leases, nil
-	}
-	return nil, lastErr
-}
-
-// decodeDHCPLeases decodes either the {"leases": [...]} or paged {"rows":
-// [...]} DHCP leases response shape.
-func decodeDHCPLeases(r io.Reader) ([]DHCPLease, error) {
-	var result struct {
-		Leases []DHCPLease `json:"leases"`
-		Rows   []DHCPLease `json:"rows"`
-	}
-	if err := json.NewDecoder(r).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding DHCP leases response: %w", err)
-	}
-	if len(result.Leases) > 0 {
-		return result.Leases, nil
-	}
-	return result.Rows, nil
 }
 
 // buildTLSConfig creates a TLS config based on the provided options.

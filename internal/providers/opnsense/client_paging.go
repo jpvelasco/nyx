@@ -50,12 +50,16 @@ func fetchPagedList(ctx context.Context, c *Client, path string, pageSize int, r
 // fetchPagedListPOST walks the same envelope over POST with a datatables body
 // ({"current":N,"rowCount":P,"sort":{},"searchPhrase":""}).
 func fetchPagedListPOST(ctx context.Context, c *Client, path string, pageSize int, rowsDest *[]json.RawMessage) (int, error) {
+	return fetchPagedListPOSTSearch(ctx, c, path, pageSize, "", rowsDest)
+}
+
+func fetchPagedListPOSTSearch(ctx context.Context, c *Client, path string, pageSize int, search string, rowsDest *[]json.RawMessage) (int, error) {
 	return walkPagedList(pageSize, path, rowsDest, func(page int, env *pagedEnvelope) error {
 		body, err := json.Marshal(map[string]interface{}{
 			"current":      page,
 			"rowCount":     pageSize,
 			"sort":         map[string]interface{}{},
-			"searchPhrase": "",
+			"searchPhrase": search,
 		})
 		if err != nil {
 			return err
@@ -94,6 +98,11 @@ func walkPagedList(pageSize int, path string, rowsDest *[]json.RawMessage, fetch
 			if err := json.Unmarshal(env.Rows, &pageRows); err != nil {
 				return 0, fmt.Errorf("decoding paged list response: %w", err)
 			}
+		}
+		// Preserve the difference between an explicit empty array and an
+		// absent collection so callers that require completeness can check it.
+		if pageRows != nil && all == nil {
+			all = []json.RawMessage{}
 		}
 		all = append(all, pageRows...)
 

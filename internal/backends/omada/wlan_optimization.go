@@ -1,0 +1,137 @@
+package omada
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/url"
+	"strings"
+	"unicode"
+
+	"github.com/jpvelasco/nyx/internal/logger"
+)
+
+// WLANOptimizationRun is a row from the site planning-history collection.
+type WLANOptimizationRun struct {
+	ID          string `json:"planningHistroyId"`
+	APCount     int    `json:"apNum"`
+	ScanSuccess bool   `json:"isScanSuccess"`
+	MessageType int    `json:"msgType"`
+	Message     string `json:"msg"`
+	Failed2G    string `json:"failedMacs2g"`
+	Failed5G    string `json:"failedMacs5g"`
+	Failed6G    string `json:"failedMacs6g"`
+}
+
+// WLANOptimizationStatus describes the known controller status codes.
+func WLANOptimizationStatus(code int) string {
+	return wlanOptimizationStatuses[code]
+}
+
+var wlanOptimizationStatuses = map[int]string{
+	-34800: "No SSIDs are available on the band.",
+	-34804: "No connected APs are available.",
+	-34805: "No wired APs are available.",
+	-34806: "No supported APs are available for WLAN optimization.",
+	-34812: "WLAN optimization is not configured.",
+	-34814: "WLAN optimization is already running.",
+	-34823: "All 5 GHz channels are excluded.",
+	-34825: "The optimization history entry was not found.",
+}
+
+// ListWLANOptimizationHistory reads all pages of the site's planning history.
+func (c *Client) ListWLANOptimizationHistory(ctx context.Context, siteID string) ([]WLANOptimizationRun, error) {
+	rows, _, err := fetchPaged[WLANOptimizationRun](ctx, c, planningHistoryPath(siteID), defaultPageSize)
+	if err != nil {
+		return nil, planningHistoryError(err)
+	}
+	return rows, nil
+}
+
+func planningHistoryPath(siteID string) string {
+	return "sites/" + url.PathEscape(siteID) + "/planningHistory"
+}
+
+// Keep controller status codes and static guidance without echoing wire messages.
+func planningHistoryError(err error) error {
+	var apiErr *apiError
+	if errors.As(err, &apiErr) {
+		if status := WLANOptimizationStatus(apiErr.ErrorCode); status != "" {
+			return fmt.Errorf("reading WLAN optimization history: controller error %d: %s", apiErr.ErrorCode, status)
+		}
+		if apiErr.ErrorCode != 0 {
+			return fmt.Errorf("reading WLAN optimization history: controller error %d", apiErr.ErrorCode)
+		}
+		if apiErr.StatusCode != 0 {
+			return fmt.Errorf("reading WLAN optimization history: HTTP %d", apiErr.StatusCode)
+		}
+	}
+	return errors.New("reading WLAN optimization history: transport or protocol error")
+}
+
+// WLANOptimizationDetail describes the recorded outcome for each AP.
+type WLANOptimizationDetail struct {
+	SuccessDevices int                  `json:"successDevices"`
+	FailDevices    int                  `json:"failDevices"`
+	Devices        []WLANOptimizationAP `json:"data"`
+}
+
+type WLANOptimizationAP struct {
+	Name            string                 `json:"name"`
+	IP              string                 `json:"ip"`
+	Model           string                 `json:"model"`
+	ModelVersion    string                 `json:"modelVersion"`
+	FailMessage     string                 `json:"failMsg"`
+	FailMessageType *int                   `json:"failMsgType"`
+	TriggerReason   *int                   `json:"triggerReason"`
+	Radio2G         *WLANOptimizationRadio `json:"radio2g"`
+	Radio5G         *WLANOptimizationRadio `json:"radio5g"`
+	Radio5G2        *WLANOptimizationRadio `json:"radio5g2"`
+	Radio6G         *WLANOptimizationRadio `json:"radio6g"`
+}
+
+type WLANOptimizationRadio struct {
+	ErrorCode       *int `json:"errCode"`
+	LegacyErrorCode *int `json:"err_code"`
+}
+
+func (r *WLANOptimizationRadio) Code() *int {
+	if r == nil {
+		return nil
+	}
+	if r.ErrorCode != nil {
+		return r.ErrorCode
+	}
+	return r.LegacyErrorCode
+}
+
+func (c *Client) GetWLANOptimizationHistory(ctx context.Context, siteID, historyID string) (WLANOptimizationDetail, error) {
+	var detail WLANOptimizationDetail
+	if historyID == "" || historyID == "." || historyID == ".." {
+		return detail, errors.New("invalid WLAN optimization history ID")
+	}
+	if err := c.get(ctx, planningHistoryPath(siteID)+"/"+url.PathEscape(historyID), &detail); err != nil {
+		return detail, planningHistoryError(err)
+	}
+	return detail, nil
+}
+
+func (ap WLANOptimizationAP) SafeFailureMessage() string {
+	text := ap.FailMessage
+	for _, value := range []string{ap.Name, ap.IP, ap.Model, ap.ModelVersion} {
+		if value != "" {
+			text = strings.ReplaceAll(text, value, "[device]")
+		}
+	}
+	return SafeWLANOptimizationMessage(text)
+}
+
+func SafeWLANOptimizationMessage(text string) string {
+	text = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return ' '
+		}
+		return r
+	}, text)
+	return strings.TrimSpace(string(logger.ScrubLine([]byte(text))))
+}
