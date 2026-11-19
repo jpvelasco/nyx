@@ -299,8 +299,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 82 {
-		t.Fatalf("expected 82 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 84 {
+		t.Fatalf("expected 84 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
