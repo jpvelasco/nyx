@@ -184,3 +184,13 @@ inventory is still returned. Control and formatting characters are removed
 from controller-provided mDNS strings in all inventory formats.
 
 [TP-Link hardware controller 6.3.0 operation schema](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/getMdnsGrid.json)
+
+## AP channel inventory
+
+`nyx omada ap-channel-info` lists managed access points and reads their current
+radio channels and candidate channels. `--json` produces one row per AP and
+retains the controller's candidate list. Both reads use the Open API under
+`sites/{siteId}/aps/{apMac}` (`radios` and `available-channel`). On OC200
+firmware 6.3.0.45, the site-wide `aps/channel-info` path was registered in the
+controller package and returned error `-1600` on the appliance.
+[Read-only endpoint observations](https://github.com/jpvelasco/nyx/issues/315)
