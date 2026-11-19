@@ -184,3 +184,14 @@ inventory is still returned. Control and formatting characters are removed
 from controller-provided mDNS strings in all inventory formats.
 
 [TP-Link hardware controller 6.3.0 operation schema](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/getMdnsGrid.json)
+
+## Attack-defense diagnostics
+
+`nyx omada attack-defense` reports site configuration and whether gateway
+runtime state is observable. Add `--mac` to read that client's administrative
+block flag. A `false` flag can coexist with a runtime firewall block. Inspect
+the enforcing gateway for runtime entries, reasons, and expiry.
+
+`nyx omada unblock-client --mac <client-mac> --confirm` removes the controller's
+administrative block for one client. For runtime attack-defense blocks, use the
+gateway's own administrative tools.
