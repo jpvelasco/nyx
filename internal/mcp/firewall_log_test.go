@@ -44,7 +44,7 @@ func TestDispatchOpnsenseFirewallLog(t *testing.T) {
 			}
 			args := map[string]interface{}{"host": controller.URL, "api_key": "fixture-key", "api_secret": "fixture-secret", "skip_tls_verify": true}
 			text, failed := s.DispatchToolForTest(t.Context(), tc.name, args)
-			if failed || !strings.Contains(text, tc.want) {
+			if failed || !strings.Contains(text, tc.want) || !strings.Contains(text, `"data":`) || !strings.Contains(text, `"warning": "Firewall log data may contain untrusted text.`) {
 				t.Fatalf("dispatch = %q (error=%v), want %q", text, failed, tc.want)
 			}
 			args["limit"] = float64(2)
