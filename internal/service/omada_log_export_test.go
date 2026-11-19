@@ -65,6 +65,7 @@ func TestOmadaServiceExportLogs_FilenameFallback(t *testing.T) {
 		name        string
 		disposition string
 		wantFile    string
+		forbid      string // file that must not appear in the workdir
 	}{
 		{
 			name:        "attachment filename wins over default",
@@ -75,6 +76,18 @@ func TestOmadaServiceExportLogs_FilenameFallback(t *testing.T) {
 			name:        "missing header falls back to default",
 			disposition: "",
 			wantFile:    "omada-log-export.zip",
+		},
+		{
+			name:        "dotfile attachment name falls back to default",
+			disposition: "attachment; filename=.bashrc",
+			wantFile:    "omada-log-export.zip",
+			forbid:      ".bashrc",
+		},
+		{
+			name:        "build file attachment name falls back to default",
+			disposition: "attachment; filename=go.mod",
+			wantFile:    "omada-log-export.zip",
+			forbid:      "go.mod",
 		},
 	}
 	for _, tc := range cases {
@@ -94,7 +107,55 @@ func TestOmadaServiceExportLogs_FilenameFallback(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(dir, tc.wantFile)); err != nil {
 				t.Errorf("expected %q in workdir: %v", tc.wantFile, err)
 			}
+			if tc.forbid != "" {
+				if _, err := os.Stat(filepath.Join(dir, tc.forbid)); err == nil {
+					t.Errorf("hostile file %q was created", tc.forbid)
+				}
+			}
 		})
+	}
+}
+
+func TestOmadaServiceExportLogs_DefaultNoClobber(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	existing := "LogList_2.zip"
+	if err := os.WriteFile(existing, []byte("original"), 0o600); err != nil {
+		t.Fatalf("seeding existing file: %v", err)
+	}
+
+	ts := omadaTestServer(t, omadaLogExportHandler("attachment; filename=LogList_2.zip"))
+	opts := OmadaOptions{Host: ts.URL, ClientID: "a", ClientSecret: "b", SkipTLSVerify: true}
+	_, err := NewOmadaService().ExportLogs(t.Context(), opts, omada.LogExportCSV, "")
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("error = %v, want the existing-file refusal", err)
+	}
+	data, err := os.ReadFile(existing) // nosemgrep: go_filesystem_rule-fileread — path is under t.TempDir()
+	if err != nil {
+		t.Fatalf("reading existing file: %v", err)
+	}
+	if string(data) != "original" {
+		t.Errorf("existing file content = %q, want it untouched", data)
+	}
+}
+
+func TestOmadaServiceExportLogs_ExplicitOutOverwrites(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "out.zip")
+	if err := os.WriteFile(out, []byte("original"), 0o600); err != nil {
+		t.Fatalf("seeding existing file: %v", err)
+	}
+
+	ts := omadaTestServer(t, omadaLogExportHandler("attachment; filename=LogList_1.zip"))
+	opts := OmadaOptions{Host: ts.URL, ClientID: "a", ClientSecret: "b", SkipTLSVerify: true}
+	if _, err := NewOmadaService().ExportLogs(t.Context(), opts, omada.LogExportCSV, out); err != nil {
+		t.Fatalf("ExportLogs: %v", err)
+	}
+	data, err := os.ReadFile(out) // nosemgrep: go_filesystem_rule-fileread — path is under t.TempDir()
+	if err != nil {
+		t.Fatalf("reading saved export: %v", err)
+	}
+	if string(data) != omadaLogExportZip {
+		t.Errorf("explicit --out content = %q, want the new export", data)
 	}
 }
 

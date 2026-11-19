@@ -210,9 +210,11 @@ contains a single spreadsheet with the columns `LOG TYPE`, `TIME`, and
 The endpoint requires the `GLOBAL_DATA_EXPORT` privilege. A JSON body in
 response to the export request is the error envelope, so the client treats any
 JSON answer as failure — a zip attachment can never parse as JSON. `--out`
-writes the archive to an explicit path; without it, the attachment filename is
-used, and if the header is missing the archive is saved as
-`omada-log-export.zip` in the working directory.
+writes the archive to an explicit path, replacing any existing file. Without
+`--out`, the attachment name is used only when it matches the controller's
+export shape `LogList_<digits>.zip`; anything else — including a missing
+header — falls back to `omada-log-export.zip` in the working directory. The
+default path is created fresh and never overwrites an existing file.
 
 ## AP channel inventory
 
