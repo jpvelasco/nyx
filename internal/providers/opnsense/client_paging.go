@@ -50,12 +50,16 @@ func fetchPagedList(ctx context.Context, c *Client, path string, pageSize int, r
 // fetchPagedListPOST walks the same envelope over POST with a datatables body
 // ({"current":N,"rowCount":P,"sort":{},"searchPhrase":""}).
 func fetchPagedListPOST(ctx context.Context, c *Client, path string, pageSize int, rowsDest *[]json.RawMessage) (int, error) {
+	return fetchPagedListPOSTSearch(ctx, c, path, pageSize, "", rowsDest)
+}
+
+func fetchPagedListPOSTSearch(ctx context.Context, c *Client, path string, pageSize int, search string, rowsDest *[]json.RawMessage) (int, error) {
 	return walkPagedList(pageSize, path, rowsDest, func(page int, env *pagedEnvelope) error {
 		body, err := json.Marshal(map[string]interface{}{
 			"current":      page,
 			"rowCount":     pageSize,
 			"sort":         map[string]interface{}{},
-			"searchPhrase": "",
+			"searchPhrase": search,
 		})
 		if err != nil {
 			return err

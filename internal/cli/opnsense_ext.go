@@ -25,6 +25,7 @@ func buildOpnsenseExtraCommands() []*cobra.Command {
 		buildOpnsenseListCmd("list-firewall-rules", "List firewall filter rules", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 			return service.NewOpnsenseService().ListFirewallRules(ctx, opts)
 		}),
+		buildOpnsenseBlocklistCmd(),
 		buildOpnsenseListCmd("list-vlans", "List configured VLAN devices", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 			return service.NewOpnsenseService().ListVLANs(ctx, opts)
 		}),
