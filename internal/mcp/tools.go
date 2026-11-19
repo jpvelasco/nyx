@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -982,6 +983,12 @@ func (s *Server) toolOpnsenseListClients(ctx context.Context, args map[string]in
 	clients, err := s.opnsenseSvc.ListClients(ctx, opts)
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense clients request failed: %v", err))
+	}
+	if !argBoolDefault(args, "include_hostnames", false) {
+		clients = slices.Clone(clients)
+		for i := range clients {
+			clients[i].Hostname = ""
+		}
 	}
 	return okResult(toJSON(clients))
 }

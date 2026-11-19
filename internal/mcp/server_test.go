@@ -1496,13 +1496,20 @@ func TestDispatchOpnsenseListClients(t *testing.T) {
 	stub := &stubOpnsenseSvc{clients: []service.OpnsenseClient{
 		{MAC: "aa:bb:cc:dd:ee:ff", IP: "10.0.10.5", Hostname: "nas"},
 	}}
-	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_list_clients", map[string]interface{}{
+	s := serverWithOpnsenseStub(stub)
+	args := map[string]interface{}{
 		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
-	})
+	}
+	text, isErr := s.DispatchToolForTest(context.Background(), "opnsense_list_clients", args)
 	if isErr {
 		t.Fatalf("unexpected error: %s", text)
 	}
-	if !strings.Contains(text, `"hostname": "nas"`) {
+	if strings.Contains(text, `"hostname"`) || !strings.Contains(text, `"ip": "10.0.10.5"`) {
+		t.Fatalf("default clients JSON = %s", text)
+	}
+	args["include_hostnames"] = true
+	text, isErr = s.DispatchToolForTest(context.Background(), "opnsense_list_clients", args)
+	if isErr || !strings.Contains(text, `"hostname": "nas"`) {
 		t.Errorf("expected clients JSON, got: %s", text)
 	}
 }

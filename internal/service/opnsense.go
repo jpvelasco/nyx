@@ -56,3 +56,8 @@ func (s *OpnsenseService) Info(ctx context.Context, opts OpnsenseOptions) (*Opns
 func (s *OpnsenseService) client(opts OpnsenseOptions) *opnsensebackend.Client {
 	return s.NewClient(opts.Host, opts.APIKey, opts.APISecret, opts.SkipTLSVerify, opts.CACertPath)
 }
+
+// CheckPrivileges verifies credentials and read access to representative API pages.
+func (s *OpnsenseService) CheckPrivileges(ctx context.Context, opts OpnsenseOptions) ([]string, error) {
+	return s.client(opts).CheckPrivileges(ctx)
+}

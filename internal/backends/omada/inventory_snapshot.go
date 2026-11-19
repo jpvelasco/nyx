@@ -23,6 +23,7 @@ type InventorySnapshot struct {
 	GatewayACLsOK      bool
 	SwitchACLsOK       bool
 	Clients            []ConnectedClient
+	MDNS               *intent.MDNSInventory
 	Warnings           []string
 }
 
@@ -70,6 +71,7 @@ func (c *Client) FetchInventory(ctx context.Context, siteID string) (*InventoryS
 		snap.Warnings = append(snap.Warnings, fmt.Sprintf("client DHCP enrichment unavailable: %v", eerr))
 	}
 	snap.Clients = clients
+	snap.MDNS = c.fetchMDNSInventory(ctx, siteID)
 	return snap, nil
 }
 
@@ -81,6 +83,7 @@ func BuildSpecInventory(snap *InventorySnapshot) *intent.Inventory {
 		ControllerVersion:  snap.ControllerVersion,
 		ControllerCategory: snap.ControllerCategory,
 		NetworkGateways:    make(map[string]string),
+		MDNS:               snap.MDNS,
 	}
 	gwMap := NetworkGatewayMap(snap.Devices, snap.Networks)
 	for _, n := range snap.Networks {
@@ -165,6 +168,10 @@ func RenderInventory(snap *InventorySnapshot, siteName string) string {
 		renderScope(&b, "switch", snap.SwitchACLs)
 	} else {
 		fmt.Fprintf(&b, "  switch:  unknown (fetch failed)\n")
+	}
+
+	if snap.MDNS != nil {
+		renderMDNSInventory(&b, snap.MDNS)
 	}
 
 	fmt.Fprintf(&b, "\n== Clients ==\n")

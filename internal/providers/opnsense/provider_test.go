@@ -108,6 +108,8 @@ func TestProviderInfo(t *testing.T) {
 	})
 }
 
+const enabledDnsmasqFixture = `{"dnsmasq":{"enable":"1"}}`
+
 // opnsenseServer returns a test server serving a canned OPNsense API
 // (real endpoint shapes: interfaces_info map, paged search_rule rows).
 func opnsenseServer(t *testing.T, leases string) *httptest.Server {
@@ -131,6 +133,8 @@ func opnsenseServer(t *testing.T, leases string) *httptest.Server {
 				{"uuid":"u4","enabled":"0","action":"block","interface":["lan"],"source_net":"10.0.0.7","destination_net":"203.0.113.11"},
 				{"uuid":"u5","enabled":"1","action":"block","description":"unresolvable endpoints","interface":["lan"],"source_net":"any","destination_net":"203.0.113.9"}
 			]}`)
+		case "/api/dnsmasq/settings/get":
+			testutil.WriteBody(w, enabledDnsmasqFixture)
 		case "/api/dnsmasq/leases/search":
 			testutil.WriteBody(w, leases)
 		case "/api/core/service/search":
@@ -141,8 +145,6 @@ func opnsenseServer(t *testing.T, leases string) *httptest.Server {
 			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
 		case "/api/interfaces/settings/get":
 			testutil.WriteBody(w, `{"interface":{}}`)
-		case "/api/dnsmasq/settings/get":
-			testutil.WriteBody(w, `{"dnsmasq":{"enable":"0"}}`)
 		case "/api/unbound/settings/get":
 			testutil.WriteBody(w, `{"unbound":{"enable":"1","active_interface":{"lan":{"selected":1}}}}`)
 		case "/api/unbound/settings/searchHostOverride":
@@ -322,6 +324,8 @@ func TestProviderImportSpec(t *testing.T) {
 				testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, enabledDnsmasqFixture)
 			case "/api/dnsmasq/leases/search":
 				w.WriteHeader(http.StatusInternalServerError)
 			default:
@@ -399,6 +403,8 @@ func TestProviderImportSpec(t *testing.T) {
 				]}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, enabledDnsmasqFixture)
 			case "/api/dnsmasq/leases/search":
 				testutil.WriteBody(w, `{"leases":[{"mac":"aa","ip":"198.51.100.10","hostname":"laptop"}]}`)
 			default:
@@ -456,6 +462,8 @@ func TestProviderImportSpec(t *testing.T) {
 				]}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, enabledDnsmasqFixture)
 			case "/api/dnsmasq/leases/search":
 				testutil.WriteBody(w, `{"leases":[]}`)
 			default:
@@ -495,6 +503,8 @@ func TestProviderImportSpec(t *testing.T) {
 				testutil.WriteBody(w, `{"interfaces":{}}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, enabledDnsmasqFixture)
 			case "/api/dnsmasq/leases/search":
 				testutil.WriteBody(w, `{"leases":[]}`)
 			default:
@@ -544,7 +554,9 @@ func importStatusServer(t *testing.T, rulesStatus, leasesStatus int) *httptest.S
 			testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`)
 		case "/api/firewall/filter/search_rule":
 			writeStatus(w, rulesStatus, rulesBody)
-		case "/api/dnsmasq/leases/search", "/api/dhcpd/leases":
+		case "/api/dnsmasq/settings/get":
+			testutil.WriteBody(w, enabledDnsmasqFixture)
+		case "/api/dnsmasq/leases/search":
 			writeStatus(w, leasesStatus, leaseBody)
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -634,6 +646,8 @@ func TestProviderCheck(t *testing.T) {
 				testutil.WriteBody(w, `{"interfaces":{}}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, enabledDnsmasqFixture)
 			case "/api/dnsmasq/leases/search":
 				testutil.WriteBody(w, `{"leases":[]}`)
 			default:
@@ -733,8 +747,11 @@ func TestProviderInventory(t *testing.T) {
 				w.WriteHeader(http.StatusInternalServerError)
 			case "/api/firewall/filter/search_rule":
 				w.WriteHeader(http.StatusInternalServerError)
+			case "/api/dnsmasq/settings/get":
+				w.WriteHeader(http.StatusForbidden)
 			case "/api/dnsmasq/leases/search":
-				w.WriteHeader(http.StatusInternalServerError)
+				t.Errorf("lease search should not run when the backend is unknown")
+				w.WriteHeader(http.StatusNotFound)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -755,6 +772,9 @@ func TestProviderInventory(t *testing.T) {
 		}
 		if res.ClientCount != 0 {
 			t.Errorf("ClientCount = %d, want 0 when leases failed", res.ClientCount)
+		}
+		if !strings.Contains(res.Human, "active clients unknown (fetch failed)") || !strings.Contains(strings.Join(res.Warnings, "\n"), "Services: Dnsmasq DNS/DHCP: Settings") {
+			t.Errorf("missing DHCP failure details: %v\n%s", res.Warnings, res.Human)
 		}
 	})
 
@@ -782,6 +802,8 @@ func TestProviderInventory(t *testing.T) {
 				testutil.WriteBody(w, `{"interfaces":{}}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, enabledDnsmasqFixture)
 			case "/api/dnsmasq/leases/search":
 				testutil.WriteBody(w, `{"leases":[]}`)
 			default:
@@ -1128,6 +1150,8 @@ func TestImportSpec_AliasNamedPolicies(t *testing.T) {
 				{"name":"trusted_net","type":"net","address":"10.0.10.0/24","enabled":"1"},
 				{"name":"iot_net","type":"net","address":"10.0.60.0/24","enabled":"1"}
 			]}`)
+		case "/api/dnsmasq/settings/get":
+			testutil.WriteBody(w, enabledDnsmasqFixture)
 		case "/api/dnsmasq/leases/search":
 			testutil.WriteBody(w, `{"leases":[]}`)
 		default:
@@ -1176,6 +1200,8 @@ func TestImportSpec_AliasErrorsAndUnknownAction(t *testing.T) {
 				case http.StatusForbidden:
 					testutil.WriteBody(w, `{"error":"page privilege denied"}`)
 				}
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, enabledDnsmasqFixture)
 			case "/api/dnsmasq/leases/search":
 				testutil.WriteBody(w, `{"leases":[]}`)
 			default:

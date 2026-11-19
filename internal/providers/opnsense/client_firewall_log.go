@@ -21,17 +21,6 @@ const (
 	firewallStatsPath = "/diagnostics/firewall/stats"
 )
 
-func firewallLogPrivilege(path string) string {
-	switch path {
-	case firewallLogPath:
-		return "Diagnostics: Logs: Firewall: Live View (page-diagnostics-logs-firewall-dynamic)"
-	case firewallStatsPath:
-		return "Diagnostics: Logs: Firewall: Summary View"
-	default:
-		return ""
-	}
-}
-
 // FirewallLogQuery filters a single newest-first page of controller logs.
 type FirewallLogQuery struct {
 	Limit                                                            int
