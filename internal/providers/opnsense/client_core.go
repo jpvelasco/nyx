@@ -137,10 +137,15 @@ func (c *Client) classifyStatus(resp *http.Response, path string) error {
 		return &stableError{fmt.Errorf("authentication failed — check API key and secret")}
 	}
 	if resp.StatusCode == http.StatusForbidden {
-		return &stableError{fmt.Errorf("permission denied: %s on OPNsense at %s — the API user lacks the privilege for this endpoint; grant the matching page privilege to the user (System ‣ Access ‣ Users)", path, c.host)}
+		privilege := firstNonEmpty(dhcpPrivileges[path], "the matching page privilege")
+		return &stableError{fmt.Errorf("permission denied: %s on OPNsense at %s — the API user lacks the privilege for this endpoint; grant %s to the user (System ‣ Access ‣ Users)", path, c.host, privilege)}
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return &stableError{fmt.Errorf("resource not found: %s on OPNsense at %s", path, c.host)}
+		detail := ""
+		if dhcpPrivileges[path] != "" {
+			detail = " — endpoint not present in this OPNsense version"
+		}
+		return &stableError{fmt.Errorf("resource not found: %s on OPNsense at %s%s", path, c.host, detail)}
 	}
 	if resp.StatusCode >= http.StatusInternalServerError {
 		return fmt.Errorf("unexpected status %d from OPNsense for %s", resp.StatusCode, path)

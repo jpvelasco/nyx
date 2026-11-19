@@ -82,14 +82,6 @@ func (c *Client) FetchInventory(ctx context.Context) (*InventorySnapshot, error)
 		snap.RulesOK = true
 	}
 
-	leases, err := c.GetDHCPLeases(ctx)
-	if err != nil {
-		snap.Warnings = append(snap.Warnings, fmt.Sprintf("DHCP leases unavailable: %v", err))
-	} else {
-		snap.Leases = leases
-		snap.LeasesOK = true
-	}
-
 	svcs, err := c.GetServices(ctx)
 	if err != nil {
 		snap.Warnings = append(snap.Warnings, fmt.Sprintf("services unavailable: %v", err))
@@ -123,11 +115,19 @@ func (c *Client) FetchInventory(ctx context.Context) (*InventorySnapshot, error)
 	}
 
 	dns, err := c.GetDnsmasqSettings(ctx)
+	var leases []DHCPLease
 	if err != nil {
 		snap.Warnings = append(snap.Warnings, fmt.Sprintf("dnsmasq settings unavailable: %v", err))
 	} else {
 		snap.Dnsmasq = dns
 		snap.DnsmasqOK = true
+		leases, err = c.getDHCPLeases(ctx, dns.Enabled)
+	}
+	if err != nil {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("DHCP leases unavailable: %v", err))
+	} else {
+		snap.Leases = leases
+		snap.LeasesOK = true
 	}
 
 	unbound, err := c.GetUnboundObserve(ctx)
@@ -277,7 +277,11 @@ func RenderInventory(snap *InventorySnapshot, site string) string {
 	}
 
 	fmt.Fprintf(&b, "\n== Clients ==\n")
-	fmt.Fprintf(&b, "  %d active clients\n", snap.LeaseCount())
+	if snap.LeasesOK {
+		fmt.Fprintf(&b, "  %d active clients\n", snap.LeaseCount())
+	} else {
+		fmt.Fprintf(&b, "  active clients unknown (fetch failed)\n")
+	}
 
 	if snap.ServicesOK {
 		running := 0
