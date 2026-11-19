@@ -262,4 +262,10 @@ func TestACLDrift_EngineReportsMeasuredDirection(t *testing.T) {
 	if len(report.Findings) != 2 || report.Findings[0].Status != models.StatusPass || report.Findings[1].CheckType != "uncovered_direction" || report.Findings[1].Status != models.StatusWarn || report.Findings[1].Target != "iot -> trusted" {
 		t.Fatalf("findings: %v", report.Findings)
 	}
+	for _, key := range []string{"unreachable_gateways", "source_network"} {
+		if _, leaked := report.Findings[0].Observed[key]; leaked {
+			t.Errorf("internal isolation correlation field %q leaked in audit report", key)
+		}
+	}
+
 }

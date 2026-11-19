@@ -222,6 +222,15 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 		}
 	}
 
+	// Isolation observations are only needed to derive uncovered directions.
+	// Keep raw correlation fields out of public reports and snapshots.
+	for i := range findings {
+		if findings[i].CheckType == "isolation" {
+			delete(findings[i].Observed, "unreachable_gateways")
+			delete(findings[i].Observed, "source_network")
+		}
+	}
+
 	// Telemetry: one counter per finding (type + status) and the run
 	// duration, recorded centrally after the findings settle (#137).
 	telemetryOnce.Do(initTelemetryInstruments)
