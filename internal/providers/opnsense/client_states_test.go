@@ -71,3 +71,50 @@ func TestStateDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestStateDiagnosticsErrors(t *testing.T) {
+	ctx := t.Context()
+	c := NewClient("firewall.example", "fixture-key", "fixture-secret", false, "")
+	c.httpClient.Transport = stateTestTransport(func(*http.Request) (*http.Response, error) {
+		t.Fatal("invalid selector reached the controller")
+		return nil, nil
+	})
+	for _, q := range []StateQuery{
+		{Page: 0, PageSize: 1}, {Page: 1, PageSize: 10000},
+		{Page: 1, PageSize: 1, Sort: map[string]string{"age": "asc", "state": "desc"}},
+		{Page: 1, PageSize: 1, Sort: map[string]string{"bad field": "asc"}},
+		{Page: 1, PageSize: 1, Sort: map[string]string{"age": "bad order"}},
+	} {
+		if _, err := c.QueryStates(ctx, q); err == nil {
+			t.Errorf("accepted invalid query %+v", q)
+		}
+	}
+	for _, id := range []string{"abcd", "../1234", "abcd/"} {
+		if _, err := c.DeleteState(ctx, id); err == nil {
+			t.Errorf("accepted invalid ID %q", id)
+		}
+	}
+	for _, selector := range [][2]string{{"", ""}, {"", "invalid rule"}, {"", "0"}, {"***", ""}, {"0", ""}} {
+		if _, err := c.KillStates(ctx, selector[0], selector[1]); err == nil {
+			t.Errorf("accepted invalid selector %q", selector)
+		}
+	}
+	for _, tc := range []struct {
+		body string
+		run  func() error
+		want string
+	}{
+		{`{"current":0}`, func() error { _, err := c.QueryStates(ctx, StateQuery{Page: 1, PageSize: 1}); return err }, "requested state page"},
+		{`{"result":"killed 0 states"}`, func() error { _, err := c.DeleteState(ctx, "abcd/1234"); return err }, "already expired"},
+		{`{"result":"unexpected"}`, func() error { _, err := c.DeleteState(ctx, "abcd/1234"); return err }, "confirm state deletion"},
+		{`{`, func() error { _, err := c.DeleteState(ctx, "abcd/1234"); return err }, "decoding state diagnostics"},
+		{`{"result":"failed"}`, func() error { _, err := c.FlushSources(ctx); return err }, "confirm the state operation"},
+	} {
+		c.httpClient.Transport = stateTestTransport(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+		})
+		if err := tc.run(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("response=%q error=%v want %q", tc.body, err, tc.want)
+		}
+	}
+}

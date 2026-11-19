@@ -13,6 +13,7 @@ func TestOpnsenseStatesConfirmation(t *testing.T) {
 		args []string
 		want string
 	}{
+		{[]string{"list", "--sort", "invalid"}, "requires field:asc"},
 		{[]string{"kill", "--state", "abcd/1234"}, "requires --confirm"},
 		{[]string{"kill", "--confirm"}, "supply --state"},
 		{[]string{"kill", "--state", "abcd/1234", "--filter", "fixture", "--confirm"}, "supply --state"},
