@@ -44,6 +44,7 @@ func (c *Client) FetchInventory(ctx context.Context, siteID string) (*InventoryS
 	if err != nil {
 		snap.Warnings = append(snap.Warnings, fmt.Sprintf("device inventory unavailable: %v", err))
 	} else {
+		c.observeDeviceFirmware(ctx, siteID, devices)
 		snap.Devices = devices
 	}
 
@@ -100,12 +101,14 @@ func BuildSpecInventory(snap *InventorySnapshot) *intent.Inventory {
 	}
 	for _, d := range SortedDevices(snap.Devices) {
 		dev := intent.InventoryDevice{
-			Type:     d.Type,
-			Name:     d.Name,
-			Model:    d.Model,
-			IP:       d.IP,
-			Firmware: d.FirmwareVersion,
-			Upgrade:  d.NeedUpgrade,
+			Type:             d.Type,
+			Name:             d.Name,
+			Model:            d.Model,
+			IP:               d.IP,
+			Firmware:         d.FirmwareVersion,
+			Upgrade:          d.NeedUpgrade || d.FirmwareStatus == firmwareUpdate,
+			FirmwareStatus:   d.FirmwareStatus,
+			FirmwareAdvisory: d.FirmwareAdvisory,
 		}
 		for _, n := range snap.Networks {
 			if bound[n.ID] == d.Name {
@@ -141,8 +144,13 @@ func RenderInventory(snap *InventorySnapshot, siteName string) string {
 	fmt.Fprintf(&b, "\n== Devices (%d) ==\n", len(snap.Devices))
 	for _, d := range SortedDevices(snap.Devices) {
 		upgrade := ""
-		if d.NeedUpgrade {
+		switch {
+		case d.FirmwareStatus == firmwareEOL:
+			upgrade = "  [eol] " + d.FirmwareAdvisory
+		case d.NeedUpgrade || d.FirmwareStatus == firmwareUpdate:
 			upgrade = "  [upgrade available]"
+		case d.FirmwareStatus != "":
+			upgrade = "  [" + d.FirmwareStatus + "]"
 		}
 		fmt.Fprintf(&b, "  [%-8s] %-34s %-14s %-15s %s%s\n",
 			d.Type, d.Name, d.Model, d.IP, d.FirmwareVersion, upgrade)

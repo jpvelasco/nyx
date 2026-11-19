@@ -3,7 +3,9 @@ package opnsense
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 
@@ -27,6 +29,8 @@ type InventorySnapshot struct {
 	Interfaces       []Interface
 	Rules            []FirewallRule
 	RulesOK          bool
+	Aliases          []Alias
+	AliasesOK        bool
 	Leases           []DHCPLease
 	LeasesOK         bool
 	Services         []Service
@@ -82,12 +86,12 @@ func (c *Client) FetchInventory(ctx context.Context) (*InventorySnapshot, error)
 		snap.RulesOK = true
 	}
 
-	leases, err := c.GetDHCPLeases(ctx)
+	aliases, err := c.GetAliases(ctx)
 	if err != nil {
-		snap.Warnings = append(snap.Warnings, fmt.Sprintf("DHCP leases unavailable: %v", err))
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("firewall aliases unavailable: %v", err))
 	} else {
-		snap.Leases = leases
-		snap.LeasesOK = true
+		snap.Aliases = aliases
+		snap.AliasesOK = true
 	}
 
 	svcs, err := c.GetServices(ctx)
@@ -123,11 +127,19 @@ func (c *Client) FetchInventory(ctx context.Context) (*InventorySnapshot, error)
 	}
 
 	dns, err := c.GetDnsmasqSettings(ctx)
+	var leases []DHCPLease
 	if err != nil {
 		snap.Warnings = append(snap.Warnings, fmt.Sprintf("dnsmasq settings unavailable: %v", err))
 	} else {
 		snap.Dnsmasq = dns
 		snap.DnsmasqOK = true
+		leases, err = c.getDHCPLeases(ctx, dns.Enabled)
+	}
+	if err != nil {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("DHCP leases unavailable: %v", err))
+	} else {
+		snap.Leases = leases
+		snap.LeasesOK = true
 	}
 
 	unbound, err := c.GetUnboundObserve(ctx)
@@ -235,7 +247,7 @@ func ifaceIP(ifaces []Interface, name string) string {
 // firewall. It mirrors the Omada inventory rendering (section banners,
 // `N item%s` counts) so both providers present the same "where is
 // everything" surface.
-func RenderInventory(snap *InventorySnapshot, site string) string {
+func RenderInventory(snap *InventorySnapshot, site string, includeFirewallDetails bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Site: %s\n", site)
 	if snap.System != nil && snap.System.ProductVersion() != "" {
@@ -271,13 +283,43 @@ func RenderInventory(snap *InventorySnapshot, site string) string {
 	if snap.RulesOK {
 		fmt.Fprintf(&b, "\n== Firewall rules (%d) ==\n", len(snap.Rules))
 		fmt.Fprintf(&b, "  %d rule%s\n", len(snap.Rules), plural(len(snap.Rules)))
+		if includeFirewallDetails {
+			for _, row := range snap.FirewallInventory().Rules {
+				state := "enabled"
+				if row.Disabled {
+					state = "disabled"
+				}
+				fmt.Fprintf(&b, "  [controller data] %s %q %q %q → %q categories=%q\n", state, row.Action, row.Label, row.Source, row.Destination, row.Categories)
+				for _, name := range slices.Sorted(maps.Keys(row.AliasMembers)) {
+					fmt.Fprintf(&b, "    [controller data] %q: %q\n", name, row.AliasMembers[name])
+				}
+			}
+		}
+
 	} else {
 		fmt.Fprintf(&b, "\n== Firewall rules ==\n")
 		fmt.Fprintf(&b, "  unknown (fetch failed)\n")
 	}
 
+	if snap.AliasesOK {
+		fmt.Fprintf(&b, "\n== Firewall aliases (%d) ==\n", len(snap.Aliases))
+		if includeFirewallDetails {
+			for _, alias := range snap.Aliases {
+				state := "enabled"
+				if alias.Disabled {
+					state = "disabled"
+				}
+				fmt.Fprintf(&b, "  [controller data] %s %q (%q): %q\n", state, alias.Name, alias.Type, alias.Addresses)
+			}
+		}
+	}
+
 	fmt.Fprintf(&b, "\n== Clients ==\n")
-	fmt.Fprintf(&b, "  %d active clients\n", snap.LeaseCount())
+	if snap.LeasesOK {
+		fmt.Fprintf(&b, "  %d active clients\n", snap.LeaseCount())
+	} else {
+		fmt.Fprintf(&b, "  active clients unknown (fetch failed)\n")
+	}
 
 	if snap.ServicesOK {
 		running := 0

@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/models"
@@ -114,4 +116,21 @@ func TestProviderCheck_ForwardsTLSOptions(t *testing.T) {
 			t.Errorf("acl_check status = %s, want pass (summary %q)", acl.Status, acl.Summary)
 		}
 	})
+}
+
+func TestObserveACLs_ScopeCompleteness(t *testing.T) {
+	for _, denied := range []bool{false, true} {
+		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if denied && strings.HasSuffix(r.URL.Path, "/osg-acls") {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			aclCheckMockHandler()(w, r)
+		}))
+		t.Cleanup(ts.Close)
+		obs, err := (&OmadaProvider{}).ObserveACLs(t.Context(), providers.ImportOptions{Host: ts.URL, ClientID: "fixture", ClientSecret: "fixture", SkipTLSVerify: true}, nil)
+		if err != nil || len(obs.Rules) != 1 || obs.Rules[0] != (providers.ObservedACL{Name: "allow-web", Scope: "switch"}) || slices.Contains(obs.UnknownScopes, "gateway") != denied {
+			t.Fatalf("denied=%v: %v, %v", denied, obs, err)
+		}
+	}
 }

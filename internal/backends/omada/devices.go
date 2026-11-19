@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Device is one managed device (gateway, switch, or AP) from the site's
@@ -17,6 +18,12 @@ type Device struct {
 	IP              string `json:"ip"`
 	FirmwareVersion string `json:"firmwareVersion"`
 	NeedUpgrade     bool   `json:"needUpgrade"`
+	LatestVersion   string `json:"latestVersion"`
+	ShowModel       string `json:"showModel"`
+	CompoundModel   string `json:"compoundModel"`
+
+	FirmwareStatus   string `json:"-"`
+	FirmwareAdvisory string `json:"-"`
 }
 
 // IsGateway reports whether the device is the site's managed gateway.
@@ -33,6 +40,10 @@ func (c *Client) GetDevices(ctx context.Context, siteID string) ([]Device, error
 	devices, _, err := fetchPaged[Device](ctx, c, fmt.Sprintf("sites/%s/networks/devices", siteID), defaultPageSize)
 	if err != nil {
 		return nil, fmt.Errorf("getting devices for site %s: %w", siteID, err)
+	}
+	now := time.Now()
+	for i, device := range devices {
+		devices[i].FirmwareStatus, devices[i].FirmwareAdvisory = classifyDeviceFirmware(device, firmwareInfo{Current: device.FirmwareVersion, Latest: device.LatestVersion}, now)
 	}
 	return devices, nil
 }
