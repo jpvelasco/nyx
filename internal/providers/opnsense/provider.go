@@ -235,12 +235,9 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		if from == "" || to == "" {
 			continue
 		}
-		name := rule.Label
-		if name == "" {
-			name = fmt.Sprintf("%s-%s-to-%s", action, from, to)
-		}
 		policies = append(policies, intent.Policy{
-			Name:   strings.ToLower(name),
+			Name:   filterPolicyName(rule, from, to),
+			Scope:  "filter",
 			From:   from,
 			To:     to,
 			Action: action,
@@ -270,7 +267,7 @@ func (o *Provider) ImportSpec(ctx context.Context, opts providers.ImportOptions)
 		Site:       "opnsense-firewall",
 		Networks:   networks,
 		Policies:   policies,
-		Assertions: assertions,
+		Assertions: append(assertions, intent.Assertion{Type: "acl_drift", Provider: ProviderName}),
 	}
 
 	if len(networks) == 0 {
@@ -319,6 +316,40 @@ func (o *Provider) Check(ctx context.Context, opts providers.ImportOptions) (*pr
 		Report:   report,
 		Warnings: imported.Warnings,
 	}, nil
+}
+
+func filterPolicyName(rule FirewallRule, from, to string) string {
+	if rule.Label != "" {
+		return strings.ToLower(rule.Label)
+	}
+	if action := policyAction(rule.Action); action != "" && from != "" && to != "" {
+		return fmt.Sprintf("%s-%s-to-%s", action, from, to)
+	}
+	return rule.RuleUUID
+}
+
+func (o *Provider) ObserveACLs(ctx context.Context, opts providers.ImportOptions, networks []intent.Network) (providers.ACLObservation, error) {
+	var observed providers.ACLObservation
+	client := newProviderClient(opts)
+	rules, err := client.GetFirewallRules(ctx)
+	if err != nil {
+		return observed, err
+	}
+	var aliases []Alias
+	for _, r := range rules {
+		if r.Label == "" {
+			aliases, err = client.GetAliases(ctx)
+			if err != nil {
+				return observed, fmt.Errorf("resolving unnamed filter rules: %w", err)
+			}
+			break
+		}
+	}
+	for _, r := range rules {
+		name := filterPolicyName(r, resolveEndpointZone(r.Source, networks, aliases), resolveEndpointZone(r.Destination, networks, aliases))
+		observed.Rules = append(observed.Rules, providers.ObservedACL{Name: name, Scope: "filter"})
+	}
+	return observed, nil
 }
 
 // CheckACL evaluates a from/to pair against listed filter rules (and

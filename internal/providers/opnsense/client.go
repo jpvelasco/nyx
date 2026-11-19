@@ -467,14 +467,18 @@ func decodeLooseBool(raw json.RawMessage) bool {
 // an unreachable controller would hide the real problem.
 func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
 	var raw []json.RawMessage
-	if _, err := fetchPagedList(ctx, c, "/firewall/filter/search_rule", listPageSize, &raw); err != nil {
+	total, err := fetchPagedList(ctx, c, "/firewall/filter/search_rule", listPageSize, &raw)
+	if err != nil {
 		return nil, remapPagedDecode(err, "decoding firewall rules response")
+	}
+	if total > len(raw) {
+		return nil, fmt.Errorf("incomplete firewall rule inventory: %d of %d rows", len(raw), total)
 	}
 	out := make([]FirewallRule, 0, len(raw))
 	for _, row := range raw {
 		var rule FirewallRule
 		if err := json.Unmarshal(row, &rule); err != nil {
-			continue
+			return nil, fmt.Errorf("decoding firewall rule: %w", err)
 		}
 		rule.Disabled = rule.Enabled != "1"
 		out = append(out, rule)

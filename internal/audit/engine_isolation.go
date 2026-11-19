@@ -48,13 +48,16 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 	// Only a ping bound to an address on the requested network measures
 	// isolation from that network on a multihomed runner.
 	var source *system.PingSource
+	var sourceNetwork string
 	for _, n := range e.Spec.Networks {
 		if addr, ok := e.runnerCtx.sources[n.Name]; ok && (n.Zone == a.From || n.Name == a.From) {
 			source = &addr
+			sourceNetwork = n.Name
 			break
 		}
 	}
 	// For each target network, ping the gateway to check reachability
+	var unreachable []string
 	allBlocked := true
 	tested := 0
 	for _, targetNet := range toNets {
@@ -71,10 +74,17 @@ func (e *Engine) runIsolation(ctx context.Context, a intent.Assertion) (*models.
 			allBlocked = false
 			result.Evidence = append(result.Evidence, fmt.Sprintf("gateway %s is reachable", targetNet.Gateway))
 		} else {
+			if source != nil {
+				unreachable = append(unreachable, targetNet.Gateway)
+			}
 			result.Evidence = append(result.Evidence, fmt.Sprintf("gateway %s is not reachable", targetNet.Gateway))
 		}
 	}
 
+	if len(unreachable) > 0 {
+		result.Observed["unreachable_gateways"] = unreachable
+		result.Observed["source_network"] = sourceNetwork
+	}
 	expectDeny := a.Expect == "deny"
 	kind := "isolation"
 	if !expectDeny {

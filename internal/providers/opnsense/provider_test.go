@@ -1390,3 +1390,32 @@ func TestMatchACLRule_NamedRuleMustCoverRequestedEndpoints(t *testing.T) {
 		t.Errorf("name-only request should match by name, got %+v", m)
 	}
 }
+
+func TestObserveACLs_FilterRules(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		wantErr    bool
+	}{
+		{"rules", `{"rows":[{"uuid":"one","description":"IoT Deny","enabled":"0"}]}`, false},
+		{"empty", `{"rows":[]}`, false},
+		{"bad row", `{"rows":["bad"]}`, true},
+		{"missing rows", `{}`, true},
+		{"incomplete", `{"total":2,"rows":[]}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "GET" || r.URL.Path != "/api/firewall/filter/search_rule" {
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				}
+				testutil.WriteBody(w, tc.body)
+			})
+			obs, err := (&Provider{}).ObserveACLs(t.Context(), providers.ImportOptions{Host: srv.URL, ClientID: "fixture", ClientSecret: "fixture", SkipTLSVerify: true}, nil)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("unexpected error %v", err)
+			}
+			if tc.name == "rules" && (len(obs.Rules) != 1 || obs.Rules[0] != (providers.ObservedACL{Name: "iot deny", Scope: "filter"})) {
+				t.Fatalf("unexpected rules %v", obs.Rules)
+			}
+		})
+	}
+}

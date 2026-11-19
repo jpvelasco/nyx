@@ -130,6 +130,7 @@ func TestRunIsolationViaProbe_AllGatewaysBlocked(t *testing.T) {
 			return fakePingOutput("10.0.0.1", true), 1
 		},
 	})
+	eng.Spec.Probes[0].VLAN = "trusted"
 	a := intent.Assertion{Type: "isolation", From: "trusted", To: "zone1", Expect: "deny", Runner: "fakeprobe"}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -140,6 +141,9 @@ func TestRunIsolationViaProbe_AllGatewaysBlocked(t *testing.T) {
 	}
 	if result.Status != models.StatusPass {
 		t.Fatalf("status = %v, want StatusPass (summary: %s)", result.Status, result.Summary)
+	}
+	if !slices.Equal(result.Observed["unreachable_gateways"].([]string), []string{"10.0.0.1"}) || result.Observed["source_network"] != "trusted" {
+		t.Fatalf("observed direction: %v", result.Observed)
 	}
 	want := "isolation confirmed from probe \"fakeprobe\": trusted cannot reach zone1"
 	if result.Summary != want {

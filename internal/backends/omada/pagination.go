@@ -50,6 +50,9 @@ func fetchPaged[T any](ctx context.Context, c *Client, basePath string, pageSize
 			}
 			return nil, 0, fmt.Errorf("decoding paged list response: %w", err)
 		}
+		if paged.Data == nil {
+			return nil, 0, fmt.Errorf("decoding paged list response: missing data array")
+		}
 		if page == 1 {
 			total = paged.TotalRows
 			firstData = paged.Data
