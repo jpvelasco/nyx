@@ -465,6 +465,12 @@ func TestBuildPortScanArgs(t *testing.T) {
 	if !reflect.DeepEqual(udp, want) {
 		t.Errorf("udp args = %v, want %v", udp, want)
 	}
+
+	capped := buildPortScanArgs(ScanOptions{TimingTemplate: 3, MinRate: 200, MaxRate: 1000}, "10.0.0.1", []int{80}, "tcp")
+	want = []string{"-sV", "--open", "-Pn", "-sT", "-T3", "--min-rate", "200", "--max-rate", "1000", "-p", "80", "10.0.0.1"}
+	if !reflect.DeepEqual(capped, want) {
+		t.Errorf("max-rate args = %v, want %v", capped, want)
+	}
 }
 
 func TestParseDoneLine(t *testing.T) {
@@ -485,6 +491,14 @@ func TestParseDoneLine(t *testing.T) {
 
 	if got := parseDoneLine("Nmap scan report for 10.0.0.1"); got != nil {
 		t.Errorf("absent done line = %+v, want nil", got)
+	}
+
+	// Counts that overflow int64 are unparseable — treat like an absent line.
+	if got := parseDoneLine("Nmap done: 99999999999999999999 IP addresses (5 hosts up) scanned in 1.00s"); got != nil {
+		t.Errorf("overflowing address count = %+v, want nil", got)
+	}
+	if got := parseDoneLine("Nmap done: 256 IP addresses (99999999999999999999 hosts up) scanned in 1.00s"); got != nil {
+		t.Errorf("overflowing hosts-up count = %+v, want nil", got)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/backends"
+	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
@@ -553,6 +554,47 @@ func TestDispatchDiscoverSubnet_ArpNotAttached(t *testing.T) {
 	})
 	if !isErr || !strings.Contains(text, "directly-attached") {
 		t.Errorf("got (%q, %v), want directly-attached error", text, isErr)
+	}
+}
+
+func TestDispatchDiscoverSubnet_ArpInvalidSubnet(t *testing.T) {
+	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "discover_subnet", map[string]interface{}{
+		"subnet":      "not-a-cidr",
+		"scan_probes": "arp",
+	})
+	if !isErr || !strings.Contains(text, "invalid CIDR") {
+		t.Errorf("got (%q, %v), want invalid CIDR error", text, isErr)
+	}
+}
+
+func TestDispatchDiscoverSubnet_IcmpProbeSet(t *testing.T) {
+	if !nmap.Available() {
+		t.Skip("nmap not available")
+	}
+	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "discover_subnet", map[string]interface{}{
+		"subnet":      "127.0.0.1/32",
+		"scan_probes": "icmp",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, "hosts") {
+		t.Errorf("text = %q, want hosts in result", text)
+	}
+}
+
+func TestDispatchDiscoverSubnet_AutoProbeSet(t *testing.T) {
+	if !nmap.Available() {
+		t.Skip("nmap not available")
+	}
+	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "discover_subnet", map[string]interface{}{
+		"subnet": "127.0.0.1/32",
+	})
+	if isErr {
+		t.Fatalf("unexpected error: %s", text)
+	}
+	if !strings.Contains(text, "hosts") {
+		t.Errorf("text = %q, want hosts in result", text)
 	}
 }
 

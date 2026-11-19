@@ -88,6 +88,16 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
+      # Install nmap so the real-scan tests run instead of skipping — the
+      # scan execution paths earn coverage only when nmap is on PATH.
+      - name: Install nmap
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Linux) sudo apt-get update -y && sudo apt-get install -y nmap ;;
+            macOS) brew install nmap ;;
+            Windows) choco install nmap -y ;;
+          esac
       # Run in bash on every OS so the working directory and tooling are
       # consistent. Go on the Windows runner writes coverage.out with CRLF line
       # endings, which Codecov's parser rejects (the upload lands in an ERROR

@@ -22,6 +22,13 @@ func TestResolveDiscoverProbeSet_ArpNotAttached(t *testing.T) {
 	}
 }
 
+func TestResolveDiscoverProbeSet_ArpInvalidSubnet(t *testing.T) {
+	_, err := resolveDiscoverProbeSet("arp", "not-a-cidr")
+	if err == nil || !strings.Contains(err.Error(), "invalid CIDR") {
+		t.Errorf("got %v, want invalid CIDR error", err)
+	}
+}
+
 func TestResolveDiscoverProbeSet_ArpAttached(t *testing.T) {
 	cidr := attachedSubnet24(t)
 	got, err := resolveDiscoverProbeSet("arp", cidr)
@@ -106,5 +113,18 @@ func TestDiscoverCmd_ArpNotAttached(t *testing.T) {
 	discoverProbes = "arp"
 	if err := discoverCmd.RunE(discoverCmd, nil); err == nil || !strings.Contains(err.Error(), "not attached") {
 		t.Errorf("got %v, want directly-attached error", err)
+	}
+}
+
+func TestDiscoverCmd_HappyPath_Loopback(t *testing.T) {
+	if !nmap.Available() {
+		t.Skip("nmap not available")
+	}
+	saveRestoreGlobals(t)
+	discoverSubnet = "127.0.0.1/32"
+	discoverProbes = "icmp"
+	timeout = "30s"
+	if err := discoverCmd.RunE(discoverCmd, nil); err != nil {
+		t.Fatalf("discover RunE failed: %v", err)
 	}
 }
