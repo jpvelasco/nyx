@@ -1106,3 +1106,39 @@ assertions:
 		t.Fatal("LoadSpec should reject the unknown field expect_latncy_ms")
 	}
 }
+
+func TestACLDriftSpec(t *testing.T) {
+	yaml := `version: 1
+site: test
+policies:
+  - {name: iot-deny, scope: gateway, from: iot, to: trusted, action: deny}
+assertions:
+  - {type: acl_drift, provider: omada}
+`
+	for _, tc := range []struct {
+		input string
+		valid bool
+	}{{yaml, true}, {strings.Replace(yaml, "omada", "opnsense", 1), true}, {strings.Replace(yaml, "omada", "missing", 1), false}, {strings.Replace(yaml, "gateway", "missing", 1), false}, {strings.Replace(yaml, "provider: omada", "provider: omada, runner: remote", 1), false}} {
+		if _, err := ParseSpec([]byte(tc.input)); (err == nil) != tc.valid {
+			t.Errorf("parse valid=%t: %v", tc.valid, err)
+		}
+	}
+}
+
+func TestValidateACLCheckBidirectional(t *testing.T) {
+	bidirectional := false
+	for _, tc := range []struct {
+		provider string
+		expect   string
+		valid    bool
+	}{
+		{"omada", "enforced", true},
+		{"omada", "not_enforced", false},
+		{"opnsense", "enforced", false},
+	} {
+		a := Assertion{Type: "acl_check", Provider: tc.provider, Policy: "test-policy", Expect: tc.expect, ExpectBidirectional: &bidirectional}
+		if err := validateACLCheckAssertion(0, &a); (err == nil) != tc.valid {
+			t.Errorf("provider %s and expect %s: validation = %v, want valid %t", tc.provider, tc.expect, err, tc.valid)
+		}
+	}
+}

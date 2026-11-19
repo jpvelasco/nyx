@@ -13,6 +13,10 @@ func TestOpnsenseServiceListClients(t *testing.T) {
 	for _, shape := range []string{"leases", "rows"} {
 		t.Run(shape, func(t *testing.T) {
 			ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/dnsmasq/settings/get" {
+					testutil.WriteBody(w, `{"dnsmasq":{"enable":"1"}}`)
+					return
+				}
 				if r.URL.Path != "/api/dnsmasq/leases/search" {
 					t.Errorf("path = %s, want dnsmasq/leases/search", r.URL.Path)
 				}
@@ -20,7 +24,7 @@ func TestOpnsenseServiceListClients(t *testing.T) {
 					testutil.WriteBody(w, `{"leases":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","hostname":"nas"}]}`)
 					return
 				}
-				testutil.WriteBody(w, `{"rows":[{"mac":"aa:bb:cc:dd:ee:ff","ip":"10.0.10.5","hostname":"nas"}]}`)
+				testutil.WriteBody(w, `{"total":1,"rows":[{"hwaddr":"aa:bb:cc:dd:ee:ff","address":"10.0.10.5","hostname":"nas"}]}`)
 			})
 
 			clients, err := NewOpnsenseService().ListClients(context.Background(), opnsenseOptions(ts))
@@ -46,9 +50,14 @@ func TestOpnsenseServiceInventory(t *testing.T) {
 					"iot": {"description":"IoT","ipv4":"10.0.20.1/24","ipv4_gateway":"10.0.20.1"}
 				}}`)
 			case "/api/firewall/filter/search_rule":
-				testutil.WriteBody(w, `{"total":2,"rows":[{"uuid":"u1","enabled":"1","action":"block"},{"uuid":"u2","enabled":"1","action":"pass"}]}`)
-			case "/api/dnsmasq/leases/search":
-				testutil.WriteBody(w, `{"leases":[{"mac":"aa","ip":"10.0.10.5","hostname":"nas"},{"mac":"bb","ip":"10.0.20.5","hostname":"cam"}]}`)
+				testutil.WriteBody(w, `{"total":2,"rows":[{"uuid":"u1","enabled":"1","action":"block","interface":"lan,wan","categories":"trusted,iot","source_net":"trusted_hosts"},{"uuid":"u2","enabled":false,"action":"pass"}]}`)
+			case "/api/firewall/alias/search_item":
+				testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"a1","name":"trusted_hosts","enabled":"1","type":"host","content":"192.0.2.1\r\n192.0.2.2"}]}`)
+			case "/api/kea/leases4/search":
+				testutil.WriteBody(w, `{"total":1,"rows":[{"hwaddr":"aa","address":"10.0.10.5","hostname":"nas","state":0}]}`)
+			case "/api/kea/leases6/search":
+				testutil.WriteBody(w, `{"total":1,"rows":[{"hwaddr":"bb","address":"2001:db8::10","hostname":"cam","state":0}]}`)
+
 			case "/api/core/service/search":
 				testutil.WriteBody(w, `{"total":1,"rows":[{"name":"dnsmasq","running":"1","description":"Dnsmasq DNS/DHCP"}]}`)
 			case "/api/routes/gateway/status":
@@ -74,7 +83,13 @@ func TestOpnsenseServiceInventory(t *testing.T) {
 			}
 		})
 
-		inv, err := NewOpnsenseService().Inventory(context.Background(), opnsenseOptions(ts))
+		opts := opnsenseOptions(ts)
+		defaultInventory, err := NewOpnsenseService().Inventory(context.Background(), opts)
+		if err != nil || defaultInventory.FirewallInventory != nil || !defaultInventory.FirewallAliasesOK {
+			t.Fatalf("default inventory = %+v, %v", defaultInventory, err)
+		}
+		opts.IncludeFirewallDetails = true
+		inv, err := NewOpnsenseService().Inventory(context.Background(), opts)
 		if err != nil {
 			t.Fatalf("Inventory: %v", err)
 		}
@@ -102,6 +117,14 @@ func TestOpnsenseServiceInventory(t *testing.T) {
 		if !inv.UnboundOK || inv.Unbound == nil || !inv.Unbound.Enabled || !inv.Unbound.Running {
 			t.Errorf("unbound = %+v", inv.Unbound)
 		}
+		if !inv.AliasesOK || len(inv.Aliases) != 1 || len(inv.Rules) != 2 {
+			t.Fatalf("firewall inventory = %+v", inv.FirewallInventory)
+		}
+		row := inv.Rules[0]
+		if !row.Active || inv.Rules[1].Active || len(row.Interface) != 2 || len(row.Categories) != 2 || len(row.AliasMembers["trusted_hosts"]) != 2 {
+			t.Errorf("firewall rows = %+v", inv.Rules)
+		}
+
 		if len(inv.Warnings) != 0 {
 			t.Errorf("Warnings = %v, want none", inv.Warnings)
 		}
@@ -129,6 +152,11 @@ func TestOpnsenseServiceInventory(t *testing.T) {
 				testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.10.1/24"}}}`)
 			case "/api/firewall/filter/search_rule":
 				w.WriteHeader(http.StatusInternalServerError)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, `{"dnsmasq":{"enable":"1"}}`)
+			case "/api/firewall/alias/search_item":
+				w.WriteHeader(http.StatusForbidden)
+
 			case "/api/dnsmasq/leases/search":
 				w.WriteHeader(http.StatusInternalServerError)
 			default:
@@ -146,8 +174,8 @@ func TestOpnsenseServiceInventory(t *testing.T) {
 		if inv.ClientCount != 0 {
 			t.Errorf("ClientCount = %d, want 0 after lease failure", inv.ClientCount)
 		}
-		if len(inv.Warnings) != 2 {
-			t.Errorf("Warnings = %v, want 2 (rules, leases)", inv.Warnings)
+		if len(inv.Warnings) != 3 {
+			t.Errorf("Warnings = %v, want 3 (rules, aliases, leases)", inv.Warnings)
 		}
 	})
 }

@@ -1522,3 +1522,27 @@ func TestProbeMTUAllProbesFailIsError(t *testing.T) {
 		t.Errorf("observed mtu = %v, want \"unknown\"", result.Observed["mtu"])
 	}
 }
+
+func TestEvaluatePingOutputSingleLatencyOutlier(t *testing.T) {
+	output := `64 bytes from 192.0.2.1: icmp_seq=1 ttl=64 time=0.4 ms
+64 bytes from 192.0.2.1: icmp_seq=2 ttl=64 time=0.5 ms
+64 bytes from 192.0.2.1: icmp_seq=3 ttl=64 time=242 ms
+3 packets transmitted, 3 received, 0% packet loss
+rtt min/avg/max/mdev = 0.4/81.0/242.0/113.9 ms`
+	status, _, summary := EvaluatePingOutput(output, "192.0.2.1", 3, 20, 0)
+	if status != models.StatusPass {
+		t.Fatalf("status = %v, want pass: %s", status, summary)
+	}
+}
+
+func TestEvaluatePingOutputWindowsMedian(t *testing.T) {
+	output := `Reply from 192.0.2.1: bytes=32 time<1ms TTL=64
+Reply from 192.0.2.1: bytes=32 time=35ms TTL=64
+Reply from 192.0.2.1: bytes=32 time=60ms TTL=64
+Packets: Sent = 3, Received = 3, Lost = 0 (0% loss),
+Minimum = 0ms, Maximum = 60ms, Average = 31ms`
+	status, _, summary := EvaluatePingOutput(output, "192.0.2.1", 3, 32, 0)
+	if status != models.StatusFail || !strings.Contains(summary, "median of 3 replies, mean 31.0ms") {
+		t.Fatalf("status = %v, summary = %q, want median threshold failure", status, summary)
+	}
+}

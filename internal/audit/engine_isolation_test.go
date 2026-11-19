@@ -59,6 +59,13 @@ func TestRunIsolation_Multihomed(t *testing.T) {
 			if err != nil || result.Status != tc.want {
 				t.Fatalf("got %v, %v; want %v", result, err, tc.want)
 			}
+			blocked, _ := result.Observed["unreachable_gateways"].([]string)
+			if tc.want == models.StatusPass && (!slices.Equal(blocked, gateways) || result.Observed["source_network"] != "iot") {
+				t.Errorf("observed dead paths: %v", result.Observed)
+			}
+			if tc.want == models.StatusWarn && len(blocked) > 0 {
+				t.Errorf("unverified dead paths: %v", blocked)
+			}
 			if !slices.Equal(gateways, []string{"10.0.11.1", "10.0.40.1"}) {
 				t.Errorf("gateways = %v", gateways)
 			}

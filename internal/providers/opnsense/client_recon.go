@@ -122,7 +122,7 @@ func (c *Client) GetInterfaceSettings(ctx context.Context) ([]InterfaceSetting, 
 // GetDnsmasqSettings returns Dnsmasq enable/interfaces/ranges/hosts
 // (GET /dnsmasq/settings/get). A 403 is the stable page-privilege error.
 func (c *Client) GetDnsmasqSettings(ctx context.Context) (*DnsmasqSettings, error) {
-	raw, err := getRaw(ctx, c, "/dnsmasq/settings/get")
+	raw, err := getRaw(ctx, c, dnsmasqSettingsPath)
 	if err != nil {
 		return nil, err
 	}

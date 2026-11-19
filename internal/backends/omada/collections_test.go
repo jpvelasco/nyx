@@ -254,8 +254,8 @@ func TestGetACLRulesUsesSwitchScopePath(t *testing.T) {
 			return
 		}
 		writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
-			{"id":"a1","description":"Deny IoT","status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]},
-			{"id":"a2","description":"Allow Web","status":true,"policy":1,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]}
+			{"id":"a1","description":"  Deny\u202E   IoT\u001b ","name":"Ignored fallback","biDirectional":false,"status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]},
+			{"id":"a2","name":" Allow\u007f  Web ","status":true,"policy":1,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]}
 		]}`)
 	}))
 	rules, err := c.GetACLRules(context.Background(), "s1")
@@ -266,7 +266,10 @@ func TestGetACLRulesUsesSwitchScopePath(t *testing.T) {
 		t.Errorf("rules = %+v, want two switch rules with permit on the second", rules)
 	}
 	if rules[0].Name != "Deny IoT" || rules[1].Name != "Allow Web" {
-		t.Errorf("rule names = %q/%q, want descriptions from the wire", rules[0].Name, rules[1].Name)
+		t.Errorf("rule names = %q/%q, want description and fallback name from the wire", rules[0].Name, rules[1].Name)
+	}
+	if rules[0].BiDirectional == nil || *rules[0].BiDirectional || rules[1].BiDirectional != nil {
+		t.Errorf("bidirectional values = %v/%v, want explicit false and absent", rules[0].BiDirectional, rules[1].BiDirectional)
 	}
 	if len(queries) == 0 || !strings.Contains(queries[0], "page=1") || strings.Contains(queries[0], "type=") {
 		t.Errorf("queries = %v, want page params and no type query", queries)
@@ -527,5 +530,14 @@ func TestLANMatchesWrite_DHCPLeaseAndDNSChangesCount(t *testing.T) {
 	dnsChanged.DHCPSettings.DHCPNS = "10.0.40.1"
 	if LANMatchesWrite(n, dnsChanged) {
 		t.Error("dhcp-dns-only change must not be a no-op")
+	}
+}
+
+func TestGetACLRulesRejectsInvalidBidirectional(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"a1","biDirectional":"invalid"}]}`)
+	}))
+	if _, err := c.GetACLRules(context.Background(), "s1"); err == nil {
+		t.Fatal("GetACLRules accepted an invalid biDirectional value")
 	}
 }

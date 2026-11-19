@@ -108,6 +108,8 @@ func TestProviderInfo(t *testing.T) {
 	})
 }
 
+const enabledDnsmasqFixture = `{"dnsmasq":{"enable":"1"}}`
+
 // opnsenseServer returns a test server serving a canned OPNsense API
 // (real endpoint shapes: interfaces_info map, paged search_rule rows).
 func opnsenseServer(t *testing.T, leases string) *httptest.Server {
@@ -131,6 +133,10 @@ func opnsenseServer(t *testing.T, leases string) *httptest.Server {
 				{"uuid":"u4","enabled":"0","action":"block","interface":["lan"],"source_net":"10.0.0.7","destination_net":"203.0.113.11"},
 				{"uuid":"u5","enabled":"1","action":"block","description":"unresolvable endpoints","interface":["lan"],"source_net":"any","destination_net":"203.0.113.9"}
 			]}`)
+		case "/api/dnsmasq/settings/get":
+			testutil.WriteBody(w, enabledDnsmasqFixture)
+		case "/api/firewall/alias/search_item":
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"a1","name":"trusted_hosts","type":"host","content":"192.0.2.1","enabled":"1"}]}`)
 		case "/api/dnsmasq/leases/search":
 			testutil.WriteBody(w, leases)
 		case "/api/core/service/search":
@@ -141,8 +147,6 @@ func opnsenseServer(t *testing.T, leases string) *httptest.Server {
 			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
 		case "/api/interfaces/settings/get":
 			testutil.WriteBody(w, `{"interface":{}}`)
-		case "/api/dnsmasq/settings/get":
-			testutil.WriteBody(w, `{"dnsmasq":{"enable":"0"}}`)
 		case "/api/unbound/settings/get":
 			testutil.WriteBody(w, `{"unbound":{"enable":"1","active_interface":{"lan":{"selected":1}}}}`)
 		case "/api/unbound/settings/searchHostOverride":
@@ -322,6 +326,8 @@ func TestProviderImportSpec(t *testing.T) {
 				testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, enabledDnsmasqFixture)
 			case "/api/dnsmasq/leases/search":
 				w.WriteHeader(http.StatusInternalServerError)
 			default:
@@ -399,6 +405,8 @@ func TestProviderImportSpec(t *testing.T) {
 				]}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, enabledDnsmasqFixture)
 			case "/api/dnsmasq/leases/search":
 				testutil.WriteBody(w, `{"leases":[{"mac":"aa","ip":"198.51.100.10","hostname":"laptop"}]}`)
 			default:
@@ -456,6 +464,8 @@ func TestProviderImportSpec(t *testing.T) {
 				]}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, enabledDnsmasqFixture)
 			case "/api/dnsmasq/leases/search":
 				testutil.WriteBody(w, `{"leases":[]}`)
 			default:
@@ -495,6 +505,8 @@ func TestProviderImportSpec(t *testing.T) {
 				testutil.WriteBody(w, `{"interfaces":{}}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, enabledDnsmasqFixture)
 			case "/api/dnsmasq/leases/search":
 				testutil.WriteBody(w, `{"leases":[]}`)
 			default:
@@ -544,7 +556,9 @@ func importStatusServer(t *testing.T, rulesStatus, leasesStatus int) *httptest.S
 			testutil.WriteBody(w, `{"interfaces":{"lan":{"ipv4":"10.0.0.1/24"}}}`)
 		case "/api/firewall/filter/search_rule":
 			writeStatus(w, rulesStatus, rulesBody)
-		case "/api/dnsmasq/leases/search", "/api/dhcpd/leases":
+		case "/api/dnsmasq/settings/get":
+			testutil.WriteBody(w, enabledDnsmasqFixture)
+		case "/api/dnsmasq/leases/search":
 			writeStatus(w, leasesStatus, leaseBody)
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -634,6 +648,8 @@ func TestProviderCheck(t *testing.T) {
 				testutil.WriteBody(w, `{"interfaces":{}}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, enabledDnsmasqFixture)
 			case "/api/dnsmasq/leases/search":
 				testutil.WriteBody(w, `{"leases":[]}`)
 			default:
@@ -719,6 +735,24 @@ func TestProviderInventory(t *testing.T) {
 		if len(res.Warnings) != 0 {
 			t.Errorf("Warnings = %v, want none on a clean fetch", res.Warnings)
 		}
+		defaultDetails, err := json.Marshal(res.Details)
+		if err != nil || strings.Contains(string(defaultDetails), "configured_members") || strings.Contains(res.Human, "192.0.2.1") {
+			t.Fatalf("private details appeared in default inventory: %s, %v", defaultDetails, err)
+		}
+		res, err = p.Inventory(context.Background(), providers.ImportOptions{
+			Host: ts.URL, ClientID: "key", ClientSecret: "secret", SkipTLSVerify: true, IncludeFirewallDetails: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		details, err := json.Marshal(res.Details)
+		if err != nil || !strings.Contains(string(details), `"firewall_rules_ok":true`) || !strings.Contains(string(details), `"configured_members":["192.0.2.1"]`) {
+			t.Errorf("firewall details = %s, err = %v", details, err)
+		}
+		if !strings.Contains(res.Human, `"trusted_hosts" ("host"): ["192.0.2.1"]`) {
+			t.Errorf("missing alias render: %s", res.Human)
+		}
+
 		if !strings.Contains(res.Human, "== Networks (2) ==") || !strings.Contains(res.Human, "2 active clients") {
 			t.Errorf("Human render missing sections:\n%s", res.Human)
 		}
@@ -733,8 +767,11 @@ func TestProviderInventory(t *testing.T) {
 				w.WriteHeader(http.StatusInternalServerError)
 			case "/api/firewall/filter/search_rule":
 				w.WriteHeader(http.StatusInternalServerError)
+			case "/api/dnsmasq/settings/get":
+				w.WriteHeader(http.StatusForbidden)
 			case "/api/dnsmasq/leases/search":
-				w.WriteHeader(http.StatusInternalServerError)
+				t.Errorf("lease search should not run when the backend is unknown")
+				w.WriteHeader(http.StatusNotFound)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -747,14 +784,17 @@ func TestProviderInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Inventory: %v (only interfaces is fatal)", err)
 		}
-		if len(res.Warnings) != 11 {
-			t.Errorf("Warnings = %v, want 11 (system, rules, leases, services, gateways + 6 recon reads)", res.Warnings)
+		if len(res.Warnings) != 12 {
+			t.Errorf("Warnings = %v, want 12 (system, rules, aliases, leases, services, gateways + 6 recon reads)", res.Warnings)
 		}
 		if len(res.Inventory.Devices) != 1 {
 			t.Errorf("Devices = %+v, want 1 (interfaces still fetched)", res.Inventory.Devices)
 		}
 		if res.ClientCount != 0 {
 			t.Errorf("ClientCount = %d, want 0 when leases failed", res.ClientCount)
+		}
+		if !strings.Contains(res.Human, "active clients unknown (fetch failed)") || !strings.Contains(strings.Join(res.Warnings, "\n"), "Services: Dnsmasq DNS/DHCP: Settings") {
+			t.Errorf("missing DHCP failure details: %v\n%s", res.Warnings, res.Human)
 		}
 	})
 
@@ -782,6 +822,8 @@ func TestProviderInventory(t *testing.T) {
 				testutil.WriteBody(w, `{"interfaces":{}}`)
 			case "/api/firewall/filter/search_rule":
 				testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, enabledDnsmasqFixture)
 			case "/api/dnsmasq/leases/search":
 				testutil.WriteBody(w, `{"leases":[]}`)
 			default:
@@ -1128,6 +1170,8 @@ func TestImportSpec_AliasNamedPolicies(t *testing.T) {
 				{"name":"trusted_net","type":"net","address":"10.0.10.0/24","enabled":"1"},
 				{"name":"iot_net","type":"net","address":"10.0.60.0/24","enabled":"1"}
 			]}`)
+		case "/api/dnsmasq/settings/get":
+			testutil.WriteBody(w, enabledDnsmasqFixture)
 		case "/api/dnsmasq/leases/search":
 			testutil.WriteBody(w, `{"leases":[]}`)
 		default:
@@ -1176,6 +1220,8 @@ func TestImportSpec_AliasErrorsAndUnknownAction(t *testing.T) {
 				case http.StatusForbidden:
 					testutil.WriteBody(w, `{"error":"page privilege denied"}`)
 				}
+			case "/api/dnsmasq/settings/get":
+				testutil.WriteBody(w, enabledDnsmasqFixture)
 			case "/api/dnsmasq/leases/search":
 				testutil.WriteBody(w, `{"leases":[]}`)
 			default:
@@ -1388,5 +1434,61 @@ func TestMatchACLRule_NamedRuleMustCoverRequestedEndpoints(t *testing.T) {
 	nameOnly := providers.ACLCheckRequest{PolicyName: "isolate", Action: "deny"}
 	if m := matchACLRule(rules, networks, aliases, nameOnly); m == nil || m.RuleUUID != "r-wrong" {
 		t.Errorf("name-only request should match by name, got %+v", m)
+	}
+}
+
+func TestObserveACLs_FilterRules(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		wantErr    bool
+	}{
+		{"rules", `{"rows":[{"uuid":"one","description":"IoT Deny","enabled":"0"}]}`, false},
+		{"empty", `{"rows":[]}`, false},
+		{"bad row", `{"rows":["bad"]}`, true},
+		{"missing rows", `{}`, true},
+		{"incomplete", `{"total":2,"rows":[]}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "GET" || r.URL.Path != "/api/firewall/filter/search_rule" {
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				}
+				testutil.WriteBody(w, tc.body)
+			})
+			obs, err := (&Provider{}).ObserveACLs(t.Context(), providers.ImportOptions{Host: srv.URL, ClientID: "fixture", ClientSecret: "fixture", SkipTLSVerify: true}, nil)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("unexpected error %v", err)
+			}
+			if tc.name == "rules" && (len(obs.Rules) != 1 || obs.Rules[0] != (providers.ObservedACL{Name: "iot deny", Scope: "filter"})) {
+				t.Fatalf("unexpected rules %v", obs.Rules)
+			}
+		})
+	}
+}
+
+func TestObserveACLs_UnnamedFilterRules(t *testing.T) {
+	for _, denied := range []bool{false, true} {
+		_, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/firewall/filter/search_rule":
+				testutil.WriteBody(w, `{"rows":[{"uuid":"first","action":"block","source_net":"trusted_net","destination_net":"iot"},{"uuid":"second","action":"other"}]}`)
+			case "/api/firewall/alias/search_item":
+				if denied {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				testutil.WriteBody(w, `{"rows":[{"name":"trusted_net","type":"net","address":"10.0.10.0/24","enabled":"1"}]}`)
+			default:
+				t.Errorf("unexpected endpoint %s", r.URL.Path)
+			}
+		})
+		networks := []intent.Network{{Name: "trusted", Zone: "trusted", CIDR: "10.0.10.0/24"}, {Name: "iot", Zone: "iot", CIDR: "10.0.60.0/24"}}
+		obs, err := (&Provider{}).ObserveACLs(t.Context(), providers.ImportOptions{Host: srv.URL, ClientID: "fixture", ClientSecret: "fixture", SkipTLSVerify: true}, networks)
+		if (err != nil) != denied {
+			t.Fatalf("aliases denied %t: %v", denied, err)
+		}
+		if !denied && (len(obs.Rules) != 2 || obs.Rules[0].Name != "deny-trusted-to-iot" || obs.Rules[1].Name != "second") {
+			t.Fatalf("rules: %v", obs.Rules)
+		}
 	}
 }

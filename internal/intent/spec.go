@@ -75,6 +75,9 @@ type InventoryDevice struct {
 	Firmware string   `yaml:"firmware,omitempty" json:"firmware,omitempty"`
 	Upgrade  bool     `yaml:"upgrade_available,omitempty" json:"upgrade_available,omitempty"`
 	Networks []string `yaml:"networks,omitempty" json:"networks,omitempty"`
+
+	FirmwareStatus   string `yaml:"firmware_status,omitempty" json:"firmware_status,omitempty"`
+	FirmwareAdvisory string `yaml:"firmware_advisory,omitempty" json:"firmware_advisory,omitempty"`
 }
 
 // ACLScopeStatus captures the rule count of a controller ACL scope. The
@@ -115,6 +118,7 @@ type Probe struct {
 
 // Policy defines network access rules
 type Policy struct {
+	Scope  string            `yaml:"scope,omitempty" json:"scope,omitempty"` // optional rule collection: gateway, switch, or filter
 	Name   string            `yaml:"name" json:"name"`
 	From   string            `yaml:"from" json:"from"`
 	To     string            `yaml:"to" json:"to"`
@@ -157,6 +161,8 @@ type Assertion struct {
 	Policy          string  `yaml:"policy,omitempty" json:"policy,omitempty"`
 	NatMode         string  `yaml:"nat_mode,omitempty" json:"nat_mode,omitempty"`
 	Runner          string  `yaml:"runner,omitempty" json:"runner,omitempty"`
+
+	ExpectBidirectional *bool `yaml:"expect_bidirectional,omitempty" json:"expect_bidirectional,omitempty"`
 }
 
 // LoadSpec reads and parses a YAML spec file
@@ -291,6 +297,9 @@ func validatePolicies(policies []Policy) error {
 		if p.Name == "" {
 			return fmt.Errorf("policy[%d]: name is required", i)
 		}
+		if p.Scope != "" && p.Scope != "gateway" && p.Scope != "switch" && p.Scope != "filter" {
+			return fmt.Errorf("policy %q: scope must be gateway, switch, or filter", p.Name)
+		}
 		if p.Action != "allow" && p.Action != "deny" {
 			return fmt.Errorf("policy %q: action must be 'allow' or 'deny'", p.Name)
 		}
@@ -330,6 +339,7 @@ var assertionValidators = map[string]func(int, *Assertion) error{
 	"dns_check":        validateDNSCheckAssertion,
 	"network_health":   validateNetworkHealthAssertion,
 	"acl_check":        validateACLCheckAssertion,
+	"acl_drift":        validateACLDriftAssertion,
 	"nat_check":        validateNatCheckAssertion,
 }
 
@@ -449,6 +459,16 @@ func validateNetworkHealthAssertion(i int, a *Assertion) error {
 	return nil
 }
 
+func validateACLDriftAssertion(i int, a *Assertion) error {
+	if a.Provider != "omada" && a.Provider != "opnsense" {
+		return fmt.Errorf("assertion[%d]: acl_drift requires provider omada or opnsense", i)
+	}
+	if a.Runner != "" && a.Runner != "local" {
+		return fmt.Errorf("assertion[%d]: acl_drift reads controller rules locally", i)
+	}
+	return nil
+}
+
 func validateACLCheckAssertion(i int, a *Assertion) error {
 	if a.Provider == "" {
 		return fmt.Errorf("assertion[%d]: acl_check requires 'provider'", i)
@@ -458,6 +478,9 @@ func validateACLCheckAssertion(i int, a *Assertion) error {
 	}
 	if a.Expect == "" {
 		return fmt.Errorf("assertion[%d]: acl_check requires 'expect' (enforced or not_enforced)", i)
+	}
+	if a.ExpectBidirectional != nil && (a.Provider != "omada" || a.Expect != "enforced") {
+		return fmt.Errorf("assertion[%d]: expect_bidirectional requires provider omada and expect enforced", i)
 	}
 	if !aclCheckExpects[a.Expect] {
 		return fmt.Errorf("assertion[%d]: acl_check expect must be 'enforced' or 'not_enforced', got %q", i, a.Expect)

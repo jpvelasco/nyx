@@ -19,7 +19,7 @@ func TestRenderInventory(t *testing.T) {
 		LeasesOK:   true,
 		Warnings:   []string{"DHCP leases unavailable: boom"},
 	}
-	out := RenderInventory(snap, "opnsense-firewall")
+	out := RenderInventory(snap, "opnsense-firewall", false)
 	for _, want := range []string{
 		"Site: opnsense-firewall",
 		"Controller: 24.1.7_2 (amd64)",
@@ -73,7 +73,7 @@ func TestRenderInventoryReconOK(t *testing.T) {
 		WireGuardStatus:  &WireGuardStatus{Running: true},
 		WireGuardOK:      true,
 	}
-	out := RenderInventory(snap, "opnsense-firewall")
+	out := RenderInventory(snap, "opnsense-firewall", false)
 	for _, want := range []string{
 		"== Bridges (1) ==", "lan-br", "members:igb0",
 		"== Interface settings (1) ==", "1 configured",
@@ -93,12 +93,12 @@ func TestRenderInventoryUnknownScopes(t *testing.T) {
 	snap := &InventorySnapshot{
 		Interfaces: []Interface{{Name: "lan", IP: "10.0.0.1", Subnet: 24}},
 	}
-	out := RenderInventory(snap, "opnsense-firewall")
+	out := RenderInventory(snap, "opnsense-firewall", false)
 	if !strings.Contains(out, "unknown (fetch failed)") {
 		t.Errorf("rules fetch failure must render unknown:\n%s", out)
 	}
-	if !strings.Contains(out, "0 active clients") {
-		t.Errorf("lease fetch failure must render 0 clients:\n%s", out)
+	if !strings.Contains(out, "active clients unknown (fetch failed)") {
+		t.Errorf("lease fetch failure must render unknown:\n%s", out)
 	}
 	if strings.Contains(out, "Controller: ") {
 		t.Errorf("no system info → no Controller line at all:\n%s", out)
@@ -109,7 +109,7 @@ func TestRenderInventoryNoArch(t *testing.T) {
 	snap := &InventorySnapshot{
 		System: &SystemInformation{Versions: []string{"OPNsense 24.1.7_2", "FreeBSD 14.2"}},
 	}
-	out := RenderInventory(snap, "opnsense-firewall")
+	out := RenderInventory(snap, "opnsense-firewall", false)
 	if strings.Contains(out, "Controller: 24.1.7_2 (") {
 		t.Errorf("arch without a recognisable suffix must not render a parenthetical:\n%s", out)
 	}
@@ -208,4 +208,50 @@ func TestLeaseCount(t *testing.T) {
 func mustSystemInfo(t *testing.T) *SystemInformation {
 	t.Helper()
 	return &SystemInformation{Versions: []string{"OPNsense 24.1.7_2-amd64", "FreeBSD 14.2-RELEASE-p1", "OpenSSL 3.0.13"}}
+}
+
+func TestRenderInventoryConfiguredAliasMembers(t *testing.T) {
+	snap := &InventorySnapshot{
+		AliasesOK: true,
+		Aliases: []Alias{
+			{Name: "servers", Type: "host", Addresses: []string{"192.0.2.1"}},
+			{Name: "disabled", Type: "host", Disabled: true, Addresses: []string{"192.0.2.2"}},
+		},
+		RulesOK: true,
+		Rules:   []FirewallRule{{Action: "pass", Label: "example", Source: "!servers", Destination: "disabled", Disabled: true}},
+	}
+	output := RenderInventory(snap, "firewall.example", true)
+	for _, want := range []string{`disabled "pass" "example"`, `    [controller data] "servers": ["192.0.2.1"]`, `disabled "disabled" ("host"): ["192.0.2.2"]`} {
+		if !strings.Contains(output, want) {
+			t.Errorf("inventory does not contain %q: %s", want, output)
+		}
+	}
+	if strings.Contains(output, `    [controller data] "disabled":`) {
+		t.Errorf("disabled alias was expanded: %s", output)
+	}
+}
+
+func TestFetchInventoryAliasPrivilegeMissing(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/firewall/alias/search_item" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		testutil.WriteBody(w, `{"total":0,"rows":[],"leases":[],"items":[],"interface":{},"interfaces":{},"dnsmasq":{"enable":"0"},"states":{"current":0}}`)
+	}))
+	snapshot, err := c.FetchInventory(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.AliasesOK || !snapshot.RulesOK || !strings.Contains(strings.Join(snapshot.Warnings, "\n"), "firewall aliases unavailable") {
+		t.Fatalf("expected rule inventory and alias privilege warning, got %+v", snapshot)
+	}
+}
+
+func TestFirewallInventoryIgnoresDisabledAliases(t *testing.T) {
+	snap := InventorySnapshot{RulesOK: true, AliasesOK: true, Rules: []FirewallRule{{Source: "disabled-alias", Destination: "any"}}, Aliases: []Alias{{Name: "disabled-alias", Disabled: true, Addresses: []string{"192.0.2.10"}}}}
+	inv := snap.FirewallInventory()
+	if len(inv.Rules) != 1 || len(inv.Rules[0].AliasMembers) != 0 || !inv.Aliases[0].Disabled {
+		t.Fatalf("inventory=%+v", inv)
+	}
 }
