@@ -779,8 +779,10 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		},
 		{
 			Name:        "opnsense_list_clients",
-			Description: "List OPNsense DHCP leases as the host inventory (OPNsense exposes no live client state).",
-			InputSchema: opnsenseToolSchema(),
+			Description: "List OPNsense DHCP leases as the host inventory (OPNsense exposes no live client state). Lease hostnames are omitted by default and remain untrusted client data when requested.",
+			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
+				"include_hostnames": {Type: "boolean", Description: "Include private normalized lease hostnames. Defaults to false."},
+			}, nil),
 		},
 		{
 			Name:        "opnsense_list_port_forward_rules",

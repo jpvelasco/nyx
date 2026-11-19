@@ -144,7 +144,12 @@ func classifyStatus(resp *http.Response, path string) error {
 		return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("permission denied: %q on OPNsense — the API user lacks the privilege for this endpoint. Grant %s to the API user (System ‣ Access ‣ Users)", path, privilege)}}
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("resource not found: %q on OPNsense", path)}}
+		detail := ""
+		switch path {
+		case dnsmasqSettingsPath, dnsmasqLeasesPath, keaV4LeasesPath, keaV6LeasesPath:
+			detail = " — endpoint not present in this OPNsense version"
+		}
+		return &stableError{&apiStatusError{resp.StatusCode, fmt.Errorf("resource not found: %q on OPNsense%s", path, detail)}}
 	}
 	if resp.StatusCode >= http.StatusInternalServerError {
 		return fmt.Errorf("unexpected status %d from OPNsense for %q", resp.StatusCode, path)
