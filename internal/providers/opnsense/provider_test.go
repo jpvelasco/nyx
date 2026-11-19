@@ -1419,3 +1419,30 @@ func TestObserveACLs_FilterRules(t *testing.T) {
 		})
 	}
 }
+
+func TestObserveACLs_UnnamedFilterRules(t *testing.T) {
+	for _, denied := range []bool{false, true} {
+		_, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/firewall/filter/search_rule":
+				testutil.WriteBody(w, `{"rows":[{"uuid":"first","action":"block","source_net":"trusted_net","destination_net":"iot"},{"uuid":"second","action":"other"}]}`)
+			case "/api/firewall/alias/search_item":
+				if denied {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				testutil.WriteBody(w, `{"rows":[{"name":"trusted_net","type":"net","address":"10.0.10.0/24","enabled":"1"}]}`)
+			default:
+				t.Errorf("unexpected endpoint %s", r.URL.Path)
+			}
+		})
+		networks := []intent.Network{{Name: "trusted", Zone: "trusted", CIDR: "10.0.10.0/24"}, {Name: "iot", Zone: "iot", CIDR: "10.0.60.0/24"}}
+		obs, err := (&Provider{}).ObserveACLs(t.Context(), providers.ImportOptions{Host: srv.URL, ClientID: "fixture", ClientSecret: "fixture", SkipTLSVerify: true}, networks)
+		if (err != nil) != denied {
+			t.Fatalf("aliases denied %t: %v", denied, err)
+		}
+		if !denied && (len(obs.Rules) != 2 || obs.Rules[0].Name != "deny-trusted-to-iot" || obs.Rules[1].Name != "second") {
+			t.Fatalf("rules: %v", obs.Rules)
+		}
+	}
+}

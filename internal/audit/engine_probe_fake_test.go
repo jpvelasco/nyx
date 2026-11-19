@@ -236,3 +236,20 @@ func TestRunIsolationViaProbe_PartialUnreachedWarns(t *testing.T) {
 		t.Errorf("evidence missing unreachable gateway marker: %v", result.Evidence)
 	}
 }
+
+func TestACLDrift_EngineReportsMeasuredDirection(t *testing.T) {
+	spec := &intent.Spec{
+		Networks:   []intent.Network{{Name: "trusted", Zone: "trusted", Gateway: "10.0.10.1"}, {Name: "iot", Zone: "iot", Gateway: "10.0.60.1"}},
+		Policies:   []intent.Policy{{Name: "reverse", From: "trusted", To: "iot", Action: "deny"}},
+		Assertions: []intent.Assertion{{Type: "isolation", From: "iot", To: "trusted", Expect: "deny", Runner: "fakeprobe"}},
+	}
+	eng := newProbeEngine(t, spec, fake.Options{ExecReply: true, OnExec: func(string) (string, uint32) { return fakePingOutput("10.0.10.1", true), 1 }})
+	spec.Probes[0].VLAN = "iot"
+	report, err := eng.Run(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Findings) != 2 || report.Findings[0].Status != models.StatusPass || report.Findings[1].CheckType != "uncovered_direction" || report.Findings[1].Status != models.StatusWarn || report.Findings[1].Target != "iot -> trusted" {
+		t.Fatalf("findings: %v", report.Findings)
+	}
+}

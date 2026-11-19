@@ -21,13 +21,8 @@ func aclCheckErrorResult(provider, policy string, summary string) *models.CheckR
 	return result
 }
 
-// fillFromCredentialStores completes missing import options from the
-// Windows Credential Manager (omada only; no-op off Windows — the entry
-// nyx-omada-<host> is keyed on the resolved host, which this step can
-// never supply) and then the encrypted credential store (entry
-// <provider>/default). Store failures are silently ignored — env vars
-// remain the primary source and the caller still reports missing
-// credentials.
+// fillFromCredentialStores overlays the provider's Windows Credential Manager
+// entry, then its encrypted store entry. Values supplied by the environment win.
 func fillFromCredentialStores(opts providers.ImportOptions, provider, path string) providers.ImportOptions {
 	if provider == "omada" {
 		opts.ClientID, opts.ClientSecret = credmanager.OverlayOmada(opts.Host, opts.ClientID, opts.ClientSecret)
