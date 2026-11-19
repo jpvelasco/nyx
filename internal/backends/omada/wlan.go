@@ -37,7 +37,7 @@ type SSIDWrite struct {
 
 // GetWLANGroups lists site WLAN groups.
 func (c *Client) GetWLANGroups(ctx context.Context, siteID string) ([]WLANGroup, error) {
-	rows, _, err := fetchPaged[WLANGroup](ctx, c, fmt.Sprintf("sites/%s/wlan-groups", siteID), defaultPageSize)
+	rows, _, err := fetchPaged[WLANGroup](ctx, c, wlanGroupsPath(siteID), defaultPageSize)
 	if err != nil {
 		return nil, fmt.Errorf("fetching WLAN groups: %w", err)
 	}
@@ -49,7 +49,7 @@ func (c *Client) GetWLANGroups(ctx context.Context, siteID string) ([]WLANGroup,
 
 // GetSSIDs lists site SSIDs.
 func (c *Client) GetSSIDs(ctx context.Context, siteID string) ([]SSID, error) {
-	rows, _, err := fetchPaged[SSID](ctx, c, fmt.Sprintf("sites/%s/ssids", siteID), defaultPageSize)
+	rows, _, err := fetchPaged[SSID](ctx, c, ssidsPath(siteID), defaultPageSize)
 	if err != nil {
 		return nil, fmt.Errorf("fetching SSIDs: %w", err)
 	}
@@ -64,7 +64,7 @@ func (c *Client) CreateSSID(ctx context.Context, siteID string, w SSIDWrite) (st
 	var res struct {
 		ID string `json:"id"`
 	}
-	if err := c.postCreate(ctx, fmt.Sprintf("sites/%s/ssids", siteID), w, &res); err != nil {
+	if err := c.postCreate(ctx, ssidsPath(siteID), w, &res); err != nil {
 		return "", fmt.Errorf("creating SSID %q: %w", w.Name, err)
 	}
 	if res.ID == "" {
@@ -114,4 +114,12 @@ func SSIDMatchesWrite(s SSID, w SSIDWrite) bool {
 		s.Band == w.Band &&
 		strings.EqualFold(s.Security, w.Security) &&
 		(w.WLANGroupID == "" || s.WLANGroupID == w.WLANGroupID)
+}
+
+func wlanGroupsPath(siteID string) string {
+	return fmt.Sprintf("sites/%s/wlan-groups", siteID)
+}
+
+func ssidsPath(siteID string) string {
+	return fmt.Sprintf("sites/%s/ssids", siteID)
 }

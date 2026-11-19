@@ -10,6 +10,7 @@ import (
 
 	"github.com/jpvelasco/nyx/internal/audit"
 	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
+	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 )
@@ -107,23 +108,11 @@ func (o *OmadaProvider) Check(ctx context.Context, opts providers.ImportOptions)
 // LAN networks with their gateway bindings, both ACL scopes and their rule
 // counts, and the active client count. It is read-only and never mutates.
 func (o *OmadaProvider) Inventory(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInventory, error) {
-	client, err := newProviderClient(ctx, opts)
+	client, site, err := openACLSite(ctx, opts)
 	if err != nil {
-		return nil, fmt.Errorf("connecting to omada controller: %w", err)
-	}
-	if err := client.Login(ctx, opts.ClientID, opts.ClientSecret); err != nil {
 		return nil, err
 	}
 	defer client.Logout(ctx) //nolint:errcheck
-
-	sites, err := client.GetSites(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetching sites: %w", err)
-	}
-	site, err := omadabackend.SelectSite(sites, opts.Site)
-	if err != nil {
-		return nil, err
-	}
 
 	snap, err := client.FetchInventory(ctx, site.EffectiveID())
 	if err != nil {
@@ -136,6 +125,52 @@ func (o *OmadaProvider) Inventory(ctx context.Context, opts providers.ImportOpti
 		ClientCount: len(snap.Clients),
 		Warnings:    snap.Warnings,
 	}, nil
+}
+
+// openACLSite opens a read session and resolves the configured site. On success the caller owns logout.
+func openACLSite(ctx context.Context, opts providers.ImportOptions) (*omadabackend.Client, omadabackend.Site, error) {
+	client, err := newProviderClient(ctx, opts)
+	if err != nil {
+		return nil, omadabackend.Site{}, fmt.Errorf("connecting to omada controller: %w", err)
+	}
+	if err := client.Login(ctx, opts.ClientID, opts.ClientSecret); err != nil {
+		return nil, omadabackend.Site{}, err
+	}
+	sites, err := client.GetSites(ctx)
+	var site omadabackend.Site
+	if err == nil {
+		site, err = omadabackend.SelectSite(sites, opts.Site)
+	}
+	if err != nil {
+		client.Logout(ctx)
+		return nil, site, err
+	}
+	return client, site, nil
+}
+
+func (o *OmadaProvider) ObserveACLs(ctx context.Context, opts providers.ImportOptions, _ []intent.Network) (providers.ACLObservation, error) {
+	var observed providers.ACLObservation
+	client, site, err := openACLSite(ctx, opts)
+	if err != nil {
+		return observed, err
+	}
+	defer client.Logout(ctx)
+	for _, scope := range []omadabackend.ACLType{omadabackend.ACLTypeGateway, omadabackend.ACLTypeSwitch} {
+		list, err := client.FetchACLs(ctx, site.EffectiveID(), scope)
+		label := scope.Scope()
+		if err != nil {
+			observed.UnknownScopes = append(observed.UnknownScopes, label)
+			continue
+		}
+		for _, r := range list.Rules {
+			name := omadabackend.SanitizeName(r.Name)
+			if name == "" && r.Name != "" {
+				name = r.Name
+			}
+			observed.Rules = append(observed.Rules, providers.ObservedACL{Name: name, Scope: label})
+		}
+	}
+	return observed, nil
 }
 
 // CheckACL verifies that an ACL policy is enforced (or not) on the Omada controller.
@@ -176,7 +211,7 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 	siteID := site.EffectiveID()
 
 	// Fetch both ACL scopes. The Open API has no scope enable/disable
-	// flag, so an enabled matching rule is enforced.
+	// flag. The list establishes controller configuration only.
 	swList, swErr := client.FetchACLs(ctx, siteID, omadabackend.ACLTypeSwitch)
 	gwList, gwErr := client.FetchACLs(ctx, siteID, omadabackend.ACLTypeGateway)
 	if swErr != nil {
@@ -207,7 +242,7 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 	result.Evidence = append(result.Evidence, string(rulesJSON))
 	result.Observed["rule_count"] = len(allRules)
 	if match != nil {
-		match.Scope = scopeLabel(match.Rule.Type)
+		match.Scope = match.Rule.Type.Scope()
 		result.Observed["scope"] = match.Scope
 	}
 	result.Expected["policy"] = req.PolicyName
@@ -232,9 +267,34 @@ func (o *OmadaProvider) CheckACL(ctx context.Context, req providers.ACLCheckRequ
 
 	// A negative verdict is only trustworthy when every ACL scope responded:
 	// a gateway-scoped rule that could not be fetched would flip it.
-	if gwErr != nil && result.Status == models.StatusFail {
+	if gwErr != nil && result.Status == models.StatusFail && req.ExpectBidirectional == nil {
 		result.Status = models.StatusWarn
 		result.Summary += " (gateway ACLs unverified — check the controller for gateway-scoped rules)"
+	}
+
+	var bidirectional *bool
+	if match != nil && match.Rule.Type == omadabackend.ACLTypeSwitch {
+		result.Observed["applied_state"] = omadabackend.SwitchACLAppliedStateHint
+		bidirectional = match.Rule.BiDirectional
+		if bidirectional != nil {
+			result.Observed["bi_directional"] = *bidirectional
+		}
+	}
+	if req.ExpectBidirectional != nil {
+		result.Expected["bi_directional"] = *req.ExpectBidirectional
+		if result.Status == models.StatusPass {
+			switch {
+			case bidirectional == nil:
+				result.Status = models.StatusWarn
+				result.Summary = "switch ACL bidirectional setting was unavailable in controller readback"
+			case *bidirectional != *req.ExpectBidirectional:
+				result.Status = models.StatusFail
+				result.Summary = "controller switch ACL bidirectional setting differs from the expectation"
+			default:
+				result.Status = models.StatusWarn
+				result.Summary = "controller switch ACL bidirectional setting matches; " + omadabackend.SwitchACLAppliedStateHint
+			}
+		}
 	}
 
 	result.Finish()
@@ -339,7 +399,7 @@ type aclCheckMatch struct {
 func lookupACLMatch(rules []omadabackend.ACLRule, req providers.ACLCheckRequest) *aclCheckMatch {
 	for i := range rules {
 		r := rules[i]
-		if !r.Status {
+		if !r.Status || (req.ExpectBidirectional != nil && r.Type != omadabackend.ACLTypeSwitch) {
 			continue
 		}
 		if !strings.EqualFold(omadabackend.SanitizeName(r.Name), req.PolicyName) {
@@ -357,6 +417,9 @@ func lookupACLMatch(rules []omadabackend.ACLRule, req providers.ACLCheckRequest)
 		if r.Policy.MatchesAction(req.Action) {
 			return &aclCheckMatch{Rule: r, MatchedBy: "name"}
 		}
+	}
+	if req.ExpectBidirectional != nil {
+		return nil
 	}
 	for i := range rules {
 		r := rules[i]
@@ -489,7 +552,7 @@ func (o *OmadaProvider) ApplyACL(ctx context.Context, req providers.ACLApplyRequ
 		Outcome:      outcome,
 		RuleID:       ruleID,
 		RuleName:     rule.Name,
-		Scope:        scopeLabel(scopeType),
+		Scope:        scopeType.Scope(),
 		FromCIDRs:    networkList(srcs, func(n omadabackend.Network) string { return n.CIDR() }),
 		ToCIDRs:      networkList(dsts, func(n omadabackend.Network) string { return n.CIDR() }),
 		FromGateways: networkList(srcs, func(n omadabackend.Network) string { return n.Gateway() }),
@@ -546,14 +609,6 @@ func classifyApply(rules []omadabackend.ACLRule, srcs, dsts []omadabackend.Netwo
 		rule.Direction = omadabackend.ACLDirection{LANToLAN: true}
 	}
 	return "created", rule, nil
-}
-
-// scopeLabel renders an ACL type as the agent-facing scope label.
-func scopeLabel(typ omadabackend.ACLType) string {
-	if typ == omadabackend.ACLTypeGateway {
-		return "gateway"
-	}
-	return "switch"
 }
 
 // joinNames renders a network set as a comma-joined name list.
