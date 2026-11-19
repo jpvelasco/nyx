@@ -735,6 +735,16 @@ func TestProviderInventory(t *testing.T) {
 		if len(res.Warnings) != 0 {
 			t.Errorf("Warnings = %v, want none on a clean fetch", res.Warnings)
 		}
+		defaultDetails, err := json.Marshal(res.Details)
+		if err != nil || strings.Contains(string(defaultDetails), "configured_members") || strings.Contains(res.Human, "192.0.2.1") {
+			t.Fatalf("private details appeared in default inventory: %s, %v", defaultDetails, err)
+		}
+		res, err = p.Inventory(context.Background(), providers.ImportOptions{
+			Host: ts.URL, ClientID: "key", ClientSecret: "secret", SkipTLSVerify: true, IncludeFirewallDetails: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 		details, err := json.Marshal(res.Details)
 		if err != nil || !strings.Contains(string(details), `"firewall_rules_ok":true`) || !strings.Contains(string(details), `"configured_members":["192.0.2.1"]`) {
 			t.Errorf("firewall details = %s, err = %v", details, err)

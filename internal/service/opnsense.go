@@ -10,11 +10,12 @@ import (
 // via its REST API. The API secret is held only for the duration of a
 // request; it is never written to logs, evidence, or tool output.
 type OpnsenseOptions struct {
-	Host          string
-	APIKey        string
-	APISecret     string
-	SkipTLSVerify bool
-	CACertPath    string
+	Host                   string
+	APIKey                 string
+	APISecret              string
+	SkipTLSVerify          bool
+	CACertPath             string
+	IncludeFirewallDetails bool
 }
 
 // OpnsenseInfo is the system metadata surfaced to agents.

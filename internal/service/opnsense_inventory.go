@@ -21,7 +21,9 @@ type OpnsenseClient struct {
 // exposes no managed-device inventory, so model/firmware/upgrade fields are
 // intentionally empty.
 type OpnsenseInventory struct {
-	opnsensebackend.FirewallInventory
+	*opnsensebackend.FirewallInventory
+	FirewallAliasesOK   bool                     `json:"firewall_aliases_ok"`
+	FirewallAliasCount  int                      `json:"firewall_alias_count"`
 	Host                string                   `json:"host"`
 	ControllerVersion   string                   `json:"controller_version,omitempty"`
 	Arch                string                   `json:"arch,omitempty"`
@@ -85,7 +87,12 @@ func (s *OpnsenseService) Inventory(ctx context.Context, opts OpnsenseOptions) (
 	specInv := opnsensebackend.BuildSpecInventory(snap)
 	inv.NetworkGateways = specInv.NetworkGateways
 	inv.FirewallRuleCount = len(snap.Rules)
-	inv.FirewallInventory = snap.FirewallInventory()
+	inv.FirewallAliasesOK = snap.AliasesOK
+	inv.FirewallAliasCount = len(snap.Aliases)
+	if opts.IncludeFirewallDetails {
+		configuration := snap.FirewallInventory()
+		inv.FirewallInventory = &configuration
+	}
 	inv.FirewallRulesOK = snap.RulesOK
 	inv.ClientCount = snap.LeaseCount()
 	inv.Services = flattenServices(snap.Services)

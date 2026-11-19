@@ -1060,6 +1060,7 @@ func (s *Server) toolOpnsenseInventory(ctx context.Context, args map[string]inte
 	if msg != "" {
 		return errResult(msg)
 	}
+	opts.IncludeFirewallDetails = argBoolDefault(args, "include_firewall_details", false)
 	inv, err := s.opnsenseSvc.Inventory(ctx, opts)
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense inventory request failed: %v", err))

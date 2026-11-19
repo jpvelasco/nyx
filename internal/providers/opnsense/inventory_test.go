@@ -19,7 +19,7 @@ func TestRenderInventory(t *testing.T) {
 		LeasesOK:   true,
 		Warnings:   []string{"DHCP leases unavailable: boom"},
 	}
-	out := RenderInventory(snap, "opnsense-firewall")
+	out := RenderInventory(snap, "opnsense-firewall", false)
 	for _, want := range []string{
 		"Site: opnsense-firewall",
 		"Controller: 24.1.7_2 (amd64)",
@@ -73,7 +73,7 @@ func TestRenderInventoryReconOK(t *testing.T) {
 		WireGuardStatus:  &WireGuardStatus{Running: true},
 		WireGuardOK:      true,
 	}
-	out := RenderInventory(snap, "opnsense-firewall")
+	out := RenderInventory(snap, "opnsense-firewall", false)
 	for _, want := range []string{
 		"== Bridges (1) ==", "lan-br", "members:igb0",
 		"== Interface settings (1) ==", "1 configured",
@@ -93,7 +93,7 @@ func TestRenderInventoryUnknownScopes(t *testing.T) {
 	snap := &InventorySnapshot{
 		Interfaces: []Interface{{Name: "lan", IP: "10.0.0.1", Subnet: 24}},
 	}
-	out := RenderInventory(snap, "opnsense-firewall")
+	out := RenderInventory(snap, "opnsense-firewall", false)
 	if !strings.Contains(out, "unknown (fetch failed)") {
 		t.Errorf("rules fetch failure must render unknown:\n%s", out)
 	}
@@ -109,7 +109,7 @@ func TestRenderInventoryNoArch(t *testing.T) {
 	snap := &InventorySnapshot{
 		System: &SystemInformation{Versions: []string{"OPNsense 24.1.7_2", "FreeBSD 14.2"}},
 	}
-	out := RenderInventory(snap, "opnsense-firewall")
+	out := RenderInventory(snap, "opnsense-firewall", false)
 	if strings.Contains(out, "Controller: 24.1.7_2 (") {
 		t.Errorf("arch without a recognisable suffix must not render a parenthetical:\n%s", out)
 	}
@@ -220,13 +220,13 @@ func TestRenderInventoryConfiguredAliasMembers(t *testing.T) {
 		RulesOK: true,
 		Rules:   []FirewallRule{{Action: "pass", Label: "example", Source: "!servers", Destination: "disabled", Disabled: true}},
 	}
-	output := RenderInventory(snap, "firewall.example")
-	for _, want := range []string{`disabled "pass" "example"`, `    "servers": ["192.0.2.1"]`, `disabled "disabled" ("host"): ["192.0.2.2"]`} {
+	output := RenderInventory(snap, "firewall.example", true)
+	for _, want := range []string{`disabled "pass" "example"`, `    [controller data] "servers": ["192.0.2.1"]`, `disabled "disabled" ("host"): ["192.0.2.2"]`} {
 		if !strings.Contains(output, want) {
 			t.Errorf("inventory does not contain %q: %s", want, output)
 		}
 	}
-	if strings.Contains(output, `    "disabled":`) {
+	if strings.Contains(output, `    [controller data] "disabled":`) {
 		t.Errorf("disabled alias was expanded: %s", output)
 	}
 }

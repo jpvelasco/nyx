@@ -1648,6 +1648,16 @@ func TestDispatchOpnsenseInventory(t *testing.T) {
 	if strings.Contains(text, "secret1") {
 		t.Error("tool output must not echo the API secret")
 	}
+	if stub.lastOpts.IncludeFirewallDetails {
+		t.Fatal("MCP inventory included private details by default")
+	}
+	_, _ = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_inventory", map[string]interface{}{
+		"host": "fw.local", "api_key": "key1", "api_secret": "secret1", "include_firewall_details": true,
+	})
+	if !stub.lastOpts.IncludeFirewallDetails {
+		t.Fatal("MCP inventory did not forward the explicit opt-in")
+	}
+
 }
 
 func TestDispatchOpnsense_ServiceError(t *testing.T) {

@@ -83,7 +83,13 @@ func TestOpnsenseServiceInventory(t *testing.T) {
 			}
 		})
 
-		inv, err := NewOpnsenseService().Inventory(context.Background(), opnsenseOptions(ts))
+		opts := opnsenseOptions(ts)
+		defaultInventory, err := NewOpnsenseService().Inventory(context.Background(), opts)
+		if err != nil || defaultInventory.FirewallInventory != nil || !defaultInventory.FirewallAliasesOK {
+			t.Fatalf("default inventory = %+v, %v", defaultInventory, err)
+		}
+		opts.IncludeFirewallDetails = true
+		inv, err := NewOpnsenseService().Inventory(context.Background(), opts)
 		if err != nil {
 			t.Fatalf("Inventory: %v", err)
 		}
