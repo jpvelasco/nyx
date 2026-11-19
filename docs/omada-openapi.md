@@ -184,3 +184,20 @@ inventory is still returned. Control and formatting characters are removed
 from controller-provided mDNS strings in all inventory formats.
 
 [TP-Link hardware controller 6.3.0 operation schema](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/getMdnsGrid.json)
+
+## Site configuration drift
+
+Run `nyx omada site-config snapshot` to save a baseline of the selected site's
+LAN networks, switch ACLs, WLAN groups, and SSIDs. Run
+`nyx omada site-config drift` to report added, removed, or modified objects,
+using the normal provider flags on either command. The comparison leaves the
+baseline in place. Run `snapshot` again after an intentional change to reset it.
+
+Every baseline contains a SHA-256 hash and the full resource JSON returned by
+the Open API list endpoints. Nyx writes the baseline locally under
+`~/.nyx/snapshots/omada-site-config/` with owner-only file permissions. Keep
+these private files out of source control and shared reports. The text and
+`--json` drift reports show the resource kind, change, and a reference that
+matches its key in the local baseline. The report never includes configuration
+values. Site config drift measures the state returned by these endpoints, with
+no dependency on controller audit log retention.
