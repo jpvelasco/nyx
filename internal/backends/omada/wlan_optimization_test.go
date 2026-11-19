@@ -55,3 +55,26 @@ func TestWLANOptimizationReads(t *testing.T) {
 		t.Fatalf("unexpected error %v", err)
 	}
 }
+
+func TestWLANOptimizationErrors(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{&apiError{ErrorCode: -123, Msg: "raw details"}, "controller error -123"},
+		{&apiError{StatusCode: 502}, "HTTP 502"},
+		{io.ErrUnexpectedEOF, "transport or protocol error"},
+	} {
+		got := planningHistoryError(tc.err).Error()
+		if !strings.Contains(got, tc.want) || strings.Contains(got, "raw details") {
+			t.Errorf("error=%q want %q", got, tc.want)
+		}
+	}
+	c := &Client{}
+	if _, err := c.GetWLANOptimizationHistory(t.Context(), "site", ".."); err == nil {
+		t.Fatal("expected invalid ID error")
+	}
+	if got := SafeWLANOptimizationMessage("bad\u202eradio\nstate"); got != "bad radio state" {
+		t.Errorf("safe message=%q", got)
+	}
+}
