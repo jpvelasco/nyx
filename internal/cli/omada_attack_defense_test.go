@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -27,6 +28,7 @@ func TestOmadaUnblockConfirmation(t *testing.T) {
 
 func TestOmadaAttackDefenseCommands(t *testing.T) {
 	saveRestoreOmadaExtGlobals(t)
+	var rejectSettings atomic.Bool
 	const prefix = "/openapi/v1/controller/sites/site/"
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body string
@@ -38,6 +40,10 @@ func TestOmadaAttackDefenseCommands(t *testing.T) {
 		case "GET /openapi/v1/controller/sites":
 			body = `{"errorCode":0,"result":{"totalRows":1,"data":[{"id":"site","name":"example"}]}}`
 		case "GET " + prefix + "attack-defense":
+			if rejectSettings.Load() {
+				body = `{"errorCode":-1005,"msg":"raw controller details"}`
+				break
+			}
 			body = `{"errorCode":0,"result":{"tcpScanReject":true}}`
 		case "GET " + prefix + "clients/00-00-00-00-00-01":
 			body = `{"errorCode":0,"result":{"blocked":false}}`
@@ -91,4 +97,11 @@ func TestOmadaAttackDefenseCommands(t *testing.T) {
 			t.Errorf("invalid MAC error=%v", err)
 		}
 	}
+	rejectSettings.Store(true)
+	cmd := buildOmadaAttackDefenseCmd()
+	providerSkipTLS = true
+	if err := cmd.RunE(cmd, nil); err == nil || !strings.Contains(err.Error(), "-1005") || strings.Contains(err.Error(), "raw controller details") {
+		t.Errorf("settings error=%v", err)
+	}
+
 }

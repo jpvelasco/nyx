@@ -1,6 +1,7 @@
 package omada
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -49,5 +50,21 @@ func TestAttackDefenseRoutes(t *testing.T) {
 	}
 	if err = c.UnblockClient(t.Context(), "site", "../all"); err == nil || calls != 4 {
 		t.Fatalf("invalid selector or retried failed POST: calls=%d err=%v", calls, err)
+	}
+}
+
+func TestAttackDefenseErrorPreservesSafeDetails(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{context.Canceled, "context canceled"},
+		{&apiError{ErrorCode: -1005, Msg: "raw details"}, "controller error -1005"},
+		{io.ErrUnexpectedEOF, "transport or protocol error"},
+	} {
+		err := attackDefenseError("reading settings", tc.err)
+		if !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "raw details") {
+			t.Errorf("error=%q want %q", err, tc.want)
+		}
 	}
 }
