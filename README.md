@@ -494,3 +494,9 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md) (or the release workflow) for the
 ## License
 
 MIT
+
+`nyx topology --fingerprint` adds an architecture summary from the configured
+Omada and OPNsense providers. It shows inferred enforcement and bridge roles,
+observed managed upstream links, and VLAN gateway provider assignments. The
+summary is based on controller inventory and uses provider names and VLAN IDs
+for its reported topology. Incomplete reads leave roles or assignments unknown.
