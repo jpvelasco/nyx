@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -119,5 +120,30 @@ func TestACLDrift_NoObservedRuleIsUnknown(t *testing.T) {
 		if got := compareACLs(tc.p, nil, tc.obs); got.Status != tc.want {
 			t.Errorf("%v: got %s, want %s", tc.obs, got.Status, tc.want)
 		}
+	}
+}
+
+func TestACLDrift_ProviderDiagnosticsAndRuleText(t *testing.T) {
+	providers.Reset()
+	t.Cleanup(providers.Reset)
+	if err := providers.Register(&driftTestProvider{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPNSENSE_HOST", "gateway.example")
+	t.Setenv("OPNSENSE_API_KEY", "fixture")
+	t.Setenv("OPNSENSE_API_SECRET", "fixture")
+	// With TLS verification enabled this fake returns a diagnostic. The
+	// public report should carry the failure category, without its raw text.
+	result, err := NewEngine(&intent.Spec{}).runACLDrift(t.Context(), "opnsense")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(result)
+	if err != nil || result.Status != models.StatusWarn || strings.Contains(string(data), "incorrect controller options") {
+		t.Fatalf("provider error exposed: %v", result)
+	}
+	r := compareACLs("opnsense", nil, providers.ACLObservation{Rules: []providers.ObservedACL{{Scope: "filter", Name: "two\nlines"}}})
+	if len(r.Evidence) != 1 || strings.ContainsRune(r.Evidence[0], '\n') || r.Observed["live_but_undeclared"].([]string)[0] != "filter/two\nlines" {
+		t.Fatalf("rule name was not rendered as a single quoted value: %v", r.Evidence)
 	}
 }

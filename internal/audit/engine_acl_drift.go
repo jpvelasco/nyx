@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/jpvelasco/nyx/internal/intent"
@@ -34,19 +35,23 @@ func (e *Engine) runACLDrift(ctx context.Context, provider string) (*models.Chec
 	observer, ok := providers.Get(provider).(providers.ACLObserver)
 	opts := e.controllerOptions(provider)
 	var observation providers.ACLObservation
-	var err error
+	var unavailable string
 	switch {
 	case !ok:
-		err = fmt.Errorf("provider %q does not support ACL observation", provider)
+		unavailable = "provider does not support ACL observation"
 	case opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "":
-		err = fmt.Errorf("acl_drift requires credentials for %s", provider)
+		unavailable = "provider credentials are missing"
 	default:
+		var err error
 		observation, err = observer.ObserveACLs(ctx, opts, e.Spec.Networks)
+		if err != nil {
+			unavailable = "could not read controller rule inventory"
+		}
 	}
-	if err != nil {
+	if unavailable != "" {
 		r := models.NewCheckResult(provider, "acl_drift", provider, provider)
 		r.Status = models.StatusWarn
-		r.Summary = "ACL inventory unknown: " + err.Error()
+		r.Summary = "ACL inventory unknown: " + unavailable
 		r.Finish()
 		return r, nil
 	}
@@ -122,10 +127,10 @@ func compareACLs(provider string, policies []intent.Policy, live providers.ACLOb
 		result.Summary += ". Incomplete inventory for " + strings.Join(unknown, ", ")
 	}
 	for _, name := range absent {
-		result.Violations = append(result.Violations, "declared but absent: "+name)
+		result.Violations = append(result.Violations, "declared but absent: "+strconv.Quote(name))
 	}
 	for _, name := range extra {
-		result.Evidence = append(result.Evidence, "live but undeclared: "+name)
+		result.Evidence = append(result.Evidence, "live but undeclared: "+strconv.Quote(name))
 	}
 	result.Finish()
 	return result

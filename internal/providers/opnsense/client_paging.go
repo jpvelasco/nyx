@@ -90,8 +90,15 @@ func walkPagedList(pageSize int, path string, rowsDest *[]json.RawMessage, fetch
 		}
 
 		var pageRows []json.RawMessage
-		if err := json.Unmarshal(env.Rows, &pageRows); err != nil || pageRows == nil {
-			return 0, fmt.Errorf("decoding paged list response: missing or invalid rows array")
+		if len(env.Rows) > 0 {
+			if err := json.Unmarshal(env.Rows, &pageRows); err != nil {
+				return 0, fmt.Errorf("decoding paged list response: %w", err)
+			}
+		}
+		// Preserve the difference between an explicit empty array and an
+		// absent collection so callers that require completeness can check it.
+		if pageRows != nil && all == nil {
+			all = []json.RawMessage{}
 		}
 		all = append(all, pageRows...)
 

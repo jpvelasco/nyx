@@ -471,6 +471,9 @@ func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
 	if err != nil {
 		return nil, remapPagedDecode(err, "decoding firewall rules response")
 	}
+	if raw == nil {
+		return nil, fmt.Errorf("firewall rule inventory has no rows array")
+	}
 	if total > len(raw) {
 		return nil, fmt.Errorf("incomplete firewall rule inventory: %d of %d rows", len(raw), total)
 	}

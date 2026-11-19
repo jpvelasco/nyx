@@ -38,10 +38,10 @@ func fetchPaged[T any](ctx context.Context, c *Client, basePath string, pageSize
 		}
 
 		var paged struct {
-			TotalRows   int `json:"totalRows"`
-			CurrentPage int `json:"currentPage"`
-			CurrentSize int `json:"currentSize"`
-			Data        []T `json:"data"`
+			TotalRows   *int `json:"totalRows"`
+			CurrentPage int  `json:"currentPage"`
+			CurrentSize int  `json:"currentSize"`
+			Data        []T  `json:"data"`
 		}
 		if err := json.Unmarshal(raw, &paged); err != nil {
 			var direct []T
@@ -50,11 +50,13 @@ func fetchPaged[T any](ctx context.Context, c *Client, basePath string, pageSize
 			}
 			return nil, 0, fmt.Errorf("decoding paged list response: %w", err)
 		}
-		if paged.Data == nil {
+		if paged.Data == nil && (paged.TotalRows == nil || *paged.TotalRows != 0) {
 			return nil, 0, fmt.Errorf("decoding paged list response: missing data array")
 		}
 		if page == 1 {
-			total = paged.TotalRows
+			if paged.TotalRows != nil {
+				total = *paged.TotalRows
+			}
 			firstData = paged.Data
 		} else if len(paged.Data) > 0 && reflect.DeepEqual(paged.Data, firstData) {
 			return nil, 0, fmt.Errorf("%s: controller repeated page 1 at page %d — it is ignoring page", basePath, page)
