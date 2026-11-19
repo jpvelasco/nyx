@@ -254,8 +254,8 @@ func TestGetACLRulesUsesSwitchScopePath(t *testing.T) {
 			return
 		}
 		writeEnvelope(w, 0, "", `{"totalRows":2,"data":[
-			{"id":"a1","description":"Deny IoT","name":"Ignored fallback","biDirectional":false,"status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]},
-			{"id":"a2","name":"Allow Web","status":true,"policy":1,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]}
+			{"id":"a1","description":"  Deny\u202E   IoT\u001b ","name":"Ignored fallback","biDirectional":false,"status":true,"policy":0,"sourceType":"network","sourceIds":["n2"],"destinationType":"network","destinationIds":["n1"]},
+			{"id":"a2","name":" Allow\u007f  Web ","status":true,"policy":1,"sourceType":"network","sourceIds":["n1"],"destinationType":"network","destinationIds":["n2"]}
 		]}`)
 	}))
 	rules, err := c.GetACLRules(context.Background(), "s1")

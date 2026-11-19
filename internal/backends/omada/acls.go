@@ -244,10 +244,15 @@ func (r *ACLRule) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
+	r.Name = normalizeACLName(r.Name)
 	if r.Name == "" {
-		r.Name = wire.Name
+		r.Name = normalizeACLName(wire.Name)
 	}
 	return nil
+}
+
+func normalizeACLName(name string) string {
+	return strings.Join(strings.Fields(stripControllerFormatting(name)), " ")
 }
 
 // SwitchACLAppliedStateHint describes the limit of controller ACL readback.
