@@ -7,12 +7,14 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/jpvelasco/nyx/internal/audit"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/logger"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
 	reportpkg "github.com/jpvelasco/nyx/internal/report"
@@ -59,6 +61,7 @@ var toolHandlers = map[string]toolHandler{
 	"omada_get_dhcp_server_info":       (*Server).toolOmadaGetDHCPServerInfo,
 	"omada_get_dhcp_snoop_status":      (*Server).toolOmadaGetDHCPSnoopStatus,
 	"omada_list_dhcp_snoops":           (*Server).toolOmadaListDHCPSnoops,
+	"omada_list_logs":                  (*Server).toolOmadaListLogs,
 	"omada_list_lan_multicasts":        (*Server).toolOmadaListLANMulticasts,
 	"omada_plan_port":                  (*Server).toolOmadaPlanPort,
 	"omada_apply_port_profile":         (*Server).toolOmadaApplyPortProfile,
@@ -1489,6 +1492,49 @@ func (s *Server) toolApplyPortForward(ctx context.Context, args map[string]inter
 		return errResult(fmt.Sprintf("port-forward playbook failed: %v", err))
 	}
 	return okResult(toJSON(plan))
+}
+
+func (s *Server) toolOmadaListLogs(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	query := service.OmadaEventLogQuery{
+		Module: argString(args, "module"), Since: argString(args, "since"),
+		TimeStart: argString(args, "time_start"), TimeEnd: argString(args, "time_end"),
+		Page: argIntDefault(args, "page", 1), PageSize: argIntDefault(args, "page_size", 50),
+	}
+	return s.omadaJSON(ctx, args, "omada event log request failed", func(opts service.OmadaOptions) (any, error) {
+		page, err := s.omadaSvc.ListEventLogs(ctx, opts, query)
+		if err != nil {
+			return nil, err
+		}
+		page.Data = slices.Clone(page.Data)
+		includeContent := argBoolDefault(args, "include_content", false) && os.Getenv("NYX_MCP_ALLOW_OMADA_LOG_CONTENT") == "true"
+		for i := range page.Data {
+			event := &page.Data[i]
+			event.ID = ""
+			event.Key = ""
+			switch event.Module {
+			case "System", "Device", "Client":
+			default:
+				event.Module = "Other"
+			}
+			if includeContent {
+				event.Content = scrubOmadaEventContent(event.Content)
+			} else {
+				event.Content = ""
+			}
+		}
+		return page, nil
+	})
+}
+
+// scrubOmadaEventContent applies the shared logger redactor to plain text.
+func scrubOmadaEventContent(content string) string {
+	clean := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return ' '
+		}
+		return r
+	}, content)
+	return strings.TrimSpace(string(logger.ScrubLine([]byte(clean))))
 }
 
 func (s *Server) toolOpnsenseFirewallLog(ctx context.Context, args map[string]interface{}) toolDispatchResult {
