@@ -2,10 +2,12 @@ package system
 
 import (
 	"context"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 )
@@ -192,5 +194,47 @@ func TestPing_CommandErrorIsNotUnreachable(t *testing.T) {
 	}
 	if pr != nil && pr.Reachable == false && pr.PacketLoss == 100 {
 		t.Error("command failure was fabricated as 100% packet loss")
+	}
+}
+
+func TestPingArgs_SourceBinding(t *testing.T) {
+	const target = "10.0.11.1"
+	source := &PingSource{Interface: "wifi", IP: net.ParseIP("10.0.60.15")}
+	args, err := pingArgs(target, source)
+	want := map[string][]string{
+		"linux":   {"-c", "3", "-W", "2", "-I", "10.0.60.15", "-I", "wifi", target},
+		"darwin":  {"-c", "3", "-t", "2", "-b", "wifi", "-S", "10.0.60.15", target},
+		"windows": {"-n", "3", "-w", "2000", "-S", "10.0.60.15", target},
+	}[runtime.GOOS]
+	if err != nil || !slices.Equal(args, want) {
+		t.Fatalf("ping args = %v, %v; want %v", args, err, want)
+	}
+	args, err = pingArgs(target, nil)
+	if err != nil || !slices.Equal(args, append(slices.Clone(want[:4]), target)) {
+		t.Fatalf("unbound ping args = %v, %v", args, err)
+	}
+	for _, invalid := range []*PingSource{{Interface: "wifi"}, {IP: source.IP}, {IP: net.IPv4zero, Interface: "wifi"}} {
+		if _, err := PingFrom(context.Background(), target, invalid); err == nil {
+			t.Errorf("accepted invalid source %v", invalid)
+		}
+	}
+}
+
+// Platform fixtures share the same contract for a definitive isolation result.
+type boundPingCase struct {
+	name, out        string
+	err              error
+	reachable, valid bool
+}
+
+func checkBoundPingCases(t *testing.T, cases []boundPingCase) {
+	t.Helper()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parsePingResult("10.0.11.1", tc.out, tc.err, true)
+			if (err == nil) != tc.valid || (got != nil) != tc.valid || (got != nil && got.Reachable != tc.reachable) {
+				t.Fatalf("ping = %v, %v", got, err)
+			}
+		})
 	}
 }

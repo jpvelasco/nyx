@@ -130,36 +130,16 @@ func GetRouteToTarget(ctx context.Context, target string) (*Route, error) {
 // Ping
 // -----------------------------------------------------------------------
 
-var (
-	rePktLossLinux = regexp.MustCompile(`(\d+(?:\.\d+)?)% packet loss`)
-	reAvgRTTLinux  = regexp.MustCompile(`rtt min/avg/max/mdev = [\d.]+/([\d.]+)/`)
+const (
+	pingCountFlag   = "-c"
+	pingTimeoutFlag = "-W"
+	pingTimeout     = "2"
 )
 
-// Ping performs an ICMP ping to the target and returns results (Linux uses ping -c -W).
-func Ping(ctx context.Context, target string) (*PingResult, error) {
-	if err := checkPingTarget(target); err != nil {
-		return nil, err
-	}
-	out, err := runCmd(ctx, "ping", "-c", "3", "-W", "2", target)
-	if err != nil && ctx.Err() != nil {
-		return nil, fmt.Errorf("ping cancelled: %w", ctx.Err())
-	}
-
-	pr := &PingResult{}
-	if m := rePktLossLinux.FindStringSubmatch(out); m != nil {
-		loss, _ := strconv.ParseFloat(m[1], 64)
-		pr.PacketLoss = loss
-		pr.Reachable = loss < 100
-	} else if err != nil {
-		// The command failed without reportable loss statistics: that is a
-		// usage or execution error, not evidence of an unreachable host —
-		// report it instead of fabricating 100% packet loss.
-		return nil, fmt.Errorf("ping %s failed: %w", target, err)
-	}
-	if m := reAvgRTTLinux.FindStringSubmatch(out); m != nil {
-		pr.AvgLatency = m[1]
-	}
-	return pr, nil
+// iputils accepts separate source-address and device bindings. Keep the
+// device last for implementations that only retain one interface option.
+func (s PingSource) bindArgs() []string {
+	return []string{"-I", s.IP.String(), "-I", s.Interface}
 }
 
 // -----------------------------------------------------------------------
