@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -372,11 +374,208 @@ func TestDiscoveryVerdict(t *testing.T) {
 }
 
 func TestDiscoverySummary(t *testing.T) {
-	if got := discoverySummary(0, "10.0.0.0/24"); got != "no hosts discovered in 10.0.0.0/24" {
+	if got := discoverySummary(0, 0, "10.0.0.0/24"); got != "no hosts discovered in 10.0.0.0/24" {
 		t.Errorf("empty summary = %q", got)
 	}
-	if got := discoverySummary(3, "10.0.0.0/24"); got != "discovered 3 host(s) in 10.0.0.0/24" {
+	if got := discoverySummary(3, 0, "10.0.0.0/24"); got != "discovered 3 host(s) in 10.0.0.0/24" {
 		t.Errorf("hosts summary = %q", got)
+	}
+}
+
+func TestDiscoverySummary_UnresponsiveSuffix(t *testing.T) {
+	if got := discoverySummary(3, 2, "10.0.0.0/24"); got != "discovered 3 host(s) in 10.0.0.0/24 — 2 addresses unresponsive: down or probes filtered" {
+		t.Errorf("hosts+unresponsive summary = %q", got)
+	}
+	if got := discoverySummary(0, 254, "10.0.0.0/24"); got != "no hosts discovered in 10.0.0.0/24 — 254 addresses unresponsive: down or probes filtered" {
+		t.Errorf("empty+unresponsive summary = %q", got)
+	}
+}
+
+// ─── probe set tests ───
+
+func TestParseProbeSet(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"", ""},
+		{"default", ""},
+		{"arp", "arp"},
+		{"icmp", "icmp"},
+	} {
+		got, err := ParseProbeSet(tc.in)
+		if err != nil {
+			t.Errorf("ParseProbeSet(%q) error = %v", tc.in, err)
+		}
+		if string(got) != tc.want {
+			t.Errorf("ParseProbeSet(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	for _, bad := range []string{"bogus", "ARP", "ICMP", "  arp"} {
+		if _, err := ParseProbeSet(bad); err == nil {
+			t.Errorf("ParseProbeSet(%q) should error", bad)
+		}
+	}
+}
+
+func TestProbeSetFlag(t *testing.T) {
+	if got := ProbeSetARP.flag(); got != "-PR" {
+		t.Errorf("arp flag = %q", got)
+	}
+	if got := ProbeSetICMP.flag(); got != "-PE" {
+		t.Errorf("icmp flag = %q", got)
+	}
+	if got := ProbeSetDefault.flag(); got != "" {
+		t.Errorf("default flag = %q", got)
+	}
+}
+
+func TestBuildDiscoverArgs(t *testing.T) {
+	defaults := buildDiscoverArgs(DefaultScanOptions, "10.0.0.0/24")
+	want := []string{"-sn", "-T4", "--min-rate", "500", "10.0.0.0/24"}
+	if !reflect.DeepEqual(defaults, want) {
+		t.Errorf("default args = %v, want %v", defaults, want)
+	}
+
+	arp := buildDiscoverArgs(ScanOptions{TimingTemplate: 4, MinRate: 500, ProbeSet: ProbeSetARP}, "10.0.0.0/24")
+	want = []string{"-sn", "-PR", "-T4", "--min-rate", "500", "10.0.0.0/24"}
+	if !reflect.DeepEqual(arp, want) {
+		t.Errorf("arp args = %v, want %v", arp, want)
+	}
+
+	icmp := buildDiscoverArgs(ScanOptions{TimingTemplate: 2, MinRate: 50, MaxRate: 100, ProbeSet: ProbeSetICMP}, "10.0.20.0/24")
+	want = []string{"-sn", "-PE", "-T2", "--min-rate", "50", "--max-rate", "100", "10.0.20.0/24"}
+	if !reflect.DeepEqual(icmp, want) {
+		t.Errorf("icmp args = %v, want %v", icmp, want)
+	}
+
+	zero := buildDiscoverArgs(ScanOptions{}, "10.0.0.0/24")
+	want = []string{"-sn", "10.0.0.0/24"}
+	if !reflect.DeepEqual(zero, want) {
+		t.Errorf("zero opts args = %v, want %v", zero, want)
+	}
+}
+
+func TestBuildPortScanArgs(t *testing.T) {
+	got := buildPortScanArgs(ScanOptions{TimingTemplate: 3, MinRate: 200}, "10.0.0.1", []int{22, 80, 443}, "tcp")
+	want := []string{"-sV", "--open", "-Pn", "-sT", "-T3", "--min-rate", "200", "-p", "22,80,443", "10.0.0.1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("tcp args = %v, want %v", got, want)
+	}
+
+	udp := buildPortScanArgs(ScanOptions{}, "10.0.0.1", []int{53}, "udp")
+	want = []string{"-sV", "--open", "-Pn", "-sU", "-p", "53", "10.0.0.1"}
+	if !reflect.DeepEqual(udp, want) {
+		t.Errorf("udp args = %v, want %v", udp, want)
+	}
+}
+
+func TestParseDoneLine(t *testing.T) {
+	done := parseDoneLine("Nmap done: 256 IP addresses (12 hosts up) scanned in 3.42s")
+	if done == nil || done.Addresses != 256 || done.HostsUp != 12 {
+		t.Errorf("plural done line = %+v", done)
+	}
+
+	single := parseDoneLine("Nmap done: 1 IP address (1 host up) scanned in 0.02s")
+	if single == nil || single.Addresses != 1 || single.HostsUp != 1 {
+		t.Errorf("singular done line = %+v", single)
+	}
+
+	embedded := parseDoneLine("Starting Nmap 7.94 ( https://nmap.org )\nNmap scan report for 10.0.0.1\nNmap done: 3 IP addresses (1 host up) scanned in 0.5s\n")
+	if embedded == nil || embedded.Addresses != 3 || embedded.HostsUp != 1 {
+		t.Errorf("embedded done line = %+v", embedded)
+	}
+
+	if got := parseDoneLine("Nmap scan report for 10.0.0.1"); got != nil {
+		t.Errorf("absent done line = %+v, want nil", got)
+	}
+}
+
+func TestUnresponsiveFrom(t *testing.T) {
+	if got := unresponsiveFrom(nil); got != 0 {
+		t.Errorf("nil done = %d", got)
+	}
+	if got := unresponsiveFrom(&doneLine{Addresses: 256, HostsUp: 12}); got != 244 {
+		t.Errorf("unresponsive = %d, want 244", got)
+	}
+	if got := unresponsiveFrom(&doneLine{Addresses: 3, HostsUp: 3}); got != 0 {
+		t.Errorf("all up = %d, want 0", got)
+	}
+	if got := unresponsiveFrom(&doneLine{Addresses: 2, HostsUp: 3}); got != 0 {
+		t.Errorf("clamped = %d, want 0", got)
+	}
+}
+
+// attachedCIDR24 builds a /24 around a non-loopback IPv4 on this host, so the
+// subnet is guaranteed directly-attached regardless of where the test runs.
+func attachedCIDR24(t *testing.T) string {
+	t.Helper()
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		t.Skipf("reading interfaces: %v", err)
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ipNet, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipNet.IP.To4()
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			return fmt.Sprintf("%d.%d.%d.0/24", ip[0], ip[1], ip[2])
+		}
+	}
+	t.Skip("no non-loopback IPv4 address on this host")
+	return ""
+}
+
+func TestDirectlyAttached(t *testing.T) {
+	attached, err := DirectlyAttached(attachedCIDR24(t))
+	if err != nil {
+		t.Fatalf("DirectlyAttached error: %v", err)
+	}
+	if !attached {
+		t.Error("local /24 should be directly-attached")
+	}
+
+	routed, err := DirectlyAttached("203.0.113.0/24")
+	if err != nil {
+		t.Fatalf("DirectlyAttached(203.0.113.0/24) error: %v", err)
+	}
+	if routed {
+		t.Error("documentation-range /24 should not be directly-attached")
+	}
+
+	if _, err := DirectlyAttached("not-a-cidr"); err == nil {
+		t.Error("expected error for invalid CIDR")
+	}
+}
+
+func TestChooseProbeSet(t *testing.T) {
+	got, err := ChooseProbeSet(attachedCIDR24(t))
+	if err != nil {
+		t.Fatalf("ChooseProbeSet error: %v", err)
+	}
+	if got != ProbeSetARP {
+		t.Errorf("attached = %q, want arp", got)
+	}
+
+	got, err = ChooseProbeSet("203.0.113.0/24")
+	if err != nil {
+		t.Fatalf("ChooseProbeSet(203.0.113.0/24) error: %v", err)
+	}
+	if got != ProbeSetICMP {
+		t.Errorf("routed = %q, want icmp", got)
+	}
+
+	if _, err := ChooseProbeSet("not-a-cidr"); err == nil {
+		t.Error("expected error for invalid CIDR")
 	}
 }
 

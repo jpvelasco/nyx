@@ -402,6 +402,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"subnet":        {Type: "string", Description: "CIDR notation subnet to scan, e.g. 10.0.10.0/24"},
 					"scan_timing":   {Type: "number", Description: "nmap -T timing template (0-5, default 4)"},
 					"scan_min_rate": {Type: "number", Description: "nmap --min-rate packets/sec (default 500)"},
+					"scan_probes":   {Type: "string", Description: "host-discovery probes: auto (default — ARP for directly-attached subnets, icmp echo for routed), arp, icmp, or default"},
 				},
 				Required: []string{"subnet"},
 			},

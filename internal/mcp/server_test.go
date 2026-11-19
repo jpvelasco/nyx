@@ -536,6 +536,26 @@ func TestDispatchDiscoverSubnet_TimingRange(t *testing.T) {
 	}
 }
 
+func TestDispatchDiscoverSubnet_UnknownProbes(t *testing.T) {
+	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "discover_subnet", map[string]interface{}{
+		"subnet":      "203.0.113.0/24",
+		"scan_probes": "bogus",
+	})
+	if !isErr || !strings.Contains(text, "unknown probe set") {
+		t.Errorf("got (%q, %v), want unknown probe set error", text, isErr)
+	}
+}
+
+func TestDispatchDiscoverSubnet_ArpNotAttached(t *testing.T) {
+	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "discover_subnet", map[string]interface{}{
+		"subnet":      "203.0.113.0/24",
+		"scan_probes": "arp",
+	})
+	if !isErr || !strings.Contains(text, "directly-attached") {
+		t.Errorf("got (%q, %v), want directly-attached error", text, isErr)
+	}
+}
+
 func TestDispatchCheckRoutes_EmptyTarget(t *testing.T) {
 	text, isErr := newTestServer().DispatchToolForTest(context.Background(), "check_routes", map[string]interface{}{})
 	if !isErr || !strings.Contains(text, "target parameter") {
@@ -2142,6 +2162,7 @@ func (s *stubOmadaSvc) PlanLAN(_ context.Context, opts service.OmadaOptions, req
 }
 
 func TestDispatchOmadaPlanApplyLAN(t *testing.T) {
+	hermeticCreds(t)
 	stub := &stubOmadaSvc{}
 	args := map[string]interface{}{"host": "omada.local", "client_id": "a", "client_secret": "b", "name": "iot"}
 	text, isErr := serverWithOmadaStub(stub).DispatchToolForTest(context.Background(), "omada_plan_lan", args)
