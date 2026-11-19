@@ -1506,7 +1506,7 @@ func (s *Server) toolOmadaListLogs(ctx context.Context, args map[string]interfac
 			return nil, err
 		}
 		page.Data = slices.Clone(page.Data)
-		includeContent := argBoolDefault(args, "include_content", false)
+		includeContent := argBoolDefault(args, "include_content", false) && os.Getenv("NYX_MCP_ALLOW_OMADA_LOG_CONTENT") == "true"
 		for i := range page.Data {
 			event := &page.Data[i]
 			event.ID = ""

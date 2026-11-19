@@ -3369,6 +3369,12 @@ func TestDispatchOmadaListLogs(t *testing.T) {
 		t.Fatalf("event log metadata = %q (failed=%v)", text, failed)
 	}
 	args["include_content"] = true
+	t.Setenv("NYX_MCP_ALLOW_OMADA_LOG_CONTENT", "")
+	text, failed = server.DispatchToolForTest(t.Context(), "omada_list_logs", args)
+	if failed || strings.Contains(text, `"content"`) {
+		t.Fatalf("event log without operator opt-in = %q (failed=%v)", text, failed)
+	}
+	t.Setenv("NYX_MCP_ALLOW_OMADA_LOG_CONTENT", "true")
 	text, failed = server.DispatchToolForTest(t.Context(), "omada_list_logs", args)
 	if failed || !strings.Contains(text, "Client connected from") || strings.Contains(text, "10.0.10.123") || strings.Contains(text, "private-") {
 		t.Fatalf("redacted event log text = %q (failed=%v)", text, failed)
