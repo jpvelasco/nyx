@@ -317,3 +317,13 @@ func TestOpnsenseService_ConnectFailure(t *testing.T) {
 		t.Fatalf("Info error = %v, want connect failure", err)
 	}
 }
+
+func TestOpnsenseServiceCheckPrivileges(t *testing.T) {
+	server := opnsenseTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	rows, err := NewOpnsenseService().CheckPrivileges(t.Context(), opnsenseOptions(server))
+	if err != nil || len(rows) != 8 || rows[0] != "/firewall/alias/get\tusable" {
+		t.Fatalf("privilege report = %v, error = %v", rows, err)
+	}
+}

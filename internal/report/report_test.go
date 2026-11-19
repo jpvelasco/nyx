@@ -928,3 +928,31 @@ func TestRenderHuman_CRLFInEvidence_BulletCount(t *testing.T) {
 		t.Errorf("expected 2 bullets from CRLF evidence, got %d: %s", bulletCount, output)
 	}
 }
+
+func TestRenderACLDriftRuleNames(t *testing.T) {
+	r := models.NewCheckResult("opnsense", "acl_drift", "opnsense", "opnsense")
+	r.Observed["live_but_undeclared"] = []string{"filter/two\nlines"}
+	var text bytes.Buffer
+	RenderHuman(&text, &models.AuditReport{Findings: []models.CheckResult{*r}})
+	if !strings.Contains(text.String(), `live but undeclared: "filter/two\nlines"`) {
+		t.Fatalf("human output %q", text.String())
+	}
+}
+
+func TestOmitControllerACLNamesProjection(t *testing.T) {
+	finding := models.NewCheckResult("opnsense", "acl_drift", "opnsense", "opnsense")
+	finding.Observed["live_but_undeclared"] = []string{"private label"}
+	original := &models.AuditReport{Findings: []models.CheckResult{*finding, {CheckType: "isolation"}}}
+	projected := OmitControllerACLNames(original)
+	if _, exists := projected.Findings[0].Observed["live_but_undeclared"]; exists || projected.Findings[0].Observed["live_but_undeclared_count"] != 1 {
+		t.Fatalf("unexpected projection %+v", projected.Findings[0].Observed)
+	}
+	if _, exists := original.Findings[0].Observed["live_but_undeclared"]; !exists {
+		t.Fatal("private report lost its controller label")
+	}
+	var text bytes.Buffer
+	RenderHuman(&text, projected)
+	if strings.Contains(text.String(), "private label") {
+		t.Fatal("default report exposed the controller label")
+	}
+}

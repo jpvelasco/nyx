@@ -299,8 +299,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 82 {
-		t.Fatalf("expected 82 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 85 {
+		t.Fatalf("expected 85 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -309,7 +309,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "credentials_status", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_plan_port", "omada_apply_port_profile", "omada_plan_lan", "omada_apply_lan", "omada_list_ssids", "omada_plan_ssid", "omada_apply_ssid", "opnsense_get_info", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_get_firewall_rule", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_vlans", "opnsense_plan_vlan", "opnsense_apply_vlan", "opnsense_plan_filter", "opnsense_apply_filter", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_unbound_settings", "opnsense_list_unbound_overrides", "opnsense_get_unbound_status", "opnsense_plan_unbound_override", "opnsense_apply_unbound_override", "opnsense_plan_dhcp", "opnsense_apply_dhcp", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_list_kea_subnets", "opnsense_list_kea_reservations", "opnsense_list_wireguard_servers", "opnsense_list_wireguard_clients", "opnsense_get_wireguard_status", "opnsense_inventory", "topology"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "credentials_status", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_list_logs", "omada_plan_port", "omada_apply_port_profile", "omada_plan_lan", "omada_apply_lan", "omada_list_ssids", "omada_plan_ssid", "omada_apply_ssid", "opnsense_get_info", "opnsense_firewall_log", "opnsense_firewall_log_stats", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_get_firewall_rule", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_vlans", "opnsense_plan_vlan", "opnsense_apply_vlan", "opnsense_plan_filter", "opnsense_apply_filter", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_unbound_settings", "opnsense_list_unbound_overrides", "opnsense_get_unbound_status", "opnsense_plan_unbound_override", "opnsense_apply_unbound_override", "opnsense_plan_dhcp", "opnsense_apply_dhcp", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_list_kea_subnets", "opnsense_list_kea_reservations", "opnsense_list_wireguard_servers", "opnsense_list_wireguard_clients", "opnsense_get_wireguard_status", "opnsense_inventory", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -1496,13 +1496,20 @@ func TestDispatchOpnsenseListClients(t *testing.T) {
 	stub := &stubOpnsenseSvc{clients: []service.OpnsenseClient{
 		{MAC: "aa:bb:cc:dd:ee:ff", IP: "10.0.10.5", Hostname: "nas"},
 	}}
-	text, isErr := serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_list_clients", map[string]interface{}{
+	s := serverWithOpnsenseStub(stub)
+	args := map[string]interface{}{
 		"host": "fw.local", "api_key": "key1", "api_secret": "secret1",
-	})
+	}
+	text, isErr := s.DispatchToolForTest(context.Background(), "opnsense_list_clients", args)
 	if isErr {
 		t.Fatalf("unexpected error: %s", text)
 	}
-	if !strings.Contains(text, `"hostname": "nas"`) {
+	if strings.Contains(text, `"hostname"`) || !strings.Contains(text, `"ip": "10.0.10.5"`) {
+		t.Fatalf("default clients JSON = %s", text)
+	}
+	args["include_hostnames"] = true
+	text, isErr = s.DispatchToolForTest(context.Background(), "opnsense_list_clients", args)
+	if isErr || !strings.Contains(text, `"hostname": "nas"`) {
 		t.Errorf("expected clients JSON, got: %s", text)
 	}
 }
@@ -1617,6 +1624,7 @@ func TestDispatchOpnsenseWireGuard(t *testing.T) {
 }
 
 func TestDispatchOpnsenseInventory(t *testing.T) {
+	t.Setenv("NYX_MCP_ALLOW_FIREWALL_DETAILS", "")
 	stub := &stubOpnsenseSvc{inventory: &service.OpnsenseInventory{
 		Host:              "fw.local",
 		ControllerVersion: "24.7.11_2",
@@ -1635,12 +1643,34 @@ func TestDispatchOpnsenseInventory(t *testing.T) {
 	if !strings.Contains(text, `"controller_version": "24.7.11_2"`) ||
 		!strings.Contains(text, `"client_count": 2`) ||
 		!strings.Contains(text, `"firewall_rule_count": 3`) ||
+		!strings.Contains(text, `"untrusted_data": true`) ||
 		!strings.Contains(text, `"network_gateways"`) {
 		t.Errorf("expected inventory JSON, got: %s", text)
 	}
 	if strings.Contains(text, "secret1") {
 		t.Error("tool output must not echo the API secret")
 	}
+	if stub.lastOpts.IncludeFirewallDetails {
+		t.Fatal("MCP inventory included private details by default")
+	}
+	args := map[string]interface{}{"host": "fw.local", "api_key": "key1", "api_secret": "secret1", "include_firewall_details": true}
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_inventory", args)
+	if !isErr || !strings.Contains(text, "operator opt-in") || stub.lastOpts.IncludeFirewallDetails {
+		t.Fatalf("inventory bypassed operator gate: %s", text)
+	}
+	t.Setenv("NYX_MCP_ALLOW_FIREWALL_DETAILS", "true")
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_inventory", args)
+	if isErr {
+		t.Fatalf("unexpected opt-in error: %s", text)
+	}
+
+	if !strings.Contains(text, `"untrusted_data": true`) {
+		t.Errorf("missing inventory trust marker: %s", text)
+	}
+	if !stub.lastOpts.IncludeFirewallDetails {
+		t.Fatal("MCP inventory did not forward the explicit opt-in")
+	}
+
 }
 
 func TestDispatchOpnsense_ServiceError(t *testing.T) {
@@ -2249,6 +2279,14 @@ func sliceEqInt(a, b []int) bool {
 }
 
 // stubOpnsenseSvc is a hermetic stand-in for the OPNsense observation surface.
+func (s *stubOpnsenseSvc) FirewallLog(_ context.Context, _ service.OpnsenseOptions, _ service.OpnsenseFirewallLogQuery) (service.OpnsenseFirewallLogPage, error) {
+	return service.OpnsenseFirewallLogPage{}, nil
+}
+
+func (s *stubOpnsenseSvc) FirewallLogStats(_ context.Context, _ service.OpnsenseOptions, _ int, _ string) ([]service.OpnsenseFirewallLogStat, error) {
+	return nil, nil
+}
+
 type stubOpnsenseSvc struct {
 	info         *service.OpnsenseInfo
 	interfaces   []service.OpnsenseInterface
@@ -3289,5 +3327,56 @@ func TestDispatchPortForwardPlaybook(t *testing.T) {
 		"external_port": "443", "target": "10.0.40.10",
 	}); !isErr || !strings.Contains(text, "at least one provider") {
 		t.Errorf("no providers must be an actionable error, got (%q, %v)", text, isErr)
+	}
+}
+
+func TestOpnsenseAliasDetailsPrivacy(t *testing.T) {
+	t.Setenv("NYX_MCP_ALLOW_FIREWALL_DETAILS", "")
+	stub := &stubOpnsenseSvc{aliases: []service.OpnsenseAlias{{Name: "trusted", Addresses: []string{"192.0.2.10"}}}}
+	server := serverWithOpnsenseStub(stub)
+	args := map[string]interface{}{"host": "fw.example", "api_key": "fixture-key", "api_secret": "fixture-secret"}
+	text, failed := server.DispatchToolForTest(t.Context(), "opnsense_list_aliases", args)
+	if failed || strings.Contains(text, "192.0.2.10") {
+		t.Fatalf("default response %s", text)
+	}
+	args["include_firewall_details"] = true
+	if _, failed := server.DispatchToolForTest(t.Context(), "opnsense_list_aliases", args); !failed {
+		t.Fatal("missing operator gate")
+	}
+	t.Setenv("NYX_MCP_ALLOW_FIREWALL_DETAILS", "true")
+	text, failed = server.DispatchToolForTest(t.Context(), "opnsense_list_aliases", args)
+	if failed || !strings.Contains(text, "192.0.2.10") || !strings.Contains(text, `"untrusted_data": true`) {
+		t.Fatalf("detailed response %s", text)
+	}
+}
+
+func (s *stubOmadaSvc) ListEventLogs(_ context.Context, _ service.OmadaOptions, _ service.OmadaEventLogQuery) (service.OmadaEventLogPage, error) {
+	var page service.OmadaEventLogPage
+	if err := json.Unmarshal([]byte(`{"totalRows":2,"data":[{"id":"private-id","key":"private-key","module":"System","content":"Client connected from 10.0.10.123"},{"module":"private-module","content":"untrusted test text"}]}`), &page); err != nil {
+		return page, err
+	}
+	return page, s.err
+}
+
+func TestDispatchOmadaListLogs(t *testing.T) {
+	stub := &stubOmadaSvc{}
+	server := serverWithOmadaStub(stub)
+	args := map[string]interface{}{
+		"host": "controller.example", "client_id": "fixture-client", "client_secret": "fixture-secret", "since": "30d",
+	}
+	text, failed := server.DispatchToolForTest(t.Context(), "omada_list_logs", args)
+	if failed || !strings.Contains(text, `"totalRows": 2`) || !strings.Contains(text, `"module": "Other"`) || strings.Contains(text, `"content"`) || strings.Contains(text, "private-") {
+		t.Fatalf("event log metadata = %q (failed=%v)", text, failed)
+	}
+	args["include_content"] = true
+	t.Setenv("NYX_MCP_ALLOW_OMADA_LOG_CONTENT", "")
+	text, failed = server.DispatchToolForTest(t.Context(), "omada_list_logs", args)
+	if failed || strings.Contains(text, `"content"`) {
+		t.Fatalf("event log without operator opt-in = %q (failed=%v)", text, failed)
+	}
+	t.Setenv("NYX_MCP_ALLOW_OMADA_LOG_CONTENT", "true")
+	text, failed = server.DispatchToolForTest(t.Context(), "omada_list_logs", args)
+	if failed || !strings.Contains(text, "Client connected from") || strings.Contains(text, "10.0.10.123") || strings.Contains(text, "private-") {
+		t.Fatalf("redacted event log text = %q (failed=%v)", text, failed)
 	}
 }

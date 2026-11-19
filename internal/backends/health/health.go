@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -17,13 +18,14 @@ import (
 
 // PingStats captures detailed ping statistics
 type PingStats struct {
-	Target   string  `json:"target"`
-	Sent     int     `json:"sent"`
-	Received int     `json:"received"`
-	LossPct  float64 `json:"loss_pct"`
-	AvgRTTMs float64 `json:"avg_rtt_ms"`
-	MinRTTMs float64 `json:"min_rtt_ms"`
-	MaxRTTMs float64 `json:"max_rtt_ms"`
+	MedianRTTMs *float64 `json:"median_rtt_ms,omitempty"`
+	Target      string   `json:"target"`
+	Sent        int      `json:"sent"`
+	Received    int      `json:"received"`
+	LossPct     float64  `json:"loss_pct"`
+	AvgRTTMs    float64  `json:"avg_rtt_ms"`
+	MinRTTMs    float64  `json:"min_rtt_ms"`
+	MaxRTTMs    float64  `json:"max_rtt_ms"`
 }
 
 // MTUResult captures MTU discovery results
@@ -35,6 +37,7 @@ type MTUResult struct {
 
 // pingOutputParsers hold platform-specific regex patterns
 var (
+	reReplyRTT       = regexp.MustCompile(`(?mi)^(?:[0-9]+ bytes from|Reply from)[^\n]*\btime[=<]([0-9]+(?:\.[0-9]+)?)\s*ms`)
 	rePktLossLinux   = regexp.MustCompile(`(\d+(?:\.\d+)?)% packet loss`)
 	reAvgRTTLinux    = regexp.MustCompile(`rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)/`)
 	rePktLossWindows = regexp.MustCompile(`\((\d+)% loss\)`)
@@ -83,6 +86,9 @@ func PingCheck(ctx context.Context, target string, count int) (*models.CheckResu
 	}
 	if stats.MaxRTTMs > 0 {
 		statsMap["max_rtt_ms"] = stats.MaxRTTMs
+	}
+	if stats.MedianRTTMs != nil {
+		statsMap["median_rtt_ms"] = *stats.MedianRTTMs
 	}
 	result.Observed = statsMap
 
@@ -161,9 +167,12 @@ func classifyLatencyLoss(stats *PingStats, maxLatencyMs float64, maxLossPct floa
 		violations = append(violations, fmt.Sprintf("loss %.1f%% exceeds limit %.1f%%", stats.LossPct, maxLossPct))
 	}
 
-	// Check latency
-	if maxLatencyMs > 0 && stats.AvgRTTMs > maxLatencyMs {
-		violations = append(violations, fmt.Sprintf("latency %.1fms exceeds limit %.1fms", stats.AvgRTTMs, maxLatencyMs))
+	latency, statistic := stats.AvgRTTMs, "mean"
+	if stats.MedianRTTMs != nil {
+		latency, statistic = *stats.MedianRTTMs, "median"
+	}
+	if maxLatencyMs > 0 && latency > maxLatencyMs {
+		violations = append(violations, fmt.Sprintf("latency %.1fms exceeds limit %.1fms (%s of %d replies, mean %.1fms)", latency, maxLatencyMs, statistic, stats.Received, stats.AvgRTTMs))
 	}
 
 	if len(violations) > 0 {
@@ -181,6 +190,26 @@ func EvaluatePingOutput(output, target string, count int, maxLatencyMs, maxLossP
 	return classifyLatencyLoss(stats, maxLatencyMs, maxLossPct)
 }
 
+// medianReplyRTT uses complete samples and falls back to the reported mean when
+// a reply format is unrecognized or the output omits individual replies.
+func medianReplyRTT(output string, received int) *float64 {
+	matches := reReplyRTT.FindAllStringSubmatch(output, -1)
+	if received == 0 || len(matches) != received {
+		return nil
+	}
+	samples := make([]float64, 0, received)
+	for _, match := range matches {
+		value, err := strconv.ParseFloat(match[1], 64)
+		if err != nil {
+			return nil
+		}
+		samples = append(samples, value)
+	}
+	slices.Sort(samples)
+	median := (samples[(received-1)/2] + samples[received/2]) / 2
+	return &median
+}
+
 // parsePingOutputAnyFormat extracts ping stats from output whose producing
 // platform is unknown — a probe host may run a different OS than the local
 // machine, so the output format is detected from its content (the Windows
@@ -195,6 +224,7 @@ func parsePingOutputAnyFormat(output string, target string, count int) *PingStat
 	default:
 		parseLinuxPingOutput(output, stats)
 	}
+	stats.MedianRTTMs = medianReplyRTT(output, stats.Received)
 	return stats
 }
 
@@ -303,6 +333,7 @@ func parsePingOutput(output string, target string, count int) *PingStats {
 		parseLinuxPingOutput(output, stats)
 	}
 
+	stats.MedianRTTMs = medianReplyRTT(output, stats.Received)
 	return stats
 }
 

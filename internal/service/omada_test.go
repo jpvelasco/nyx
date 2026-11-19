@@ -57,6 +57,8 @@ func TestOmadaServiceInventory(t *testing.T) {
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[{"mac":"aa","name":"PC-01","type":"wired"},{"mac":"bb","name":"PC-02","type":"wired"}]}`)
 		case "/openapi/v1/abc123/sites/s1/setting/service/dhcp/user-list":
 			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
+		case "/openapi/v1/abc123/sites/s1/setting/service/mdns":
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"m1","name":"media","status":true,"type":1,"profileIds":["p1"],"osg":{"serviceNetworks":["n2"],"clientNetworks":["n1"]}}]}`)
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -90,6 +92,9 @@ func TestOmadaServiceInventory(t *testing.T) {
 	}
 	if sw.Scope != "switch" || sw.RuleCount != 0 {
 		t.Errorf("switch scope = %+v, want 0 rules", sw)
+	}
+	if inv.MDNS == nil || inv.MDNS.Status != "available" || len(inv.MDNS.Rules) != 1 || inv.MDNS.Rules[0].Name != "media" {
+		t.Errorf("mDNS = %+v, want one available media rule", inv.MDNS)
 	}
 	if len(inv.Warnings) != 0 {
 		t.Errorf("warnings = %v, want none", inv.Warnings)

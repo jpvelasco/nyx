@@ -210,7 +210,7 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: fmt.Sprintf("Import from %s and immediately run a live audit", p.Name()),
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			dur, err := parseTimeoutFlag(timeout)
 			if err != nil {
 				return err
@@ -241,6 +241,10 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 			if outputPath != "" {
 				defer w.Close()
 			}
+			includeACLNames, _ := cmd.Flags().GetBool("include-acl-names")
+			if !includeACLNames {
+				result.Report = report.OmitControllerACLNames(result.Report)
+			}
 			if jsonOutput {
 				return renderAuditReport(w, result.Report)
 			}
@@ -249,12 +253,14 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 		},
 	}
 	addProviderFlags(cmd, p.Name())
+	cmd.Flags().Bool("include-acl-names", false, "Include private controller ACL labels in the audit report")
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name")
 	cmd.Flags().BoolVar(&providerDebug, "debug", false, "Print raw API responses to stderr")
 	return cmd
 }
 
 func buildInventoryCmd(p providers.Provider) *cobra.Command {
+	var includeFirewallDetails bool
 	cmd := &cobra.Command{
 		Use:   "inventory",
 		Short: fmt.Sprintf("Show the current %s site inventory (devices, networks, ACL scopes, clients)", p.Name()),
@@ -275,6 +281,7 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 
 			opts := providerImportOptions(p.Name())
 			opts.Debug = providerDebug
+			opts.IncludeFirewallDetails = includeFirewallDetails
 			if err := requireProviderHost(opts, p.Name()); err != nil {
 				return err
 			}
@@ -297,6 +304,9 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 	addProviderFlags(cmd, p.Name())
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name (defaults to first site)")
 	cmd.Flags().BoolVar(&providerDebug, "debug", false, "Print raw API responses to stderr")
+	if p.Name() == "opnsense" {
+		cmd.Flags().BoolVar(&includeFirewallDetails, "include-firewall-details", false, "Include private rule endpoints and configured alias members")
+	}
 	return cmd
 }
 
