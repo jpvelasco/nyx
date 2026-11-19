@@ -835,3 +835,13 @@ func TestSetReplayIsIdempotentAndRetried(t *testing.T) {
 		t.Errorf("set issued %d POSTs, want 2 (transient retry)", sets)
 	}
 }
+
+func TestClassifyStatusQuotesEndpoint(t *testing.T) {
+	const path = "/firewall/filter/search_rule\nexample text"
+	for _, code := range []int{http.StatusForbidden, http.StatusNotFound, http.StatusBadRequest, http.StatusInternalServerError} {
+		err := classifyStatus(&http.Response{StatusCode: code}, path)
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%q", path)) || strings.Contains(err.Error(), "\n") {
+			t.Errorf("status %d: error = %q, want escaped endpoint", code, err)
+		}
+	}
+}
