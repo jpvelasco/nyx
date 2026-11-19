@@ -88,7 +88,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) (*htt
 			}
 			lastErr = tlsutil.Annotate(fmt.Errorf("connecting to OPNsense at %s: %w", c.host, err))
 		} else {
-			if c.Debug {
+			if c.Debug && firewallLogPrivilege(strings.TrimPrefix(req.URL.Path, "/api")) == "" {
 				c.debugDump(resp, method, path)
 			}
 			lastErr = c.classifyStatus(resp, path)
@@ -137,6 +137,10 @@ func (c *Client) classifyStatus(resp *http.Response, path string) error {
 		return &stableError{fmt.Errorf("authentication failed — check API key and secret")}
 	}
 	if resp.StatusCode == http.StatusForbidden {
+		endpoint, _, _ := strings.Cut(path, "?")
+		if privilege := firewallLogPrivilege(endpoint); privilege != "" {
+			return &stableError{fmt.Errorf("permission denied: grant %s to the API user", privilege)}
+		}
 		return &stableError{fmt.Errorf("permission denied: %s on OPNsense at %s — the API user lacks the privilege for this endpoint; grant the matching page privilege to the user (System ‣ Access ‣ Users)", path, c.host)}
 	}
 	if resp.StatusCode == http.StatusNotFound {

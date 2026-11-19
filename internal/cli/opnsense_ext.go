@@ -17,6 +17,8 @@ import (
 
 func buildOpnsenseExtraCommands() []*cobra.Command {
 	return []*cobra.Command{
+		buildOpnsenseFirewallLogCmd(),
+		buildOpnsenseFirewallLogStatsCmd(),
 		buildOpnsenseListCmd("list-vlans", "List configured VLAN devices", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 			return service.NewOpnsenseService().ListVLANs(ctx, opts)
 		}),
