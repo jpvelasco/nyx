@@ -33,6 +33,35 @@ type Inventory struct {
 	Devices            []InventoryDevice `yaml:"devices" json:"devices"`
 	NetworkGateways    map[string]string `yaml:"network_gateways,omitempty" json:"network_gateways,omitempty"`
 	ACLScopes          []ACLScopeStatus  `yaml:"acl_scopes,omitempty" json:"acl_scopes,omitempty"`
+	MDNS               *MDNSInventory    `yaml:"mdns,omitempty" json:"mdns,omitempty"`
+}
+
+// MDNSInventory records whether the controller exposed its site's repeater rules.
+type MDNSInventory struct {
+	Status string     `yaml:"status" json:"status"` // available | api-unavailable | unknown
+	Rules  []MDNSRule `yaml:"rules" json:"rules"`
+}
+
+// MDNSRule reports the controller's configured AP VLANs or gateway networks.
+// Gateway network and Bonjour profile references are controller IDs.
+type MDNSRule struct {
+	ID         string        `yaml:"id" json:"id"`
+	Name       string        `yaml:"name" json:"name"`
+	Enabled    bool          `yaml:"status" json:"status"`
+	ProfileIDs []string      `yaml:"profileIds" json:"profileIds"`
+	Type       int           `yaml:"type" json:"type"` // 0 by VLAN ID, 1 by network
+	AP         *MDNSVLAN     `yaml:"ap,omitempty" json:"ap,omitempty"`
+	Gateway    *MDNSNetworks `yaml:"osg,omitempty" json:"osg,omitempty"`
+}
+
+type MDNSVLAN struct {
+	Service string `yaml:"serviceVlan" json:"serviceVlan"`
+	Client  string `yaml:"clientVlan" json:"clientVlan"`
+}
+
+type MDNSNetworks struct {
+	Service []string `yaml:"serviceNetworks" json:"serviceNetworks"`
+	Client  []string `yaml:"clientNetworks" json:"clientNetworks"`
 }
 
 // InventoryDevice is one managed device observed at import time.
