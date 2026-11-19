@@ -60,7 +60,7 @@ func TestDefaultBackendPing(t *testing.T) {
 	ctx := context.Background()
 	b := NewDefaultBackend()
 
-	result, err := b.Ping(ctx, "127.0.0.1")
+	result, err := b.Ping(ctx, "127.0.0.1", nil)
 	if err != nil {
 		t.Fatalf("unexpected ping error: %v", err)
 	}
@@ -293,12 +293,12 @@ func TestMockBackendSystemMethods(t *testing.T) {
 	t.Run("Ping", func(t *testing.T) {
 		pr := &system.PingResult{Reachable: true}
 		m := &MockBackend{PingResult: pr}
-		got, err := m.Ping(ctx, "10.0.0.1")
+		got, err := m.Ping(ctx, "10.0.0.1", nil)
 		if err != nil || got != pr {
 			t.Fatalf("got %+v, err %v", got, err)
 		}
 		m = &MockBackend{PingErr: BackendError("boom")}
-		if _, err := m.Ping(ctx, "10.0.0.1"); err == nil {
+		if _, err := m.Ping(ctx, "10.0.0.1", nil); err == nil {
 			t.Fatal("expected error")
 		}
 	})

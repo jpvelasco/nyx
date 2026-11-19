@@ -72,7 +72,7 @@ func (s *CheckService) CheckVPN(ctx context.Context, target string) *models.Chec
 // Callers must call result.Finish() before rendering.
 func (s *CheckService) Ping(ctx context.Context, target string) *models.CheckResult {
 	result := models.NewCheckResult("system", "ping", "local", target)
-	pingResult, err := s.Backend.Ping(ctx, target)
+	pingResult, err := s.Backend.Ping(ctx, target, nil)
 	if err != nil {
 		result.Status = models.StatusError
 		result.Summary = fmt.Sprintf("ping failed: %v", err)
