@@ -167,3 +167,19 @@ tests) — do not port the old PowerShell probe scripts verbatim.
   `lan-networks` rows carry `purpose` as `integer(int32)` (0: VLAN,
   1: interface) — pinned in BDD S3.3; `acls/osw-acls` and `acls/osg-acls`
   work without a `type` query.
+
+## mDNS repeater inventory
+
+The published `getMdnsGrid` operation lists a site's configured repeater
+rules with `GET sites/{siteId}/setting/service/mdns`. Its paged response
+includes rule status, Bonjour profile IDs, and either AP VLANs or gateway
+network IDs. The operation is site-scoped and provides no per-gateway rule
+assignment or runtime verification.
+
+`nyx omada inventory` and MCP `omada_inventory` report the observed rules. A
+successful empty response is reported as zero rules. A controller that rejects
+the documented operation with `-1600` reports `mdns: api-unavailable (UI-only;
+configuration unknown)`. Other read failures report `unknown`. The remaining
+inventory is still returned.
+
+[TP-Link hardware controller 6.3.0 operation schema](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/getMdnsGrid.json)
