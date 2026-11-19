@@ -98,6 +98,16 @@ func TestOmadaServiceExportLogs_FilenameFallback(t *testing.T) {
 	}
 }
 
+func TestOmadaServiceExportLogs_WriteError(t *testing.T) {
+	ts := omadaTestServer(t, omadaLogExportHandler("attachment; filename=LogList_1.zip"))
+	opts := OmadaOptions{Host: ts.URL, ClientID: "a", ClientSecret: "b", SkipTLSVerify: true}
+	missing := filepath.Join(t.TempDir(), "no-such-dir", "logs.zip")
+	_, err := NewOmadaService().ExportLogs(t.Context(), opts, omada.LogExportCSV, missing)
+	if err == nil || !strings.Contains(err.Error(), "saving log export") {
+		t.Fatalf("write error = %v, want the wrapped save failure", err)
+	}
+}
+
 func TestOmadaServiceExportLogs_Errors(t *testing.T) {
 	// invalid format is rejected before the export request is made
 	ts := omadaTestServer(t, omadaLogExportHandler("attachment; filename=x.zip"))

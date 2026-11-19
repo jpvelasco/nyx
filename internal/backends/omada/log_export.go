@@ -40,13 +40,11 @@ func (c *Client) ExportLogs(ctx context.Context, siteIDs []string, format int) (
 	if format != LogExportCSV && format != LogExportXLSX {
 		return out, fmt.Errorf("export format must be %d (csv) or %d (xlsx)", LogExportCSV, LogExportXLSX)
 	}
-	payload, err := json.Marshal(struct {
+	// The payload is a struct of strings and an int, so Marshal cannot fail.
+	payload, _ := json.Marshal(struct {
 		SiteIDs []string `json:"siteIds"`
 		Format  int      `json:"format"`
 	}{siteIDs, format})
-	if err != nil {
-		return out, fmt.Errorf("marshaling log export request: %w", err)
-	}
 	filename, data, err := c.doDownloadLocked(ctx, http.MethodPost, c.requestURL("logs/export"), "logs/export", "application/json", payload)
 	if err != nil {
 		return out, logExportError(err)

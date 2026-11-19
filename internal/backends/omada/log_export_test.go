@@ -3,6 +3,7 @@ package omada
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -73,6 +74,31 @@ func TestExportLogsValidation(t *testing.T) {
 			_, err := c.ExportLogs(context.Background(), tc.sites, tc.format)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("error = %v, want contains %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestLogExportError(t *testing.T) {
+	if err := logExportError(nil); err != nil {
+		t.Fatalf("logExportError(nil) = %v, want nil", err)
+	}
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"canceled", context.Canceled, "log export: context canceled"},
+		{"deadline", context.DeadlineExceeded, "log export: context deadline exceeded"},
+		{"no attachment", errNoAttachment, "log export failed: the controller returned a JSON response"},
+		{"api error", &apiError{StatusCode: 502, Msg: "controller returned HTTP 502"}, "log export failed: controller returned HTTP 502"},
+		{"transport", errors.New("dial tcp: i/o timeout"), "log export failed: transport or protocol error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := logExportError(tc.err)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("logExportError(%v) = %v, want contains %q", tc.err, err, tc.want)
 			}
 		})
 	}
@@ -234,7 +260,10 @@ func TestAttachmentFilename(t *testing.T) {
 		"":                                      "",
 		"attachment; filename=..%2F..%2Fpasswd": "..%2F..%2Fpasswd",
 		"attachment; filename=../../etc/passwd": "", // unparseable token
-		"attachment; filename=C:\\logs\\LogList.zip": "", // unparseable token
+		"attachment; filename=C:\\logs\\LogList.zip":      "", // unparseable token
+		`attachment; filename="2026-11-19/LogList.zip"`:   "LogList.zip",
+		`attachment; filename="C:\logs\LogList.zip"`:      "LogList.zip",
+		`attachment; filename="sub/dir/deep/LogList.zip"`: "LogList.zip",
 		"inline": "",
 	}
 	for in, want := range cases {
