@@ -24,10 +24,16 @@ var (
 // buildOmadaExtraCommands builds the omada-only extra subcommands.
 func buildOmadaExtraCommands() []*cobra.Command {
 	return []*cobra.Command{
+		buildOmadaControllerFirmwareCmd(),
+		buildOmadaFirmwareCmd(),
 		buildOmadaUplinkInfoCmd(),
+		buildOmadaLogsCmd(),
 		buildOmadaSwitchPortsCmd(),
+		buildOmadaAPChannelsCmd(),
 		buildOmadaLanProfilesCmd(),
+		buildOmadaSiteConfigCmd(),
 		buildOmadaListSSIDsCmd(),
+		buildOmadaWLANOptimizationCmd(),
 		buildOmadaPlanCmd(),
 		buildOmadaApplyACLCmd(),
 		buildOmadaPlanPortCmd(),
@@ -39,6 +45,33 @@ func buildOmadaExtraCommands() []*cobra.Command {
 		buildOmadaPlanNatCmd(),
 		buildOmadaApplyNatCmd(),
 	}
+}
+
+func buildOmadaControllerFirmwareCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "controller-firmware",
+		Short: "Check hardware controller firmware against vendor and published versions",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return withProviderSession("omada", func(ctx context.Context, opts providers.ImportOptions) error {
+				result, err := service.NewOmadaService().ControllerFirmware(ctx, toOmadaOptions(opts))
+				if err != nil {
+					return err
+				}
+				if jsonOutput {
+					return printJSON(result)
+				}
+				fmt.Printf("%s: %s\n", result.Status, result.Summary)
+				for _, version := range []struct{ label, value string }{{"Current", result.Current}, {"Latest", result.Latest}, {"Published reference", result.Reference}} {
+					if version.value != "" {
+						fmt.Printf("%s: %q\n", version.label, version.value)
+					}
+				}
+				return nil
+			})
+		},
+	}
+	addProviderFlags(cmd, "omada")
+	return cmd
 }
 
 func buildOmadaUplinkInfoCmd() *cobra.Command {

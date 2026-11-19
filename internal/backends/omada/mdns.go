@@ -41,12 +41,12 @@ func (c *Client) fetchMDNSInventory(ctx context.Context, siteID string) *intent.
 // scrubMDNSRule removes control and formatting characters before controller
 // values reach either a terminal or an agent consuming structured inventory.
 func scrubMDNSRule(rule *intent.MDNSRule) {
-	rule.ID = scrubMDNSText(rule.ID)
-	rule.Name = scrubMDNSText(rule.Name)
+	rule.ID = stripControllerFormatting(rule.ID)
+	rule.Name = stripControllerFormatting(rule.Name)
 	scrubMDNSIDs(rule.ProfileIDs)
 	if rule.AP != nil {
-		rule.AP.Service = scrubMDNSText(rule.AP.Service)
-		rule.AP.Client = scrubMDNSText(rule.AP.Client)
+		rule.AP.Service = stripControllerFormatting(rule.AP.Service)
+		rule.AP.Client = stripControllerFormatting(rule.AP.Client)
 	}
 	if rule.Gateway != nil {
 		scrubMDNSIDs(rule.Gateway.Service)
@@ -56,11 +56,11 @@ func scrubMDNSRule(rule *intent.MDNSRule) {
 
 func scrubMDNSIDs(ids []string) {
 	for i, id := range ids {
-		ids[i] = scrubMDNSText(id)
+		ids[i] = stripControllerFormatting(id)
 	}
 }
 
-func scrubMDNSText(text string) string {
+func stripControllerFormatting(text string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return -1

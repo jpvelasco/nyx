@@ -206,6 +206,26 @@ When an `acl_check` fails, read `inventory.acl_scopes` first: `rule_count: 0` me
 
 - **Drift is your friend.** A "no drift" report is the best feeling. It means everything is still holding.
 
+### Declare the edge provider
+
+Set `edge: opnsense` on a network when OPNsense owns its firewall and NAT.
+Set `observer: omada` on the same network when Omada only observes it.
+For example, the `trusted` segment can declare the following relationship.
+
+```yaml
+networks:
+  - name: trusted
+    cidr: 10.0.10.0/24
+    edge: opnsense
+    observer: omada
+```
+
+An `acl_check` or `nat_check` with `network: trusted` uses that segment's edge.
+An explicit `provider` must agree with the edge when a network is selected.
+Assertions without a network keep their existing provider selection.
+`nyx opnsense inventory --spec <file>` includes the declared edge and observer
+relationships alongside observed inventory. The same flag works with Omada.
+
 ### Inspect OPNsense firewall states
 
 `nyx opnsense states list` queries one page of the pf state table. Use

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
+	"github.com/jpvelasco/nyx/internal/intent"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/report"
 	"github.com/jpvelasco/nyx/internal/storepath"
@@ -210,7 +211,7 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: fmt.Sprintf("Import from %s and immediately run a live audit", p.Name()),
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			dur, err := parseTimeoutFlag(timeout)
 			if err != nil {
 				return err
@@ -241,6 +242,10 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 			if outputPath != "" {
 				defer w.Close()
 			}
+			includeACLNames, _ := cmd.Flags().GetBool("include-acl-names")
+			if !includeACLNames {
+				result.Report = report.OmitControllerACLNames(result.Report)
+			}
 			if jsonOutput {
 				return renderAuditReport(w, result.Report)
 			}
@@ -249,16 +254,27 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 		},
 	}
 	addProviderFlags(cmd, p.Name())
+	cmd.Flags().Bool("include-acl-names", false, "Include private controller ACL labels in the audit report")
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name")
 	cmd.Flags().BoolVar(&providerDebug, "debug", false, "Print raw API responses to stderr")
 	return cmd
 }
 
 func buildInventoryCmd(p providers.Provider) *cobra.Command {
+	var includeFirewallDetails bool
+	var inventorySpec string
 	cmd := &cobra.Command{
 		Use:   "inventory",
 		Short: fmt.Sprintf("Show the current %s site inventory (devices, networks, ACL scopes, clients)", p.Name()),
 		RunE: func(_ *cobra.Command, _ []string) error {
+			var segmentEdges []intent.SegmentEdge
+			if inventorySpec != "" {
+				spec, err := intent.LoadSpec(inventorySpec)
+				if err != nil {
+					return err
+				}
+				segmentEdges = spec.SegmentEdges()
+			}
 			inv, ok := p.(providers.InventoryProvider)
 			if !ok {
 				return fmt.Errorf("provider %q does not support inventory", p.Name())
@@ -275,6 +291,7 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 
 			opts := providerImportOptions(p.Name())
 			opts.Debug = providerDebug
+			opts.IncludeFirewallDetails = includeFirewallDetails
 			if err := requireProviderHost(opts, p.Name()); err != nil {
 				return err
 			}
@@ -288,15 +305,32 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 			if jsonOutput {
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
+				if len(segmentEdges) > 0 {
+					return enc.Encode(struct {
+						*providers.ProviderInventory
+						SegmentEdges []intent.SegmentEdge `json:"segment_edges"`
+					}{res, segmentEdges})
+				}
 				return enc.Encode(res)
 			}
 			fmt.Print(res.Human)
+			for _, segment := range segmentEdges {
+				fmt.Printf("  %s: edge=%s", segment.Network, segment.Edge)
+				if segment.Observer != "" {
+					fmt.Printf(" observer=%s", segment.Observer)
+				}
+				fmt.Println()
+			}
 			return nil
 		},
 	}
 	addProviderFlags(cmd, p.Name())
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name (defaults to first site)")
 	cmd.Flags().BoolVar(&providerDebug, "debug", false, "Print raw API responses to stderr")
+	if p.Name() == "opnsense" {
+		cmd.Flags().BoolVar(&includeFirewallDetails, "include-firewall-details", false, "Include private rule endpoints and configured alias members")
+	}
+	cmd.Flags().StringVar(&inventorySpec, "spec", "", "Include declared segment edge and observer relationships")
 	return cmd
 }
 

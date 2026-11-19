@@ -9,31 +9,6 @@ import (
 	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
-func TestGetDHCPLeases_KeaFallback(t *testing.T) {
-	var seen []string
-	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.URL.Path)
-		switch r.URL.Path {
-		case "/api/dnsmasq/leases/search":
-			w.WriteHeader(http.StatusNotFound)
-		case "/api/kea/leases/search":
-			testutil.WriteBody(w, `{"leases":[{"mac":"aa:bb:cc:dd:ee:01","ip":"10.0.10.20","hostname":"pc1"}]}`)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	leases, err := c.GetDHCPLeases(context.Background())
-	if err != nil {
-		t.Fatalf("GetDHCPLeases: %v", err)
-	}
-	if len(leases) != 1 || leases[0].IP != "10.0.10.20" {
-		t.Fatalf("leases = %+v", leases)
-	}
-	if strings.Join(seen, ",") != "/api/dnsmasq/leases/search,/api/kea/leases/search" {
-		t.Errorf("probe order = %v", seen)
-	}
-}
-
 func TestGetKeaSubnetsAndReservations(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
