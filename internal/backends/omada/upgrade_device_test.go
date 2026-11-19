@@ -8,6 +8,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
 func TestUpgradeDevice(t *testing.T) {
@@ -58,6 +61,61 @@ func TestUpgradeDevice(t *testing.T) {
 			result, err := client.UpgradeDevice(context.Background(), "s1", "AA:BB:CC:DD:EE:00", "1.1.0", strings.NewReader("synthetic image"), confirmed)
 			if err != nil || (confirmed && (result.Status != "verified" || result.ObservedFirmware != "1.1.0" || result.TaskID != "task")) || (!confirmed && (result.Status != "dry_run" || uploaded.Load() || started.Load())) {
 				t.Fatalf("upgrade = %+v, %v", result, err)
+			}
+		})
+	}
+}
+
+func TestUpgradeDeviceFailures(t *testing.T) {
+	for _, tc := range []struct{ name, mac, observed, image, failPath, failResponse, want string }{
+		{name: "invalid target", mac: "invalid", want: "requires a MAC"},
+		{name: "missing device", want: "target device was not found"},
+		{name: "already current", observed: "2.0.0", want: ""},
+		{name: "empty image", observed: "1.0.0", want: "image must contain"},
+		{name: "upload rejected", observed: "1.0.0", image: "fixture", failPath: "upgrade-file", failResponse: `{"errorCode":-39021}`, want: "uploading device image"},
+		{name: "missing image ID", observed: "1.0.0", image: "fixture", failPath: "upgrade-file", failResponse: `{"errorCode":0,"result":{}}`, want: "did not return an image ID"},
+		{name: "start rejected", observed: "1.0.0", image: "fixture", failPath: "start-manually-upgrade", failResponse: `{"errorCode":-39020}`, want: "starting device firmware upgrade"},
+		{name: "missing task ID", observed: "1.0.0", image: "fixture", failPath: "start-manually-upgrade", failResponse: `{"errorCode":0,"result":{}}`, want: "did not return an upgrade task ID"},
+		{name: "wrong verified version", observed: "1.0.0", image: "fixture", want: "last observed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.failPath != "" && strings.HasSuffix(r.URL.Path, "/"+tc.failPath) {
+					testutil.WriteBody(w, tc.failResponse)
+					return
+				}
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/networks/devices"):
+					if tc.observed == "" {
+						writeEnvelope(w, 0, "", `[]`)
+						return
+					}
+					writeEnvelope(w, 0, "", `[{"mac":"AA-BB-CC-DD-EE-00","firmwareVersion":"`+tc.observed+`"}]`)
+				case strings.HasSuffix(r.URL.Path, "/devices/upgrade-file"):
+					writeEnvelope(w, 0, "", `{"fileId":"image"}`)
+				case strings.HasSuffix(r.URL.Path, "/start-manually-upgrade"):
+					writeEnvelope(w, 0, "", `{"taskId":"task"}`)
+				case strings.HasSuffix(r.URL.Path, "/manually-upgrade-tasks/task"):
+					writeEnvelope(w, 0, "", `{"finished":true}`)
+				default:
+					t.Errorf("unexpected path %s", r.URL.Path)
+				}
+			}))
+			mac := tc.mac
+			if mac == "" {
+				mac = "AA:BB:CC:DD:EE:00"
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			got, err := client.UpgradeDevice(ctx, "s1", mac, "2.0.0", strings.NewReader(tc.image), true)
+			if tc.want == "" {
+				if err != nil || got.Status != "already_current" {
+					t.Fatalf("upgrade = %+v, %v; want already current", got, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("upgrade = %+v, %v; want %q", got, err, tc.want)
 			}
 		})
 	}
