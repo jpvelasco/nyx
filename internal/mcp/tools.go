@@ -1492,7 +1492,7 @@ func (s *Server) toolOpnsenseFirewallLog(ctx context.Context, args map[string]in
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense firewall log request failed: %v", err))
 	}
-	if argBoolDefault(args, "metadata_only", false) {
+	if argBoolDefault(args, "metadata_only", true) {
 		return firewallLogResult(map[string]any{"row_count": len(rows.Rows), "next_before": rows.NextBefore})
 	}
 	return firewallLogResult(rows)
@@ -1511,7 +1511,7 @@ func (s *Server) toolOpnsenseFirewallLogStats(ctx context.Context, args map[stri
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense firewall log stats request failed: %v", err))
 	}
-	if argBoolDefault(args, "metadata_only", false) {
+	if argBoolDefault(args, "metadata_only", true) {
 		return firewallLogResult(map[string]int{"group_count": len(rows)})
 	}
 	return firewallLogResult(rows)
