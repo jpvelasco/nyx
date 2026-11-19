@@ -547,6 +547,13 @@ assertions:
                     provider, policy, expect: enforced
                 </div>
             </div>
+            <div class="spec-card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6">
+                <div class="font-semibold text-slate-900 dark:text-white">acl_drift</div>
+                <p>Set <code>provider</code> to <code>omada</code> or <code>opnsense</code> to compare declared policy names with stored rules. Missing declarations on the controller fail. Extra stored rules and unreadable collections warn. Disabled rules count as stored. To check enforcement, use <code>acl_check</code>. Audit reports count undeclared rules. To include private controller labels in local CLI reports, pass <code>--include-acl-names</code>.</p>
+                <p>Policies can specify <code>scope</code> as <code>gateway</code> or <code>switch</code> for Omada, or <code>filter</code> for OPNsense. An unscoped name can match any observed collection for its provider. Provider imports include this assertion. Older specs with an <code>acl_check</code> receive the same comparison for that provider.</p>
+                <p>Audits with policies or an ACL comparison also warn when a measured isolation gateway is unreachable in a direction without a declared policy. The measurement comes from an existing isolation assertion. Silence alone cannot identify the cause.</p>
+            </div>
+
         </div>
     </div>
 

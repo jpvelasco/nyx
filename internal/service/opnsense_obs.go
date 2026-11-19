@@ -235,3 +235,19 @@ func flattenRoutes(in []opnsensebackend.KernelRoute) []OpnsenseKernelRoute {
 	}
 	return out
 }
+
+type OpnsenseFirewallLogQuery = opnsensebackend.FirewallLogQuery
+type OpnsenseFirewallLogPage = opnsensebackend.FirewallLogPage
+
+// FirewallLog reads and filters one page of firewall packet logs.
+func (s *OpnsenseService) FirewallLog(ctx context.Context, opts OpnsenseOptions, query OpnsenseFirewallLogQuery) (OpnsenseFirewallLogPage, error) {
+	return s.client(opts).GetFirewallLog(ctx, query)
+}
+
+// OpnsenseFirewallLogStat is one controller log count.
+type OpnsenseFirewallLogStat = opnsensebackend.FirewallLogStat
+
+// FirewallLogStats reads aggregate counts from the controller.
+func (s *OpnsenseService) FirewallLogStats(ctx context.Context, opts OpnsenseOptions, limit int, groupBy string) ([]OpnsenseFirewallLogStat, error) {
+	return s.client(opts).GetFirewallLogStats(ctx, limit, groupBy)
+}

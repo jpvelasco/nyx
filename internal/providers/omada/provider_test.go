@@ -656,6 +656,8 @@ func TestProviderInventory(t *testing.T) {
 				{"ipAddress":"10.0.0.50","macAddress":"aa","name":"trusted-pc","netId":"n1","netName":"Trusted"},
 				{"ipAddress":"10.0.1.51","macAddress":"bb","name":"iot-pc","netId":"n2","netName":"IoT"}
 			]}`)
+		case "/openapi/v1/abc123/sites/s1/setting/service/mdns":
+			writeEnvelope(w, -1600, "", `null`)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -669,6 +671,9 @@ func TestProviderInventory(t *testing.T) {
 	}
 	if res.Site != "HQ" || res.ClientCount != 2 {
 		t.Errorf("site/count = %q/%d, want HQ/2", res.Site, res.ClientCount)
+	}
+	if res.Inventory.MDNS == nil || res.Inventory.MDNS.Status != "api-unavailable" || !strings.Contains(res.Human, "mdns: api-unavailable (UI-only; configuration unknown)") {
+		t.Errorf("mDNS API unavailability missing from inventory: structured=%+v, human=%s", res.Inventory.MDNS, res.Human)
 	}
 	if res.Inventory.ControllerCategory != "advanced" {
 		t.Errorf("controller_category = %q, want advanced", res.Inventory.ControllerCategory)

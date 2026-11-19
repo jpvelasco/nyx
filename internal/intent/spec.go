@@ -33,6 +33,35 @@ type Inventory struct {
 	Devices            []InventoryDevice `yaml:"devices" json:"devices"`
 	NetworkGateways    map[string]string `yaml:"network_gateways,omitempty" json:"network_gateways,omitempty"`
 	ACLScopes          []ACLScopeStatus  `yaml:"acl_scopes,omitempty" json:"acl_scopes,omitempty"`
+	MDNS               *MDNSInventory    `yaml:"mdns,omitempty" json:"mdns,omitempty"`
+}
+
+// MDNSInventory records whether the controller exposed its site's repeater rules.
+type MDNSInventory struct {
+	Status string     `yaml:"status" json:"status"` // available | api-unavailable | unknown
+	Rules  []MDNSRule `yaml:"rules" json:"rules"`
+}
+
+// MDNSRule reports the controller's configured AP VLANs or gateway networks.
+// Gateway network and Bonjour profile references are controller IDs.
+type MDNSRule struct {
+	ID         string        `yaml:"id" json:"id"`
+	Name       string        `yaml:"name" json:"name"`
+	Enabled    bool          `yaml:"status" json:"status"`
+	ProfileIDs []string      `yaml:"profileIds" json:"profileIds"`
+	Type       int           `yaml:"type" json:"type"` // 0 by VLAN ID, 1 by network
+	AP         *MDNSVLAN     `yaml:"ap,omitempty" json:"ap,omitempty"`
+	Gateway    *MDNSNetworks `yaml:"osg,omitempty" json:"osg,omitempty"`
+}
+
+type MDNSVLAN struct {
+	Service string `yaml:"serviceVlan" json:"serviceVlan"`
+	Client  string `yaml:"clientVlan" json:"clientVlan"`
+}
+
+type MDNSNetworks struct {
+	Service []string `yaml:"serviceNetworks" json:"serviceNetworks"`
+	Client  []string `yaml:"clientNetworks" json:"clientNetworks"`
 }
 
 // InventoryDevice is one managed device observed at import time.
@@ -86,6 +115,7 @@ type Probe struct {
 
 // Policy defines network access rules
 type Policy struct {
+	Scope  string            `yaml:"scope,omitempty" json:"scope,omitempty"` // optional rule collection: gateway, switch, or filter
 	Name   string            `yaml:"name" json:"name"`
 	From   string            `yaml:"from" json:"from"`
 	To     string            `yaml:"to" json:"to"`
@@ -262,6 +292,9 @@ func validatePolicies(policies []Policy) error {
 		if p.Name == "" {
 			return fmt.Errorf("policy[%d]: name is required", i)
 		}
+		if p.Scope != "" && p.Scope != "gateway" && p.Scope != "switch" && p.Scope != "filter" {
+			return fmt.Errorf("policy %q: scope must be gateway, switch, or filter", p.Name)
+		}
 		if p.Action != "allow" && p.Action != "deny" {
 			return fmt.Errorf("policy %q: action must be 'allow' or 'deny'", p.Name)
 		}
@@ -301,6 +334,7 @@ var assertionValidators = map[string]func(int, *Assertion) error{
 	"dns_check":        validateDNSCheckAssertion,
 	"network_health":   validateNetworkHealthAssertion,
 	"acl_check":        validateACLCheckAssertion,
+	"acl_drift":        validateACLDriftAssertion,
 	"nat_check":        validateNatCheckAssertion,
 }
 
@@ -416,6 +450,16 @@ func validateNetworkHealthAssertion(i int, a *Assertion) error {
 		// and loss only — a declared MTU expectation would be silently
 		// unevaluated on the remote path, so reject it up front.
 		return fmt.Errorf("assertion[%d]: network_health: expect_mtu is not supported by probe runners — the probe measures reachability, latency, and loss only", i)
+	}
+	return nil
+}
+
+func validateACLDriftAssertion(i int, a *Assertion) error {
+	if a.Provider != "omada" && a.Provider != "opnsense" {
+		return fmt.Errorf("assertion[%d]: acl_drift requires provider omada or opnsense", i)
+	}
+	if a.Runner != "" && a.Runner != "local" {
+		return fmt.Errorf("assertion[%d]: acl_drift reads controller rules locally", i)
 	}
 	return nil
 }

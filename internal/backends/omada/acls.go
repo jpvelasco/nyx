@@ -67,6 +67,14 @@ func intsContain(set []int, want int) bool {
 // ACLType is the controller's ACL scope: gateway, switch, or EAP.
 type ACLType int
 
+// Scope is the collection label for a fetched ACL type.
+func (t ACLType) Scope() string {
+	if t == ACLTypeGateway {
+		return "gateway"
+	}
+	return "switch"
+}
+
 // ScopeFromLabel maps an agent-facing scope label to its ACL type. EAP
 // rules are not supported by the mutation surface (their wire shape has not
 // been observed), so it is deliberately not accepted here.
@@ -236,9 +244,12 @@ type ACLList struct {
 // switch rules, osg-acls for gateway rules. An empty list is success (no
 // rules in that scope).
 func (c *Client) FetchACLs(ctx context.Context, siteID string, typ ACLType) (ACLList, error) {
-	rules, _, err := fetchPaged[ACLRule](ctx, c, aclScopePath(siteID, typ), defaultPageSize)
+	rules, total, err := fetchPaged[ACLRule](ctx, c, aclScopePath(siteID, typ), defaultPageSize)
 	if err != nil {
 		return ACLList{}, fmt.Errorf("fetching ACL rules (type %d): %w", typ, err)
+	}
+	if total > len(rules) {
+		return ACLList{}, fmt.Errorf("incomplete %s ACL inventory: %d of %d rows", typ.Scope(), len(rules), total)
 	}
 	if rules == nil {
 		rules = []ACLRule{}
