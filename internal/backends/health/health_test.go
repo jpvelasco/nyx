@@ -1534,3 +1534,15 @@ rtt min/avg/max/mdev = 0.4/81.0/242.0/113.9 ms`
 		t.Fatalf("status = %v, want pass: %s", status, summary)
 	}
 }
+
+func TestEvaluatePingOutputWindowsMedian(t *testing.T) {
+	output := `Reply from 192.0.2.1: bytes=32 time<1ms TTL=64
+Reply from 192.0.2.1: bytes=32 time=35ms TTL=64
+Reply from 192.0.2.1: bytes=32 time=60ms TTL=64
+Packets: Sent = 3, Received = 3, Lost = 0 (0% loss),
+Minimum = 0ms, Maximum = 60ms, Average = 31ms`
+	status, _, summary := EvaluatePingOutput(output, "192.0.2.1", 3, 32, 0)
+	if status != models.StatusFail || !strings.Contains(summary, "median of 3 replies, mean 31.0ms") {
+		t.Fatalf("status = %v, summary = %q, want median threshold failure", status, summary)
+	}
+}
