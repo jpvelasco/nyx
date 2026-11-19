@@ -475,8 +475,8 @@ func TestMatchNetworks_InvalidCIDR(t *testing.T) {
 			{Name: "net1", CIDR: "invalid-cidr"},
 		},
 	}
-	ips := []net.IP{net.ParseIP("10.0.0.1")}
-	got := matchNetworks(ips, spec)
+	ips := []system.PingSource{{IP: net.ParseIP("10.0.60.15"), Interface: "eth0"}}
+	got := matchNetworks(ips, spec).Networks
 	if len(got) != 0 {
 		t.Errorf("expected no matches for invalid CIDR, got %v", got)
 	}
@@ -485,11 +485,11 @@ func TestMatchNetworks_InvalidCIDR(t *testing.T) {
 func TestMatchNetworks_NoMatch(t *testing.T) {
 	spec := &intent.Spec{
 		Networks: []intent.Network{
-			{Name: "net1", CIDR: "10.0.0.0/24"},
+			{Name: "net1", CIDR: "10.0.60.0/24"},
 		},
 	}
-	ips := []net.IP{net.ParseIP("192.168.1.1")}
-	got := matchNetworks(ips, spec)
+	ips := []system.PingSource{{IP: net.ParseIP("10.0.11.20"), Interface: "eth0"}}
+	got := matchNetworks(ips, spec).Networks
 	if len(got) != 0 {
 		t.Errorf("expected no matches, got %v", got)
 	}
@@ -1251,7 +1251,7 @@ func TestRunIsolation_IsolationViolation(t *testing.T) {
 	}
 	eng := NewEngine(spec)
 	eng.Backend = mock
-	eng.runnerCtx = models.RunnerContext{Networks: []string{"fromnet"}}
+	eng.runnerCtx = testRunnerInFromnet(spec)
 	a := intent.Assertion{Type: "isolation", From: "fromzone", To: "tozone", Expect: "deny"}
 	result, err := eng.runIsolation(context.Background(), a)
 	if err != nil {
@@ -1275,7 +1275,7 @@ func TestRunIsolation_ConnectivityFailure(t *testing.T) {
 	}
 	eng := NewEngine(spec)
 	eng.Backend = mock
-	eng.runnerCtx = models.RunnerContext{Networks: []string{"fromnet"}}
+	eng.runnerCtx = testRunnerInFromnet(spec)
 	a := intent.Assertion{Type: "isolation", From: "fromzone", To: "tozone", Expect: "allow"}
 	result, err := eng.runIsolation(context.Background(), a)
 	if err != nil {
@@ -1299,10 +1299,7 @@ func TestRunIsolation_IsolationConfirmedFromInsideZone(t *testing.T) {
 	}
 	eng := NewEngine(spec)
 	eng.Backend = mock
-	eng.runnerCtx = models.RunnerContext{
-		LocalIPs: []string{"10.0.0.50"},
-		Networks: []string{"fromnet"},
-	}
+	eng.runnerCtx = testRunnerInFromnet(spec)
 	a := intent.Assertion{Type: "isolation", From: "fromzone", To: "tozone", Expect: "deny"}
 	result, err := eng.runIsolation(context.Background(), a)
 	if err != nil {
@@ -1350,7 +1347,7 @@ func TestRunIsolation_TargetAsNetworkName(t *testing.T) {
 	}
 	eng := NewEngine(spec)
 	eng.Backend = mock
-	eng.runnerCtx = models.RunnerContext{Networks: []string{"fromnet"}}
+	eng.runnerCtx = testRunnerInFromnet(spec)
 	a := intent.Assertion{Type: "isolation", From: "fromzone", To: "tonet", Expect: "allow"}
 	result, err := eng.runIsolation(context.Background(), a)
 	if err != nil {
@@ -1373,13 +1370,13 @@ func TestRunIsolation_CommaListTarget(t *testing.T) {
 	newEng := func(mock *backends.MockBackend) *Engine {
 		eng := NewEngine(spec)
 		eng.Backend = mock
-		eng.runnerCtx = models.RunnerContext{Networks: []string{"fromnet"}}
+		eng.runnerCtx = testRunnerInFromnet(spec)
 		return eng
 	}
 
 	t.Run("deny with all targets blocked passes", func(t *testing.T) {
 		mock := &backends.MockBackend{
-			PingResultFunc: func(string) *system.PingResult { return &system.PingResult{} },
+			PingResult: &system.PingResult{},
 		}
 		a := intent.Assertion{Type: "isolation", From: "fromzone", To: "tonet, twonet", Expect: "deny"}
 		result, err := newEng(mock).runIsolation(context.Background(), a)
@@ -1399,7 +1396,7 @@ func TestRunIsolation_CommaListTarget(t *testing.T) {
 
 	t.Run("deny with any target reachable fails", func(t *testing.T) {
 		mock := &backends.MockBackend{
-			PingResultFunc: func(target string) *system.PingResult {
+			PingResultFunc: func(target string, _ *system.PingSource) *system.PingResult {
 				return &system.PingResult{Reachable: target == "10.0.2.1"}
 			},
 		}
@@ -1415,7 +1412,7 @@ func TestRunIsolation_CommaListTarget(t *testing.T) {
 
 	t.Run("duplicate names resolve once", func(t *testing.T) {
 		mock := &backends.MockBackend{
-			PingResultFunc: func(string) *system.PingResult { return &system.PingResult{} },
+			PingResult: &system.PingResult{},
 		}
 		a := intent.Assertion{Type: "isolation", From: "fromzone", To: "tonet,tonet,twonet", Expect: "deny"}
 		result, err := newEng(mock).runIsolation(context.Background(), a)
@@ -1445,7 +1442,7 @@ func TestRunIsolation_UnverifiableFromZone(t *testing.T) {
 	eng := NewEngine(spec)
 	eng.Backend = mock
 	// Don't set runnerCtx.Networks → runner not in from zone
-	eng.runnerCtx = models.RunnerContext{}
+	eng.runnerCtx = runnerContext{}
 	a := intent.Assertion{Type: "isolation", From: "fromzone", To: "tozone", Expect: "allow"}
 	result, err := eng.runIsolation(context.Background(), a)
 	if err != nil {
@@ -1531,7 +1528,7 @@ func TestRun_AggregationStatusFail(t *testing.T) {
 	}
 	eng := NewEngine(spec)
 	eng.Backend = mock
-	eng.runnerCtx = models.RunnerContext{}
+	eng.runnerCtx = runnerContext{}
 	eng.seenDB = seendb.New()
 	report, err := eng.Run(context.Background())
 	if err != nil {
@@ -2194,12 +2191,12 @@ func TestMatchNetworks_Match(t *testing.T) {
 	spec := &intent.Spec{
 		Version: 1, Site: "test",
 		Networks: []intent.Network{
-			{Name: "net1", CIDR: "10.0.0.0/24"},
-			{Name: "net2", CIDR: "192.168.1.0/24"},
+			{Name: "net1", CIDR: "10.0.60.0/24"},
+			{Name: "net2", CIDR: "10.0.11.0/24"},
 		},
 	}
-	ips := []net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("8.8.8.8")}
-	matched := matchNetworks(ips, spec)
+	ips := []system.PingSource{{IP: net.ParseIP("10.0.60.15"), Interface: "eth0"}, {IP: net.ParseIP("10.0.50.5"), Interface: "eth1"}}
+	matched := matchNetworks(ips, spec).Networks
 	if len(matched) != 1 || matched[0] != "net1" {
 		t.Errorf("expected [net1], got %v", matched)
 	}

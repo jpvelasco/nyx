@@ -980,12 +980,15 @@ func TestVerifyIsolationCmd_Spec_RunnerOutsideFromZone(t *testing.T) {
 }
 
 func TestVerifyIsolationCmd_Spec_RunnerInsideFromZone(t *testing.T) {
-	// The from-zone wraps this host's own address, so the engine's runner
-	// context places it inside the source zone and the verdict is definitive:
-	// the to-zone gateway is loopback, which is reachable on every platform,
-	// so isolation is violated.
+	// Enumerate the real source as the CLI would. A fake ping replies only
+	// when the command binds that address, independent of the host's routes.
 	saveRestoreGlobals(t)
 	ip := hostIPv4(t)
+	t.Setenv("NYX_TEST_SOURCE", ip)
+	fakeCommandOnPATH(t, "ping",
+		`case " $* " in *" $NYX_TEST_SOURCE "*) echo '3 packets transmitted, 3 received, 0% packet loss';; *) exit 2;; esac`,
+		`if not "%~6"=="%NYX_TEST_SOURCE%" exit /b 2`+"\r\n"+`echo Reply from 127.0.0.1: bytes=32 time=1ms TTL=64`,
+	)
 	specFile = isolationSpec(t, ip+"/32", ip)
 	isolationFrom = "lan"
 	isolationTo = "iot"

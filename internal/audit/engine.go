@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/jpvelasco/nyx/internal/backends"
+	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/seendb"
@@ -82,15 +83,15 @@ type Engine struct {
 	Spec              *intent.Spec
 	Interface         string
 	WarnVirtual       bool
-	SkipTLSVerify     bool                 // allow self-signed TLS certs (like curl -k)
-	CACertPath        string               // path to custom CA cert PEM file
-	SkipHostKeyVerify bool                 // skip SSH host key verification for probes
-	SeenDBPath        string               // if non-empty, overrides ~/.nyx/seen.json (used in tests)
-	CredentialsPath   string               // if non-empty, overrides ~/.nyx/credentials.json (used in tests)
-	Backend           backends.Backend     // backend abstraction; nil means use default
-	Logger            *slog.Logger         // structured logger; nil means use default stderr logger
-	runnerCtx         models.RunnerContext // populated once at Run() time
-	seenDB            *seendb.SeenDB       // populated once at Run() time
+	SkipTLSVerify     bool             // allow self-signed TLS certs (like curl -k)
+	CACertPath        string           // path to custom CA cert PEM file
+	SkipHostKeyVerify bool             // skip SSH host key verification for probes
+	SeenDBPath        string           // if non-empty, overrides ~/.nyx/seen.json (used in tests)
+	CredentialsPath   string           // if non-empty, overrides ~/.nyx/credentials.json (used in tests)
+	Backend           backends.Backend // backend abstraction; nil means use default
+	Logger            *slog.Logger     // structured logger; nil means use default stderr logger
+	runnerCtx         runnerContext    // populated once at Run() time
+	seenDB            *seendb.SeenDB   // populated once at Run() time
 }
 
 // NewEngine creates an audit engine for a spec
@@ -227,150 +228,109 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 		Audit:    e.Spec.Site,
 		Status:   models.ComputeOverallStatus(findings),
 		Summary:  models.Tally(findings),
-		Runner:   e.runnerCtx,
+		Runner:   e.runnerCtx.RunnerContext,
 		Findings: findings,
 	}
 	return report, nil
 }
 
-// matchNetworks returns the names of spec networks whose CIDRs contain at least
-// one of the given IPs. This helper consolidates the CIDR-matching loop shared by
-// localRunnerContext and pickBestInterface.
-func matchNetworks(ips []net.IP, spec *intent.Spec) []string {
-	var matched []string
+// runnerContext keeps the source addresses used to establish network membership
+// alongside the public report. Interface bindings are needed only while probing.
+type runnerContext struct {
+	models.RunnerContext
+	sources map[string]system.PingSource
+}
+
+func matchNetworks(addresses []system.PingSource, spec *intent.Spec) runnerContext {
+	r := runnerContext{sources: make(map[string]system.PingSource)}
+	for _, addr := range addresses {
+		r.LocalIPs = append(r.LocalIPs, addr.IP.String())
+	}
 	for _, n := range spec.Networks {
 		_, cidr, err := net.ParseCIDR(n.CIDR)
 		if err != nil {
 			continue
 		}
-		for _, ip := range ips {
-			if cidr.Contains(ip) {
-				matched = append(matched, n.Name)
+		for _, addr := range addresses {
+			if cidr.Contains(addr.IP) {
+				r.Networks = append(r.Networks, n.Name)
+				r.sources[n.Name] = addr
 				break
 			}
 		}
 	}
-	return matched
+	return r
+}
+
+// interfaceSources returns the IPv4 addresses eligible for local audit probes.
+func interfaceSources(iface net.Interface) []system.PingSource {
+	if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+		return nil
+	}
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return nil
+	}
+	var sources []system.PingSource
+	for _, a := range addrs {
+		var ip net.IP
+		switch v := a.(type) {
+		case *net.IPNet:
+			ip = v.IP
+		case *net.IPAddr:
+			ip = v.IP
+		}
+		if ip.To4() != nil && !ip.IsLoopback() {
+			sources = append(sources, system.PingSource{IP: ip, Interface: iface.Name})
+		}
+	}
+	return sources
 }
 
 // localRunnerContext detects which of the spec networks this machine is inside.
 // If interfaceName is non-empty, only addresses on that specific interface are considered.
-func localRunnerContext(spec *intent.Spec, interfaceName string) models.RunnerContext {
+func localRunnerContext(spec *intent.Spec, interfaceName string) runnerContext {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not enumerate network interfaces: %v\n", err)
-		return models.RunnerContext{}
+		return runnerContext{}
 	}
-
-	var localIPs []net.IP
-	var localIPStrs []string
-
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		if interfaceName != "" && iface.Name != interfaceName {
-			continue // expert mode: only use the chosen interface
-		}
-
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, a := range addrs {
-			var ip net.IP
-			switch v := a.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-			if ip == nil || ip.IsLoopback() || ip.To4() == nil {
-				continue
-			}
-			localIPs = append(localIPs, ip)
-			localIPStrs = append(localIPStrs, ip.String())
-		}
-	}
-
-	matchedNetworks := matchNetworks(localIPs, spec)
 
 	// Smart default for multi-homed machines (noob-friendly)
 	// When no interface was forced, try to pick the "best" one (the one that matches the most spec networks).
 	if interfaceName == "" && len(ifaces) > 1 && len(spec.Networks) > 0 {
 		bestIface := pickBestInterface(ifaces, spec)
 		if bestIface != "" {
-			// Recompute using only the best interface
-			return localRunnerContext(spec, bestIface)
+			interfaceName = bestIface
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: multiple network interfaces, no clear winner for your spec. Use --interface to pick one. (Run 'nyx interfaces' to see the list.)\n")
 		}
-		// Still ambiguous → warn the user
-		fmt.Fprintf(os.Stderr, "warning: multiple network interfaces, no clear winner for your spec. Use --interface to pick one. (Run 'nyx interfaces' to see the list.)\n")
 	}
 
-	return models.RunnerContext{
-		LocalIPs: localIPStrs,
-		Networks: matchedNetworks,
+	var sources []system.PingSource
+	for _, iface := range ifaces {
+		if interfaceName == "" || interfaceName == iface.Name {
+			sources = append(sources, interfaceSources(iface)...)
+		}
 	}
+	return matchNetworks(sources, spec)
 }
 
 // pickBestInterface tries to find the interface that can reach the most networks in the spec.
 // Returns the interface name, or empty if there's no clear winner.
 func pickBestInterface(ifaces []net.Interface, spec *intent.Spec) string {
-	type score struct {
-		name  string
-		count int
-	}
-	var scores []score
-
+	best := 0
+	winner := ""
 	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-
-		var ifaceIPs []net.IP
-		for _, a := range addrs {
-			if ipnet, ok := a.(*net.IPNet); ok && ipnet.IP.To4() != nil {
-				ifaceIPs = append(ifaceIPs, ipnet.IP)
-			}
-		}
-
-		matched := matchNetworks(ifaceIPs, spec)
-		if len(matched) > 0 {
-			scores = append(scores, score{name: iface.Name, count: len(matched)})
+		count := len(matchNetworks(interfaceSources(iface), spec).Networks)
+		switch {
+		case count > best:
+			best, winner = count, iface.Name
+		case count == best:
+			winner = ""
 		}
 	}
-
-	if len(scores) == 0 {
-		return ""
-	}
-
-	// Find the highest score
-	maxCount := 0
-	for _, s := range scores {
-		if s.count > maxCount {
-			maxCount = s.count
-		}
-	}
-
-	// Count how many have the max score
-	winners := 0
-	var winnerName string
-	for _, s := range scores {
-		if s.count == maxCount {
-			winners++
-			winnerName = s.name
-		}
-	}
-
-	if winners == 1 {
-		return winnerName // clear winner
-	}
-	return "" // tie or ambiguous
+	return winner
 }
 
 func (e *Engine) runAssertion(ctx context.Context, a intent.Assertion) (*models.CheckResult, error) {

@@ -557,6 +557,7 @@ func (c *Client) execute(req *http.Request, dest interface{}) error {
 		return fmt.Errorf("decoding response from %s: %w", req.URL.Path, err)
 	}
 
+	var guidance string
 	switch env.ErrorCode {
 	case 0:
 		// success
@@ -567,11 +568,17 @@ func (c *Client) execute(req *http.Request, dest interface{}) error {
 	case -44106:
 		return &apiError{ErrorCode: env.ErrorCode, Msg: "invalid client credentials — check OMADA_CLIENT_ID and OMADA_CLIENT_SECRET"}
 	case -1005:
-		return &apiError{ErrorCode: env.ErrorCode, Msg: "operation forbidden — check account permissions"}
+		guidance = "operation forbidden: check the token’s account, site, and required privileges"
 	case -1600:
-		return &apiError{ErrorCode: env.ErrorCode, Msg: "unsupported request path (errorCode -1600) — this controller rejected the method or path; client-link-topology is POST-only with an empty body, not GET"}
+		guidance = "unsupported request path: check this controller version’s Open API endpoint registry"
+	case -1:
+		guidance = "operation failed: check whether this endpoint applies to the site or edition"
 	default:
 		return &apiError{ErrorCode: env.ErrorCode, Msg: fmt.Sprintf("controller error %d: %s", env.ErrorCode, env.Msg)}
+	}
+
+	if guidance != "" {
+		return &apiError{ErrorCode: env.ErrorCode, Msg: fmt.Sprintf("%s (controller error %d: %s)", guidance, env.ErrorCode, env.Msg)}
 	}
 
 	if dest != nil && len(env.Result) > 0 {
