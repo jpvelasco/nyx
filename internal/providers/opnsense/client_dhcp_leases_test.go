@@ -34,7 +34,7 @@ func TestGetDHCPLeases(t *testing.T) {
 	}{
 		{
 			name:      "enabled dnsmasq with active leases",
-			responses: []response{{path: dnsSettings, body: dnsEnabled}, {path: dnsLeases, body: `{"total":1,"rows":[{"hostname":"printer","address":"10.0.10.20","hwaddr":"aa:bb:cc:dd:ee:01"}]}`}},
+			responses: []response{{path: dnsSettings, body: dnsEnabled}, {path: dnsLeases, body: `{"total":1,"rows":[{"hostname":" printer\u202e\u001b ","address":"10.0.10.20","hwaddr":"aa:bb:cc:dd:ee:01"}]}`}},
 			want:      []DHCPLease{{Hostname: "printer", IP: "10.0.10.20", MAC: "aa:bb:cc:dd:ee:01"}},
 		},
 		{
@@ -52,7 +52,7 @@ func TestGetDHCPLeases(t *testing.T) {
 		},
 		{
 			name:      "legacy response still decodes",
-			responses: []response{{path: dnsSettings, body: dnsEnabled}, {path: dnsLeases, body: `{"leases":[{"hostname":"printer","ip":"10.0.10.20","mac":"aa:bb:cc:dd:ee:01"}]}`}},
+			responses: []response{{path: dnsSettings, body: dnsEnabled}, {path: dnsLeases, body: `{"leases":[{"hostname":" printer\n\u007f ","ip":"10.0.10.20","mac":"aa:bb:cc:dd:ee:01"}]}`}},
 			want:      []DHCPLease{{Hostname: "printer", IP: "10.0.10.20", MAC: "aa:bb:cc:dd:ee:01"}},
 		},
 		{
@@ -124,5 +124,12 @@ func TestGetDHCPLeases(t *testing.T) {
 				t.Errorf("leases = %+v, error = %v, want %+v", got, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestCleanLeaseHostname(t *testing.T) {
+	got := cleanLeaseHostname(" \u202e\x7f" + strings.Repeat("é", 127) + "-extra")
+	if len(got) != 252 || got != strings.Repeat("é", 126) {
+		t.Fatalf("invalid normalized hostname length %d", len(got))
 	}
 }

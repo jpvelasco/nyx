@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -60,6 +63,9 @@ func (c *Client) fetchDHCPLeaseRows(ctx context.Context, path string) ([]DHCPLea
 		return nil, fmt.Errorf("decoding DHCP leases response: %w", err)
 	}
 	if len(result.Leases) > 0 {
+		for i := range result.Leases {
+			result.Leases[i].Hostname = cleanLeaseHostname(result.Leases[i].Hostname)
+		}
 		return result.Leases, nil
 	}
 	leases := make([]DHCPLease, 0, len(result.Rows))
@@ -69,8 +75,23 @@ func (c *Client) fetchDHCPLeaseRows(ctx context.Context, path string) ([]DHCPLea
 			lease := row.DHCPLease
 			lease.IP = firstNonEmpty(row.Address, lease.IP)
 			lease.MAC = firstNonEmpty(row.HWAddr, lease.MAC)
+			lease.Hostname = cleanLeaseHostname(lease.Hostname)
 			leases = append(leases, lease)
 		}
 	}
 	return leases, nil
+}
+
+func cleanLeaseHostname(value string) string {
+	var name strings.Builder
+	for _, r := range strings.TrimSpace(value) {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '.' && r != '-' && r != '_' {
+			continue
+		}
+		if name.Len()+utf8.RuneLen(r) > 253 {
+			break
+		}
+		name.WriteRune(r)
+	}
+	return name.String()
 }
