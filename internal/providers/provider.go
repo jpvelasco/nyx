@@ -13,13 +13,14 @@ import (
 // ClientID/ClientSecret carry the vendor's credential pair: for Omada the
 // Open API client credentials, for OPNsense the API key/secret.
 type ImportOptions struct {
-	Host          string
-	ClientID      string
-	ClientSecret  string
-	Site          string
-	Debug         bool
-	SkipTLSVerify bool
-	CACertPath    string
+	Host                   string
+	ClientID               string
+	ClientSecret           string
+	Site                   string
+	Debug                  bool
+	SkipTLSVerify          bool
+	CACertPath             string
+	IncludeFirewallDetails bool
 	// Logger receives structured operation events (token mint, retries,
 	// refresh) from provider clients. Never contains credentials.
 	Logger *slog.Logger
@@ -113,6 +114,7 @@ type ACLApplyResult struct {
 // scopes and their rule counts, and the active client count. Human is a
 // stable, human-readable rendering.
 type ProviderInventory struct {
+	Details     any               `json:"details,omitempty"`
 	Site        string            `json:"site"`
 	Human       string            `json:"human"`
 	Inventory   *intent.Inventory `json:"inventory"`

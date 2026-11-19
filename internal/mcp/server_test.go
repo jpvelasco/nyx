@@ -1624,6 +1624,7 @@ func TestDispatchOpnsenseWireGuard(t *testing.T) {
 }
 
 func TestDispatchOpnsenseInventory(t *testing.T) {
+	t.Setenv("NYX_MCP_ALLOW_FIREWALL_DETAILS", "")
 	stub := &stubOpnsenseSvc{inventory: &service.OpnsenseInventory{
 		Host:              "fw.local",
 		ControllerVersion: "24.7.11_2",
@@ -1642,12 +1643,34 @@ func TestDispatchOpnsenseInventory(t *testing.T) {
 	if !strings.Contains(text, `"controller_version": "24.7.11_2"`) ||
 		!strings.Contains(text, `"client_count": 2`) ||
 		!strings.Contains(text, `"firewall_rule_count": 3`) ||
+		!strings.Contains(text, `"untrusted_data": true`) ||
 		!strings.Contains(text, `"network_gateways"`) {
 		t.Errorf("expected inventory JSON, got: %s", text)
 	}
 	if strings.Contains(text, "secret1") {
 		t.Error("tool output must not echo the API secret")
 	}
+	if stub.lastOpts.IncludeFirewallDetails {
+		t.Fatal("MCP inventory included private details by default")
+	}
+	args := map[string]interface{}{"host": "fw.local", "api_key": "key1", "api_secret": "secret1", "include_firewall_details": true}
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_inventory", args)
+	if !isErr || !strings.Contains(text, "operator opt-in") || stub.lastOpts.IncludeFirewallDetails {
+		t.Fatalf("inventory bypassed operator gate: %s", text)
+	}
+	t.Setenv("NYX_MCP_ALLOW_FIREWALL_DETAILS", "true")
+	text, isErr = serverWithOpnsenseStub(stub).DispatchToolForTest(context.Background(), "opnsense_inventory", args)
+	if isErr {
+		t.Fatalf("unexpected opt-in error: %s", text)
+	}
+
+	if !strings.Contains(text, `"untrusted_data": true`) {
+		t.Errorf("missing inventory trust marker: %s", text)
+	}
+	if !stub.lastOpts.IncludeFirewallDetails {
+		t.Fatal("MCP inventory did not forward the explicit opt-in")
+	}
+
 }
 
 func TestDispatchOpnsense_ServiceError(t *testing.T) {
@@ -3304,5 +3327,25 @@ func TestDispatchPortForwardPlaybook(t *testing.T) {
 		"external_port": "443", "target": "10.0.40.10",
 	}); !isErr || !strings.Contains(text, "at least one provider") {
 		t.Errorf("no providers must be an actionable error, got (%q, %v)", text, isErr)
+	}
+}
+
+func TestOpnsenseAliasDetailsPrivacy(t *testing.T) {
+	t.Setenv("NYX_MCP_ALLOW_FIREWALL_DETAILS", "")
+	stub := &stubOpnsenseSvc{aliases: []service.OpnsenseAlias{{Name: "trusted", Addresses: []string{"192.0.2.10"}}}}
+	server := serverWithOpnsenseStub(stub)
+	args := map[string]interface{}{"host": "fw.example", "api_key": "fixture-key", "api_secret": "fixture-secret"}
+	text, failed := server.DispatchToolForTest(t.Context(), "opnsense_list_aliases", args)
+	if failed || strings.Contains(text, "192.0.2.10") {
+		t.Fatalf("default response %s", text)
+	}
+	args["include_firewall_details"] = true
+	if _, failed := server.DispatchToolForTest(t.Context(), "opnsense_list_aliases", args); !failed {
+		t.Fatal("missing operator gate")
+	}
+	t.Setenv("NYX_MCP_ALLOW_FIREWALL_DETAILS", "true")
+	text, failed = server.DispatchToolForTest(t.Context(), "opnsense_list_aliases", args)
+	if failed || !strings.Contains(text, "192.0.2.10") || !strings.Contains(text, `"untrusted_data": true`) {
+		t.Fatalf("detailed response %s", text)
 	}
 }

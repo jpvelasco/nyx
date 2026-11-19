@@ -92,9 +92,21 @@ func (o *Provider) Inventory(ctx context.Context, opts providers.ImportOptions) 
 	if err != nil {
 		return nil, err
 	}
+	details := struct {
+		*FirewallInventory
+		FirewallRulesOK    bool `json:"firewall_rules_ok"`
+		FirewallAliasesOK  bool `json:"firewall_aliases_ok"`
+		FirewallRuleCount  int  `json:"firewall_rule_count"`
+		FirewallAliasCount int  `json:"firewall_alias_count"`
+	}{FirewallRulesOK: snap.RulesOK, FirewallAliasesOK: snap.AliasesOK, FirewallRuleCount: len(snap.Rules), FirewallAliasCount: len(snap.Aliases)}
+	if opts.IncludeFirewallDetails {
+		configuration := snap.FirewallInventory()
+		details.FirewallInventory = &configuration
+	}
 	return &providers.ProviderInventory{
 		Site:        "opnsense-firewall",
-		Human:       RenderInventory(snap, "opnsense-firewall"),
+		Details:     details,
+		Human:       RenderInventory(snap, "opnsense-firewall", opts.IncludeFirewallDetails),
 		Inventory:   BuildSpecInventory(snap),
 		ClientCount: snap.LeaseCount(),
 		Warnings:    snap.Warnings,

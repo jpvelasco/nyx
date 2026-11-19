@@ -12,6 +12,8 @@ func opnsensePagePrivilege(path string) string {
 	path = strings.TrimPrefix(path, "api/")
 	path, _, _ = strings.Cut(path, "?")
 	switch {
+	case path == "firewall/alias/search_item":
+		return "Firewall: Aliases"
 	case path == "firewall/filter/search_rule":
 		return "Firewall: Rules [new]"
 	case path == "diagnostics/firewall/log":

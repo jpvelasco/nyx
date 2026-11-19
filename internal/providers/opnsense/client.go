@@ -146,6 +146,7 @@ type FirewallRule struct {
 	Direction   string   `json:"direction,omitempty"`
 	IPProtocol  string   `json:"ipprotocol,omitempty"`
 	Label       string   `json:"description"`
+	Categories  []string `json:"categories,omitempty"`
 	// Disabled is derived from Enabled after decoding.
 	Disabled bool
 }
@@ -478,11 +479,28 @@ func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
 	}
 	out := make([]FirewallRule, 0, len(raw))
 	for _, row := range raw {
+		var fields struct {
+			*FirewallRule
+			Interface  json.RawMessage `json:"interface"`
+			Categories json.RawMessage `json:"categories"`
+			Enabled    json.RawMessage `json:"enabled"`
+		}
 		var rule FirewallRule
-		if err := json.Unmarshal(row, &rule); err != nil {
+		fields.FirewallRule = &rule
+		if err := json.Unmarshal(row, &fields); err != nil {
 			return nil, fmt.Errorf("decoding firewall rule: %w", err)
 		}
-		rule.Disabled = rule.Enabled != "1"
+		if rule.RuleUUID == "" && rule.Action == "" {
+			return nil, fmt.Errorf("firewall rule inventory has an invalid row")
+		}
+		rule.Interface = decodeStringList(fields.Interface)
+		rule.Categories = decodeStringList(fields.Categories)
+		rule.Disabled = !decodeLooseBool(fields.Enabled)
+		if rule.Disabled {
+			rule.Enabled = "0"
+		} else {
+			rule.Enabled = "1"
+		}
 		out = append(out, rule)
 	}
 	return out, nil

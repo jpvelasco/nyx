@@ -260,6 +260,7 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 }
 
 func buildInventoryCmd(p providers.Provider) *cobra.Command {
+	var includeFirewallDetails bool
 	cmd := &cobra.Command{
 		Use:   "inventory",
 		Short: fmt.Sprintf("Show the current %s site inventory (devices, networks, ACL scopes, clients)", p.Name()),
@@ -280,6 +281,7 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 
 			opts := providerImportOptions(p.Name())
 			opts.Debug = providerDebug
+			opts.IncludeFirewallDetails = includeFirewallDetails
 			if err := requireProviderHost(opts, p.Name()); err != nil {
 				return err
 			}
@@ -302,6 +304,9 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 	addProviderFlags(cmd, p.Name())
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name (defaults to first site)")
 	cmd.Flags().BoolVar(&providerDebug, "debug", false, "Print raw API responses to stderr")
+	if p.Name() == "opnsense" {
+		cmd.Flags().BoolVar(&includeFirewallDetails, "include-firewall-details", false, "Include private rule endpoints and configured alias members")
+	}
 	return cmd
 }
 
