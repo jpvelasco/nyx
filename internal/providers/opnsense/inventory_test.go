@@ -209,3 +209,41 @@ func mustSystemInfo(t *testing.T) *SystemInformation {
 	t.Helper()
 	return &SystemInformation{Versions: []string{"OPNsense 24.1.7_2-amd64", "FreeBSD 14.2-RELEASE-p1", "OpenSSL 3.0.13"}}
 }
+
+func TestRenderInventoryConfiguredAliasMembers(t *testing.T) {
+	snap := &InventorySnapshot{
+		AliasesOK: true,
+		Aliases: []Alias{
+			{Name: "servers", Type: "host", Addresses: []string{"192.0.2.1"}},
+			{Name: "disabled", Type: "host", Disabled: true, Addresses: []string{"192.0.2.2"}},
+		},
+		RulesOK: true,
+		Rules:   []FirewallRule{{Action: "pass", Label: "example", Source: "!servers", Destination: "disabled", Disabled: true}},
+	}
+	output := RenderInventory(snap, "firewall.example")
+	for _, want := range []string{`disabled "pass" "example"`, `    "servers": ["192.0.2.1"]`, `disabled "disabled" ("host"): ["192.0.2.2"]`} {
+		if !strings.Contains(output, want) {
+			t.Errorf("inventory does not contain %q: %s", want, output)
+		}
+	}
+	if strings.Contains(output, `    "disabled":`) {
+		t.Errorf("disabled alias was expanded: %s", output)
+	}
+}
+
+func TestFetchInventoryAliasPrivilegeMissing(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/firewall/alias/search_item" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		testutil.WriteBody(w, `{"total":0,"rows":[],"leases":[],"items":[],"interface":{},"interfaces":{},"dnsmasq":{"enable":"0"},"states":{"current":0}}`)
+	}))
+	snapshot, err := c.FetchInventory(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.AliasesOK || !snapshot.RulesOK || !strings.Contains(strings.Join(snapshot.Warnings, "\n"), "firewall aliases unavailable") {
+		t.Fatalf("expected rule inventory and alias privilege warning, got %+v", snapshot)
+	}
+}
