@@ -72,3 +72,13 @@ func TestAttachDetailIgnoresUnparseableSubnet(t *testing.T) {
 		t.Fatalf("detail = %+v, want nil for an unparseable subnet", got[0].Detail)
 	}
 }
+
+func TestAttachDetailSanitizesHostnames(t *testing.T) {
+	segments := []FingerprintSegment{{VLAN: 60, Gateway: ProviderOpnsense}}
+	subnets := []SegmentSubnet{{VLAN: 60, Provider: ProviderOpnsense, Gateway: "10.0.60.1/24"}}
+	hosts := []HostSighting{{Address: "10.0.60.7", Hostname: "\x1b[2J\x1b]0;owned\acam\u202e", Source: ProviderOpnsense}}
+	got := AttachDetail(segments, subnets, hosts, 5)[0].Detail.ProbeCandidates[0].Hostname
+	if want := "[2J]0;ownedcam"; got != want {
+		t.Fatalf("hostname = %q, want %q (control and format runes stripped)", got, want)
+	}
+}

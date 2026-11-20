@@ -4,6 +4,8 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+
+	"github.com/jpvelasco/nyx/internal/textsafe"
 )
 
 // SegmentDetail holds a segment's private addressing. It is attached only
@@ -95,7 +97,9 @@ func probeCandidates(gateway netip.Prefix, hosts []HostSighting, limit int) []Pr
 			continue
 		}
 		seen[addr] = true
-		found = append(found, sighting{addr, ProbeCandidate{Address: addr.String(), Hostname: h.Hostname, Source: h.Source}})
+		// Hostnames are device-chosen (a DHCP client names itself), so
+		// strip anything that could drive or spoof the operator's terminal.
+		found = append(found, sighting{addr, ProbeCandidate{Address: addr.String(), Hostname: textsafe.Printable(h.Hostname), Source: h.Source}})
 	}
 	slices.SortFunc(found, func(a, b sighting) int { return a.addr.Compare(b.addr) })
 	candidates := make([]ProbeCandidate, 0, min(len(found), limit))
