@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/jpvelasco/nyx/internal/textsafe"
 )
 
 // ACL types on the per-scope Open API paths (osw-acls / osg-acls / eap-acls).
@@ -252,7 +254,7 @@ func (r *ACLRule) UnmarshalJSON(data []byte) error {
 }
 
 func normalizeACLName(name string) string {
-	return strings.Join(strings.Fields(stripControllerFormatting(name)), " ")
+	return strings.Join(strings.Fields(textsafe.Printable(name)), " ")
 }
 
 // SwitchACLAppliedStateHint describes the limit of controller ACL readback.

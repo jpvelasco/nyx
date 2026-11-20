@@ -19,3 +19,18 @@ func TestPrintable(t *testing.T) {
 		})
 	}
 }
+
+func TestMessage(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"plain", "radio busy", "radio busy"},
+		{"ansi escape spaced", "\x1b[2Jbad\nstate", "[2Jbad state"},
+		{"bidi and separator spaced", "bad\u202eradio\u2028state", "bad radio state"},
+		{"trimmed", "\tbusy\r\n", "busy"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Message(tc.in); got != tc.want {
+				t.Errorf("Message(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

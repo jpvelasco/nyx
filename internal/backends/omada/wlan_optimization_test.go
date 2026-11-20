@@ -125,7 +125,11 @@ func TestWLANOptimizationErrors(t *testing.T) {
 	if _, err := c.GetWLANOptimizationHistory(t.Context(), "site", ".."); err == nil {
 		t.Fatal("expected invalid ID error")
 	}
-	if got := SafeWLANOptimizationMessage("bad\u202eradio\nstate"); got != "bad radio state" {
-		t.Errorf("safe message=%q", got)
+}
+
+func TestSafeFailureMessageSpacesEscapes(t *testing.T) {
+	ap := WLANOptimizationAP{Name: "ap-lobby", FailMessage: "scan\x1b[2Jfailed on\u202eap-lobby\n"}
+	if got := ap.SafeFailureMessage(); got != "scan [2Jfailed on [device]" {
+		t.Errorf("SafeFailureMessage = %q", got)
 	}
 }
