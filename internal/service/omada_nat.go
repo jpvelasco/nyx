@@ -86,10 +86,10 @@ type OmadaNatFacts struct {
 // Every read must succeed: a partial picture would mislead the double-NAT
 // verdict, so a failure is a hard error.
 func (s *OmadaService) NatFacts(ctx context.Context, opts OmadaOptions) (*OmadaNatFacts, error) {
-	return s.natFacts(ctx, opts, false)
+	return s.natFacts(ctx, opts, noFingerprint)
 }
 
-func (s *OmadaService) natFacts(ctx context.Context, opts OmadaOptions, fingerprint bool) (*OmadaNatFacts, error) {
+func (s *OmadaService) natFacts(ctx context.Context, opts OmadaOptions, scope fingerprintScope) (*OmadaNatFacts, error) {
 	client, site, err := s.session(ctx, opts)
 	if err != nil {
 		return nil, err
@@ -141,8 +141,8 @@ func (s *OmadaService) natFacts(ctx context.Context, opts OmadaOptions, fingerpr
 			}
 		}
 	}
-	if fingerprint {
-		facts.fingerprint = readOmadaFingerprint(ctx, client, siteID, devices)
+	if scope != noFingerprint {
+		facts.fingerprint = readOmadaFingerprint(ctx, client, siteID, devices, scope == fingerprintDetail)
 	}
 	return facts, nil
 }

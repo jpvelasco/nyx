@@ -17,6 +17,28 @@ type TopologyOptions struct {
 	Omada       *OmadaOptions    // nil = do not observe Omada
 	Opnsense    *OpnsenseOptions // nil = do not observe OPNsense
 	Fingerprint bool
+	// Detail attaches private segment addressing and probe candidates to
+	// the fingerprint. It implies Fingerprint.
+	Detail bool
+}
+
+// fingerprintScope says how much the fingerprint reads.
+type fingerprintScope int
+
+const (
+	noFingerprint fingerprintScope = iota
+	fingerprintRoles
+	fingerprintDetail
+)
+
+func (o TopologyOptions) fingerprintScope() fingerprintScope {
+	switch {
+	case o.Detail:
+		return fingerprintDetail
+	case o.Fingerprint:
+		return fingerprintRoles
+	}
+	return noFingerprint
 }
 
 // TopologyReport is the agent-facing topology assessment: per-provider NAT
@@ -63,7 +85,7 @@ func (s *TopologyService) Report(ctx context.Context, opts TopologyOptions) (*To
 
 	if opts.Omada != nil {
 		var err error
-		omadaFacts, err = s.Omada.natFacts(ctx, *opts.Omada, opts.Fingerprint)
+		omadaFacts, err = s.Omada.natFacts(ctx, *opts.Omada, opts.fingerprintScope())
 		if err != nil {
 			return nil, fmt.Errorf("observing omada: %w", err)
 		}
@@ -103,7 +125,7 @@ func (s *TopologyService) Report(ctx context.Context, opts TopologyOptions) (*To
 	rep.Devices = classified.Devices
 	rep.Risk = string(classified.Risk)
 	rep.Reason = classified.Reason
-	if opts.Fingerprint {
+	if opts.fingerprintScope() != noFingerprint {
 		rep.Fingerprint = s.fingerprint(ctx, opts, rep, opnsenseInterfaces)
 	}
 	return rep, nil

@@ -69,11 +69,12 @@ produce a confidently wrong verdict.`,
 				"or run `nyx credentials set <provider> --set host=...`")
 		}
 
-		fingerprint, _ := cmd.Flags().GetBool("fingerprint")
+		fingerprint, detail := topologyFingerprintFlags(cmd)
 		rep, err := service.NewTopologyService().Report(ctx, service.TopologyOptions{
 			Omada:       omadaOpts,
 			Opnsense:    opnsOpts,
 			Fingerprint: fingerprint,
+			Detail:      detail,
 		})
 		if err != nil {
 			return err
@@ -233,11 +234,46 @@ func printTopologyFingerprint(w io.Writer, fingerprint *topology.Fingerprint) {
 			fmt.Fprintf(w, " (seen by %s)", strings.Join(segment.ObservedBy, ", "))
 		}
 		fmt.Fprintln(w)
+		if segment.Detail != nil {
+			printSegmentDetail(w, *segment.Detail)
+		}
 	}
 	for _, warning := range fingerprint.Warnings {
 		fmt.Fprintf(w, "  Warning: %s\n", warning)
 	}
 	fmt.Fprintln(w)
+}
+
+// printSegmentDetail renders a segment's private addressing, shown only
+// when the operator asked for --detail.
+func printSegmentDetail(w io.Writer, detail topology.SegmentDetail) {
+	fmt.Fprintf(w, "    subnet %s, gateway %s\n", detail.CIDR, detail.GatewayAddress)
+	candidates := make([]string, 0, len(detail.ProbeCandidates))
+	for _, c := range detail.ProbeCandidates {
+		label := c.Address
+		if c.Hostname != "" {
+			label = c.Hostname + " " + c.Address
+		}
+		candidates = append(candidates, fmt.Sprintf("%s [%s]", label, c.Source))
+	}
+	if len(candidates) == 0 {
+		candidates = []string{"none in inventory"}
+	}
+	fmt.Fprintf(w, "    probe candidates (unverified): %s\n", strings.Join(candidates, ", "))
+}
+
+// addTopologyFingerprintFlags registers the fingerprint flags.
+func addTopologyFingerprintFlags(cmd *cobra.Command) {
+	cmd.Flags().Bool("fingerprint", false, "Infer architecture from configured provider inventory without probing the network")
+	cmd.Flags().Bool("detail", false, "With the fingerprint, also show each segment's subnet, gateway address, and inventory-known probe candidates (private: implies --fingerprint)")
+}
+
+// topologyFingerprintFlags reads the fingerprint flags; --detail implies
+// --fingerprint.
+func topologyFingerprintFlags(cmd *cobra.Command) (fingerprint, detail bool) {
+	fingerprint, _ = cmd.Flags().GetBool("fingerprint")
+	detail, _ = cmd.Flags().GetBool("detail")
+	return fingerprint || detail, detail
 }
 
 // fingerprintNextHop explains each edge next-hop classification in words.
@@ -257,7 +293,7 @@ func describeFingerprintEdge(edge topology.FingerprintEdge) string {
 }
 
 func init() {
-	topologyCmd.Flags().Bool("fingerprint", false, "Infer architecture from configured provider inventory without probing the network")
+	addTopologyFingerprintFlags(topologyCmd)
 	topologyCmd.Flags().StringVar(&topoOmadaHost, "omada-host", "", "Omada controller IP or hostname (omit to skip Omada)")
 	topologyCmd.Flags().StringVar(&topoOmadaClientID, "omada-client-id", "", "Omada Open API client ID")
 	topologyCmd.Flags().StringVar(&topoOmadaClientSecret, "omada-client-secret", "", "Omada Open API client secret")

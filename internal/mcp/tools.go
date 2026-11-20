@@ -1067,7 +1067,7 @@ func (s *Server) toolOpnsenseListAliases(ctx context.Context, args map[string]in
 		return errResult(fmt.Sprintf("opnsense aliases request failed: %v", err))
 	}
 	if includeDetails {
-		return firewallDataResult(aliases, "Firewall alias data")
+		return untrustedDataResult(aliases, "Firewall alias data")
 	}
 	aliases = slices.Clone(aliases)
 	for i := range aliases {
@@ -1102,7 +1102,7 @@ func (s *Server) toolOpnsenseInventory(ctx context.Context, args map[string]inte
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense inventory request failed: %v", err))
 	}
-	return firewallDataResult(inv, "Firewall inventory data")
+	return untrustedDataResult(inv, "Firewall inventory data")
 }
 
 // opnsenseNatRequestFromArgs assembles the NAT mutation request from tool
@@ -1358,9 +1358,22 @@ func (s *Server) toolTopology(ctx context.Context, args map[string]interface{}) 
 	if omadaOpts == nil && opnsOpts == nil {
 		return errResult("topology requires a host for at least one provider: set omada_host or opnsense_host (or the OMADA_HOST / OPNSENSE_HOST environment variables or the credential store)")
 	}
-	rep, err := s.topoSvc.Report(ctx, service.TopologyOptions{Omada: omadaOpts, Opnsense: opnsOpts})
+	detail := argBoolDefault(args, "include_detail", false)
+	if detail && os.Getenv("NYX_MCP_ALLOW_TOPOLOGY_DETAILS") != "true" {
+		return errResult("Topology details (segment subnets, gateway addresses, probe candidates) require operator opt-in via NYX_MCP_ALLOW_TOPOLOGY_DETAILS=true")
+	}
+	rep, err := s.topoSvc.Report(ctx, service.TopologyOptions{
+		Omada:       omadaOpts,
+		Opnsense:    opnsOpts,
+		Fingerprint: detail || argBoolDefault(args, "fingerprint", false),
+		Detail:      detail,
+	})
 	if err != nil {
 		return errResult(fmt.Sprintf("topology report failed: %v", err))
+	}
+	if detail {
+		// Probe-candidate hostnames are chosen by the devices themselves.
+		return untrustedDataResult(rep, "Topology detail data")
 	}
 	return okResult(toJSON(rep))
 }
@@ -1613,10 +1626,10 @@ func firewallDetailsAllowed() bool {
 }
 
 func firewallLogResult(data any) toolDispatchResult {
-	return firewallDataResult(data, "Firewall log data")
+	return untrustedDataResult(data, "Firewall log data")
 }
 
-func firewallDataResult(data any, label string) toolDispatchResult {
+func untrustedDataResult(data any, label string) toolDispatchResult {
 	return okResult(toJSON(map[string]any{
 		"data":           data,
 		"untrusted_data": true,

@@ -15,6 +15,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/testutil"
 	topology "github.com/jpvelasco/nyx/internal/topology"
+	"github.com/spf13/cobra"
 )
 
 // topoFlagsRestore snapshots the topology command flag variables so a test
@@ -506,6 +507,52 @@ func TestDescribeFingerprintEdge(t *testing.T) {
 	} {
 		if got := describeFingerprintEdge(tc.edge); got != tc.want {
 			t.Errorf("describeFingerprintEdge(%+v) = %q, want %q", tc.edge, got, tc.want)
+		}
+	}
+}
+
+func TestPrintTopologyFingerprintDetail(t *testing.T) {
+	var buf bytes.Buffer
+	printTopologyFingerprint(&buf, &topology.Fingerprint{
+		Segments: []topology.FingerprintSegment{
+			{VLAN: 10, Gateway: "omada", ObservedBy: []string{"omada"}, Detail: &topology.SegmentDetail{
+				CIDR: "10.0.10.0/24", GatewayAddress: "10.0.10.1",
+				ProbeCandidates: []topology.ProbeCandidate{
+					{Address: "10.0.10.20", Source: "opnsense"},
+					{Address: "10.0.10.30", Hostname: "desk", Source: "omada"},
+				},
+			}},
+			{VLAN: 60, ObservedBy: []string{"opnsense"}, Detail: &topology.SegmentDetail{CIDR: "10.0.60.0/24", GatewayAddress: "10.0.60.1"}},
+		},
+	})
+	for _, want := range []string{
+		"    subnet 10.0.10.0/24, gateway 10.0.10.1\n",
+		"    probe candidates (unverified): 10.0.10.20 [opnsense], desk 10.0.10.30 [omada]\n",
+		"    subnet 10.0.60.0/24, gateway 10.0.60.1\n    probe candidates (unverified): none in inventory\n",
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, buf.String())
+		}
+	}
+}
+
+func TestTopologyDetailFlagImpliesFingerprint(t *testing.T) {
+	for _, tc := range []struct {
+		args                []string
+		fingerprint, detail bool
+	}{
+		{nil, false, false},
+		{[]string{"--fingerprint"}, true, false},
+		{[]string{"--detail"}, true, true},
+	} {
+		cmd := &cobra.Command{}
+		addTopologyFingerprintFlags(cmd)
+		if err := cmd.ParseFlags(tc.args); err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, detail := topologyFingerprintFlags(cmd)
+		if fingerprint != tc.fingerprint || detail != tc.detail {
+			t.Errorf("%v: fingerprint, detail = %t, %t; want %t, %t", tc.args, fingerprint, detail, tc.fingerprint, tc.detail)
 		}
 	}
 }
