@@ -3485,6 +3485,10 @@ func TestDispatchTopology_FingerprintAndDetailGate(t *testing.T) {
 			if topo.opts.Fingerprint != tc.fingerprint || topo.opts.Detail != tc.detail {
 				t.Errorf("options fingerprint, detail = %t, %t; want %t, %t", topo.opts.Fingerprint, topo.opts.Detail, tc.fingerprint, tc.detail)
 			}
+			// Detail carries device-chosen hostnames, so it is marked untrusted.
+			if wrapped := strings.Contains(text, `"untrusted_data": true`); wrapped != tc.detail {
+				t.Errorf("untrusted_data wrapper present = %t, want %t: %s", wrapped, tc.detail, text)
+			}
 		})
 	}
 }

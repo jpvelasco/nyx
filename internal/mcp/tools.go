@@ -1067,7 +1067,7 @@ func (s *Server) toolOpnsenseListAliases(ctx context.Context, args map[string]in
 		return errResult(fmt.Sprintf("opnsense aliases request failed: %v", err))
 	}
 	if includeDetails {
-		return firewallDataResult(aliases, "Firewall alias data")
+		return untrustedDataResult(aliases, "Firewall alias data")
 	}
 	aliases = slices.Clone(aliases)
 	for i := range aliases {
@@ -1102,7 +1102,7 @@ func (s *Server) toolOpnsenseInventory(ctx context.Context, args map[string]inte
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense inventory request failed: %v", err))
 	}
-	return firewallDataResult(inv, "Firewall inventory data")
+	return untrustedDataResult(inv, "Firewall inventory data")
 }
 
 // opnsenseNatRequestFromArgs assembles the NAT mutation request from tool
@@ -1371,6 +1371,10 @@ func (s *Server) toolTopology(ctx context.Context, args map[string]interface{}) 
 	if err != nil {
 		return errResult(fmt.Sprintf("topology report failed: %v", err))
 	}
+	if detail {
+		// Probe-candidate hostnames are chosen by the devices themselves.
+		return untrustedDataResult(rep, "Topology detail data")
+	}
 	return okResult(toJSON(rep))
 }
 
@@ -1622,10 +1626,10 @@ func firewallDetailsAllowed() bool {
 }
 
 func firewallLogResult(data any) toolDispatchResult {
-	return firewallDataResult(data, "Firewall log data")
+	return untrustedDataResult(data, "Firewall log data")
 }
 
-func firewallDataResult(data any, label string) toolDispatchResult {
+func untrustedDataResult(data any, label string) toolDispatchResult {
 	return okResult(toJSON(map[string]any{
 		"data":           data,
 		"untrusted_data": true,
