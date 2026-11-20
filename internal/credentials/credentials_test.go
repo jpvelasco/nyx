@@ -519,9 +519,6 @@ func TestConcurrentSetAllPersist(t *testing.T) {
 }
 
 func TestKeyReadFailurePreservesOriginalKey(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("os.Symlink requires developer mode on Windows")
-	}
 	path := filepath.Join(t.TempDir(), "credentials.json")
 	s, err := Open(path)
 	if err != nil {
@@ -576,9 +573,6 @@ func TestKeyReadFailurePreservesOriginalKey(t *testing.T) {
 }
 
 func TestKeyCreationRefusesUnexpectedExistingPath(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("os.Symlink requires developer mode on Windows")
-	}
 	// A dangling in-root symlink at the key path reads as a missing key
 	// but exists as a directory entry: first-use creation must refuse it
 	// exclusively instead of following or replacing it.

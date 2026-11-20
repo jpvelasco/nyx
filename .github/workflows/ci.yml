@@ -89,16 +89,31 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
-      # Install nmap so the real-scan tests run instead of skipping — the
-      # scan execution paths earn coverage only when nmap is on PATH.
-      - name: Install nmap
+      # Install nmap (and dig on Windows) so the real-scan tests run instead
+      # of skipping — the scan execution paths earn coverage only when the
+      # tools are on PATH.
+      - name: Install scan tools
         shell: bash
         run: |
           case "${{ runner.os }}" in
-            Linux) sudo apt-get -o Acquire::Retries=5 update -y && sudo apt-get -o Acquire::Retries=5 install -y nmap ;;
+            Linux)
+              sudo apt-get -o Acquire::Retries=5 update -y
+              sudo apt-get -o Acquire::Retries=5 install -y nmap
+              # Raw-socket capabilities let privileged scans (UDP, ARP) run
+              # without root; NMAP_PRIVILEGED tells nmap to use them.
+              sudo setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip "$(command -v nmap)"
+              echo "NMAP_PRIVILEGED=1" >> "$GITHUB_ENV" ;;
             macOS) brew install nmap ;;
-            Windows) choco install nmap -y ;;
+            Windows)
+              choco install nmap bind-toolsonly -y
+              # choco edits the machine PATH, which later steps never reload.
+              echo 'C:\Program Files (x86)\Nmap' >> "$GITHUB_PATH" ;;
           esac
+      # Fail loudly if a tool is missing: a silent install miss turns every
+      # real-scan test into a skip.
+      - name: Verify scan tools on PATH
+        shell: bash
+        run: nmap --version && dig -v
       # Run in bash on every OS so the working directory and tooling are
       # consistent. Go on the Windows runner writes coverage.out with CRLF line
       # endings, which Codecov's parser rejects (the upload lands in an ERROR

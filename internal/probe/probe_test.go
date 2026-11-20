@@ -660,16 +660,7 @@ func TestConnectAgent_UnreachableSocket(t *testing.T) {
 }
 
 func TestConnectAgent_AvailableSocket(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("unix sockets unavailable on Windows")
-	}
-	sockPath := filepath.Join(t.TempDir(), "agent.sock")
-	ln, err := net.Listen("unix", sockPath)
-	if err != nil {
-		t.Skipf("cannot create unix socket: %v", err)
-	}
-	defer ln.Close()
-	t.Setenv("SSH_AUTH_SOCK", sockPath)
+	t.Setenv("SSH_AUTH_SOCK", listenAgent(t))
 
 	conn := connectAgent()
 	if conn == nil {
@@ -679,16 +670,7 @@ func TestConnectAgent_AvailableSocket(t *testing.T) {
 }
 
 func TestAuthMethods_WithAgent(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("unix sockets unavailable on Windows")
-	}
-	sockPath := filepath.Join(t.TempDir(), "agent.sock")
-	ln, err := net.Listen("unix", sockPath)
-	if err != nil {
-		t.Skipf("cannot create unix socket: %v", err)
-	}
-	defer ln.Close()
-	t.Setenv("SSH_AUTH_SOCK", sockPath)
+	t.Setenv("SSH_AUTH_SOCK", listenAgent(t))
 	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
 	writeTestKey(t, keyPath)
 

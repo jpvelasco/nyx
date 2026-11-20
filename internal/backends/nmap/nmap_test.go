@@ -763,9 +763,7 @@ func TestDiscoverWithOptions_InvalidCIDR(t *testing.T) {
 }
 
 func TestDiscover_ValidCIDR_NoNmap(t *testing.T) {
-	if Available() {
-		t.Skip("nmap is available — this test requires nmap to be absent")
-	}
+	t.Setenv("PATH", t.TempDir()) // hide nmap so the missing-nmap path runs on every host
 	result, err := Discover(context.Background(), "192.168.1.0/24")
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -779,9 +777,7 @@ func TestDiscover_ValidCIDR_NoNmap(t *testing.T) {
 }
 
 func TestDiscoverWithOptions_ValidCIDR_NoNmap(t *testing.T) {
-	if Available() {
-		t.Skip("nmap is available — this test requires nmap to be absent")
-	}
+	t.Setenv("PATH", t.TempDir()) // hide nmap so the missing-nmap path runs on every host
 	result, err := DiscoverWithOptions(context.Background(), "10.0.0.0/8", DefaultScanOptions)
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -943,20 +939,17 @@ func TestCheckAvailable_WhenAvailable(t *testing.T) {
 }
 
 func TestCheckAvailable_WhenNotAvailable(t *testing.T) {
-	if !Available() {
-		err := CheckAvailable()
-		if err == nil {
-			t.Fatal("expected error when nmap is not available")
-		}
-		errMsg := err.Error()
-		if !strings.Contains(errMsg, "nmap is required") {
-			t.Errorf("expected error to mention 'nmap is required', got: %s", errMsg)
-		}
-		if !strings.Contains(errMsg, "Install it with") {
-			t.Errorf("expected error to mention install instructions, got: %s", errMsg)
-		}
-	} else {
-		t.Skip("nmap is available — cannot test the error path")
+	t.Setenv("PATH", t.TempDir()) // hide nmap so the missing-nmap path runs on every host
+	err := CheckAvailable()
+	if err == nil {
+		t.Fatal("expected error when nmap is not available")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "nmap is required") {
+		t.Errorf("expected error to mention 'nmap is required', got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "Install it with") {
+		t.Errorf("expected error to mention install instructions, got: %s", errMsg)
 	}
 }
 
@@ -1103,8 +1096,8 @@ func TestPortScan_UDP(t *testing.T) {
 	if !Available() {
 		t.Skip("nmap not available")
 	}
-	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
-		t.Skip("UDP scans need raw sockets (root) on Unix; CI runners are unprivileged")
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 && os.Getenv("NMAP_PRIVILEGED") == "" {
+		t.Skip("UDP scans need raw sockets: run as root, or grant nmap capabilities and set NMAP_PRIVILEGED=1")
 	}
 	result, err := PortScan(context.Background(), "127.0.0.1", []int{53}, "udp", PoliteScanOptions)
 	if err != nil {
@@ -1253,24 +1246,6 @@ func TestDiscoveryResult_JSONMarshaling(t *testing.T) {
 	}
 	if len(decoded.Hosts) != 2 {
 		t.Errorf("expected 2 hosts, got %d", len(decoded.Hosts))
-	}
-}
-
-// ─── PortScan edge cases (no nmap needed) ───
-
-func TestPortScan_EmptyPorts_NoNmap(t *testing.T) {
-	if Available() {
-		t.Skip("nmap is available — this test requires nmap to be absent for the nmap-not-found path, but we test empty ports which is checked before nmap lookup")
-	}
-	result, err := PortScan(context.Background(), "127.0.0.1", []int{}, "tcp", PoliteScanOptions)
-	if result == nil {
-		t.Fatal("expected non-nil result")
-	}
-	if err == nil {
-		t.Fatal("expected error for empty ports")
-	}
-	if result.Status != "error" {
-		t.Errorf("expected status 'error', got %s", result.Status)
 	}
 }
 

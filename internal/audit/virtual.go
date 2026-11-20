@@ -70,30 +70,6 @@ func virtualIfaceAddrsFrom(interfaces func() ([]net.Interface, error)) []net.IPN
 	return out
 }
 
-// virtualNetworksFrom maps each IPv4 address to its /24 network. IPv6
-// addresses are skipped; a machine has no virtual adapter when the input
-// is empty.
-func virtualNetworksFrom(addrs []net.IPNet) []string {
-	var out []string
-	mask24 := net.CIDRMask(24, 32)
-	for _, ipNet := range addrs {
-		ip4 := ipNet.IP.To4()
-		if ip4 == nil {
-			continue
-		}
-		out = append(out, (&net.IPNet{IP: ip4.Mask(mask24), Mask: mask24}).String())
-	}
-	return out
-}
-
-// VirtualIfaceNetworks returns the /24 network CIDRs owned by virtual
-// adapters (Hyper-V, WSL2, VMware, VirtualBox, Docker). Used by tests to
-// scan a small slice of a virtual subnet deterministically. Empty when the
-// machine has no virtual adapter.
-func VirtualIfaceNetworks() []string {
-	return virtualNetworksFrom(virtualIfaceAddrs())
-}
-
 // looksVirtualByCIDR returns true if the local interface that owns cidr has a
 // virtual adapter name. Used when nmap finds 0 hosts and reports no MACs.
 func looksVirtualByCIDR(cidr string) bool {

@@ -319,10 +319,7 @@ func TestAvailable(t *testing.T) {
 // =====================================================================
 
 func TestCheckDNSSEC_NoDig(t *testing.T) {
-	// If dig is not available, CheckDNSSEC should return error
-	if Available() {
-		t.Skip("dig is available, skipping no-dig test")
-	}
+	t.Setenv("PATH", t.TempDir()) // hide dig so the missing-dig path runs on every host
 
 	result, err := CheckDNSSEC(dnsCtx(), "example.com", "")
 	if err != nil {

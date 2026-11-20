@@ -38,9 +38,7 @@ func TestDefaultBackendDiscoverInvalidCIDR(t *testing.T) {
 }
 
 func TestDefaultBackendPortScan(t *testing.T) {
-	if nmap.Available() {
-		t.Skip("nmap installed; would run a real scan")
-	}
+	t.Setenv("PATH", t.TempDir()) // hide nmap so the missing-nmap path runs on every host
 	ctx := context.Background()
 	b := NewDefaultBackend()
 
@@ -139,9 +137,7 @@ func TestDefaultBackendResolveExpect(t *testing.T) {
 }
 
 func TestDefaultBackendCheckDNSSEC(t *testing.T) {
-	if dns.Available() {
-		t.Skip("dig installed; would query a real resolver")
-	}
+	t.Setenv("PATH", t.TempDir()) // hide dig so the missing-dig path runs on every host
 	ctx := context.Background()
 	b := NewDefaultBackend()
 

@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/jpvelasco/nyx/internal/audit"
+	"github.com/jpvelasco/nyx/internal/backends"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
@@ -314,58 +315,38 @@ func TestDiscoveryVirtualFirstRunWarns(t *testing.T) {
 }
 
 func TestVirtualSubnetSuppressesRepeatWarn(t *testing.T) {
-	if !nmap.Available() {
-		t.Skip("nmap not available")
-	}
-	// Scan a /24 slice of a virtual adapter's own network (Hyper-V/WSL2/
-	// VMware), so looksVirtualByCIDR returns true without needing a VM MAC
-	// in nmap output and the sweep stays small enough to finish in seconds.
-	nets := audit.VirtualIfaceNetworks()
-	if len(nets) == 0 {
-		t.Skip("no virtual adapter (Hyper-V/WSL2/VMware) on this machine")
-	}
-	cidr := nets[0]
+	// Zero hosts plus a Hyper-V MAC in the evidence marks the subnet
+	// virtual. TEST-NET-2 is owned by no local adapter, so the evidence
+	// alone drives detection and the result is the same on every host.
+	const cidr = "198.51.100.0/24"
 	spec := &intent.Spec{
-		Version: 1,
-		Site:    "test",
-		Networks: []intent.Network{
-			{Name: "hyperv", CIDR: cidr, Gateway: "10.255.144.1", Zone: "hyperv"},
-		},
-		Assertions: []intent.Assertion{
-			{Type: "subnet_discovery", Network: "hyperv"},
-		},
+		Version:    1,
+		Site:       "test",
+		Networks:   []intent.Network{{Name: "hyperv", CIDR: cidr, Zone: "hyperv"}},
+		Assertions: []intent.Assertion{{Type: "subnet_discovery", Network: "hyperv"}},
 	}
-
+	scan := models.NewCheckResult("nmap", "subnet_discovery", "nmap", cidr)
+	scan.Observed = map[string]interface{}{"total": 0, "hosts": []interface{}{}}
+	scan.Evidence = []string{"MAC Address: 00:15:5D:01:02:03 (Microsoft)"}
 	dbPath := filepath.Join(t.TempDir(), "seen.json")
 
-	// First run: should WARN and write seendb
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-
-	e1 := audit.NewEngine(spec)
-	e1.SeenDBPath = dbPath
-	r1, err := e1.Run(ctx)
-	if err != nil {
-		t.Fatalf("first run error: %v", err)
-	}
-	f1 := r1.Findings[0]
-	if f1.Status != models.StatusWarn {
-		t.Skipf("CIDR %s not detected as virtual on this machine (status: %s) — skipping", cidr, f1.Status)
+	run := func() models.Status {
+		t.Helper()
+		e := audit.NewEngine(spec)
+		e.Backend = &backends.MockBackend{DiscoverResult: scan}
+		e.SeenDBPath = dbPath
+		r, err := e.Run(context.Background())
+		if err != nil {
+			t.Fatalf("run error: %v", err)
+		}
+		return r.Findings[0].Status
 	}
 
-	// Second run: should SKIP
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel2()
-
-	e2 := audit.NewEngine(spec)
-	e2.SeenDBPath = dbPath
-	r2, err := e2.Run(ctx2)
-	if err != nil {
-		t.Fatalf("second run error: %v", err)
+	if got := run(); got != models.StatusWarn {
+		t.Fatalf("first run: expected StatusWarn, got %s", got)
 	}
-	f2 := r2.Findings[0]
-	if f2.Status != models.StatusSkip {
-		t.Errorf("second run: expected StatusSkip, got %s (%s)", f2.Status, f2.Summary)
+	if got := run(); got != models.StatusSkip {
+		t.Errorf("second run: expected StatusSkip, got %s", got)
 	}
 }
 
