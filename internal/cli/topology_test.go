@@ -536,23 +536,69 @@ func TestPrintTopologyFingerprintDetail(t *testing.T) {
 	}
 }
 
-func TestTopologyDetailFlagImpliesFingerprint(t *testing.T) {
+func TestTopologyFingerprintFlags(t *testing.T) {
 	for _, tc := range []struct {
-		args                []string
-		fingerprint, detail bool
+		args []string
+		want service.TopologyOptions
 	}{
-		{nil, false, false},
-		{[]string{"--fingerprint"}, true, false},
-		{[]string{"--detail"}, true, true},
+		{nil, service.TopologyOptions{}},
+		{[]string{"--fingerprint"}, service.TopologyOptions{Fingerprint: true}},
+		{[]string{"--detail"}, service.TopologyOptions{Fingerprint: true, Detail: true}},
+		{[]string{"--matrix"}, service.TopologyOptions{Fingerprint: true, Matrix: true}},
 	} {
 		cmd := &cobra.Command{}
 		addTopologyFingerprintFlags(cmd)
 		if err := cmd.ParseFlags(tc.args); err != nil {
 			t.Fatal(err)
 		}
-		fingerprint, detail := topologyFingerprintFlags(cmd)
-		if fingerprint != tc.fingerprint || detail != tc.detail {
-			t.Errorf("%v: fingerprint, detail = %t, %t; want %t, %t", tc.args, fingerprint, detail, tc.fingerprint, tc.detail)
+		var got service.TopologyOptions
+		applyTopologyFingerprintFlags(cmd, &got)
+		if got != tc.want {
+			t.Errorf("%v: options = %+v, want %+v", tc.args, got, tc.want)
 		}
+	}
+}
+
+func TestPrintEnforcementMatrix(t *testing.T) {
+	var buf bytes.Buffer
+	printEnforcementMatrix(&buf, &topology.EnforcementMatrix{
+		Pairs: []topology.MatrixPair{
+			{From: 10, To: 60, PairSpecific: true, Rules: []topology.PairCount{{Provider: "omada", Deny: 1}, {Provider: "opnsense", Allow: 2}}},
+			{From: 60, To: 10},
+		},
+		Providers: []topology.MatrixProviderTotals{{Provider: "omada", Unresolved: 2}, {Provider: "opnsense", Wildcard: 1}},
+	})
+	want := `  Enforcement matrix (rules naming each pair, allow/deny)
+    from\to  10    60
+    10       -     2/1
+    60       none  -
+  Wildcard rules: omada 0, opnsense 1
+  Unresolved rules: omada 2, opnsense 0
+  No pair-specific rule (omada_plan candidates): 60->10
+`
+	if buf.String() != want {
+		t.Fatalf("matrix output =\n%s\nwant\n%s", buf.String(), want)
+	}
+}
+
+func TestPrintEnforcementMatrixEdgeCases(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		matrix *topology.EnforcementMatrix
+		want   string
+	}{
+		{"single segment", &topology.EnforcementMatrix{}, "  Enforcement matrix: fewer than two segments observed\n"},
+		{"every pair covered", &topology.EnforcementMatrix{Pairs: []topology.MatrixPair{
+			{From: 10, To: 60, PairSpecific: true, Rules: []topology.PairCount{{Provider: "omada", Deny: 1}}},
+			{From: 60, To: 10, PairSpecific: true, Rules: []topology.PairCount{{Provider: "omada", Deny: 1}}},
+		}}, "  Every segment pair has a pair-specific rule\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			printTopologyFingerprint(&buf, &topology.Fingerprint{Matrix: tc.matrix})
+			if !strings.Contains(buf.String(), tc.want) {
+				t.Fatalf("output missing %q:\n%s", tc.want, buf.String())
+			}
+		})
 	}
 }

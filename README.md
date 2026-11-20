@@ -520,3 +520,14 @@ Candidates are unverified; nyx does not check that they are reachable. This
 output contains private addresses, so it is opt-in and is never logged. The
 MCP `topology` tool takes `fingerprint` and `include_detail`; `include_detail`
 also requires the operator to set `NYX_MCP_ALLOW_TOPOLOGY_DETAILS=true`.
+
+`nyx topology --matrix` (implies `--fingerprint`) adds the enforcement
+matrix: for each ordered pair of VLANs, how many enabled rules name that
+exact pair (allow/deny, per provider in JSON). Omada ACLs resolve through
+their network endpoints, and OPNsense filter rules through interface net
+macros and segment CIDRs. Rules with an `any` endpoint are counted
+separately as wildcards, not spread across every pair. Endpoints that map
+to no segment (IP groups, aliases, hosts) are counted as unresolved. Pairs
+with no pair-specific rule are listed last as `omada_plan` candidates. The
+matrix shows VLAN IDs only, and the MCP `topology` tool takes `matrix` with
+no opt-in.
