@@ -3443,3 +3443,48 @@ func TestDispatchOmadaListLogs(t *testing.T) {
 		t.Fatalf("redacted event log text = %q (failed=%v)", text, failed)
 	}
 }
+
+func TestDispatchTopology_FingerprintAndDetailGate(t *testing.T) {
+	opnsenseArgs := func(extra map[string]interface{}) map[string]interface{} {
+		args := map[string]interface{}{"opnsense_host": "fw.local", "opnsense_api_key": "key1", "opnsense_api_secret": "secret1"}
+		for k, v := range extra {
+			args[k] = v
+		}
+		return args
+	}
+	for _, tc := range []struct {
+		name                string
+		allow               string
+		args                map[string]interface{}
+		wantErr             bool
+		fingerprint, detail bool
+	}{
+		{name: "default", args: opnsenseArgs(nil)},
+		{name: "fingerprint needs no opt-in", args: opnsenseArgs(map[string]interface{}{"fingerprint": true}), fingerprint: true},
+		{name: "detail refused without opt-in", args: opnsenseArgs(map[string]interface{}{"include_detail": true}), wantErr: true},
+		{name: "detail with opt-in implies fingerprint", allow: "true", args: opnsenseArgs(map[string]interface{}{"include_detail": true}), fingerprint: true, detail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hermeticCreds(t)
+			t.Setenv("NYX_MCP_ALLOW_TOPOLOGY_DETAILS", tc.allow)
+			omada, opnsense := credEnvReaders()
+			topo := &stubTopoSvc{}
+			server := &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{},
+				checkSvc: service.NewCheckService(), topoSvc: topo,
+				credEnv: omada, opnsenseCredEnv: opnsense}
+			text, isErr := server.DispatchToolForTest(context.Background(), "topology", tc.args)
+			if tc.wantErr {
+				if !isErr || !strings.Contains(text, "NYX_MCP_ALLOW_TOPOLOGY_DETAILS=true") || topo.calls != 0 {
+					t.Fatalf("got (%q, %v), calls = %d; want opt-in refusal before any read", text, isErr, topo.calls)
+				}
+				return
+			}
+			if isErr {
+				t.Fatalf("unexpected error: %s", text)
+			}
+			if topo.opts.Fingerprint != tc.fingerprint || topo.opts.Detail != tc.detail {
+				t.Errorf("options fingerprint, detail = %t, %t; want %t, %t", topo.opts.Fingerprint, topo.opts.Detail, tc.fingerprint, tc.detail)
+			}
+		})
+	}
+}

@@ -1358,7 +1358,16 @@ func (s *Server) toolTopology(ctx context.Context, args map[string]interface{}) 
 	if omadaOpts == nil && opnsOpts == nil {
 		return errResult("topology requires a host for at least one provider: set omada_host or opnsense_host (or the OMADA_HOST / OPNSENSE_HOST environment variables or the credential store)")
 	}
-	rep, err := s.topoSvc.Report(ctx, service.TopologyOptions{Omada: omadaOpts, Opnsense: opnsOpts})
+	detail := argBoolDefault(args, "include_detail", false)
+	if detail && os.Getenv("NYX_MCP_ALLOW_TOPOLOGY_DETAILS") != "true" {
+		return errResult("Topology details (segment subnets, gateway addresses, probe candidates) require operator opt-in via NYX_MCP_ALLOW_TOPOLOGY_DETAILS=true")
+	}
+	rep, err := s.topoSvc.Report(ctx, service.TopologyOptions{
+		Omada:       omadaOpts,
+		Opnsense:    opnsOpts,
+		Fingerprint: detail || argBoolDefault(args, "fingerprint", false),
+		Detail:      detail,
+	})
 	if err != nil {
 		return errResult(fmt.Sprintf("topology report failed: %v", err))
 	}

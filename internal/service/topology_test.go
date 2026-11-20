@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -40,6 +43,10 @@ func omadaGatewayServer(t *testing.T) *httptest.Server {
 			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[{"id":"n1","vlan":10,"gatewaySubnet":"10.0.10.1/24"},{"id":"n2","vlan":20}]}`)
 		case "/openapi/v1/abc123/sites/s1/acls/osg-acls", "/openapi/v1/abc123/sites/s1/acls/osw-acls":
 			writeOmadaEnvelope(w, 0, `{"totalRows":0,"data":[]}`)
+		case "/openapi/v1/abc123/sites/s1/networks/client": // read only with Detail
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"mac":"aa:bb:cc:dd:ee:01","name":"desk","type":"wired"}]}`)
+		case "/openapi/v1/abc123/sites/s1/setting/service/dhcp/user-list": // read only with Detail
+			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"ipAddress":"10.0.10.30","macAddress":"aa:bb:cc:dd:ee:01","name":"desk","netId":"n1"}]}`)
 		default:
 			t.Errorf("unexpected omada path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -338,5 +345,99 @@ func TestTopologyFingerprintEdgeNextHop(t *testing.T) {
 				t.Fatalf("edge = %+v, want %+v", edge, want)
 			}
 		})
+	}
+}
+
+func TestTopologyFingerprintDetailOmada(t *testing.T) {
+	om := omadaGatewayServer(t)
+	rep, err := NewTopologyService().Report(t.Context(), TopologyOptions{
+		Omada:  &OmadaOptions{Host: om.URL, ClientID: "a", ClientSecret: "b", SkipTLSVerify: true},
+		Detail: true, // implies Fingerprint
+	})
+	if err != nil || rep.Fingerprint == nil {
+		t.Fatalf("report = %+v, %v", rep, err)
+	}
+	segments := rep.Fingerprint.Segments
+	want := &topology.SegmentDetail{
+		CIDR: "10.0.10.0/24", GatewayAddress: "10.0.10.1",
+		ProbeCandidates: []topology.ProbeCandidate{{Address: "10.0.10.30", Hostname: "desk", Source: "omada"}},
+	}
+	if len(segments) != 2 || !reflect.DeepEqual(segments[0].Detail, want) {
+		t.Fatalf("VLAN 10 detail = %+v, want %+v", segments[0].Detail, want)
+	}
+	if segments[1].Detail != nil {
+		t.Fatalf("VLAN 20 has no gateway subnet; detail = %+v", segments[1].Detail)
+	}
+}
+
+func TestTopologyFingerprintDetailOPNsense(t *testing.T) {
+	for _, leasesOK := range []bool{true, false} {
+		t.Run(fmt.Sprintf("leases_ok=%t", leasesOK), func(t *testing.T) {
+			server := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/firewall/source_nat/get":
+					testutil.WriteBody(w, testutil.SNATModeBody("automatic"))
+				case "/api/firewall/d_nat/search_rule", "/api/firewall/one_to_one/search_rule", "/api/firewall/source_nat/search_rule",
+					"/api/interfaces/bridge_settings/search_item", "/api/firewall/filter/search_rule":
+					testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+				case "/api/interfaces/overview/interfaces_info":
+					testutil.WriteBody(w, `{"rows":[{"identifier":"opt6","addr4":"10.0.60.1/24","device":"vlan06"}]}`)
+				case "/api/interfaces/vlan_settings/search_item":
+					testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"fixture6","tag":"60","vlanif":"vlan06"}]}`)
+				case "/api/dnsmasq/settings/get":
+					testutil.WriteBody(w, `{"dnsmasq":{"enable":"1"}}`)
+				case "/api/dnsmasq/leases/search":
+					if !leasesOK {
+						w.WriteHeader(http.StatusForbidden)
+						return
+					}
+					testutil.WriteBody(w, `{"leases":[{"mac":"aa:bb:cc:dd:ee:06","ip":"10.0.60.7","hostname":"cam"},{"mac":"aa:bb:cc:dd:ee:07","ip":"10.0.20.9"}]}`)
+				default:
+					t.Errorf("unexpected path %s", r.URL.Path)
+				}
+			})
+			rep, err := NewTopologyService().Report(t.Context(), TopologyOptions{
+				Opnsense: &OpnsenseOptions{Host: server.URL, APIKey: "key1", APISecret: "secret1", SkipTLSVerify: true},
+				Detail:   true,
+			})
+			if err != nil || rep.Fingerprint == nil {
+				t.Fatalf("report = %+v, %v", rep, err)
+			}
+			f := rep.Fingerprint
+			want := &topology.SegmentDetail{CIDR: "10.0.60.0/24", GatewayAddress: "10.0.60.1"}
+			if leasesOK {
+				want.ProbeCandidates = []topology.ProbeCandidate{{Address: "10.0.60.7", Hostname: "cam", Source: "opnsense"}}
+			}
+			if len(f.Segments) != 1 || !reflect.DeepEqual(f.Segments[0].Detail, want) {
+				t.Fatalf("detail = %+v, want %+v", f.Segments[0].Detail, want)
+			}
+			const leaseWarning = "OPNsense DHCP leases unavailable; probe candidates incomplete"
+			if got := slices.Contains(f.Warnings, leaseWarning); got == leasesOK {
+				t.Fatalf("warnings = %q; lease warning present = %t, want %t", f.Warnings, got, !leasesOK)
+			}
+		})
+	}
+}
+
+// TestTopologyFingerprintWithoutDetailIsAddressFree guards the default
+// privacy boundary: without Detail, the fingerprint carries no address even
+// when every inventory the detail path reads is available.
+func TestTopologyFingerprintWithoutDetailIsAddressFree(t *testing.T) {
+	om := omadaGatewayServer(t)
+	op := opnsenseDownstreamServer(t, "disabled", "10.0.10.1")
+	rep, err := NewTopologyService().Report(t.Context(), TopologyOptions{
+		Omada:       &OmadaOptions{Host: om.URL, ClientID: "a", ClientSecret: "b", SkipTLSVerify: true},
+		Opnsense:    &OpnsenseOptions{Host: op.URL, APIKey: "key1", APISecret: "secret1", SkipTLSVerify: true},
+		Fingerprint: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(rep.Fingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := regexp.MustCompile(`\d+\.\d+\.\d+\.\d+`).Find(raw); m != nil {
+		t.Fatalf("fingerprint without detail leaked an address %q: %s", m, raw)
 	}
 }

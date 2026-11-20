@@ -1075,6 +1075,8 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]propSchema{
+					"fingerprint":              {Type: "boolean", Description: "Add the address-free architecture fingerprint: provider roles, edge next-hop classification, VLAN coverage, and visibility warnings"},
+					"include_detail":           {Type: "boolean", Description: "Add each segment's subnet, gateway address, and inventory-known probe candidates (implies fingerprint). Defaults to false and requires operator opt-in via NYX_MCP_ALLOW_TOPOLOGY_DETAILS=true."},
 					"omada_host":               {Type: "string", Description: "Omada controller hostname or IP (omit to skip Omada)"},
 					"omada_client_id":          {Type: "string", Description: "Omada Open API client ID"},
 					"omada_client_secret":      {Type: "string", Description: "Omada Open API client secret"},

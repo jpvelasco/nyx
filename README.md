@@ -512,3 +512,11 @@ private router nyx does not manage (you are looking at a branch), or not
 observable. Each VLAN lists the providers that saw it, and a VLAN that no
 inventory serves is reported as a warning: that is where nyx's visibility
 ends.
+
+`nyx topology --detail` (implies `--fingerprint`) also prints each segment's
+subnet and gateway address, plus up to five probe candidates per segment:
+hosts that the Omada client list or the OPNsense DHCP leases place inside it.
+Candidates are unverified; nyx does not check that they are reachable. This
+output contains private addresses, so it is opt-in and is never logged. The
+MCP `topology` tool takes `fingerprint` and `include_detail`; `include_detail`
+also requires the operator to set `NYX_MCP_ALLOW_TOPOLOGY_DETAILS=true`.

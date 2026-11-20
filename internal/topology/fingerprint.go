@@ -33,6 +33,8 @@ type FingerprintSegment struct {
 	VLAN       int      `json:"vlan"`
 	Gateway    string   `json:"gateway,omitempty"`
 	ObservedBy []string `json:"observed_by,omitempty"`
+	// Detail carries private addressing, attached only on operator request.
+	Detail *SegmentDetail `json:"detail,omitempty"`
 }
 
 // SegmentObservation is one provider's sighting of a VLAN. Serves is true
