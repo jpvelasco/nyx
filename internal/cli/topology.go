@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
@@ -209,6 +210,9 @@ func printTopologyReport(w io.Writer, rep *service.TopologyReport) {
 
 func printTopologyFingerprint(w io.Writer, fingerprint *topology.Fingerprint) {
 	fmt.Fprintln(w, "Architecture fingerprint")
+	if fingerprint.Edge != nil {
+		fmt.Fprintf(w, "  %s\n", describeFingerprintEdge(*fingerprint.Edge))
+	}
 	for _, device := range fingerprint.Devices {
 		fmt.Fprintf(w, "  %s: %s", device.Provider, device.Role)
 		if device.ManagedUpstream != "" {
@@ -224,12 +228,32 @@ func printTopologyFingerprint(w io.Writer, fingerprint *topology.Fingerprint) {
 		if gateway == "" {
 			gateway = "unknown"
 		}
-		fmt.Fprintf(w, "  VLAN %d -> %s\n", segment.VLAN, gateway)
+		fmt.Fprintf(w, "  VLAN %d -> %s", segment.VLAN, gateway)
+		if len(segment.ObservedBy) > 0 {
+			fmt.Fprintf(w, " (seen by %s)", strings.Join(segment.ObservedBy, ", "))
+		}
+		fmt.Fprintln(w)
 	}
 	for _, warning := range fingerprint.Warnings {
 		fmt.Fprintf(w, "  Warning: %s\n", warning)
 	}
 	fmt.Fprintln(w)
+}
+
+// fingerprintNextHop explains each edge next-hop classification in words.
+var fingerprintNextHop = map[string]string{
+	topology.NextHopInternet:       "next hop is the internet, so this is the network edge",
+	topology.NextHopUpstreamRouter: "next hop is a private router nyx does not manage, so the network continues upstream (this is a branch)",
+	topology.NextHopUnknown:        "next hop not observable",
+}
+
+// describeFingerprintEdge answers "am I seeing the whole network, or a
+// branch?" without printing the next-hop address.
+func describeFingerprintEdge(edge topology.FingerprintEdge) string {
+	if edge.Provider == "" {
+		return "Edge: unknown; no provider route observed"
+	}
+	return fmt.Sprintf("Edge: %s; %s", edge.Provider, fingerprintNextHop[edge.NextHop])
 }
 
 func init() {
