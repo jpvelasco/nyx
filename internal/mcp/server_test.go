@@ -3453,14 +3453,15 @@ func TestDispatchTopology_FingerprintAndDetailGate(t *testing.T) {
 		return args
 	}
 	for _, tc := range []struct {
-		name                string
-		allow               string
-		args                map[string]interface{}
-		wantErr             bool
-		fingerprint, detail bool
+		name                        string
+		allow                       string
+		args                        map[string]interface{}
+		wantErr                     bool
+		fingerprint, detail, matrix bool
 	}{
 		{name: "default", args: opnsenseArgs(nil)},
 		{name: "fingerprint needs no opt-in", args: opnsenseArgs(map[string]interface{}{"fingerprint": true}), fingerprint: true},
+		{name: "matrix needs no opt-in and implies fingerprint", args: opnsenseArgs(map[string]interface{}{"matrix": true}), fingerprint: true, matrix: true},
 		{name: "detail refused without opt-in", args: opnsenseArgs(map[string]interface{}{"include_detail": true}), wantErr: true},
 		{name: "detail with opt-in implies fingerprint", allow: "true", args: opnsenseArgs(map[string]interface{}{"include_detail": true}), fingerprint: true, detail: true},
 	} {
@@ -3482,8 +3483,9 @@ func TestDispatchTopology_FingerprintAndDetailGate(t *testing.T) {
 			if isErr {
 				t.Fatalf("unexpected error: %s", text)
 			}
-			if topo.opts.Fingerprint != tc.fingerprint || topo.opts.Detail != tc.detail {
-				t.Errorf("options fingerprint, detail = %t, %t; want %t, %t", topo.opts.Fingerprint, topo.opts.Detail, tc.fingerprint, tc.detail)
+			if topo.opts.Fingerprint != tc.fingerprint || topo.opts.Detail != tc.detail || topo.opts.Matrix != tc.matrix {
+				t.Errorf("options fingerprint, detail, matrix = %t, %t, %t; want %t, %t, %t",
+					topo.opts.Fingerprint, topo.opts.Detail, topo.opts.Matrix, tc.fingerprint, tc.detail, tc.matrix)
 			}
 			// Detail carries device-chosen hostnames, so it is marked untrusted.
 			if wrapped := strings.Contains(text, `"untrusted_data": true`); wrapped != tc.detail {

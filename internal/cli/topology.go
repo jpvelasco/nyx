@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
@@ -69,13 +72,9 @@ produce a confidently wrong verdict.`,
 				"or run `nyx credentials set <provider> --set host=...`")
 		}
 
-		fingerprint, detail := topologyFingerprintFlags(cmd)
-		rep, err := service.NewTopologyService().Report(ctx, service.TopologyOptions{
-			Omada:       omadaOpts,
-			Opnsense:    opnsOpts,
-			Fingerprint: fingerprint,
-			Detail:      detail,
-		})
+		topoOpts := service.TopologyOptions{Omada: omadaOpts, Opnsense: opnsOpts}
+		applyTopologyFingerprintFlags(cmd, &topoOpts)
+		rep, err := service.NewTopologyService().Report(ctx, topoOpts)
 		if err != nil {
 			return err
 		}
@@ -238,10 +237,84 @@ func printTopologyFingerprint(w io.Writer, fingerprint *topology.Fingerprint) {
 			printSegmentDetail(w, *segment.Detail)
 		}
 	}
+	if fingerprint.Matrix != nil {
+		printEnforcementMatrix(w, fingerprint.Matrix)
+	}
 	for _, warning := range fingerprint.Warnings {
 		fmt.Fprintf(w, "  Warning: %s\n", warning)
 	}
 	fmt.Fprintln(w)
+}
+
+// printEnforcementMatrix renders the segment-pair matrix as a grid of
+// allow/deny counts summed across providers ("none" = no pair-specific
+// rule), the per-provider wildcard and unresolved totals, and the uncovered
+// pairs as omada_plan candidates.
+func printEnforcementMatrix(w io.Writer, m *topology.EnforcementMatrix) {
+	if len(m.Pairs) == 0 {
+		fmt.Fprintln(w, "  Enforcement matrix: fewer than two segments observed")
+		return
+	}
+	cells := map[[2]int]string{}
+	var vlans []int
+	for _, p := range m.Pairs {
+		vlans = append(vlans, p.From)
+		cells[[2]int{p.From, p.To}] = matrixCell(p)
+	}
+	slices.Sort(vlans)
+	vlans = slices.Compact(vlans)
+
+	fmt.Fprintln(w, "  Enforcement matrix (rules naming each pair, allow/deny)")
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	header := []string{"    from\\to"}
+	for _, v := range vlans {
+		header = append(header, strconv.Itoa(v))
+	}
+	fmt.Fprintln(tw, strings.Join(header, "\t"))
+	for _, from := range vlans {
+		row := []string{"    " + strconv.Itoa(from)}
+		for _, to := range vlans {
+			cell := "-"
+			if from != to {
+				cell = cells[[2]int{from, to}]
+			}
+			row = append(row, cell)
+		}
+		fmt.Fprintln(tw, strings.Join(row, "\t"))
+	}
+	_ = tw.Flush()
+
+	wildcard := make([]string, 0, len(m.Providers))
+	unresolved := make([]string, 0, len(m.Providers))
+	for _, p := range m.Providers {
+		wildcard = append(wildcard, fmt.Sprintf("%s %d", p.Provider, p.Wildcard))
+		unresolved = append(unresolved, fmt.Sprintf("%s %d", p.Provider, p.Unresolved))
+	}
+	if len(m.Providers) > 0 {
+		fmt.Fprintf(w, "  Wildcard rules: %s\n", strings.Join(wildcard, ", "))
+		fmt.Fprintf(w, "  Unresolved rules: %s\n", strings.Join(unresolved, ", "))
+	}
+	uncovered := make([]string, 0, len(m.Pairs))
+	for _, pair := range m.Uncovered() {
+		uncovered = append(uncovered, fmt.Sprintf("%d->%d", pair[0], pair[1]))
+	}
+	if len(uncovered) == 0 {
+		fmt.Fprintln(w, "  Every segment pair has a pair-specific rule")
+		return
+	}
+	fmt.Fprintf(w, "  No pair-specific rule (omada_plan candidates): %s\n", strings.Join(uncovered, ", "))
+}
+
+func matrixCell(p topology.MatrixPair) string {
+	if !p.PairSpecific {
+		return "none"
+	}
+	allow, deny := 0, 0
+	for _, r := range p.Rules {
+		allow += r.Allow
+		deny += r.Deny
+	}
+	return fmt.Sprintf("%d/%d", allow, deny)
 }
 
 // printSegmentDetail renders a segment's private addressing, shown only
@@ -266,14 +339,16 @@ func printSegmentDetail(w io.Writer, detail topology.SegmentDetail) {
 func addTopologyFingerprintFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("fingerprint", false, "Infer architecture from configured provider inventory without probing the network")
 	cmd.Flags().Bool("detail", false, "With the fingerprint, also show each segment's subnet, gateway address, and inventory-known probe candidates (private: implies --fingerprint)")
+	cmd.Flags().Bool("matrix", false, "With the fingerprint, also show the segment-pair enforcement matrix (implies --fingerprint)")
 }
 
-// topologyFingerprintFlags reads the fingerprint flags; --detail implies
-// --fingerprint.
-func topologyFingerprintFlags(cmd *cobra.Command) (fingerprint, detail bool) {
-	fingerprint, _ = cmd.Flags().GetBool("fingerprint")
-	detail, _ = cmd.Flags().GetBool("detail")
-	return fingerprint || detail, detail
+// applyTopologyFingerprintFlags copies the fingerprint flags into opts;
+// --detail and --matrix each imply --fingerprint.
+func applyTopologyFingerprintFlags(cmd *cobra.Command, opts *service.TopologyOptions) {
+	opts.Fingerprint, _ = cmd.Flags().GetBool("fingerprint")
+	opts.Detail, _ = cmd.Flags().GetBool("detail")
+	opts.Matrix, _ = cmd.Flags().GetBool("matrix")
+	opts.Fingerprint = opts.Fingerprint || opts.Detail || opts.Matrix
 }
 
 // fingerprintNextHop explains each edge next-hop classification in words.

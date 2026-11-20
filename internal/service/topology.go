@@ -20,6 +20,9 @@ type TopologyOptions struct {
 	// Detail attaches private segment addressing and probe candidates to
 	// the fingerprint. It implies Fingerprint.
 	Detail bool
+	// Matrix attaches the segment-pair enforcement matrix to the
+	// fingerprint. It implies Fingerprint.
+	Matrix bool
 }
 
 // fingerprintScope says how much the fingerprint reads.
@@ -35,7 +38,7 @@ func (o TopologyOptions) fingerprintScope() fingerprintScope {
 	switch {
 	case o.Detail:
 		return fingerprintDetail
-	case o.Fingerprint:
+	case o.Fingerprint, o.Matrix:
 		return fingerprintRoles
 	}
 	return noFingerprint

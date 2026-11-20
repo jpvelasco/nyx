@@ -476,3 +476,46 @@ func TestTopologyFingerprintDetailOmadaClientsUnavailable(t *testing.T) {
 		t.Fatalf("VLAN 10 detail = %+v, want %+v", f.Segments[0].Detail, want)
 	}
 }
+
+func TestTopologyFingerprintMatrix(t *testing.T) {
+	server := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/firewall/source_nat/get":
+			testutil.WriteBody(w, testutil.SNATModeBody("automatic"))
+		case "/api/firewall/d_nat/search_rule", "/api/firewall/one_to_one/search_rule", "/api/firewall/source_nat/search_rule",
+			"/api/interfaces/bridge_settings/search_item":
+			testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+		case "/api/interfaces/overview/interfaces_info":
+			testutil.WriteBody(w, `{"rows":[
+				{"identifier":"opt1","addr4":"10.0.10.1/24","device":"vlan01"},
+				{"identifier":"opt6","addr4":"10.0.60.1/24","device":"vlan06"}]}`)
+		case "/api/interfaces/vlan_settings/search_item":
+			testutil.WriteBody(w, `{"total":2,"rows":[{"uuid":"f1","tag":"10","vlanif":"vlan01"},{"uuid":"f6","tag":"60","vlanif":"vlan06"}]}`)
+		case "/api/firewall/filter/search_rule":
+			testutil.WriteBody(w, `{"total":3,"rows":[
+				{"uuid":"r1","enabled":"1","action":"block","interface":"opt6","source_net":"opt6","destination_net":"opt1"},
+				{"uuid":"r2","enabled":"1","action":"pass","interface":"opt1","source_net":"any","destination_net":"10.0.60.0/24"},
+				{"uuid":"r3","enabled":"1","action":"pass","interface":"opt1","source_net":"opt1","destination_net":"any"}]}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	})
+	rep, err := NewTopologyService().Report(t.Context(), TopologyOptions{
+		Opnsense: &OpnsenseOptions{Host: server.URL, APIKey: "key1", APISecret: "secret1", SkipTLSVerify: true},
+		Matrix:   true, // implies Fingerprint
+	})
+	if err != nil || rep.Fingerprint == nil || rep.Fingerprint.Matrix == nil {
+		t.Fatalf("report = %+v, %v", rep, err)
+	}
+	m := rep.Fingerprint.Matrix
+	want := []topology.MatrixPair{
+		{From: 10, To: 60, PairSpecific: true, Rules: []topology.PairCount{{Provider: "opnsense", Allow: 1}}},
+		{From: 60, To: 10, PairSpecific: true, Rules: []topology.PairCount{{Provider: "opnsense", Deny: 1}}},
+	}
+	if !reflect.DeepEqual(m.Pairs, want) {
+		t.Fatalf("pairs = %+v, want %+v", m.Pairs, want)
+	}
+	if wantTotals := []topology.MatrixProviderTotals{{Provider: "opnsense", Wildcard: 1}}; !reflect.DeepEqual(m.Providers, wantTotals) {
+		t.Fatalf("providers = %+v, want %+v", m.Providers, wantTotals)
+	}
+}

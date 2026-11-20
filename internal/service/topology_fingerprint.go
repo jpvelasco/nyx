@@ -16,6 +16,7 @@ type omadaFingerprintFacts struct {
 	segments         []topology.SegmentObservation
 	subnets          []topology.SegmentSubnet
 	hosts            []topology.HostSighting
+	rules            []topology.ObservedRule
 	gatewayAddresses []string
 	ruleCount        *int
 	warnings         []string
@@ -47,6 +48,7 @@ func readOmadaFingerprint(ctx context.Context, client *omadabackend.Client, site
 	if gatewayErr == nil && switchErr == nil {
 		count := len(gateway.Rules) + len(switchRules.Rules)
 		facts.ruleCount = &count
+		facts.rules = omadaMatrixRules(networks, gateway.Rules, switchRules.Rules)
 	} else {
 		facts.warnings = append(facts.warnings, "Omada ACL counts unavailable")
 	}
@@ -73,11 +75,14 @@ func (s *TopologyService) fingerprint(ctx context.Context, opts TopologyOptions,
 	var segments []topology.SegmentObservation
 	var subnets []topology.SegmentSubnet
 	var hosts []topology.HostSighting
+	var rules []topology.ObservedRule
+	var opnsense *opnsenseFingerprintFacts
 	if report.Omada != nil {
 		omada = report.Omada.fingerprint
 		segments = append(segments, omada.segments...)
 		subnets = append(subnets, omada.subnets...)
 		hosts = append(hosts, omada.hosts...)
+		rules = append(rules, omada.rules...)
 		fingerprint.Warnings = append(fingerprint.Warnings, omada.warnings...)
 	}
 	for _, device := range report.Devices {
@@ -86,12 +91,19 @@ func (s *TopologyService) fingerprint(ctx context.Context, opts TopologyOptions,
 			fingerprint.Devices = append(fingerprint.Devices, topology.FingerprintDevice{Provider: device.Provider, Role: role, WhereToLook: where, EnforcementRules: omada.ruleCount})
 			continue
 		}
-		opnsense := s.appendOpnsenseFingerprint(ctx, *opts.Opnsense, report, device, ifaces, fingerprint)
-		segments = append(segments, opnsense.segments...)
-		subnets = append(subnets, opnsense.subnets...)
+		facts := s.appendOpnsenseFingerprint(ctx, *opts.Opnsense, report, device, ifaces, fingerprint)
+		opnsense = &facts
+		segments = append(segments, facts.segments...)
+		subnets = append(subnets, facts.subnets...)
 	}
 	merged, coverage := topology.MergeSegments(segments)
 	fingerprint.Segments = merged
+	if opts.Matrix {
+		if opnsense != nil {
+			rules = append(rules, opnsenseMatrixRules(opnsense.firewallRules, ifaces, opnsense.vlans, subnets)...)
+		}
+		fingerprint.Matrix = topology.BuildMatrix(segmentVLANs(merged), rules)
+	}
 	if opts.fingerprintScope() == fingerprintDetail {
 		hosts = append(hosts, s.opnsenseHostSightings(ctx, opts.Opnsense, fingerprint)...)
 		fingerprint.Segments = topology.AttachDetail(merged, subnets, hosts, probeCandidateLimit)
@@ -126,6 +138,18 @@ func (s *TopologyService) opnsenseHostSightings(ctx context.Context, opts *Opnse
 type opnsenseFingerprintFacts struct {
 	segments []topology.SegmentObservation
 	subnets  []topology.SegmentSubnet
+	// vlans and firewallRules are resolved into matrix rules once every
+	// provider's subnets are known: a rule may name an Omada-served CIDR.
+	vlans         []OpnsenseVLAN
+	firewallRules []OpnsenseFirewallRule
+}
+
+func segmentVLANs(segments []topology.FingerprintSegment) []int {
+	out := make([]int, len(segments))
+	for i, s := range segments {
+		out[i] = s.VLAN
+	}
+	return out
 }
 
 // appendOpnsenseFingerprint adds the OPNsense device row and returns its
@@ -149,8 +173,9 @@ func (s *TopologyService) appendOpnsenseFingerprint(ctx context.Context, opts Op
 	} else {
 		fingerprint.Warnings = append(fingerprint.Warnings, "OPNsense bridge inventory unavailable")
 	}
-	if rules, err := s.Opnsense.ListFirewallRules(ctx, opts); err == nil {
-		count := len(rules)
+	firewallRules, err := s.Opnsense.ListFirewallRules(ctx, opts)
+	if err == nil {
+		count := len(firewallRules)
 		row.EnforcementRules = &count
 	} else {
 		fingerprint.Warnings = append(fingerprint.Warnings, "OPNsense firewall rule count unavailable")
@@ -166,7 +191,11 @@ func (s *TopologyService) appendOpnsenseFingerprint(ctx context.Context, opts Op
 		}
 	}
 	serving, bridge := false, false
-	facts := opnsenseFingerprintFacts{segments: make([]topology.SegmentObservation, 0, len(vlans))}
+	facts := opnsenseFingerprintFacts{
+		segments:      make([]topology.SegmentObservation, 0, len(vlans)),
+		vlans:         vlans,
+		firewallRules: firewallRules,
+	}
 	for _, vlan := range vlans {
 		segment := topology.SegmentObservation{VLAN: vlan.Tag, Provider: topology.ProviderOpnsense}
 		if iface, ok := addressed[vlan.Device]; ok && vlan.Device != "" {

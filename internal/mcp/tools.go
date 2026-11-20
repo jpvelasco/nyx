@@ -1362,11 +1362,13 @@ func (s *Server) toolTopology(ctx context.Context, args map[string]interface{}) 
 	if detail && os.Getenv("NYX_MCP_ALLOW_TOPOLOGY_DETAILS") != "true" {
 		return errResult("Topology details (segment subnets, gateway addresses, probe candidates) require operator opt-in via NYX_MCP_ALLOW_TOPOLOGY_DETAILS=true")
 	}
+	matrix := argBoolDefault(args, "matrix", false)
 	rep, err := s.topoSvc.Report(ctx, service.TopologyOptions{
 		Omada:       omadaOpts,
 		Opnsense:    opnsOpts,
-		Fingerprint: detail || argBoolDefault(args, "fingerprint", false),
+		Fingerprint: detail || matrix || argBoolDefault(args, "fingerprint", false),
 		Detail:      detail,
+		Matrix:      matrix,
 	})
 	if err != nil {
 		return errResult(fmt.Sprintf("topology report failed: %v", err))

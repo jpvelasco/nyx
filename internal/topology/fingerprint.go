@@ -13,6 +13,7 @@ type Fingerprint struct {
 	Edge     *FingerprintEdge     `json:"edge,omitempty"`
 	Devices  []FingerprintDevice  `json:"devices"`
 	Segments []FingerprintSegment `json:"segments,omitempty"`
+	Matrix   *EnforcementMatrix   `json:"enforcement_matrix,omitempty"`
 	Warnings []string             `json:"warnings,omitempty"`
 }
 
