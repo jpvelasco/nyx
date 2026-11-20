@@ -20,7 +20,15 @@ import (
 // gateway, one port-forward, one one-to-one rule.
 func omadaGatewayServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	return omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	return omadaTestServer(t, omadaGatewayHandler(t))
+}
+
+// omadaGatewayHandler serves a site with one managed gateway, two LAN
+// networks (VLAN 10 with a gateway subnet, VLAN 20 without), no ACLs, and
+// one connected client on VLAN 10.
+func omadaGatewayHandler(t *testing.T) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/openapi/authorize/token":
 			writeOmadaEnvelope(w, 0, `{"accessToken":"tok"}`)
@@ -51,7 +59,7 @@ func omadaGatewayServer(t *testing.T) *httptest.Server {
 			t.Errorf("unexpected omada path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
-	})
+	}
 }
 
 // opnsenseNatObserver serves the OPNsense NAT + interfaces endpoints the
@@ -439,5 +447,32 @@ func TestTopologyFingerprintWithoutDetailIsAddressFree(t *testing.T) {
 	}
 	if m := regexp.MustCompile(`\d+\.\d+\.\d+\.\d+`).Find(raw); m != nil {
 		t.Fatalf("fingerprint without detail leaked an address %q: %s", m, raw)
+	}
+}
+
+func TestTopologyFingerprintDetailOmadaClientsUnavailable(t *testing.T) {
+	gateway := omadaGatewayHandler(t)
+	om := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/openapi/v1/abc123/sites/s1/networks/client" {
+			writeOmadaEnvelope(w, -1, `null`)
+			return
+		}
+		gateway(w, r)
+	})
+	rep, err := NewTopologyService().Report(t.Context(), TopologyOptions{
+		Omada:  &OmadaOptions{Host: om.URL, ClientID: "a", ClientSecret: "b", SkipTLSVerify: true},
+		Detail: true,
+	})
+	if err != nil || rep.Fingerprint == nil {
+		t.Fatalf("report = %+v, %v", rep, err)
+	}
+	f := rep.Fingerprint
+	if !slices.Contains(f.Warnings, "Omada client inventory unavailable; probe candidates incomplete") {
+		t.Fatalf("warnings = %q, want the client-inventory warning", f.Warnings)
+	}
+	// The subnet still renders; only the candidates are missing.
+	want := &topology.SegmentDetail{CIDR: "10.0.10.0/24", GatewayAddress: "10.0.10.1"}
+	if !reflect.DeepEqual(f.Segments[0].Detail, want) {
+		t.Fatalf("VLAN 10 detail = %+v, want %+v", f.Segments[0].Detail, want)
 	}
 }
