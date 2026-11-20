@@ -35,6 +35,16 @@ func draftFixture() *topology.Fingerprint {
 	}
 }
 
+// readDraftFile reads a draft the test itself wrote under t.TempDir().
+func readDraftFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path) // nosemgrep: go_filesystem_rule-fileread — path is a fixed name under t.TempDir()
+	if err != nil {
+		t.Fatalf("reading draft: %v", err)
+	}
+	return string(data)
+}
+
 func TestRenderDraftSpecRoundTrips(t *testing.T) {
 	draft := renderDraftSpec(draftFixture(), []string{"10.0.10.0/24"})
 	spec, err := intent.ParseSpec(draft)
@@ -87,13 +97,13 @@ func TestWriteDraftSpecRefusesOverwrite(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("err = %v, want refusal that mentions --force", err)
 	}
-	if got, _ := os.ReadFile(path); string(got) != "keep me" {
+	if got := readDraftFile(t, path); got != "keep me" {
 		t.Fatalf("existing file was modified: %q", got)
 	}
 	if err := writeDraftSpec(path, []byte("version: 1\n"), true); err != nil {
 		t.Fatalf("--force write: %v", err)
 	}
-	if got, _ := os.ReadFile(path); string(got) != "version: 1\n" {
+	if got := readDraftFile(t, path); got != "version: 1\n" {
 		t.Fatalf("forced write = %q", got)
 	}
 }
@@ -157,10 +167,7 @@ func TestTopologyCmd_RunE_DraftSpec(t *testing.T) {
 	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("draft mode = %v, want 0600 (it holds private addresses)", info.Mode().Perm())
 	}
-	data, err := os.ReadFile(path) // nosemgrep: go_filesystem_rule-fileread — path is under t.TempDir()
-	if err != nil {
-		t.Fatal(err)
-	}
+	data := []byte(readDraftFile(t, path))
 	spec, err := intent.ParseSpec(data)
 	if err != nil {
 		t.Fatalf("written draft does not validate: %v\n%s", err, data)
