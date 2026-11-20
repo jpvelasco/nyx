@@ -1103,8 +1103,8 @@ func TestPortScan_UDP(t *testing.T) {
 	if !Available() {
 		t.Skip("nmap not available")
 	}
-	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
-		t.Skip("UDP scans need raw sockets (root) on Linux; CI runners are unprivileged")
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+		t.Skip("UDP scans need raw sockets (root) on Unix; CI runners are unprivileged")
 	}
 	result, err := PortScan(context.Background(), "127.0.0.1", []int{53}, "udp", PoliteScanOptions)
 	if err != nil {

@@ -54,10 +54,10 @@ jobs:
   build:
     name: Build
     strategy:
-      # Full 3-OS matrix on push to the default branch; PRs skip macOS (10x minutes
-      # on the free tier) — Linux + Windows already cover the cross-platform risk.
+      # Full 3-OS matrix on every event: macOS-only failures must surface on
+      # the PR, not after merge. Public-repo runners are free.
       matrix:
-        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -71,9 +71,10 @@ jobs:
     name: Test
     strategy:
       fail-fast: false  # one leg failing must not cancel the others' coverage uploads
-      # Full 3-OS matrix on push to the default branch; PRs skip macOS to conserve minutes.
+      # Full 3-OS matrix on every event: macOS-only failures must surface on
+      # the PR, not after merge. Public-repo runners are free.
       matrix:
-        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -94,7 +95,7 @@ jobs:
         shell: bash
         run: |
           case "${{ runner.os }}" in
-            Linux) sudo apt-get update -y && sudo apt-get install -y nmap ;;
+            Linux) sudo apt-get -o Acquire::Retries=5 update -y && sudo apt-get -o Acquire::Retries=5 install -y nmap ;;
             macOS) brew install nmap ;;
             Windows) choco install nmap -y ;;
           esac
