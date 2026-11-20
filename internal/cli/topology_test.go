@@ -545,6 +545,7 @@ func TestTopologyFingerprintFlags(t *testing.T) {
 		{[]string{"--fingerprint"}, service.TopologyOptions{Fingerprint: true}},
 		{[]string{"--detail"}, service.TopologyOptions{Fingerprint: true, Detail: true}},
 		{[]string{"--matrix"}, service.TopologyOptions{Fingerprint: true, Matrix: true}},
+		{[]string{"--draft-spec", "draft.yaml"}, service.TopologyOptions{Fingerprint: true, Detail: true, Matrix: true}},
 	} {
 		cmd := &cobra.Command{}
 		addTopologyFingerprintFlags(cmd)

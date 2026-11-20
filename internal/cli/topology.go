@@ -78,6 +78,13 @@ produce a confidently wrong verdict.`,
 		if err != nil {
 			return err
 		}
+		if draftPath, _ := cmd.Flags().GetString("draft-spec"); draftPath != "" {
+			force, _ := cmd.Flags().GetBool("force")
+			if err := writeDraftSpec(draftPath, renderDraftSpec(rep.Fingerprint, localVantageCIDRs()), force); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.ErrOrStderr(), draftSpecNotice(draftPath))
+		}
 
 		w, err := getWriter()
 		if err != nil {
@@ -340,14 +347,20 @@ func addTopologyFingerprintFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("fingerprint", false, "Infer architecture from configured provider inventory without probing the network")
 	cmd.Flags().Bool("detail", false, "With the fingerprint, also show each segment's subnet, gateway address, and inventory-known probe candidates (private: implies --fingerprint)")
 	cmd.Flags().Bool("matrix", false, "With the fingerprint, also show the segment-pair enforcement matrix (implies --fingerprint)")
+	cmd.Flags().String("draft-spec", "", "Write a draft intent spec built from the fingerprint to this file (private: implies --detail and --matrix)")
+	cmd.Flags().Bool("force", false, "With --draft-spec, replace an existing file")
 }
 
 // applyTopologyFingerprintFlags copies the fingerprint flags into opts;
-// --detail and --matrix each imply --fingerprint.
+// --detail and --matrix each imply --fingerprint, and --draft-spec implies
+// both, since the draft is built from their output.
 func applyTopologyFingerprintFlags(cmd *cobra.Command, opts *service.TopologyOptions) {
 	opts.Fingerprint, _ = cmd.Flags().GetBool("fingerprint")
 	opts.Detail, _ = cmd.Flags().GetBool("detail")
 	opts.Matrix, _ = cmd.Flags().GetBool("matrix")
+	if draft, _ := cmd.Flags().GetString("draft-spec"); draft != "" {
+		opts.Detail, opts.Matrix = true, true
+	}
 	opts.Fingerprint = opts.Fingerprint || opts.Detail || opts.Matrix
 }
 
