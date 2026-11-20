@@ -3,14 +3,13 @@ package service
 import (
 	"context"
 	"net/netip"
-	"sort"
 
 	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
 	"github.com/jpvelasco/nyx/internal/topology"
 )
 
 type omadaFingerprintFacts struct {
-	segments         []topology.FingerprintSegment
+	segments         []topology.SegmentObservation
 	gatewayAddresses []string
 	ruleCount        *int
 	warnings         []string
@@ -20,9 +19,9 @@ func readOmadaFingerprint(ctx context.Context, client *omadabackend.Client, site
 	facts := &omadaFingerprintFacts{}
 	if networks, err := client.GetNetworks(ctx, siteID); err == nil {
 		for _, network := range networks {
-			segment := topology.FingerprintSegment{VLAN: network.VLANID}
+			segment := topology.SegmentObservation{VLAN: network.VLANID, Provider: topology.ProviderOmada}
 			if network.Gateway() != "" && omadabackend.GatewayForNetwork(devices, networks, network.ID) != nil {
-				segment.Gateway = topology.ProviderOmada
+				segment.Serves = true
 				facts.gatewayAddresses = append(facts.gatewayAddresses, network.Gateway())
 			}
 			facts.segments = append(facts.segments, segment)
@@ -44,9 +43,10 @@ func readOmadaFingerprint(ctx context.Context, client *omadabackend.Client, site
 func (s *TopologyService) fingerprint(ctx context.Context, opts TopologyOptions, report *TopologyReport, ifaces []OpnsenseInterface) *topology.Fingerprint {
 	fingerprint := &topology.Fingerprint{Devices: []topology.FingerprintDevice{}}
 	var omada *omadaFingerprintFacts
+	var segments []topology.SegmentObservation
 	if report.Omada != nil {
 		omada = report.Omada.fingerprint
-		fingerprint.Segments = omada.segments
+		segments = append(segments, omada.segments...)
 		fingerprint.Warnings = append(fingerprint.Warnings, omada.warnings...)
 	}
 	for _, device := range report.Devices {
@@ -55,19 +55,20 @@ func (s *TopologyService) fingerprint(ctx context.Context, opts TopologyOptions,
 			fingerprint.Devices = append(fingerprint.Devices, topology.FingerprintDevice{Provider: device.Provider, Role: role, WhereToLook: where, EnforcementRules: omada.ruleCount})
 			continue
 		}
-		s.appendOpnsenseFingerprint(ctx, *opts.Opnsense, report, device, ifaces, fingerprint)
+		segments = append(segments, s.appendOpnsenseFingerprint(ctx, *opts.Opnsense, report, device, ifaces, fingerprint)...)
 	}
-	sort.Slice(fingerprint.Segments, func(i, j int) bool {
-		left, right := fingerprint.Segments[i], fingerprint.Segments[j]
-		if left.VLAN == right.VLAN {
-			return left.Gateway < right.Gateway
-		}
-		return left.VLAN < right.VLAN
+	merged, coverage := topology.MergeSegments(segments)
+	fingerprint.Segments = merged
+	fingerprint.Warnings = append(fingerprint.Warnings, coverage...)
+	fingerprint.Edge = topology.SelectEdge(fingerprint.Devices, map[string]string{
+		topology.ProviderOpnsense: topology.ClassifyNextHop(interfaceGateways(ifaces)),
 	})
 	return fingerprint
 }
 
-func (s *TopologyService) appendOpnsenseFingerprint(ctx context.Context, opts OpnsenseOptions, report *TopologyReport, device topology.DeviceReport, ifaces []OpnsenseInterface, fingerprint *topology.Fingerprint) {
+// appendOpnsenseFingerprint adds the OPNsense device row and returns its
+// VLAN observations for the cross-provider segment merge.
+func (s *TopologyService) appendOpnsenseFingerprint(ctx context.Context, opts OpnsenseOptions, report *TopologyReport, device topology.DeviceReport, ifaces []OpnsenseInterface, fingerprint *topology.Fingerprint) []topology.SegmentObservation {
 	row := topology.FingerprintDevice{Provider: device.Provider, InterfaceCount: len(ifaces)}
 	if report.Omada != nil {
 		upstream := interfaceGateways(ifaces)
@@ -103,13 +104,14 @@ func (s *TopologyService) appendOpnsenseFingerprint(ctx context.Context, opts Op
 		}
 	}
 	serving, bridge := false, false
+	segments := make([]topology.SegmentObservation, 0, len(vlans))
 	for _, vlan := range vlans {
-		segment := topology.FingerprintSegment{VLAN: vlan.Tag}
+		segment := topology.SegmentObservation{VLAN: vlan.Tag, Provider: topology.ProviderOpnsense}
 		if vlan.Device != "" && addressed[vlan.Device] {
-			segment.Gateway = topology.ProviderOpnsense
+			segment.Serves = true
 			serving = true
 		}
-		fingerprint.Segments = append(fingerprint.Segments, segment)
+		segments = append(segments, segment)
 	}
 	for _, entry := range bridges {
 		bridge = bridge || len(entry.Members) >= 2
@@ -118,4 +120,5 @@ func (s *TopologyService) appendOpnsenseFingerprint(ctx context.Context, opts Op
 	confirmedNAT := nat.OutboundNatMode == topology.NatModeAutomatic || nat.OutboundNatMode == topology.NatModeHybrid || len(nat.SourceNatRules) > 0
 	row.Role, row.WhereToLook = topology.FingerprintRole(device, serving, bridge, confirmedNAT)
 	fingerprint.Devices = append(fingerprint.Devices, row)
+	return segments
 }

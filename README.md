@@ -506,3 +506,9 @@ Omada and OPNsense providers. It shows inferred enforcement and bridge roles,
 observed managed upstream links, and VLAN gateway provider assignments. The
 summary is based on controller inventory and uses provider names and VLAN IDs
 for its reported topology. Incomplete reads leave roles or assignments unknown.
+An `Edge:` line names the provider where the default route leaves the
+configured providers, and says whether its next hop is the internet, a
+private router nyx does not manage (you are looking at a branch), or not
+observable. Each VLAN lists the providers that saw it, and a VLAN that no
+inventory serves is reported as a warning: that is where nyx's visibility
+ends.

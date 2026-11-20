@@ -480,12 +480,32 @@ func TestPrintTopologyFingerprint(t *testing.T) {
 			{Provider: "omada", Role: "enforcer", WhereToLook: "Inspect firewall rules."},
 			{Provider: "opnsense", Role: "observer", ManagedUpstream: "omada"},
 		},
-		Segments: []topology.FingerprintSegment{{VLAN: 10, Gateway: "omada"}, {VLAN: 20}},
+		Segments: []topology.FingerprintSegment{
+			{VLAN: 10, Gateway: "omada", ObservedBy: []string{"omada", "opnsense"}},
+			{VLAN: 20, ObservedBy: []string{"omada"}},
+		},
 		Warnings: []string{"Optional inventory unavailable"},
+		Edge:     &topology.FingerprintEdge{Provider: "omada", NextHop: topology.NextHopUnknown},
 	}})
-	for _, want := range []string{"Architecture fingerprint", "opnsense: observer -> omada", "Inspect firewall rules.", "VLAN 10 -> omada", "VLAN 20 -> unknown", "Optional inventory unavailable"} {
+	for _, want := range []string{"Architecture fingerprint", "Edge: omada; next hop not observable", "opnsense: observer -> omada", "Inspect firewall rules.", "VLAN 10 -> omada (seen by omada, opnsense)", "VLAN 20 -> unknown (seen by omada)", "Optional inventory unavailable"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("missing %q in %s", want, buf.String())
+		}
+	}
+}
+
+func TestDescribeFingerprintEdge(t *testing.T) {
+	for _, tc := range []struct {
+		edge topology.FingerprintEdge
+		want string
+	}{
+		{topology.FingerprintEdge{Provider: "opnsense", NextHop: topology.NextHopInternet}, "Edge: opnsense; next hop is the internet, so this is the network edge"},
+		{topology.FingerprintEdge{Provider: "opnsense", NextHop: topology.NextHopUpstreamRouter}, "Edge: opnsense; next hop is a private router nyx does not manage, so the network continues upstream (this is a branch)"},
+		{topology.FingerprintEdge{Provider: "omada", NextHop: topology.NextHopUnknown}, "Edge: omada; next hop not observable"},
+		{topology.FingerprintEdge{NextHop: topology.NextHopUnknown}, "Edge: unknown; no provider route observed"},
+	} {
+		if got := describeFingerprintEdge(tc.edge); got != tc.want {
+			t.Errorf("describeFingerprintEdge(%+v) = %q, want %q", tc.edge, got, tc.want)
 		}
 	}
 }

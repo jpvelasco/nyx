@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/testutil"
+	"github.com/jpvelasco/nyx/internal/topology"
 )
 
 // omadaGatewayServer serves a fully-featured Omada controller: one managed
@@ -271,8 +273,17 @@ func TestTopologyFingerprint(t *testing.T) {
 	if len(f.Devices) != 2 || f.Devices[0].Role != "enforcer" || f.Devices[1].Role != "observer" || f.Devices[1].ManagedUpstream != "omada" {
 		t.Fatalf("device roles = %+v", f.Devices)
 	}
-	if len(f.Segments) != 2 || f.Segments[0].VLAN != 10 || f.Segments[0].Gateway != "omada" || f.Segments[1].Gateway != "" || len(f.Warnings) != 0 {
-		t.Fatalf("segments or warnings = %+v", f)
+	if len(f.Segments) != 2 || f.Segments[0].VLAN != 10 || f.Segments[0].Gateway != "omada" || f.Segments[1].Gateway != "" {
+		t.Fatalf("segments = %+v", f.Segments)
+	}
+	wantWarnings := []string{"VLAN 20 observed by omada; no inventory serves its gateway"}
+	if !reflect.DeepEqual(f.Warnings, wantWarnings) {
+		t.Fatalf("warnings = %q, want %q", f.Warnings, wantWarnings)
+	}
+	// OPNsense routes through the Omada gateway, so Omada is the edge, and
+	// Omada never exposes its own WAN next hop.
+	if want := (topology.FingerprintEdge{Provider: "omada", NextHop: topology.NextHopUnknown}); f.Edge == nil || *f.Edge != want {
+		t.Fatalf("edge = %+v, want %+v", f.Edge, want)
 	}
 }
 
@@ -298,7 +309,34 @@ func TestTopologyFingerprintPartialOPNsense(t *testing.T) {
 		t.Fatalf("report = %+v, %v", rep, err)
 	}
 	f := rep.Fingerprint
-	if len(f.Warnings) != 2 || len(f.Segments) != 2 || f.Segments[1].Gateway != "opnsense" || f.Devices[0].Role != "enforcer" {
+	// The two VLAN 10 rows merge into one segment that OPNsense serves.
+	wantSegments := []topology.FingerprintSegment{{VLAN: 10, Gateway: "opnsense", ObservedBy: []string{"opnsense"}}}
+	if len(f.Warnings) != 2 || !reflect.DeepEqual(f.Segments, wantSegments) || f.Devices[0].Role != "enforcer" {
 		t.Fatalf("fingerprint = %+v", f)
+	}
+	if want := (topology.FingerprintEdge{Provider: "opnsense", NextHop: topology.NextHopUnknown}); f.Edge == nil || *f.Edge != want {
+		t.Fatalf("edge = %+v, want %+v", f.Edge, want)
+	}
+}
+
+func TestTopologyFingerprintEdgeNextHop(t *testing.T) {
+	for _, tc := range []struct{ gateway, want string }{
+		{"203.0.113.1", topology.NextHopInternet},
+		{"10.0.11.1", topology.NextHopUpstreamRouter},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			op := opnsenseDownstreamServer(t, "automatic", tc.gateway)
+			rep, err := NewTopologyService().Report(t.Context(), TopologyOptions{
+				Opnsense:    &OpnsenseOptions{Host: op.URL, APIKey: "key1", APISecret: "secret1", SkipTLSVerify: true},
+				Fingerprint: true,
+			})
+			if err != nil || rep.Fingerprint == nil {
+				t.Fatalf("report = %+v, %v", rep, err)
+			}
+			want := topology.FingerprintEdge{Provider: "opnsense", NextHop: tc.want}
+			if edge := rep.Fingerprint.Edge; edge == nil || *edge != want {
+				t.Fatalf("edge = %+v, want %+v", edge, want)
+			}
+		})
 	}
 }
