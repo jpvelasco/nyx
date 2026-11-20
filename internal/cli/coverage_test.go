@@ -1112,9 +1112,7 @@ func TestDoctorCmd_JSON(t *testing.T) {
 }
 
 func TestDoctorCmd_JSON_FailingChecks(t *testing.T) {
-	if nmap.Available() {
-		t.Skip("nmap present — this test exercises the failing-doctor path")
-	}
+	t.Setenv("PATH", t.TempDir()) // hide nmap so the missing-nmap path runs on every host
 	saveRestoreGlobals(t)
 	jsonOutput = true
 	outputPath = filepath.Join(t.TempDir(), "doctor.json")
@@ -1123,9 +1121,7 @@ func TestDoctorCmd_JSON_FailingChecks(t *testing.T) {
 }
 
 func TestDoctorCmd_Human_FailingChecks(t *testing.T) {
-	if nmap.Available() {
-		t.Skip("nmap present — this test exercises the failing-doctor path")
-	}
+	t.Setenv("PATH", t.TempDir()) // hide nmap so the missing-nmap path runs on every host
 	saveRestoreGlobals(t)
 	outputPath = filepath.Join(t.TempDir(), "doctor.txt")
 	err := doctorCmd.RunE(doctorCmd, nil)
