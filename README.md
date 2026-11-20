@@ -531,3 +531,13 @@ to no segment (IP groups, aliases, hosts) are counted as unresolved. Pairs
 with no pair-specific rule are listed last as `omada_plan` candidates. The
 matrix shows VLAN IDs only, and the MCP `topology` tool takes `matrix` with
 no opt-in.
+
+`nyx topology --draft-spec specs/draft.yaml` (implies `--detail` and
+`--matrix`) writes a draft intent spec: one `vlan<id>` network per segment
+with an observed subnet, a comment marking the segment this machine is
+attached to, and commented probe and isolation suggestions taken from the
+probe candidates and from pairs with no pair-specific rule. The draft is
+written owner-only and is never overwritten unless you pass `--force`. It
+contains private addresses, so keep it under the gitignored `specs/`
+directory. Rename the networks and zones to their roles (see
+`docs/naming.md`) before using it.
