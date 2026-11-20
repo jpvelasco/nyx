@@ -3415,7 +3415,7 @@ func TestOpnsenseAliasDetailsPrivacy(t *testing.T) {
 
 func (s *stubOmadaSvc) ListEventLogs(_ context.Context, _ service.OmadaOptions, _ service.OmadaEventLogQuery) (service.OmadaEventLogPage, error) {
 	var page service.OmadaEventLogPage
-	if err := json.Unmarshal([]byte(`{"totalRows":2,"data":[{"id":"private-id","key":"private-key","module":"System","content":"Client connected from 10.0.10.123"},{"module":"private-module","content":"untrusted test text"}]}`), &page); err != nil {
+	if err := json.Unmarshal([]byte(`{"totalRows":2,"data":[{"id":"private-id","key":"private-key","module":"System","content":"Client connected from 10.0.10.123"},{"module":"private-module","content":"untrusted\u001b[2J test\u202etext"}]}`), &page); err != nil {
 		return page, err
 	}
 	return page, s.err
@@ -3439,7 +3439,7 @@ func TestDispatchOmadaListLogs(t *testing.T) {
 	}
 	t.Setenv("NYX_MCP_ALLOW_OMADA_LOG_CONTENT", "true")
 	text, failed = server.DispatchToolForTest(t.Context(), "omada_list_logs", args)
-	if failed || !strings.Contains(text, "Client connected from") || strings.Contains(text, "10.0.10.123") || strings.Contains(text, "private-") {
+	if failed || !strings.Contains(text, "Client connected from") || strings.Contains(text, "10.0.10.123") || strings.Contains(text, "private-") || !strings.Contains(text, "untrusted [2J test text") {
 		t.Fatalf("redacted event log text = %q (failed=%v)", text, failed)
 	}
 }

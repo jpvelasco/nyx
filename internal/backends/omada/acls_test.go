@@ -306,3 +306,9 @@ func TestScopeFromLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeACLNameStripsEscapes(t *testing.T) {
+	if got := normalizeACLName("  block\x1b[31m \u202eiot\u2028 "); got != "block[31m iot" {
+		t.Errorf("normalizeACLName = %q, want %q", got, "block[31m iot")
+	}
+}

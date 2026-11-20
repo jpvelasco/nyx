@@ -13,7 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
+
+	"github.com/jpvelasco/nyx/internal/textsafe"
 )
 
 const (
@@ -119,7 +120,7 @@ func (c *Client) GetFirewallLogStats(ctx context.Context, limit int, groupBy str
 		}
 		switch label := label.(type) {
 		case string:
-			stats = append(stats, FirewallLogStat{Label: strings.Map(printableLogRune, label), Value: row.Value})
+			stats = append(stats, FirewallLogStat{Label: textsafe.Printable(label), Value: row.Value})
 		case float64:
 			stats = append(stats, FirewallLogStat{Label: string(row.Label), Value: row.Value})
 		default:
@@ -186,7 +187,7 @@ func filterFirewallLog(rows []FirewallLogEntry, query FirewallLogQuery, since ti
 			}
 		}
 		for _, field := range []*string{&row.Source, &row.Destination, &row.SourcePort, &row.DestinationPort, &row.Action, &row.Direction, &row.Interface, &row.Label, &row.Timestamp, &row.Digest} {
-			*field = strings.Map(printableLogRune, *field)
+			*field = textsafe.Printable(*field)
 		}
 		page.Rows = append(page.Rows, row)
 	}
@@ -229,12 +230,4 @@ func logAddressMatches(value, filter string) bool {
 	}
 	target, err := netip.ParseAddr(filter)
 	return err == nil && target == ip
-}
-
-// Suppress terminal controls and invisible formatting in controller data.
-func printableLogRune(r rune) rune {
-	if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) {
-		return -1
-	}
-	return r
 }

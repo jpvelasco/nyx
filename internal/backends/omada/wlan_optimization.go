@@ -6,9 +6,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"unicode"
 
-	"github.com/jpvelasco/nyx/internal/logger"
+	"github.com/jpvelasco/nyx/internal/textsafe"
 )
 
 // WLANOptimizationRun is a row from the site planning-history collection.
@@ -154,15 +153,5 @@ func (ap WLANOptimizationAP) SafeFailureMessage() string {
 			text = strings.ReplaceAll(text, value, "[device]")
 		}
 	}
-	return SafeWLANOptimizationMessage(text)
-}
-
-func SafeWLANOptimizationMessage(text string) string {
-	text = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
-			return ' '
-		}
-		return r
-	}, text)
-	return strings.TrimSpace(string(logger.ScrubLine([]byte(text))))
+	return textsafe.Message(text)
 }

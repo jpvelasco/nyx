@@ -8,6 +8,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/backends/omada"
 	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/service"
+	"github.com/jpvelasco/nyx/internal/textsafe"
 	"github.com/spf13/cobra"
 )
 
@@ -55,7 +56,7 @@ func renderWLANOptimizationHistory(rows []omada.WLANOptimizationRun) error {
 	}
 	output := make([]diagnostic, 0, len(rows))
 	for _, row := range rows {
-		d := diagnostic{ID: row.ID, APCount: row.APCount, ScanSuccess: row.ScanSuccess, Code: row.MessageType, Message: omada.SafeWLANOptimizationMessage(row.Message), Status: omada.WLANOptimizationStatus(row.MessageType), Failed2G: failedWLANMACCount(row.Failed2G), Failed5G: failedWLANMACCount(row.Failed5G), Failed6G: failedWLANMACCount(row.Failed6G)}
+		d := diagnostic{ID: row.ID, APCount: row.APCount, ScanSuccess: row.ScanSuccess, Code: row.MessageType, Message: textsafe.Message(row.Message), Status: omada.WLANOptimizationStatus(row.MessageType), Failed2G: failedWLANMACCount(row.Failed2G), Failed5G: failedWLANMACCount(row.Failed5G), Failed6G: failedWLANMACCount(row.Failed6G)}
 		if row.APCount == 0 && row.MessageType == -34806 {
 			d.Guidance = wlanZeroAPGuidance
 		}

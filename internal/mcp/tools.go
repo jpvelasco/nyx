@@ -7,19 +7,18 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/jpvelasco/nyx/internal/audit"
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
 	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/intent"
-	"github.com/jpvelasco/nyx/internal/logger"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
 	reportpkg "github.com/jpvelasco/nyx/internal/report"
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/storepath"
+	"github.com/jpvelasco/nyx/internal/textsafe"
 )
 
 // toolHandler invokes one registered MCP tool. Handlers return the response
@@ -1551,24 +1550,13 @@ func (s *Server) toolOmadaListLogs(ctx context.Context, args map[string]interfac
 				event.Module = "Other"
 			}
 			if includeContent {
-				event.Content = scrubOmadaEventContent(event.Content)
+				event.Content = textsafe.Message(event.Content)
 			} else {
 				event.Content = ""
 			}
 		}
 		return page, nil
 	})
-}
-
-// scrubOmadaEventContent applies the shared logger redactor to plain text.
-func scrubOmadaEventContent(content string) string {
-	clean := strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
-			return ' '
-		}
-		return r
-	}, content)
-	return strings.TrimSpace(string(logger.ScrubLine([]byte(clean))))
 }
 
 func (s *Server) toolOpnsenseFirewallLog(ctx context.Context, args map[string]interface{}) toolDispatchResult {

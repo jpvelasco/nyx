@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode"
 
 	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/textsafe"
 )
 
 const (
@@ -41,12 +41,12 @@ func (c *Client) fetchMDNSInventory(ctx context.Context, siteID string) *intent.
 // scrubMDNSRule removes control and formatting characters before controller
 // values reach either a terminal or an agent consuming structured inventory.
 func scrubMDNSRule(rule *intent.MDNSRule) {
-	rule.ID = stripControllerFormatting(rule.ID)
-	rule.Name = stripControllerFormatting(rule.Name)
+	rule.ID = textsafe.Printable(rule.ID)
+	rule.Name = textsafe.Printable(rule.Name)
 	scrubMDNSIDs(rule.ProfileIDs)
 	if rule.AP != nil {
-		rule.AP.Service = stripControllerFormatting(rule.AP.Service)
-		rule.AP.Client = stripControllerFormatting(rule.AP.Client)
+		rule.AP.Service = textsafe.Printable(rule.AP.Service)
+		rule.AP.Client = textsafe.Printable(rule.AP.Client)
 	}
 	if rule.Gateway != nil {
 		scrubMDNSIDs(rule.Gateway.Service)
@@ -56,17 +56,8 @@ func scrubMDNSRule(rule *intent.MDNSRule) {
 
 func scrubMDNSIDs(ids []string) {
 	for i, id := range ids {
-		ids[i] = stripControllerFormatting(id)
+		ids[i] = textsafe.Printable(id)
 	}
-}
-
-func stripControllerFormatting(text string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
-			return -1
-		}
-		return r
-	}, text)
 }
 
 func renderMDNSInventory(b *strings.Builder, inv *intent.MDNSInventory) {
