@@ -284,12 +284,13 @@ func TestDiscoveryVirtualFirstRunWarns(t *testing.T) {
 	if !nmap.Available() {
 		t.Skip("nmap not available")
 	}
-	// Use a real local network to ensure fast scanning and predictable results
+	// A single loopback host keeps the sweep fast on every OS: macOS answers
+	// only 127.0.0.1, so a /24 waits out 255 silent addresses.
 	spec := &intent.Spec{
 		Version: 1,
 		Site:    "test",
 		Networks: []intent.Network{
-			{Name: "localhost", CIDR: "127.0.0.0/24", Gateway: "127.0.0.1", Zone: "local"},
+			{Name: "localhost", CIDR: "127.0.0.1/32", Gateway: "127.0.0.1", Zone: "local"},
 		},
 		Assertions: []intent.Assertion{
 			{Type: "subnet_discovery", Network: "localhost"},
