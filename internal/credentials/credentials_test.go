@@ -518,6 +518,36 @@ func TestConcurrentSetAllPersist(t *testing.T) {
 	}
 }
 
+// TestConcurrentFirstOpenCreatesLock races first-use Opens of a fresh
+// store, so every handle creates the lock file at the same instant. macOS
+// can fail that create with ENOENT (#352); many rounds make it likely.
+func TestConcurrentFirstOpenCreatesLock(t *testing.T) {
+	const rounds, openers = 50, 8
+	for r := 0; r < rounds; r++ {
+		path := filepath.Join(t.TempDir(), "credentials.json")
+		start := make(chan struct{})
+		errs := make(chan error, openers)
+		var wg sync.WaitGroup
+		for i := 0; i < openers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				_, err := Open(path)
+				errs <- err
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("round %d: concurrent first Open: %v", r, err)
+			}
+		}
+	}
+}
+
 func TestKeyReadFailurePreservesOriginalKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials.json")
 	s, err := Open(path)
