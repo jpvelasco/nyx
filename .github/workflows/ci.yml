@@ -175,10 +175,9 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Run gosec
-        # Keep this -exclude set in sync with .golangci.yml gosec.excludes
-        # (single source of truth) so gosec and golangci suppress the same IDs.
-        # Adjust the set to match the target repo's .golangci.yml.
-        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.28.0 -exclude=G104,G204,G304,G704 ./...
+        # Same strict scan as the release gate (make check): no rule
+        # excludes; intentional exceptions carry per-site #nosec annotations.
+        run: make gosec
 
   trivy:
     name: Trivy
