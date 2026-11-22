@@ -73,6 +73,7 @@ func writeLogExport(path string, data []byte, fresh bool) error {
 	if !fresh {
 		return os.WriteFile(path, data, 0o600)
 	}
+	// #nosec G304 — operator-chosen --out path or a validated LogList_<digits>.zip base name
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {

@@ -143,7 +143,7 @@ func openACLSite(ctx context.Context, opts providers.ImportOptions) (*omadabacke
 		site, err = omadabackend.SelectSite(sites, opts.Site)
 	}
 	if err != nil {
-		client.Logout(ctx)
+		_ = client.Logout(ctx) // best-effort cleanup; the site error is what the caller needs
 		return nil, site, err
 	}
 	return client, site, nil

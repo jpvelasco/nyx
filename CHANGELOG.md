@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-21
+
+**Patch release.** Publishes the 0.7.0 feature set. The v0.7.0 tag failed its release verification and was never published, so 0.7.1 is the first release that includes the changes listed under 0.7.0.
+
+### Fixed
+
+- **Release verification.** Restore the gosec annotations that the release gate (`make check`) requires on the nmap launcher, the Omada log-export write, and a best-effort Omada logout.
+
 ## [0.7.0] - 2026-11-21
 
 **Feature release.** Topology fingerprinting maps an unfamiliar network: segment coverage, the internet edge, probe candidates, a segment-pair enforcement matrix, and a draft intent spec. It adds Omada operations (event logs and archive export, firmware lifecycle and managed upgrades, site-config drift, WLAN optimization diagnostics, attack-defense visibility) and OPNsense firewall visibility (firewall logs, rules and aliases, pf states, runtime blocklists). It also adds ACL drift and WLAN schedule audit checks, plus explicit nmap discovery probe sets.
@@ -464,7 +472,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.7.1
 [0.7.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.7.0
 [0.6.2]: https://github.com/jpvelasco/nyx/releases/tag/v0.6.2
 [0.6.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.6.1
