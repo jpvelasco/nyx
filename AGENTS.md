@@ -7,7 +7,7 @@ make build          # go build -o nyx ./cmd/nyx/
 make test           # go test ./... (fast, no coverage — dev iteration)
 make coverage       # go test -coverprofile=coverage.out (with coverage)
 make vet            # go vet ./...
-make gosec          # run gosec static analysis
+make gosec          # run gosec static analysis (pinned in tools/go.mod, kept out of the main module)
 make check          # full CI suite: gosec → vet → coverage → build
 make lint           # golangci-lint run ./...
 make clean          # remove built binaries and coverage.out
@@ -25,7 +25,7 @@ Local (Windows) gotchas:
 - `-race` cannot run locally (no C compiler/cgo). CI runs `-race` on all 3 OS legs; do not treat local non-race runs as full coverage.
 - The `gh` CLI token in the Windows keyring expires periodically (HTTP 401 on API calls) — restore with `gh auth login`, then continue.
 
-CI (`.github/workflows/ci.yml`) jobs: `Lint`, `Lint (Windows)`, `Vulnerability scan` (govulncheck — a hard gate; stdlib vulnerabilities fail the check and require a `go.mod` toolchain bump), `Build` (3-OS matrix), `Test` (3-OS, `-race`, per-OS coverage uploads that Codecov merges; branch protection requires the macOS leg), `gosec`, and `Trivy`. There is no goreleaser snapshot job anymore. The `Test` job saves coverage as an artifact; `codacy-coverage.yml` (a `workflow_run` trusted handoff — PR jobs never receive the Codacy token) downloads and uploads it. CodeQL and Socket run on push/PR; an external Octopus Review bot posts AI review comments on PRs (`octopus.yml`). `protect-main` requires all CI checks — `Lint`, `Lint (Windows)`, `Vulnerability scan`, `Build (ubuntu/windows)`, `Test (ubuntu/windows)`, `gosec`, and `Trivy` — reconciled by fundamentum from the shipped baseline; only Codecov and Codacy stay soft.
+CI (`.github/workflows/ci.yml`) jobs: `Lint`, `Lint (Windows)`, `Vulnerability scan` (govulncheck — a hard gate; stdlib vulnerabilities fail the check and require a `go.mod` toolchain bump), `Build` (3-OS matrix), `Test` (3-OS, `-race`, per-OS coverage uploads that Codecov merges; branch protection requires the macOS leg), `gosec` (runs `make gosec`, the same strict scan as the release gate: no rule excludes, so intentional exceptions need a per-site `#nosec <rule> — <reason>` annotation), and `Trivy`. There is no goreleaser snapshot job anymore. The `Test` job saves coverage as an artifact; `codacy-coverage.yml` (a `workflow_run` trusted handoff — PR jobs never receive the Codacy token) downloads and uploads it. CodeQL and Socket run on push/PR; an external Octopus Review bot posts AI review comments on PRs (`octopus.yml`). `protect-main` requires all CI checks — `Lint`, `Lint (Windows)`, `Vulnerability scan`, `Build (ubuntu/windows)`, `Test (ubuntu/windows)`, `gosec`, and `Trivy` — reconciled by fundamentum from the shipped baseline; only Codecov and Codacy stay soft.
 
 `.golangci.yml` enables only `govet`, `ineffassign`, `staticcheck`, `unused`, `misspell` (+ `gofmt` formatter) — revive is intentionally disabled to avoid pre-existing style churn.
 
