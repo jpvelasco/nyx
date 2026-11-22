@@ -7,7 +7,7 @@ make build          # go build -o nyx ./cmd/nyx/
 make test           # go test ./... (fast, no coverage — dev iteration)
 make coverage       # go test -coverprofile=coverage.out (with coverage)
 make vet            # go vet ./...
-make gosec          # run gosec static analysis
+make gosec          # run gosec static analysis (pinned in tools/go.mod, kept out of the main module)
 make check          # full CI suite: gosec → vet → coverage → build
 make lint           # golangci-lint run ./...
 make clean          # remove built binaries and coverage.out
