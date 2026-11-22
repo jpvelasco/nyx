@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.7.0] - 2026-11-21
+
+**Feature release.** Topology fingerprinting maps an unfamiliar network: segment coverage, the internet edge, probe candidates, a segment-pair enforcement matrix, and a draft intent spec. It adds Omada operations (event logs and archive export, firmware lifecycle and managed upgrades, site-config drift, WLAN optimization diagnostics, attack-defense visibility) and OPNsense firewall visibility (firewall logs, rules and aliases, pf states, runtime blocklists). It also adds ACL drift and WLAN schedule audit checks, plus explicit nmap discovery probe sets.
+
+### New Features
+
+- **Topology fingerprint.** `nyx topology --fingerprint` infers each configured provider's role (enforcer, bridge observer, managed upstream), maps VLANs to providers, flags segments that only one provider observes, and names the internet edge. `--detail` adds segment CIDRs and inventory-backed probe candidates and stays local-only (MCP requires `NYX_MCP_ALLOW_TOPOLOGY_DETAILS`). `--matrix` counts enforcement rules per segment pair and lists the pairs no rule names. `--draft-spec <file>` writes an owner-only draft intent spec with commented probe and isolation suggestions.
+- **Omada operations.**
+  - Site event logs: `nyx omada logs`, plus `logs export` for the controller's site log archive.
+  - Per-AP channel inventory: `ap-channel-info`.
+  - mDNS repeater inventory.
+  - Device firmware lifecycle status and controller firmware staleness checks.
+  - Confirmed single-device managed firmware upgrades with readback verification.
+  - Site configuration snapshots and drift: `site-config snapshot` / `drift`.
+  - WLAN optimization history diagnostics.
+  - Attack-defense runtime visibility, with a confirmed single-client unblock.
+- **OPNsense firewall visibility.**
+  - Firewall logs and grouped statistics, with filters and cursor paging.
+  - Firewall rules, categories, and alias members in inventory. Detailed output is opt-in, and MCP requires operator authorization.
+  - pf state queries and capacity diagnostics. State deletion, scoped kills, and flushes require confirmation.
+  - Runtime blocklist inspection, with preview-by-default unblock and flush.
+- **Audit checks.** `acl_drift` compares declared policy names with Omada or OPNsense rule inventories. `wlan_schedule_liveness` verifies that an Omada WLAN optimization schedule is actually running and reports why when it is not.
+- **Per-segment edge model.** Spec networks declare their firewall and NAT provider (and optionally an observer). Segment-bound `acl_check` and `nat_check` route through the declared edge.
+- **Explicit discovery probe sets.** `nyx discover --probes auto|arp|icmp|default` selects ARP for attached subnets and politely paced ICMP for routed ones, and the summary counts unresponsive addresses.
+
+### Fixed
+
+- **OPNsense compatibility.**
+  - Decode 26.x routing and pf statistics responses.
+  - Select the active DHCP lease backend (Dnsmasq or Kea).
+  - Report exact API page privileges for denials.
+- **Omada compatibility.**
+  - Decode 6.3 nested DHCP guard flags.
+  - Distinguish unregistered, forbidden, and edition-limited Open API errors.
+- **Audit accuracy.**
+  - Local isolation checks bind to the source network on multihomed runners.
+  - Remote probe output is withheld from evidence and recorded as byte counts.
+  - Latency verdicts use the median reply time, so one outlier no longer fails a link.
+- **Credential store.** Retry a transient `ENOENT` when concurrent processes create the store lock file.
+- **Output safety.** Controller- and device-supplied text (mDNS, ACL names, firewall logs, WLAN messages, MCP event content, probe-candidate hostnames) passes through one shared sanitizer that removes terminal escapes, bidirectional overrides, and line separators.
+
+### Verification
+
+- **CI coverage.** macOS runs on every pull request. nmap and dig are installed on all three OSes, with raw-socket capabilities on Linux. Previously skipped nmap, DNS, discovery, probe-agent, and credential tests now run and assert real behavior.
+
+### Other
+
+- `golang.org/x/crypto` 0.59.0.
+
 ## [0.6.2] - 2026-11-15
 
 **Patch release.** Restores Windows npm installation from PowerShell 7 environments.
@@ -16,8 +67,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Verification
 
 - **Installer regression coverage.** Exercise Windows ZIP and Unix tar.gz extraction, quoted paths, binary contents, executable permissions, and cleanup.
-
-## [Unreleased]
 
 ## [0.6.1] - 2026-11-15
 
@@ -415,7 +464,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.7.0
 [0.6.2]: https://github.com/jpvelasco/nyx/releases/tag/v0.6.2
 [0.6.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.6.1
 [0.6.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.6.0
