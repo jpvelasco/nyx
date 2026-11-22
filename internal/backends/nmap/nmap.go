@@ -188,6 +188,7 @@ func Discover(ctx context.Context, cidr string) (*models.CheckResult, error) {
 //     empty and err explains the failure, including nmap's stderr so the
 //     cause (for example "need root to do a UDP scan") is visible
 func runNmap(ctx context.Context, nmapPath string, args []string) (out string, err error, warned bool) {
+	// #nosec G204 — nmapPath is the resolved nmap binary; args are built by this package
 	cmd := exec.CommandContext(ctx, nmapPath, args...) // nosemgrep
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
