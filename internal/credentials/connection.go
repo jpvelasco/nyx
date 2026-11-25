@@ -53,6 +53,7 @@ var (
 	schemaMu     sync.RWMutex
 	customFields = map[string][]Field{}
 	fieldName    = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	envName      = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 )
 
 // RegisterFields registers a new adapter's credential shape during registration.
@@ -63,14 +64,30 @@ func RegisterFields(provider string, fields []Field) error {
 	if builtinFields[provider] != nil || exists {
 		return fmt.Errorf("credential schema already registered for %q", provider)
 	}
-	seen := map[string]bool{"profile": true, "logical_site": true, "skip_tls_verify": true, "ca_cert": true, "ca_cert_path": true, "spec": true, "out": true, "debug": true, "include_acl_names": true, "include_firewall_details": true, "help": true}
+	seen := map[string]bool{
+		"profile": true, "logical_site": true, "skip_tls_verify": true, "ca_cert": true, "ca_cert_path": true,
+		"spec": true, "out": true, "debug": true,
+		"include_acl_names": true, "include_firewall_details": true, "help": true,
+	}
+	// A provider's prefix can overlap another provider's full environment name.
+	// Check actual names across adapters as well as enforcing the prefix.
+	usedEnv := map[string]bool{}
+	for _, schemas := range []map[string][]Field{builtinFields, customFields} {
+		for _, schema := range schemas {
+			for _, field := range schema {
+				usedEnv[field.Env] = true
+			}
+		}
+	}
+	prefix := strings.ToUpper(strings.ReplaceAll(provider, "-", "_")) + "_"
 	for _, f := range fields {
 		if !fieldName.MatchString(f.Name) || seen[f.Name] || (f.Secret && (f.Name == "host" || f.Name == "site")) {
 			return fmt.Errorf("invalid or duplicate credential field for %q", provider)
 		}
-		if f.Env != "" && !strings.HasPrefix(f.Env, strings.ToUpper(strings.ReplaceAll(provider, "-", "_"))+"_") {
-			return fmt.Errorf("credential environment variable outside provider namespace for %q", provider)
+		if f.Env != "" && (usedEnv[f.Env] || !envName.MatchString(f.Env) || !strings.HasPrefix(f.Env, prefix)) {
+			return fmt.Errorf("invalid or duplicate credential environment variable for %q", provider)
 		}
+		usedEnv[f.Env] = true
 		seen[f.Name] = true
 	}
 	customFields[provider] = slices.Clone(fields)

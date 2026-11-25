@@ -2,18 +2,17 @@ package credentials
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestNamedConnectionIsolation(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "credentials.json")
-	store, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for profile, entry := range map[string]Entry{"default": {"host": "default.example", "api_key": "default-key", "api_secret": "default-secret"}, "one": {"host": "one.example", "api_key": "one-key", "api_secret": "one-secret", "logical_site": "trusted"}, "two": {"host": "two.example", "api_key": "two-key"}} {
+	store, path := newTestStore(t)
+	for profile, entry := range map[string]Entry{
+		"default": {"host": "default.example", "api_key": "default-key", "api_secret": "default-secret"},
+		"one":     {"host": "one.example", "api_key": "one-key", "api_secret": "one-secret", "logical_site": "trusted"},
+		"two":     {"host": "two.example", "api_key": "two-key"},
+	} {
 		if err := store.Set("opnsense", profile, entry); err != nil {
 			t.Fatal(err)
 		}
@@ -71,14 +70,24 @@ func TestDefaultLogicalSiteRequiresStoredTarget(t *testing.T) {
 
 func TestCredentialSchemaRegistration(t *testing.T) {
 	t.Cleanup(ClearRegisteredFields)
-	if err := RegisterFields("sensor", []Field{{Name: "host", Env: "SENSOR_HOST", Required: true}, {Name: "token", Env: "SENSOR_TOKEN", Required: true, Secret: true}}); err != nil {
+	if err := RegisterFields("sensor", []Field{
+		{Name: "host", Env: "SENSOR_HOST", Required: true},
+		{Name: "token", Env: "SENSOR_TOKEN", Required: true, Secret: true},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
 		name   string
 		fields []Field
 	}{
-		{"omada", nil}, {"sensor", nil}, {"invalid", []Field{{Name: "profile"}}}, {"invalid", []Field{{Name: "host", Secret: true}}}, {"invalid", []Field{{Name: "token", Env: "OMADA_CLIENT_SECRET"}}}, {"invalid", []Field{{Name: "token"}, {Name: "token"}}},
+		{"omada", nil},
+		{"sensor", nil},
+		{"omada-client", []Field{{Name: "token", Env: "OMADA_CLIENT_SECRET"}}},
+		{"sensor-extra", []Field{{Name: "left", Env: "SENSOR_EXTRA_KEY"}, {Name: "right", Env: "SENSOR_EXTRA_KEY"}}},
+		{"invalid", []Field{{Name: "profile"}}},
+		{"invalid", []Field{{Name: "host", Secret: true}}},
+		{"invalid", []Field{{Name: "token", Env: "OMADA_CLIENT_SECRET"}}},
+		{"invalid", []Field{{Name: "token"}, {Name: "token"}}},
 	} {
 		if RegisterFields(tc.name, tc.fields) == nil {
 			t.Fatal("invalid declaration accepted")

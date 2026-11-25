@@ -354,9 +354,10 @@ func providerCommandOptions(cmd *cobra.Command, name string) providers.ImportOpt
 	}
 	c := credentials.Connection{Provider: name, Profile: providerProfile}
 	authenticated := cmd == nil || cmd.Name() != "info" || name != "omada"
+	// CLI info accepts a host from the default store.
 	if !authenticated {
 		c.Profile = c.ProfileName()
-	} // CLI info accepts a host from the default store.
+	}
 	opts := providers.ConnectionOptions(c, credentials.Resolve(c, values, os.Getenv, storepath.StoreFile(), authenticated))
 	opts.SkipTLSVerify, opts.CACertPath, opts.Logger = providerSkipTLS, providerCACertPath, slogLog
 	return opts
