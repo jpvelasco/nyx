@@ -1,0 +1,48 @@
+# Provider capabilities and shared network workflows
+
+**Status:** Proposed for review, November 25, 2026.
+
+A site may use Omada for Wi-Fi, a different vendor for switching, and OPNsense for routing. An operator should be able to ask Nyx for one map of that site. Adding a compiled-in provider that can observe links should make its links available through the same CLI command and MCP tool. A provider that can change a port should be selectable for the specific port it manages.
+
+Use the design issue for review decisions. The roadmap lists the implementation work in priority order and links the prerequisites for each feature. [Design review](https://github.com/jpvelasco/nyx/issues/373) · [Roadmap](https://github.com/jpvelasco/nyx/issues/372)
+
+## What already works
+
+`providers.Register` and the imports in `cmd/nyx/main.go` give Nyx a compile-time extension point. The CLI creates standard provider commands from advertised capabilities. Optional interfaces already cover inventory, ACL observation and mutation, and NAT checks and changes. Keep these contracts working during migration. [Provider contracts](../../../internal/providers/provider.go) · [CLI command builder](../../../internal/cli/provider.go)
+
+Today the MCP tool schemas and handlers are separate lists. Some intent validators explicitly name the two vendors. The CLI falls back to Omada environment variables for unknown providers. Topology takes one Omada connection and one OPNsense connection, and the port-forward playbook selects between them by name. Registering a third provider therefore gives an operator basic CLI commands and an entry in `provider_list`, while each of these other paths requires separate wiring. [MCP dispatch](../../../internal/mcp/tools.go) · [Intent validation](../../../internal/intent/spec.go) · [Topology](../../../internal/service/topology.go) · [Port forwarding](../../../internal/service/playbook.go)
+
+## Proposed design
+
+1. **Separate a provider from a connection.** The registry describes an implementation, its credential fields, and the operations it implements. A configured connection identifies a particular controller or firewall and its site or profile. Resolve credentials for that connection alone. Preserve the current argument or flag, environment, Windows Credential Manager, and encrypted-store precedence, including unauthenticated operations. Existing default profiles retain their meaning. A third provider must be able to use a different credential shape, such as a single API key. Capability discovery lists field names and support status without returning credential values.
+
+2. **Use small, typed capabilities.** Start with one existing read operation, then add observations of devices, ports, and links as mapping needs them. Keep planning and applying changes separate from observation. Providers opt into each interface they implement. A switch-only provider can participate fully in switching workflows. Register each shared operation's CLI and MCP bindings beside its typed service entry point. Derive the MCP schema listing and dispatch from the same operation declaration. CLI flags and MCP arguments can have different names and encodings where established clients depend on them.
+
+3. **Make support specific to the operation and connection.** Record what the installed Nyx adapter implements separately from what is known about the target firmware, hardware, and role permissions. An agent needs to distinguish an unsupported operation, an unavailable controller, a denied read, an unverified write, and a successful empty result. Learn from versioned documentation and read-only evidence. An ordinary discovery request must never try a write to determine support.
+
+4. **Keep vendor semantics at the adapter boundary.** Adapters translate their responses into shared observations with a site, source connection, resource identity, and observation time where available. The service combines observations into a map and retains conflicting or missing evidence. Scope port identities to the device and connection. Scope VLAN identifiers to a site and layer-2 network before merging observations. For example, identical VLAN tags in two sites are insufficient evidence to join their networks. Default reports retain Nyx's existing address-free behavior and private-detail controls.
+
+5. **Select a target by ownership.** A plan identifies the connection and resource responsible for the requested change. A switch controls its port, while a separate firewall may own that VLAN's routed interface. An incomplete observation can produce a partial map with a stated gap. An ambiguous owner blocks an apply. Existing dry-run defaults, evidence readback, and source-VLAN verification carry forward. A multi-device plan records each completed step and reconciles observed state before resuming after a failure.
+
+6. **Keep version 1 specs usable.** Retain the existing meaning of `edge`, `observer`, `provider`, and provider-specific fields. Preserve structural validation and rejection of invalid field combinations. Supply provider and capability knowledge to the relevant validators through a narrow lookup interface to avoid an `intent` → `providers` import cycle. Parsing an offline spec must still work without credentials or network access. A provider-specific extension such as the Omada WLAN schedule check stays explicitly scoped to implementations that support its semantics.
+
+## What a provider author implements
+
+For the first slice, register the provider's name, connection metadata, and a typed implementation of controller information. The existing `Provider` interface also requires `ImportSpec`, `Check`, and `CheckACL`. Let the old registration entry point adapt existing implementations into the same registry. New adapters can implement just the supported operations. Reject duplicate provider names and inconsistent capability declarations at registration. CLI, MCP, and spec validation must agree on what was registered.
+
+The map workflow adds one shared operation with an input selecting configured connections and an output containing the observations and their coverage. A provider author implements the observation interface and adds the package import to the distribution. The author of a genuinely new workflow defines its input, output, service behavior, CLI command, and MCP schema once. Vendor-only concepts can continue to use namespaced commands and tools. This keeps a future UniFi adapter small without requiring every vendor to express a switch port, firewall rule, or wireless feature in precisely the same way.
+
+## Migration and review gates
+
+| Order | Change | Evidence to review before moving on |
+| --- | --- | --- |
+| 1 | Introduce provider registration metadata and connection-scoped credentials. Migrate the two built-ins and their existing credential callers. | Existing flags, tool arguments, environment variables, Windows entries, and stored profiles resolve as before. A synthetic third provider cannot pick up another provider's host or secret, even when its own configuration is incomplete. |
+| 2 | Move one read capability, controller information, through the shared service and both interfaces. Migrate provider lookups in spec validation and expose capability discovery. | The synthetic provider can be discovered and invoked through the CLI and MCP. Exercise MCP `tools/list` and `tools/call`. Both existing vendors' command names, tool names, argument requirements, output shapes, and error behavior pass compatibility tests. Offline validation accepts supported roles and rejects unsupported combinations. |
+| 3 | Introduce provider-neutral observations in the existing topology service. Adapt the existing Omada and OPNsense observations, then exercise the mapping contract with the third provider. | A mixed site reports a switch-to-firewall link with its evidence. A disconnected source produces an explicit coverage gap. Distinct sites with the same VLAN tag stay separate. Existing topology/NAT outputs and conservative ownership decisions retain their tested behavior. |
+| 4 | Move shared workflows onto those contracts as each feature lands. Keep vendor-specific operations available through the existing entry points. | Port planning, isolation verification, and routed segment provisioning each have a CLI/MCP acceptance example using the same service. A read-only provider never advertises an apply capability. Repeated requests and partial failures have defined outcomes. |
+
+**First feature after the foundation:** map a site where one provider observes a switch and another observes its gateway. A test-only third provider that reports a link must appear in the same CLI and MCP map after registration, with no edits to either command handler. Use synthetic fixtures for routine CI and record the model, version, and outcome privately when verifying a real appliance.
+
+## Stable API baseline
+
+At design time the stable software targets are Omada Software Controller **6.3.0.112** and OPNsense Community Edition **26.7.10**. For Omada hardware controllers, verify the corresponding stable appliance firmware and its published catalog separately. A published operation establishes a candidate for integration. Verify model, permissions, and readback before describing a write as supported on an appliance. Recheck the stable releases when implementation starts. [Omada software releases](https://support.omadanetworks.com/us/product/omada-software-controller/?resourceType=download) · [Omada hardware catalogs](https://omada-northbound-docs.tplinkcloud.com/models/oc_series) · [OPNsense CE releases](https://docs.opnsense.org/releases/CE_26.7.html)
