@@ -1182,7 +1182,7 @@ func (s *Server) toolOpnsenseListVLANs(ctx context.Context, args map[string]inte
 	return okResult(toJSON(rows))
 }
 
-func vlanRequestFromArgs(args map[string]interface{}) (service.OpnsenseVLANRequest, string) {
+func vlanRequestFromArgs(args map[string]interface{}) service.OpnsenseVLANRequest {
 	return service.OpnsenseVLANRequest{
 		Kind:        argString(args, "kind"),
 		Parent:      argString(args, "parent"),
@@ -1190,8 +1190,9 @@ func vlanRequestFromArgs(args map[string]interface{}) (service.OpnsenseVLANReque
 		Description: argString(args, "description"),
 		UUID:        argString(args, "uuid"),
 		Members:     splitCSV(argString(args, "members")),
+		Address:     argString(args, "address"),
 		Delete:      argBoolDefault(args, "delete", false),
-	}, ""
+	}
 }
 
 func (s *Server) toolOpnsensePlanVLAN(ctx context.Context, args map[string]interface{}) toolDispatchResult {
@@ -1199,7 +1200,7 @@ func (s *Server) toolOpnsensePlanVLAN(ctx context.Context, args map[string]inter
 	if msg != "" {
 		return errResult(msg)
 	}
-	req, _ := vlanRequestFromArgs(args)
+	req := vlanRequestFromArgs(args)
 	plan, err := s.opnsenseSvc.PlanVLAN(ctx, opts, req)
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense vlan plan request failed: %v", err))
@@ -1212,7 +1213,7 @@ func (s *Server) toolOpnsenseApplyVLAN(ctx context.Context, args map[string]inte
 	if msg != "" {
 		return errResult(msg)
 	}
-	req, _ := vlanRequestFromArgs(args)
+	req := vlanRequestFromArgs(args)
 	res, err := s.opnsenseSvc.ApplyVLAN(ctx, opts, req, argBoolDefault(args, "dry_run", true))
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense vlan apply failed: %v", err))

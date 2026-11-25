@@ -36,11 +36,9 @@ const (
 	bridgeReconfigurePath = "/interfaces/bridge_settings/reconfigure"
 )
 
-// AssignIPGapWarning is the open upstream limitation: creating a VLAN
-// device or editing bridge members does not assign the device to optN
-// or set addressing. The GUI still owns that step.
+// AssignIPGapWarning identifies the separate interface-assignment step.
 const AssignIPGapWarning = "creating the VLAN or bridge device does not assign it to an opt " +
-	"or set addressing; finish that in the GUI, then continue with DHCP and filter writes"
+	"or set addressing; for a VLAN use kind=assignment on supported firewalls, or assign it in the GUI"
 
 // GetVLANs returns configured VLAN devices (GET search_item).
 func (c *Client) GetVLANs(ctx context.Context) ([]VLAN, error) {

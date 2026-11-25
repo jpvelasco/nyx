@@ -3494,3 +3494,16 @@ func TestDispatchTopology_FingerprintAndDetailGate(t *testing.T) {
 		})
 	}
 }
+
+func TestVLANAssignmentArguments(t *testing.T) {
+	for _, apply := range []bool{false, true} {
+		schema := opnsenseVLANToolSchema(apply)
+		if schema.Properties["address"].Type != "string" {
+			t.Fatal("missing address property")
+		}
+	}
+	req := vlanRequestFromArgs(map[string]any{"kind": "assignment", "address": "10.0.30.1/24", "tag": 30.0, "parent": "igb0", "description": "gaming"})
+	if req.Address != "10.0.30.1/24" || req.Kind != "assignment" || req.Tag != 30 || req.Parent != "igb0" || req.Description != "gaming" {
+		t.Fatal("assignment inputs did not reach the request")
+	}
+}

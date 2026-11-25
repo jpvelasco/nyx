@@ -511,3 +511,11 @@ When `PlanDHCP` / `ApplyDHCP` is called with kind=range
 Then the backend is `dnsmasq`, a missing range is `create`, dry-run issues zero POSTs, and a real apply POSTs add_range then `dnsmasq/service/reconfigure`
 And if neither backend is running the write errors with `no running DHCP backend`
 And the tests: `TestDetectDHCPBackend`, `TestOpnsenseServicePlanApplyDHCP`
+
+## VLAN interface assignment
+
+After creating a VLAN device, preview its routed interface with `nyx opnsense plan-vlan --kind assignment --parent igb0 --tag 30 --description gaming --address 10.0.30.1/24`. The corresponding MCP operation is `opnsense_plan_vlan`. `apply-vlan` and `opnsense_apply_vlan` accept the same inputs and default to dry-run. An IPv6 address with a prefix selects static IPv6.
+
+Nyx resolves the device from the requested parent and tag, checks for address and route conflicts, and stages a new interface with the requested role. OPNsense allocates the interface identifier. Nyx compares the staged interfaces with its pre-change inventory before activating the queue and checks the saved identity, address, mode and enabled state afterward. A matching committed assignment returns `unchanged`. A conflicting assignment requires operator review. An appliance without the assignment API returns a GUI handoff.
+
+OPNsense activates the entire interface queue in one call. Schedule real changes with one writer. If a request loses its reply, run the plan again. An existing pending queue requires review in the GUI. A successful configuration readback establishes the saved assignment. A client-side reachability check remains a separate observation. [Assignment API in OPNsense 26.7.10](https://github.com/opnsense/core/blob/26.7.10/src/opnsense/mvc/app/controllers/OPNsense/Interfaces/Api/AssignmentController.php)
