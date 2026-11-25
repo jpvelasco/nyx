@@ -39,7 +39,7 @@ func (e *Engine) runACLDrift(ctx context.Context, provider string) (*models.Chec
 	switch {
 	case !ok:
 		unavailable = "provider does not support ACL observation"
-	case opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "":
+	case opts.Connection.Require(opts.Credentials) != nil:
 		unavailable = "provider credentials are missing"
 	default:
 		var err error

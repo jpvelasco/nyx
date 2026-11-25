@@ -88,6 +88,9 @@ func (o *OmadaProvider) Check(ctx context.Context, opts providers.ImportOptions)
 		return nil, err
 	}
 	engine := audit.NewEngine(imported.Spec)
+	if opts.Connection.ProfileName() != "default" {
+		engine.ControllerOptions = map[string]providers.ImportOptions{"omada": opts}
+	}
 	// Forward the TLS options so the audit-engine-backed assertions that talk
 	// to the controller (acl_check, nat_check) honor the same
 	// --skip-tls-verify / --ca-cert the import used. The import path and the

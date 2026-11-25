@@ -449,7 +449,9 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]propSchema{
-					"spec_file": {Type: "string", Description: "Path to YAML spec file"},
+					"omada_profile":    {Type: "string", Description: "Named Omada credential profile"},
+					"opnsense_profile": {Type: "string", Description: "Named OPNsense credential profile"},
+					"spec_file":        {Type: "string", Description: "Path to YAML spec file"},
 				},
 				Required: []string{"spec_file"},
 			},
@@ -516,6 +518,7 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]propSchema{
+					"profile":         {Type: "string", Description: "Named Omada credential profile"},
 					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
 					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
 					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
@@ -1081,6 +1084,8 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 					"omada_host":               {Type: "string", Description: "Omada controller hostname or IP (omit to skip Omada)"},
 					"omada_client_id":          {Type: "string", Description: "Omada Open API client ID"},
 					"omada_client_secret":      {Type: "string", Description: "Omada Open API client secret"},
+					"omada_profile":            {Type: "string", Description: "Named Omada credential profile"},
+					"opnsense_profile":         {Type: "string", Description: "Named OPNsense credential profile"},
 					"omada_site":               {Type: "string", Description: "Optional Omada site name; defaults to the first site"},
 					"omada_skip_tls_verify":    {Type: "boolean", Description: "Skip TLS certificate verification for the Omada controller (self-signed certs)"},
 					"omada_ca_cert_path":       {Type: "string", Description: "Path to a CA certificate for the Omada controller"},
@@ -1111,6 +1116,7 @@ func omadaToolSchema() inputSchema {
 	return inputSchema{
 		Type: "object",
 		Properties: map[string]propSchema{
+			"profile":         {Type: "string", Description: "Named Omada credential profile"},
 			"host":            {Type: "string", Description: "Omada controller hostname or IP (OMADA_HOST env fallback)"},
 			"client_id":       {Type: "string", Description: "Omada Open API client ID (OMADA_CLIENT_ID env fallback)"},
 			"client_secret":   {Type: "string", Description: "Omada Open API client secret (OMADA_CLIENT_SECRET env fallback)"},
@@ -1141,6 +1147,7 @@ func opnsenseToolSchema() inputSchema {
 	return inputSchema{
 		Type: "object",
 		Properties: map[string]propSchema{
+			"profile":         {Type: "string", Description: "Named OPNsense credential profile"},
 			"host":            {Type: "string", Description: "OPNsense firewall hostname or IP (OPNSENSE_HOST env fallback)"},
 			"api_key":         {Type: "string", Description: "OPNsense API key (OPNSENSE_API_KEY env fallback)"},
 			"api_secret":      {Type: "string", Description: "OPNsense API secret (OPNSENSE_API_SECRET env fallback)"},
@@ -1163,10 +1170,10 @@ func portForwardToolSchema() inputSchema {
 		"label":         {Type: "string", Description: "Rule name"},
 		"dry_run":       {Type: "boolean", Description: "Preview only (apply tool). Default true."},
 	}
-	for _, k := range []string{"host", "client_id", "client_secret", "site", "skip_tls_verify", "ca_cert_path"} {
+	for _, k := range []string{"profile", "host", "client_id", "client_secret", "site", "skip_tls_verify", "ca_cert_path"} {
 		props["omada_"+k] = propSchema{Type: propTypeFor(k), Description: "Omada " + k + " (OMADA_* env fallback)"}
 	}
-	for _, k := range []string{"host", "api_key", "api_secret", "skip_tls_verify", "ca_cert_path"} {
+	for _, k := range []string{"profile", "host", "api_key", "api_secret", "skip_tls_verify", "ca_cert_path"} {
 		props["opnsense_"+k] = propSchema{Type: propTypeFor(k), Description: "OPNsense " + k + " (OPNSENSE_* env fallback)"}
 	}
 	return inputSchema{
@@ -1352,45 +1359,35 @@ const requiredHostMsg = "host parameter is required"
 // resolution order as the CLI. The returned message is non-empty when a
 // required parameter is missing after all four layers.
 func (s *Server) omadaOptionsFromArgs(args map[string]interface{}, needCredentials bool) (service.OmadaOptions, string) {
-	var opts service.OmadaOptions
-	opts.Host = storepath.FirstNonEmpty(argString(args, "host"), s.env("OMADA_HOST"))
-	opts.Site = storepath.FirstNonEmpty(argString(args, "site"), s.env("OMADA_SITE"))
+	v, msg := s.connectionFields("omada", args, needCredentials)
+	opts := service.OmadaOptions{Host: v["host"], Site: v["site"], ClientID: v["client_id"], ClientSecret: v["client_secret"]}
 	opts.SkipTLSVerify, _ = args["skip_tls_verify"].(bool)
-	opts.CACertPath, _ = args["ca_cert_path"].(string)
-	if !needCredentials {
-		// Unauthenticated calls (get_info) resolve only host/site from args
-		// and env and never touch the store, so they cannot carry
-		// credentials.
-		if opts.Host == "" {
-			return opts, requiredHostMsg
+	opts.CACertPath = argString(args, "ca_cert_path")
+	return opts, msg
+}
+
+func (s *Server) connectionFields(provider string, args map[string]interface{}, authenticated bool) (credentials.Entry, string) {
+	c := credentials.Connection{Provider: provider, Profile: argString(args, "profile")}
+	supplied := credentials.Entry{}
+	for _, field := range credentials.FieldsFor(provider) {
+		supplied[field.Name] = argString(args, field.Name)
+	}
+	v := credentials.Resolve(c, supplied, s.env, storepath.StoreFile(), authenticated)
+	if authenticated && (c.ProfileName() != "default" || (provider != "omada" && provider != "opnsense")) {
+		if err := c.Require(v); err != nil {
+			return v, err.Error()
 		}
-		return opts, ""
 	}
-	// Credential-bearing calls fill in what args and env left empty from
-	// the store (entry omada/default); read failures are silently ignored
-	// (credentials.Overlay), leaving the error below for the genuinely
-	// unconfigured case. Validation runs after the overlay so a store entry
-	// can supply the host too.
-	fields := credentials.Fields{
-		Host:         opts.Host,
-		ClientID:     storepath.FirstNonEmpty(argString(args, "client_id"), s.env("OMADA_CLIENT_ID")),
-		ClientSecret: storepath.FirstNonEmpty(argString(args, "client_secret"), s.env("OMADA_CLIENT_SECRET")),
-		Site:         opts.Site,
+	if v["host"] == "" {
+		return v, requiredHostMsg
 	}
-	// Windows Credential Manager layer, between env vars and the store
-	// (no-op off Windows — see credmanager).
-	fields.ClientID, fields.ClientSecret = credmanager.OverlayOmada(fields.Host, fields.ClientID, fields.ClientSecret)
-	credentials.Overlay(storepath.StoreFile(), "omada", "default", &fields)
-	opts.Host, opts.ClientID, opts.ClientSecret, opts.Site = fields.Host, fields.ClientID, fields.ClientSecret, fields.Site
-	if opts.Host == "" {
-		return opts, requiredHostMsg
+	if !authenticated || c.Require(v) == nil {
+		return v, ""
 	}
-	if opts.ClientID == "" || opts.ClientSecret == "" {
-		return opts, "client_id and client_secret parameters are required: " +
-			"set the OMADA_CLIENT_ID / OMADA_CLIENT_SECRET environment variables" +
-			credmanager.Hint(opts.Host) + " or run `nyx credentials set omada`"
+	if provider == "omada" {
+		return v, "client_id and client_secret parameters are required: set the OMADA_CLIENT_ID / OMADA_CLIENT_SECRET environment variables" + credmanager.Hint(v["host"]) + " or run `nyx credentials set omada`"
 	}
-	return opts, ""
+	return v, "api_key and api_secret parameters are required: set the OPNSENSE_API_KEY / OPNSENSE_API_SECRET environment variables" + credmanager.HintOpnsense(v["host"]) + " or run `nyx credentials set opnsense`"
 }
 
 // env reads a credential environment variable through the credEnv reader map
@@ -1500,39 +1497,11 @@ func portProfileRequestFromArgs(args map[string]interface{}) (service.OmadaPortP
 // empty — the same resolution order as the CLI. The returned message is
 // non-empty when a required parameter is missing after all four layers.
 func (s *Server) opnsenseOptionsFromArgs(args map[string]interface{}, needCredentials bool) (service.OpnsenseOptions, string) {
-	var opts service.OpnsenseOptions
-	opts.Host = storepath.FirstNonEmpty(argString(args, "host"), s.env("OPNSENSE_HOST"))
+	v, msg := s.connectionFields("opnsense", args, needCredentials)
+	opts := service.OpnsenseOptions{Host: v["host"], APIKey: v["api_key"], APISecret: v["api_secret"]}
 	opts.SkipTLSVerify, _ = args["skip_tls_verify"].(bool)
-	opts.CACertPath, _ = args["ca_cert_path"].(string)
-	if !needCredentials {
-		if opts.Host == "" {
-			return opts, "host parameter is required"
-		}
-		return opts, ""
-	}
-	// Credential-bearing calls fill in what args and env left empty from
-	// the store (entry opnsense/default); read failures are silently
-	// ignored (credentials.Overlay). Validation runs after the overlay so a
-	// store entry can supply the host too.
-	fields := credentials.Fields{
-		Host:      opts.Host,
-		APIKey:    storepath.FirstNonEmpty(argString(args, "api_key"), s.env("OPNSENSE_API_KEY")),
-		APISecret: storepath.FirstNonEmpty(argString(args, "api_secret"), s.env("OPNSENSE_API_SECRET")),
-	}
-	// Windows Credential Manager layer, between env vars and the store
-	// (no-op off Windows — see credmanager).
-	fields.APIKey, fields.APISecret = credmanager.OverlayOpnsense(fields.Host, fields.APIKey, fields.APISecret)
-	credentials.Overlay(storepath.StoreFile(), "opnsense", "default", &fields)
-	opts.Host, opts.APIKey, opts.APISecret = fields.Host, fields.APIKey, fields.APISecret
-	if opts.Host == "" {
-		return opts, requiredHostMsg
-	}
-	if opts.APIKey == "" || opts.APISecret == "" {
-		return opts, "api_key and api_secret parameters are required: " +
-			"set the OPNSENSE_API_KEY / OPNSENSE_API_SECRET environment variables" +
-			credmanager.HintOpnsense(opts.Host) + " or run `nyx credentials set opnsense`"
-	}
-	return opts, ""
+	opts.CACertPath = argString(args, "ca_cert_path")
+	return opts, msg
 }
 
 // DispatchToolForTest exposes dispatchTool for testing.

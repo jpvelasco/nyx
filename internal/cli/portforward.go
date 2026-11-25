@@ -3,17 +3,19 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
+
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
-	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
+
 	"github.com/jpvelasco/nyx/internal/service"
-	"github.com/jpvelasco/nyx/internal/storepath"
+
 	"github.com/spf13/cobra"
 )
 
 var (
+	pfOmadaProfile      string
+	pfOpnsenseProfile   string
 	pfExternalPort      string
 	pfTarget            string
 	pfLocalPort         string
@@ -131,69 +133,11 @@ func renderPortForwardPlan(p *service.PortForwardPlan) {
 	}
 }
 
-// resolvePlaybookOmadaOpts resolves the Omada credential set with the
-// standard chain (flags → env → Credential Manager → store), mirroring
-// the topology command.
 func resolvePlaybookOmadaOpts() (*service.OmadaOptions, error) {
-	opts := service.OmadaOptions{
-		Host:          firstNonEmptyCLI(pfOmadaHost, os.Getenv("OMADA_HOST")),
-		ClientID:      firstNonEmptyCLI(pfOmadaClientID, os.Getenv("OMADA_CLIENT_ID")),
-		ClientSecret:  firstNonEmptyCLI(pfOmadaClientSecret, os.Getenv("OMADA_CLIENT_SECRET")),
-		Site:          firstNonEmptyCLI(pfOmadaSite, os.Getenv("OMADA_SITE")),
-		SkipTLSVerify: pfSkipTLSVerify,
-		CACertPath:    pfCACertPath,
-	}
-	opts.ClientID, opts.ClientSecret = credmanager.OverlayOmada(opts.Host, opts.ClientID, opts.ClientSecret)
-	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
-		fields := credentials.Fields{Host: opts.Host, ClientID: opts.ClientID, ClientSecret: opts.ClientSecret, Site: opts.Site}
-		credentials.Overlay(storepath.StoreFile(), "omada", "default", &fields)
-		opts.Host, opts.ClientID, opts.ClientSecret, opts.Site = fields.Host, fields.ClientID, fields.ClientSecret, fields.Site
-	}
-	if opts.Host == "" {
-		return nil, nil
-	}
-	if opts.ClientID == "" || opts.ClientSecret == "" {
-		return nil, fmt.Errorf("%s", "omada credentials incomplete: set --omada-client-id/--omada-client-secret, "+
-			"OMADA_CLIENT_ID / OMADA_CLIENT_SECRET"+credmanager.Hint(opts.Host)+
-			", or run `nyx credentials set omada`")
-	}
-	return &opts, nil
+	return composedOmadaOptions(pfOmadaProfile, credentials.Entry{"host": pfOmadaHost, "site": pfOmadaSite, "client_id": pfOmadaClientID, "client_secret": pfOmadaClientSecret}, pfSkipTLSVerify, pfCACertPath)
 }
-
-// resolvePlaybookOpnsenseOpts resolves the OPNsense credential set with
-// the standard chain, mirroring the topology command.
 func resolvePlaybookOpnsenseOpts() (*service.OpnsenseOptions, error) {
-	opts := service.OpnsenseOptions{
-		Host:          firstNonEmptyCLI(pfOpnsenseHost, os.Getenv("OPNSENSE_HOST")),
-		APIKey:        firstNonEmptyCLI(pfOpnsenseAPIKey, os.Getenv("OPNSENSE_API_KEY")),
-		APISecret:     firstNonEmptyCLI(pfOpnsenseAPISecret, os.Getenv("OPNSENSE_API_SECRET")),
-		SkipTLSVerify: pfSkipTLSVerify,
-		CACertPath:    pfCACertPath,
-	}
-	opts.APIKey, opts.APISecret = credmanager.OverlayOpnsense(opts.Host, opts.APIKey, opts.APISecret)
-	if opts.Host == "" || opts.APIKey == "" || opts.APISecret == "" {
-		fields := credentials.Fields{Host: opts.Host, APIKey: opts.APIKey, APISecret: opts.APISecret}
-		credentials.Overlay(storepath.StoreFile(), "opnsense", "default", &fields)
-		opts.Host, opts.APIKey, opts.APISecret = fields.Host, fields.APIKey, fields.APISecret
-	}
-	if opts.Host == "" {
-		return nil, nil
-	}
-	if opts.APIKey == "" || opts.APISecret == "" {
-		return nil, fmt.Errorf("%s", "opnsense credentials incomplete: set --opnsense-api-key/--opnsense-api-secret, "+
-			"OPNSENSE_API_KEY / OPNSENSE_API_SECRET"+credmanager.HintOpnsense(opts.Host)+
-			", or run `nyx credentials set opnsense`")
-	}
-	return &opts, nil
-}
-
-func firstNonEmptyCLI(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
+	return composedOpnsenseOptions(pfOpnsenseProfile, credentials.Entry{"host": pfOpnsenseHost, "api_key": pfOpnsenseAPIKey, "api_secret": pfOpnsenseAPISecret}, pfSkipTLSVerify, pfCACertPath)
 }
 
 func init() {
@@ -205,6 +149,8 @@ func init() {
 	f.StringVar(&pfLabel, "label", "", "Rule name")
 	f.BoolVar(&pfApply, "apply", false, "Apply through the selected backend (dry-run by default)")
 	f.BoolVar(&pfDryRun, "dry-run", true, "Preview only (with --apply)")
+	f.StringVar(&pfOmadaProfile, "omada-profile", "", "Named Omada credential profile")
+	f.StringVar(&pfOpnsenseProfile, "opnsense-profile", "", "Named OPNsense credential profile")
 	f.StringVar(&pfOmadaHost, "omada-host", "", "Omada controller IP or hostname (omit to skip Omada)")
 	f.StringVar(&pfOmadaClientID, "omada-client-id", "", "Omada Open API client ID")
 	f.StringVar(&pfOmadaClientSecret, "omada-client-secret", "", "Omada Open API client secret")

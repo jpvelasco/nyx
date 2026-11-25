@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
@@ -54,6 +55,19 @@ func TestRunACLCheck_OpnsenseEdge(t *testing.T) {
 	if err != nil || !strings.Contains(result.Summary, "OPNSENSE_HOST") {
 		t.Fatalf("expected OPNsense credential error, result=%+v err=%v", result, err)
 	}
+	store, err := credentials.Open(eng.CredentialsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set("opnsense", "management", credentials.Entry{"host": "firewall.example", "api_key": "fixture-key"}); err != nil {
+		t.Fatal(err)
+	}
+	eng.CredentialProfiles = map[string]string{"opnsense": "management"}
+	result, err = eng.runACLCheck(t.Context(), a)
+	if err != nil || result.Status != models.StatusError || !strings.Contains(result.Summary, "missing required fields: api_secret") || strings.Contains(result.Summary, "fixture-key") {
+		t.Fatal("incomplete named profile did not produce a value-free error")
+	}
+
 }
 
 type recordingEdgeACLProvider struct {

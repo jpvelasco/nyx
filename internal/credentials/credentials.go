@@ -49,38 +49,13 @@ import (
 // are provider-defined (e.g. host, client_id, client_secret for omada).
 type Entry map[string]string
 
-// Requirements lists the fields each known provider must carry in an
-// entry. Unknown providers have no required fields.
-var Requirements = map[string][]string{
-	"omada":    {"host", "client_id", "client_secret"},
-	"opnsense": {"host", "api_key", "api_secret"},
-	"probe":    {"host", "username", "key"},
-}
-
-// OptionalFields are prompted when `nyx credentials set` runs with no
-// --set flags on a TTY. They are never required for verify / status.
-var OptionalFields = map[string][]string{
-	"omada": {"site"},
-}
-
-// secretFields are never echoed on a TTY prompt and never printed.
-var secretFields = map[string]bool{
-	"client_secret": true,
-	"api_secret":    true,
-}
-
-// IsSecret reports whether field is a secret (no-echo prompt).
-func IsSecret(field string) bool {
-	return secretFields[field]
-}
-
 // MissingRequired returns the required fields that are empty on entry.
 // Unknown providers return nil.
 func MissingRequired(provider string, entry Entry) []string {
 	var missing []string
-	for _, field := range Requirements[provider] {
-		if strings.TrimSpace(entry[field]) == "" {
-			missing = append(missing, field)
+	for _, field := range FieldsFor(provider) {
+		if field.Required && strings.TrimSpace(entry[field.Name]) == "" {
+			missing = append(missing, field.Name)
 		}
 	}
 	return missing
@@ -184,58 +159,6 @@ func (s *Store) Set(provider, name string, entry Entry) error {
 		data[provider][name] = entry
 		return nil
 	})
-}
-
-// Fields is the typed overlay target for provider credentials. A struct
-// (not a map) keeps host/site distinct from the credential values so a
-// printed hostname cannot be treated as a leaked secret.
-type Fields struct {
-	Host         string
-	ClientID     string
-	ClientSecret string
-	Site         string
-	// APIKey / APISecret carry the OPNsense credential pair (store keys
-	// api_key / api_secret under provider "opnsense").
-	APIKey    string
-	APISecret string
-}
-
-// Overlay fills empty Fields from the named store entry. Store failures
-// and missing entries are ignored — dest is left as-is for those keys so
-// callers can keep env vars / flags as the primary source.
-func Overlay(path, provider, name string, dest *Fields) {
-	if dest == nil {
-		return
-	}
-	if path == "" {
-		path = DefaultPath()
-	}
-	store, err := Open(path)
-	if err != nil {
-		return
-	}
-	entry, ok := store.Get(provider, name)
-	if !ok {
-		return
-	}
-	if dest.Host == "" {
-		dest.Host = entry["host"]
-	}
-	if dest.ClientID == "" {
-		dest.ClientID = entry["client_id"]
-	}
-	if dest.ClientSecret == "" {
-		dest.ClientSecret = entry["client_secret"]
-	}
-	if dest.Site == "" {
-		dest.Site = entry["site"]
-	}
-	if dest.APIKey == "" {
-		dest.APIKey = entry["api_key"]
-	}
-	if dest.APISecret == "" {
-		dest.APISecret = entry["api_secret"]
-	}
 }
 
 // Get returns the stored entry. ok is false when the entry does not exist.

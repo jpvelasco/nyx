@@ -50,6 +50,7 @@ var auditCmd = &cobra.Command{
 		defer cancel()
 
 		engine := audit.NewEngine(spec)
+		engine.CredentialProfiles, _ = cmd.Flags().GetStringToString("provider-profile")
 		engine.Interface = GetSelectedInterface()
 		engine.WarnVirtual = warnVirtual
 		engine.SkipHostKeyVerify = skipHostKeyVerify

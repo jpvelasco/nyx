@@ -22,6 +22,8 @@ import (
 )
 
 var (
+	topoOmadaProfile      string
+	topoOpnsenseProfile   string
 	topoOmadaHost         string
 	topoOmadaClientID     string
 	topoOmadaClientSecret string
@@ -103,85 +105,48 @@ produce a confidently wrong verdict.`,
 	},
 }
 
-// resolveOmadaTopologyOpts returns the Omada options for the topology
-// report, or nil when the host cannot be resolved after the flags ->
-// env -> Credential Manager (nyx-omada-<host>, Windows) -> store chain
-// (meaning: skip Omada). It returns a non-nil error when a host is
-// present but the credentials are incomplete after all four layers.
 func resolveOmadaTopologyOpts() (*service.OmadaOptions, error) {
-	opts := service.OmadaOptions{
-		Host:          storepath.FirstNonEmpty(topoOmadaHost, os.Getenv("OMADA_HOST")),
-		ClientID:      storepath.FirstNonEmpty(topoOmadaClientID, os.Getenv("OMADA_CLIENT_ID")),
-		ClientSecret:  storepath.FirstNonEmpty(topoOmadaClientSecret, os.Getenv("OMADA_CLIENT_SECRET")),
-		Site:          storepath.FirstNonEmpty(topoOmadaSite, os.Getenv("OMADA_SITE")),
-		SkipTLSVerify: topoSkipTLSVerify,
-		CACertPath:    topoCACertPath,
-	}
-	// Windows Credential Manager layer, between env vars and the store
-	// (no-op off Windows — see credmanager).
-	opts.ClientID, opts.ClientSecret = credmanager.OverlayOmada(opts.Host, opts.ClientID, opts.ClientSecret)
-	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
-		fields := credentials.Fields{
-			Host:         opts.Host,
-			ClientID:     opts.ClientID,
-			ClientSecret: opts.ClientSecret,
-			Site:         opts.Site,
-		}
-		credentials.Overlay(storepath.StoreFile(), "omada", "default", &fields)
-		opts.Host, opts.ClientID, opts.ClientSecret, opts.Site = fields.Host, fields.ClientID, fields.ClientSecret, fields.Site
-	}
-	if opts.Host == "" {
-		return nil, nil
-	}
-	if opts.ClientID == "" || opts.ClientSecret == "" {
-		return nil, errors.New("omada credentials incomplete: set --omada-client-id/--omada-client-secret, " +
-			"OMADA_CLIENT_ID / OMADA_CLIENT_SECRET" + credmanager.Hint(opts.Host) +
-			", or run `nyx credentials set omada`")
-	}
-	return &opts, nil
+	return composedOmadaOptions(topoOmadaProfile, credentials.Entry{"host": topoOmadaHost, "site": topoOmadaSite, "client_id": topoOmadaClientID, "client_secret": topoOmadaClientSecret}, topoSkipTLSVerify, topoCACertPath)
 }
-
-// resolveOpnsenseTopologyOpts returns the OPNsense options for the topology
-// report, or nil when the host cannot be resolved after the flags -> env ->
-// Credential Manager (nyx-opnsense-<host>, Windows) -> store chain
-// (meaning: skip OPNsense). It returns a non-nil error when a host is
-// present but the credentials are incomplete after all four layers.
 func resolveOpnsenseTopologyOpts() (*service.OpnsenseOptions, error) {
-	opts := service.OpnsenseOptions{
-		Host:          storepath.FirstNonEmpty(topoOpnsenseHost, os.Getenv("OPNSENSE_HOST")),
-		APIKey:        storepath.FirstNonEmpty(topoOpnsenseAPIKey, os.Getenv("OPNSENSE_API_KEY")),
-		APISecret:     storepath.FirstNonEmpty(topoOpnsenseAPISecret, os.Getenv("OPNSENSE_API_SECRET")),
-		SkipTLSVerify: topoSkipTLSVerify,
-		CACertPath:    topoCACertPath,
-	}
-	// Windows Credential Manager layer, between env vars and the store
-	// (no-op off Windows — see credmanager).
-	opts.APIKey, opts.APISecret = credmanager.OverlayOpnsense(opts.Host, opts.APIKey, opts.APISecret)
-	if opts.Host == "" || opts.APIKey == "" || opts.APISecret == "" {
-		fields := credentials.Fields{
-			Host:      opts.Host,
-			APIKey:    opts.APIKey,
-			APISecret: opts.APISecret,
-		}
-		credentials.Overlay(storepath.StoreFile(), "opnsense", "default", &fields)
-		opts.Host, opts.APIKey, opts.APISecret = fields.Host, fields.APIKey, fields.APISecret
-	}
-	if opts.Host == "" {
-		return nil, nil
-	}
-	if opts.APIKey == "" || opts.APISecret == "" {
-		return nil, errors.New("opnsense credentials incomplete: set --opnsense-api-key/--opnsense-api-secret, " +
-			"OPNSENSE_API_KEY / OPNSENSE_API_SECRET" + credmanager.HintOpnsense(opts.Host) +
-			", or run `nyx credentials set opnsense`")
-	}
-	return &opts, nil
+	return composedOpnsenseOptions(topoOpnsenseProfile, credentials.Entry{"host": topoOpnsenseHost, "api_key": topoOpnsenseAPIKey, "api_secret": topoOpnsenseAPISecret}, topoSkipTLSVerify, topoCACertPath)
 }
 
-// printTopologyReport renders the topology assessment for a human: the
-// double-NAT verdict up front, the per-device roles with their evidence,
-// then the raw per-provider NAT facts. An empty outbound-NAT mode is printed
-// as "unknown" — the mode key may be absent (version drift) and must not be
-// guessed.
+func composedFields(provider, profile string, fields credentials.Entry) (credentials.Entry, error) {
+	c := credentials.Connection{Provider: provider, Profile: profile}
+	v := credentials.Resolve(c, fields, os.Getenv, storepath.StoreFile(), true)
+	err := c.Require(v)
+	if profile != "" {
+		return v, err
+	}
+	if v["host"] == "" {
+		return nil, nil
+	}
+	if err == nil {
+		return v, nil
+	}
+	if provider == "omada" {
+		return nil, errors.New("omada credentials incomplete: set --omada-client-id/--omada-client-secret, OMADA_CLIENT_ID / OMADA_CLIENT_SECRET" + credmanager.Hint(v["host"]) + ", or run `nyx credentials set omada`")
+	}
+	return nil, errors.New("opnsense credentials incomplete: set --opnsense-api-key/--opnsense-api-secret, OPNSENSE_API_KEY / OPNSENSE_API_SECRET" + credmanager.HintOpnsense(v["host"]) + ", or run `nyx credentials set opnsense`")
+}
+
+func composedOmadaOptions(profile string, fields credentials.Entry, skipTLS bool, caPath string) (*service.OmadaOptions, error) {
+	v, err := composedFields("omada", profile, fields)
+	if err != nil || v == nil {
+		return nil, err
+	}
+	return &service.OmadaOptions{Host: v["host"], Site: v["site"], ClientID: v["client_id"], ClientSecret: v["client_secret"], SkipTLSVerify: skipTLS, CACertPath: caPath}, nil
+}
+
+func composedOpnsenseOptions(profile string, fields credentials.Entry, skipTLS bool, caPath string) (*service.OpnsenseOptions, error) {
+	v, err := composedFields("opnsense", profile, fields)
+	if err != nil || v == nil {
+		return nil, err
+	}
+	return &service.OpnsenseOptions{Host: v["host"], APIKey: v["api_key"], APISecret: v["api_secret"], SkipTLSVerify: skipTLS, CACertPath: caPath}, nil
+}
+
 func printTopologyReport(w io.Writer, rep *service.TopologyReport) {
 	if rep.Fingerprint != nil {
 		printTopologyFingerprint(w, rep.Fingerprint)
@@ -382,6 +347,8 @@ func describeFingerprintEdge(edge topology.FingerprintEdge) string {
 
 func init() {
 	addTopologyFingerprintFlags(topologyCmd)
+	topologyCmd.Flags().StringVar(&topoOmadaProfile, "omada-profile", "", "Named Omada credential profile")
+	topologyCmd.Flags().StringVar(&topoOpnsenseProfile, "opnsense-profile", "", "Named OPNsense credential profile")
 	topologyCmd.Flags().StringVar(&topoOmadaHost, "omada-host", "", "Omada controller IP or hostname (omit to skip Omada)")
 	topologyCmd.Flags().StringVar(&topoOmadaClientID, "omada-client-id", "", "Omada Open API client ID")
 	topologyCmd.Flags().StringVar(&topoOmadaClientSecret, "omada-client-secret", "", "Omada Open API client secret")
