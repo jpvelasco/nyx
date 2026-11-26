@@ -156,13 +156,14 @@ type driftIndex struct {
 	facts      map[string]driftFact
 	sources    map[string]topology.MapSource
 	incomplete map[string]bool
+	scopedTags map[string]bool
 }
 
 func stale(at, t time.Time, age time.Duration) bool {
 	return t.IsZero() || t.After(at) || at.Sub(t) > age
 }
 func (c NetworkMapCapture) index(maxAge time.Duration) driftIndex {
-	idx := driftIndex{facts: map[string]driftFact{}, sources: map[string]topology.MapSource{}, incomplete: map[string]bool{}}
+	idx := driftIndex{facts: map[string]driftFact{}, sources: map[string]topology.MapSource{}, incomplete: map[string]bool{}, scopedTags: map[string]bool{}}
 	sources := map[string]string{}
 	ids := map[string]string{}
 	owners := map[string]string{}
@@ -197,6 +198,9 @@ func (c NetworkMapCapture) index(maxAge time.Duration) driftIndex {
 		family := stableMapRef(subject, l.Relation)
 		if l.State != "observed" || len(l.Targets) != 1 || ids[l.Targets[0]] == "" {
 			idx.incomplete[family] = true
+			if l.Relation == "tagged" && l.Evidence == "effective port membership unavailable" {
+				idx.scopedTags[owners[l.From]] = true
+			}
 			continue
 		}
 		target := ids[l.Targets[0]]
@@ -206,7 +210,14 @@ func (c NetworkMapCapture) index(maxAge time.Duration) driftIndex {
 		}
 		idx.facts[k] = driftFact{source: owners[l.From], subject: subject, kind: l.Relation, value: target, evidence: map[string]string{"segment": "SSID VLAN configuration", "tagged": "bound port profile"}[l.Relation]}
 	}
+	scope := make([]string, 0, len(idx.sources))
+	for key := range idx.sources {
+		scope = append(scope, key)
+	}
+	slices.Sort(scope)
+	scopeKey := stableMapRef(scope...)
 	for k, p := range c.Policies {
+		k = stableMapRef(scopeKey, k)
 		quality := ""
 		if stale(c.At, p.RecordedAt, maxAge) {
 			quality = "stale"
@@ -234,7 +245,11 @@ func (idx driftIndex) quality(at time.Time, f driftFact, maxAge time.Duration) s
 	}
 	for _, g := range s.Gaps {
 		switch g {
-		case "effective tagged VLANs", "LAN profiles", "switch ports":
+		case "effective tagged VLANs":
+			if f.kind == "tagged" && !idx.scopedTags[f.source] {
+				return "unverified"
+			}
+		case "LAN profiles", "switch ports":
 			if f.kind == "tagged" {
 				return "unverified"
 			}

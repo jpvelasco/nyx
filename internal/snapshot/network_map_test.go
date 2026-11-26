@@ -84,6 +84,20 @@ func TestMapDriftEvidence(t *testing.T) {
 		})
 	}
 }
+func TestScopePortTagGaps(t *testing.T) {
+	now := time.Now()
+	a, b := driftFixture(now, false), driftFixture(now.Add(time.Second), true)
+	for _, c := range []*NetworkMapCapture{&a, &b} {
+		c.Map.Sources[0].Gaps = []string{"effective tagged VLANs"}
+		c.Map.Resources = append(c.Map.Resources, topology.MapResource{Source: "c1", ID: "p9", NativeID: "switch/9", Kind: "port"})
+		c.Map.Links = append(c.Map.Links, topology.MapLink{From: "p9", Relation: "tagged", State: "missing", Evidence: "effective port membership unavailable"})
+	}
+	report := CompareNetworkMaps(a, b, time.Hour)
+	if !slices.ContainsFunc(report.Changes, func(row MapChange) bool { return row.Change == "removed" && row.Evidence == "bound port profile" }) {
+		t.Fatal("other port uncertainty suppressed a confirmed VLAN removal")
+	}
+}
+
 func TestMapCaptureStore(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
