@@ -116,12 +116,16 @@ func observeConnection(ctx context.Context, op InfoOperation, hasInfo bool, c cr
 	input.SkipTLSVerify = opts.SkipTLSVerify
 	input.CACertPath = opts.CACertPath
 	_, err := op.Read(ctx, input)
-	entry.InfoAccess = DiagnosticAccess(err)
+	entry.InfoAccess = readAccess(err)
 	return entry
 }
 
 // DiagnosticAccess classifies read outcomes without exposing URLs, credentials or device messages.
 func DiagnosticAccess(err error) string {
+	return readAccess(err)
+}
+
+func readAccess(err error) string {
 	if err == nil {
 		return "observed"
 	}
