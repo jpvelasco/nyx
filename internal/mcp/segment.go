@@ -16,7 +16,9 @@ func segmentSchema(apply bool) inputSchema {
 	if apply {
 		props["dry_run"] = propSchema{Type: "boolean", Description: "Preview the steps. Defaults to true."}
 	}
-	addPlaybookCredentials(props)
+	props["omada_profile"] = propSchema{Type: "string", Description: "Configured Omada connection profile"}
+	props["omada_site"] = propSchema{Type: "string", Description: "Selected site on the configured Omada controller"}
+	props["opnsense_profile"] = propSchema{Type: "string", Description: "Configured OPNsense connection profile"}
 	return inputSchema{Type: "object", Properties: props, Required: []string{"role", "parent", "tag", "gateway", "management_prefix", "resolver", "pool_start", "pool_end"}}
 }
 func (s *Server) toolPlanSegment(ctx context.Context, args map[string]interface{}) toolDispatchResult {
@@ -43,6 +45,12 @@ func (s *Server) segment(ctx context.Context, args map[string]interface{}, apply
 	opts, msg := s.playbookOptionsFromArgs(args)
 	if msg != "" {
 		return errResult(msg)
+	}
+	if opts.Omada != nil {
+		opts.Omada.CACertPath = s.env("NYX_OMADA_CA_CERT")
+	}
+	if opts.Opnsense != nil {
+		opts.Opnsense.CACertPath = s.env("NYX_OPNSENSE_CA_CERT")
 	}
 	res, err := s.segmentSvc.Reconcile(ctx, opts, req, !apply || argBoolDefault(args, "dry_run", true))
 	if err != nil {

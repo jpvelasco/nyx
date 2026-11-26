@@ -1126,20 +1126,16 @@ func portForwardToolSchema() inputSchema {
 		"label":         {Type: "string", Description: "Rule name"},
 		"dry_run":       {Type: "boolean", Description: "Preview only (apply tool). Default true."},
 	}
-	addPlaybookCredentials(props)
-	return inputSchema{
-		Type:       "object",
-		Properties: props,
-		Required:   []string{"external_port", "target"},
-	}
-}
-
-func addPlaybookCredentials(props map[string]propSchema) {
 	for _, k := range []string{"profile", "host", "client_id", "client_secret", "site", "skip_tls_verify", "ca_cert_path"} {
 		props["omada_"+k] = propSchema{Type: propTypeFor(k), Description: "Omada " + k + " (OMADA_* env fallback)"}
 	}
 	for _, k := range []string{"profile", "host", "api_key", "api_secret", "skip_tls_verify", "ca_cert_path"} {
 		props["opnsense_"+k] = propSchema{Type: propTypeFor(k), Description: "OPNsense " + k + " (OPNSENSE_* env fallback)"}
+	}
+	return inputSchema{
+		Type:       "object",
+		Properties: props,
+		Required:   []string{"external_port", "target"},
 	}
 }
 

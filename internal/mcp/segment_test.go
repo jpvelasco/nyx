@@ -33,12 +33,14 @@ func TestSegmentMCPBoundaries(t *testing.T) {
 	args["role"] = "gaming"
 	args["dry_run"] = false
 	call("plan_segment")
-	args["omada_host"] = "omada.example"
-	args["omada_client_id"] = "client"
-	args["omada_client_secret"] = "fixture"
+	for _, key := range []string{"omada_host", "opnsense_host", "omada_client_id", "opnsense_api_secret", "omada_skip_tls_verify", "opnsense_ca_cert_path"} {
+		args[key] = "override"
+		call("apply_segment")
+		delete(args, key)
+	}
+	for k, v := range map[string]string{"OMADA_HOST": "omada.example", "OMADA_CLIENT_ID": "client", "OMADA_CLIENT_SECRET": "fixture", "OPNSENSE_HOST": "firewall.example", "OPNSENSE_API_KEY": "key", "OPNSENSE_API_SECRET": "fixture"} {
+		t.Setenv(k, v)
+	}
 	args["omada_site"] = "site"
-	args["opnsense_host"] = "firewall.example"
-	args["opnsense_api_key"] = "key"
-	args["opnsense_api_secret"] = "fixture"
 	call("apply_segment")
 }
