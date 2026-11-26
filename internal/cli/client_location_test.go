@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,7 +18,8 @@ func TestClientLocationTransportParity(t *testing.T) {
 	configureMapFixtures(t)
 	old := outputPath
 	t.Cleanup(func() { outputPath = old })
-	outputPath = filepath.Join(t.TempDir(), "location.json")
+	fixtureDir := t.TempDir()
+	outputPath = filepath.Join(fixtureDir, "location.json")
 	const selector = "02:aa:bb:cc:dd:04"
 	cmd := newClientLocationCmd()
 	cmd.SetContext(t.Context())
@@ -25,7 +27,7 @@ func TestClientLocationTransportParity(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(outputPath)
+	raw, err := fs.ReadFile(os.DirFS(fixtureDir), "location.json")
 	if err != nil {
 		t.Fatal(err)
 	}
