@@ -5,6 +5,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/mcp"
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/snapshot"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,7 +19,8 @@ func TestMapDriftTransportParity(t *testing.T) {
 	configureMapFixtures(t)
 	old := outputPath
 	t.Cleanup(func() { outputPath = old })
-	outputPath = filepath.Join(t.TempDir(), "result.json")
+	fixtureDir := t.TempDir()
+	outputPath = filepath.Join(fixtureDir, "result.json")
 	cmd := newMapCaptureCmd()
 	cmd.SetContext(t.Context())
 	cmd.SetArgs([]string{"before", "--connection", "omada/home", "--skip-tls-verify"})
@@ -40,7 +42,7 @@ func TestMapDriftTransportParity(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(outputPath)
+	data, err := fs.ReadFile(os.DirFS(fixtureDir), "result.json")
 	if err != nil {
 		t.Fatal(err)
 	}
