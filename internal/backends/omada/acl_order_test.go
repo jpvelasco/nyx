@@ -40,3 +40,14 @@ func TestACLOrderWire(t *testing.T) {
 		}
 	}
 }
+
+func TestEAPRuleContentWritesRemainUnavailable(t *testing.T) {
+	c := new(Client)
+	rule := ACLRule{Type: ACLTypeEAP}
+	if err := c.CreateACLRule(t.Context(), "site", rule); err == nil {
+		t.Error("EAP rule creation accepted")
+	}
+	if err := c.UpdateACLRule(t.Context(), "site", "rule", rule); err == nil {
+		t.Error("EAP rule edit accepted")
+	}
+}
