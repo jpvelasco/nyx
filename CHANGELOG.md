@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-25
+
+**Feature release.** Nyx can map a network across controllers, plan VLAN and switch-port changes, and test whether traffic follows the intended policy from a probe in the source VLAN.
+
+### New Features
+
+- **Network map and client location.** `nyx topology map` and MCP `network_map` combine observations from named Omada, OPNsense, and read-only UniFi connections. The map identifies inferred links and gaps. Client lookup traces a device to its last observable switch port or access point.
+- **VLAN and switch-port changes.** Preview a routed IPv4 segment across OPNsense and Omada with `nyx segment plan`. Apply can assign the gateway, protect management access, provision a Dnsmasq range, and verify the result from a declared probe. Separate port plans recheck attachments before a VLAN change.
+- **Service-level isolation checks.** Test a specific source, destination, and service from a declared probe with a positive control. Inspect cross-VLAN discovery exceptions, DHCP and IPv6 settings, and the order of scoped firewall and ACL rules.
+- **Performance and drift.** Sample a selected client path, compare saved network maps, and use controller diagnostics from MCP to investigate changes.
+- **Gateway and device administration.** Preview Omada NAT changes against the selected site's inventory, inspect pending adoption and staged firmware, and apply approved OPNsense WireGuard peer changes with configuration readback.
+
+### Verification
+
+- **Hardware coverage.** Physical AP enforcement, Omada NAT writes, and device adoption and firmware operations have outstanding hardware checks. See #380, #386, and #388 for the verified scope of each feature.
+
 ## [0.7.1] - 2026-11-21
 
 **Patch release.** Publishes the 0.7.0 feature set. The v0.7.0 tag failed its release verification and was never published, so 0.7.1 is the first release that includes the changes listed under 0.7.0.
@@ -472,7 +488,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.8.0
 [0.7.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.7.1
 [0.7.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.7.0
 [0.6.2]: https://github.com/jpvelasco/nyx/releases/tag/v0.6.2
