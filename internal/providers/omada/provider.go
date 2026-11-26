@@ -40,7 +40,7 @@ func (o *OmadaProvider) Name() string { return ProviderName }
 
 // Capabilities lists the supported operations for this provider.
 func (o *OmadaProvider) Capabilities() []string {
-	return []string{"info", "import", "check", "inventory", providers.NetworkMapCapability, providers.ClientLocationCapability}
+	return []string{"info", "import", "check", "inventory", providers.NetworkMapCapability, providers.ClientLocationCapability, providers.PerformanceCapability}
 }
 
 // PublicInfo reports that the controller metadata endpoint needs only a host.

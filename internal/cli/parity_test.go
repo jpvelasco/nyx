@@ -114,7 +114,7 @@ func TestProviderCapabilitySurfaceParity(t *testing.T) {
 		for _, cap := range p.Capabilities() {
 			t.Run(p.Name()+"/"+cap, func(t *testing.T) {
 				// Composite reads live under topology and use their capability name on MCP.
-				composites := map[string]string{providers.NetworkMapCapability: service.NetworkMapCommand, providers.ClientLocationCapability: service.ClientLocationCommand}
+				composites := map[string]string{providers.NetworkMapCapability: service.NetworkMapCommand, providers.ClientLocationCapability: service.ClientLocationCommand, providers.PerformanceCapability: service.PerformanceCommand}
 				if name, ok := composites[cap]; ok {
 					command, _, err := rootCmd.Find([]string{"topology", name})
 					if err != nil || command.Name() != name || !toolRegistered(cap) {
