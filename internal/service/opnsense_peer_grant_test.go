@@ -189,8 +189,13 @@ func TestPeerPlanValidationAndOverlaps(t *testing.T) {
 	const id = "00000000-0000-4000-8000-a00000000001"
 	const other = "00000000-0000-4000-8000-a00000000002"
 	yes, no := true, false
+	rowNetwork := "10.0.10.0/24"
+	otherNetwork := "10.0.11.0/24"
 	f := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"rows":[{"uuid":"` + id + `","name":"trusted","enabled":"1","tunneladdress":"10.0.10.0/24"},{"uuid":"` + other + `","name":"management","enabled":"0","tunneladdress":"10.0.11.0/24"}],"total":2}`))
+		_ = json.NewEncoder(w).Encode(map[string]any{"rows": []map[string]string{
+			{"uuid": id, "name": "trusted", "enabled": "1", "tunneladdress": rowNetwork},
+			{"uuid": other, "name": "management", "enabled": "0", "tunneladdress": otherNetwork},
+		}, "total": 2})
 	}))
 	defer f.Close()
 	svc := NewOpnsenseService()
@@ -208,5 +213,13 @@ func TestPeerPlanValidationAndOverlaps(t *testing.T) {
 		if err != nil || p.Outcome != tc.out {
 			t.Fatal(p, err)
 		}
+	}
+	rowNetwork, otherNetwork = "invalid", ""
+	plan, err := svc.PlanWireGuardPeer(t.Context(), opts, WireGuardPeerRequest{Action: "update", UUID: id, AllowedNetworks: []string{"10.0.10.0/24"}})
+	if err != nil || plan.Outcome != "unverified" || len(plan.Unverified) != 2 {
+		t.Fatal("incomplete selected and neighboring records were treated as safe", plan, err)
+	}
+	if _, err := svc.PlanWireGuardPeer(t.Context(), opts, WireGuardPeerRequest{Action: "toggle", UUID: "00000000-0000-4000-8000-a00000000003", Enabled: &no}); err == nil {
+		t.Fatal("accepted stale peer selection")
 	}
 }
