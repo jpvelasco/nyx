@@ -1,6 +1,7 @@
 package unifi
 
 import (
+	"context"
 	"encoding/pem"
 	"errors"
 	"net/http"
@@ -103,5 +104,54 @@ func TestInvalidPagesAndPrivateFailures(t *testing.T) {
 	var status statusError
 	if !errors.As(err, &status) || status.HTTPStatus() != http.StatusTemporaryRedirect {
 		t.Fatalf("redirect: %v", err)
+	}
+}
+
+func TestSelectedSitePartialDeviceDetails(t *testing.T) {
+	const siteList = `{"offset":0,"count":1,"totalCount":1,"data":[{"id":"` + siteID + `","name":"site"}]}`
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case prefix + "/sites":
+			testutil.WriteBody(w, siteList)
+		case prefix + "/sites/" + siteID + "/devices":
+			testutil.WriteBody(w, `{"offset":0,"count":2,"totalCount":2,"data":[{"id":"`+switchID+`","features":["switching"]},{"id":"`+apID+`","features":["gateway"]}]}`)
+		case prefix + "/sites/" + siteID + "/devices/" + switchID:
+			testutil.WriteBody(w, `{"id":"`+switchID+`","uplink":{"deviceId":"`+switchID+`"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	opts := connection(strings.TrimPrefix(srv.URL, "https://"))
+	opts.SkipTLSVerify = true
+	opts.Site = "site"
+	got, err := (Adapter{}).ObserveNetwork(t.Context(), opts)
+	if err != nil || len(got.Resources) != 2 || got.Resources[1].Ref.Kind != "gateway" || len(got.Links) != 0 {
+		t.Fatalf("partial inventory %+v %v", got, err)
+	}
+	for _, gap := range []string{"device details", "port inventory", "uplink peer"} {
+		if !slices.Contains(got.Gaps, gap) {
+			t.Fatalf("missing %s", gap)
+		}
+	}
+	opts.Site = "missing"
+	if _, err = (Adapter{}).ObserveNetwork(t.Context(), opts); err == nil {
+		t.Fatal("selected unknown site")
+	}
+	opts.CACertPath = filepath.Join(t.TempDir(), "ca.pem")
+	if _, err = (Adapter{}).ObserveNetwork(t.Context(), opts); err == nil {
+		t.Fatal("accepted missing CA")
+	}
+	if err = os.WriteFile(opts.CACertPath, []byte("not a certificate"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = newClient(opts); err == nil {
+		t.Fatal("accepted invalid CA")
+	}
+	opts.CACertPath = ""
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err = (Adapter{}).ObserveNetwork(ctx, opts); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation: %v", err)
 	}
 }
