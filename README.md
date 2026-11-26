@@ -519,6 +519,15 @@ site handles identify entries within one report. `--detail` includes private
 controller resource IDs, labels and addresses. MCP `include_detail` requires
 `NYX_MCP_ALLOW_TOPOLOGY_DETAILS=true` in the server environment.
 
+`nyx topology locate-client MAC` and MCP `client_location` (`mac`) report the
+last observable managed switch port or wireless AP. They accept the same
+connection selectors and detail controls as `network_map`. Current controller
+associations can establish an attachment. Client history, DHCP leases and
+firewall neighbor caches provide supporting evidence. Expired entries and
+conflicting attachments retain their status. A switch downstream of the last
+managed uplink can hide the physical port. Private detail includes observed
+addresses, SSIDs and device labels.
+
 `nyx topology --fingerprint` adds an architecture summary from the configured
 Omada and OPNsense providers. It shows inferred enforcement and bridge roles,
 observed managed upstream links, and VLAN gateway provider assignments. The

@@ -54,7 +54,7 @@ func configureMapFixtures(t *testing.T) {
 			return
 		}
 		envelope := func(result string) { testutil.WriteBody(w, `{"errorCode":0,"result":`+result+`}`) }
-		if r.Method != http.MethodGet && r.URL.Path != "/openapi/authorize/token" && !strings.HasSuffix(r.URL.Path, "/devices/uplink-info") {
+		if r.Method != http.MethodGet && r.URL.Path != "/openapi/authorize/token" && !strings.HasSuffix(r.URL.Path, "/devices/uplink-info") && !strings.HasSuffix(r.URL.Path, "/client-link-topology") {
 			t.Errorf("unexpected Omada method %s", r.Method)
 		}
 		switch strings.TrimPrefix(r.URL.Path, "/openapi/v1/fixture-controller/sites/s1/") {
@@ -62,6 +62,12 @@ func configureMapFixtures(t *testing.T) {
 			envelope(`{"accessToken":"tok"}`)
 		case "/openapi/v1/fixture-controller/sites":
 			envelope(`[{"id":"s1","name":"fixture-site"}]`)
+		case "networks/client":
+			envelope(`[{"mac":"02:aa:bb:cc:dd:04","type":"wireless"}]`)
+		case "clients/02-aa-bb-cc-dd-04/client-link-topology":
+			envelope(`[{"nodeType":"clientNode","clientNode":{"mac":"02:aa:bb:cc:dd:04","upApInfo":{"mac":"02:aa:bb:cc:dd:03"}}}]`)
+		case "clients/02-aa-bb-cc-dd-04/client-history":
+			envelope(`[{"mac":"02:aa:bb:cc:dd:04","ssid":"gaming","vid":30,"lastSeen":100}]`)
 		case "networks/devices":
 			envelope(`[{"type":"switch","mac":"02:aa:bb:cc:dd:02"},{"type":"ap","mac":"02:aa:bb:cc:dd:03"}]`)
 		case "switches/02-aa-bb-cc-dd-02/lldp-neighbors":
@@ -87,10 +93,18 @@ func configureMapFixtures(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		if r.Method != http.MethodGet {
+		if r.Method != http.MethodGet && r.URL.Path != "/api/dnsmasq/leases/search" {
 			t.Errorf("unexpected firewall method %s", r.Method)
 		}
 		switch r.URL.Path {
+		case "/api/dnsmasq/settings/get":
+			testutil.WriteBody(w, `{"dnsmasq":{"enable":"1"}}`)
+		case "/api/dnsmasq/leases/search":
+			testutil.WriteBody(w, `{"rows":[]}`)
+		case "/api/diagnostics/interface/get_arp":
+			testutil.WriteBody(w, `[{"mac":"02:aa:bb:cc:dd:04","ip":"10.0.30.10","intf":"vlan30"}]`)
+		case "/api/diagnostics/interface/get_ndp":
+			testutil.WriteBody(w, `[]`)
 		case "/api/interfaces/vlan_settings/search_item":
 			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"gaming-zone","if":"igb0","vlanif":"vlan30","tag":"30"}]}`)
 		case "/api/interfaces/overview/interfaces_info":

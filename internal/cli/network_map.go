@@ -10,10 +10,16 @@ import (
 )
 
 func newNetworkMapCmd() *cobra.Command {
+	return topologyReadCommand(service.NetworkMapCommand, "Map devices, ports, VLANs, SSIDs and serving gateways from configured controller inventories", cobra.NoArgs, func(ctx context.Context, opts service.NetworkMapOptions, _ []string) (any, error) {
+		return service.NewTopologyService().Map(ctx, opts)
+	})
+}
+
+func topologyReadCommand(use, short string, args cobra.PositionalArgs, read func(context.Context, service.NetworkMapOptions, []string) (any, error)) *cobra.Command {
 	var opts service.NetworkMapOptions
 	cmd := &cobra.Command{
-		Use: service.NetworkMapCommand, Short: "Map devices, ports, VLANs, SSIDs and serving gateways from configured controller inventories", Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Use: use, Short: short, Args: args,
+		RunE: func(cmd *cobra.Command, args []string) error {
 			dur, err := extraTimeout()
 			if err != nil {
 				return err
@@ -21,7 +27,7 @@ func newNetworkMapCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), dur)
 			defer cancel()
 			opts.Logger = slog.Default()
-			result, err := service.NewTopologyService().Map(ctx, opts)
+			result, err := read(ctx, opts, args)
 			if err != nil {
 				return err
 			}

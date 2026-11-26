@@ -113,11 +113,12 @@ func TestProviderCapabilitySurfaceParity(t *testing.T) {
 	for _, p := range providers.List() {
 		for _, cap := range p.Capabilities() {
 			t.Run(p.Name()+"/"+cap, func(t *testing.T) {
-				// Map combines multiple providers and lives under the topology command.
-				if cap == providers.NetworkMapCapability {
-					command, _, err := rootCmd.Find([]string{"topology", service.NetworkMapCommand})
-					if err != nil || command.Name() != service.NetworkMapCommand || !toolRegistered(service.NetworkMapTool) {
-						t.Fatal("configured-provider map is missing from CLI or MCP")
+				// Composite reads live under topology and use their capability name on MCP.
+				composites := map[string]string{providers.NetworkMapCapability: service.NetworkMapCommand, providers.ClientLocationCapability: service.ClientLocationCommand}
+				if name, ok := composites[cap]; ok {
+					command, _, err := rootCmd.Find([]string{"topology", name})
+					if err != nil || command.Name() != name || !toolRegistered(cap) {
+						t.Fatalf("%s is missing from CLI or MCP", cap)
 					}
 					return
 				}

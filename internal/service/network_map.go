@@ -29,22 +29,31 @@ type NetworkMapOptions struct {
 // Map reads authenticated observations from configured adapters. Only a shared,
 // operator-assigned logical site permits links between different connections.
 func (*TopologyService) Map(ctx context.Context, opts NetworkMapOptions) (topology.NetworkMap, error) {
-	path := storepath.StoreFile()
-	selected, err := mapConnections(ctx, path, opts.Connections)
+	inputs, err := collectMapInputs(ctx, opts, "")
 	if err != nil {
 		return topology.NetworkMap{}, err
 	}
-	inputs := make([]topology.MapInput, 0, len(selected))
+	maps := make([]topology.MapInput, 0, len(inputs))
+	for _, in := range inputs {
+		maps = append(maps, in.MapInput)
+	}
+	return topology.BuildNetworkMap(maps, opts.Detail), nil
+}
+
+func collectMapInputs(ctx context.Context, opts NetworkMapOptions, clientMAC string) ([]topology.ClientMapInput, error) {
+	path := storepath.StoreFile()
+	selected, err := mapConnections(ctx, path, opts.Connections)
+	if err != nil {
+		return nil, err
+	}
+	inputs := make([]topology.ClientMapInput, 0, len(selected))
 	for _, c := range selected {
 		if err := ctx.Err(); err != nil {
-			return topology.NetworkMap{}, err
+			return nil, err
 		}
-		inputs = append(inputs, observeMapConnection(ctx, c, path, opts))
+		inputs = append(inputs, observeMapConnection(ctx, c, path, opts, clientMAC))
 	}
-	if err := ctx.Err(); err != nil {
-		return topology.NetworkMap{}, err
-	}
-	return topology.BuildNetworkMap(inputs, opts.Detail), nil
+	return inputs, ctx.Err()
 }
 
 func mapConnections(ctx context.Context, path string, selectors []string) ([]credentials.Connection, error) {
@@ -83,8 +92,8 @@ func mapConnections(ctx context.Context, path string, selectors []string) ([]cre
 	return slices.Compact(connections), nil
 }
 
-func observeMapConnection(ctx context.Context, c credentials.Connection, path string, opts NetworkMapOptions) topology.MapInput {
-	input := topology.MapInput{Provider: c.Provider, Profile: c.ProfileName()}
+func observeMapConnection(ctx context.Context, c credentials.Connection, path string, opts NetworkMapOptions, clientMAC string) topology.ClientMapInput {
+	input := topology.ClientMapInput{MapInput: topology.MapInput{Provider: c.Provider, Profile: c.ProfileName()}}
 	adapter, _ := providers.LookupAdapter(c.Provider)
 	observer, ok := adapter.(providers.NetworkObserver)
 	if !ok || !slices.Contains(adapter.Capabilities(), providers.NetworkMapCapability) {
@@ -107,5 +116,18 @@ func observeMapConnection(ctx context.Context, c credentials.Connection, path st
 		facts.Gaps = append(facts.Gaps, readAccess(err))
 	}
 	input.Facts = facts
+	if clientMAC != "" {
+		reader, ok := adapter.(providers.ClientObserver)
+		if !ok || !slices.Contains(adapter.Capabilities(), providers.ClientLocationCapability) {
+			input.Facts.Gaps = append(input.Facts.Gaps, "client evidence unsupported")
+			return input
+		}
+		rows, gaps, err := reader.ObserveClient(ctx, connection, clientMAC)
+		input.Evidence = rows
+		input.Facts.Gaps = append(input.Facts.Gaps, gaps...)
+		if err != nil {
+			input.Facts.Gaps = append(input.Facts.Gaps, "client evidence "+readAccess(err))
+		}
+	}
 	return input
 }
