@@ -533,6 +533,8 @@ source of evidence and one of `observed`, `inferred`, `ambiguous` or `missing`.
 An unreadable collection appears in its source's `gaps`. An unknown observation
 time appears as `null`.
 
+UniFi OS consoles contribute adopted devices, reported ports and managed uplinks. Select the connection with `--connection unifi/home` or the `connections` argument to `network_map`. [UniFi adapter scope and credentials](docs/unifi-integration.md)
+
 Set the same `logical_site` on connection profiles serving one physical site
 to correlate LLDP chassis addresses and configured gateway addresses across
 controllers. Each ungrouped connection has its own site. Opaque resource and
