@@ -528,6 +528,15 @@ conflicting attachments retain their status. A switch downstream of the last
 managed uplink can hide the physical port. Private detail includes observed
 addresses, SSIDs and device labels.
 
+`nyx topology capture-map NAME` saves a private map in the Nyx snapshot store.
+Supply `--audit-snapshot` with a saved audit basename to include its declared
+service policies and recorded enforcement evidence. `nyx topology map-drift
+BEFORE [AFTER]` compares two captures or rereads the earlier connections.
+MCP offers `network_map_capture` and `network_map_drift`. Drift reports opaque
+resource references, source coverage and observation freshness. `--max-age`
+controls how old evidence could be when each map was captured (default `24h`).
+Saving over an existing name requires `--replace`.
+
 `nyx topology --fingerprint` adds an architecture summary from the configured
 Omada and OPNsense providers. It shows inferred enforcement and bridge roles,
 observed managed upstream links, and VLAN gateway provider assignments. The
