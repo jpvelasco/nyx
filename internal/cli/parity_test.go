@@ -169,6 +169,8 @@ var mcpMutationCLI = map[string]string{
 	"omada_plan_nat":                  "plan-nat",
 	"omada_apply_nat":                 "apply-nat",
 	"opnsense_plan_nat":               "plan-nat",
+	"opnsense_plan_wireguard_peer":    "plan-wireguard-peer",
+	"opnsense_revoke_wireguard_peer":  "revoke-wireguard-peer",
 	"opnsense_apply_nat":              "apply-nat",
 	"opnsense_plan_vlan":              "plan-vlan",
 	"opnsense_apply_vlan":             "apply-vlan",

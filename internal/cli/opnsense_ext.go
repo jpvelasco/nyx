@@ -54,6 +54,7 @@ func buildOpnsenseExtraCommands() []*cobra.Command {
 			return service.NewOpnsenseService().GetUnboundStatus(ctx, opts)
 		}),
 		buildOpnsenseStatesCmd(),
+		opnsensePeerCommand(false), opnsensePeerCommand(true),
 		buildOpnsensePlanNatCmd(),
 		buildOpnsenseApplyNatCmd(),
 		buildOpnsensePlanVLANCmd(),

@@ -17,7 +17,7 @@ type operationBinding struct {
 }
 
 func sharedBindings() []operationBinding {
-	out := []operationBinding{capabilityBinding()}
+	out := []operationBinding{capabilityBinding(), wireGuardPeerBinding(false), wireGuardPeerBinding(true)}
 	for _, adapter := range providers.Adapters() {
 		if op, ok := service.ControllerInfo(adapter); ok {
 			out = append(out, infoBinding(op))

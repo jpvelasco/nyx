@@ -319,6 +319,8 @@ Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `O
 | `omada_plan_nat` / `omada_apply_nat` | Omada NAT plan/apply. The Open API exposes NAT reads but no live-site write path, so both always refuse with current-state evidence and the write-surface explanation — configure via the controller UI or use `opnsense_plan_nat`/`opnsense_apply_nat` |
 | `opnsense_plan_nat` / `opnsense_apply_nat` | OPNsense NAT plan/apply: port forwards, one-to-one, and source NAT with double-NAT guard, idempotent creates, and dry-run default |
 | `plan_port_forward` / `apply_port_forward` | Composed playbook: plan or apply a port-forward on the backend that owns the egress-path NAT, selected from the live topology report. Routes to OPNsense when it owns NAT, reports the Omada hold when the managed gateway owns it, and refuses on double-NAT or indeterminate topologies. Dry-run default |
+| `opnsense_plan_wireguard_peer` | Preview enrollment, allowed-network edits, toggle or removal. Reports overlaps with configured peers, including disabled peers. Supply canonical network prefixes and an exact UUID for existing peers. |
+| `opnsense_revoke_wireguard_peer` | Preview or execute a selected peer disable/removal with `dry_run: false`. Reports configuration readback and service status. CLI names are `nyx opnsense plan-wireguard-peer` and `revoke-wireguard-peer`. Enroll, reactivate or expand peer access in the firewall administration UI. |
 | `opnsense_get_info` | Fetch OPNsense system metadata (version, product, arch) |
 | `opnsense_list_interfaces` | List OPNsense interfaces with IP configuration |
 | `opnsense_list_firewall_rules` | List OPNsense firewall filter rules |
