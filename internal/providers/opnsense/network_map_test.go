@@ -10,6 +10,9 @@ import (
 )
 
 func TestObserveNetworkConflictedInterfaces(t *testing.T) {
+	if facts, err := (&Provider{}).ObserveNetwork(t.Context(), providers.ImportOptions{}); err == nil || len(facts.Resources) > 0 {
+		t.Fatal("unauthenticated observation accepted")
+	}
 	failVLAN, failIface := false, false
 	_, ts := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
