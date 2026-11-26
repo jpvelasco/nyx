@@ -123,3 +123,34 @@ func TestMapCaptureStore(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMapDriftKeepsCollectionAndPolicyScope(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tc := range []struct{ gap, kind, quality string }{
+		{"devices", "tagged", "unverified"}, {"devices", "segment", ""}, {"SSIDs", "segment", "unverified"},
+		{"interface inventory", "address", "unverified"}, {"VLAN settings", "address", ""}, {"LLDP neighbors", "tagged", ""},
+	} {
+		idx := driftIndex{sources: map[string]topology.MapSource{"source": {Gaps: []string{tc.gap}}}}
+		if got := idx.quality(now, driftFact{source: "source", kind: tc.kind}, time.Hour); got != tc.quality {
+			t.Fatalf("gap %s, kind %s: got %q", tc.gap, tc.kind, got)
+		}
+	}
+	a, b := driftFixture(now, false), driftFixture(now.Add(time.Second), true)
+	b.Map.Sources[0].LogicalSite = "other"
+	for _, row := range CompareNetworkMaps(a, b, time.Hour).Changes {
+		if row.Change != "unverified" && row.Change != "unavailable" {
+			t.Fatalf("joined different sites: %+v", row)
+		}
+	}
+	a, b = driftFixture(now, false), driftFixture(now.Add(time.Second), false)
+	for k, p := range b.Policies {
+		p.Declared = "private.example"
+		p.Firewall = "private.example"
+		b.Policies[k] = p
+	}
+	report := CompareNetworkMaps(a, b, time.Hour)
+	raw, err := json.Marshal(report)
+	if err != nil || strings.Contains(string(raw), "private.example") || len(report.Changes) != 1 || report.Changes[0].Change != "unverified" {
+		t.Fatal("unrecognized stored policy escaped the observation boundary")
+	}
+}

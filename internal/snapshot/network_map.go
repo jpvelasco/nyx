@@ -73,7 +73,10 @@ func SaveNetworkMapCapture(name string, c NetworkMapCapture, replace bool) error
 		return errors.New("unable to create the private map snapshot directory")
 	}
 	if replace {
-		return filewrite.Write(path, bytes.NewReader(data))
+		if err := filewrite.Write(path, bytes.NewReader(data)); err != nil {
+			return errors.New("unable to replace the selected map snapshot")
+		}
+		return nil
 	}
 	if err := filewrite.Create(path, bytes.NewReader(data)); err != nil {
 		return errors.New("unable to create the named map snapshot; an existing name requires explicit replacement")
@@ -212,18 +215,23 @@ func (c NetworkMapCapture) index(maxAge time.Duration) driftIndex {
 		idx.facts[k] = driftFact{source: owners[l.From], subject: subject, kind: l.Relation, value: target, evidence: map[string]string{"segment": "SSID VLAN configuration", "tagged": "bound port profile"}[l.Relation]}
 	}
 	scope := make([]string, 0, len(idx.sources))
-	for key := range idx.sources {
-		scope = append(scope, key)
+	for key, src := range idx.sources {
+		scope = append(scope, stableMapRef(key, src.ControllerSite, src.LogicalSite))
 	}
 	slices.Sort(scope)
 	scopeKey := stableMapRef(scope...)
 	for k, p := range c.Policies {
 		k = stableMapRef(scopeKey, k)
 		quality := ""
+		if p.Declared != "allow" && p.Declared != "deny" {
+			p.Declared = ""
+			quality = "unverified"
+		}
 		if stale(c.At, p.RecordedAt, maxAge) {
 			quality = "stale"
-		} else if p.Declared != "allow" && p.Declared != "deny" {
-			quality = "unverified"
+		}
+		if p.Firewall != "recorded" {
+			p.Firewall = "unavailable"
 		}
 		evidence := "declared service policy, " + p.Firewall + " firewall evidence"
 		idx.facts[k] = driftFact{source: "policy", subject: k, kind: "policy", value: p.Declared, evidence: evidence, quality: quality}
@@ -258,9 +266,17 @@ func (idx driftIndex) quality(at time.Time, f driftFact, maxAge time.Duration) s
 			if f.kind == "segment" {
 				return "unverified"
 			}
-		case "LLDP neighbors", "AP uplinks", "device identity", "devices":
+		case "LLDP neighbors", "AP uplinks", "device identity", "VLAN device identity", "VLAN settings":
 			continue
-		case "segments", "VLAN interfaces", "assigned interfaces":
+		case "devices":
+			if f.kind == "tagged" {
+				return "unverified"
+			}
+		case "interface inventory":
+			if f.kind == "address" {
+				return "unverified"
+			}
+		case "segments":
 			return "unverified"
 		default:
 			return "unavailable"
@@ -307,7 +323,7 @@ func CompareNetworkMaps(before, after NetworkMapCapture, maxAge time.Duration) N
 			} else if old.quality != "" {
 				quality = old.quality
 			}
-		} else if c, d := a.sources[fact.source], b.sources[fact.source]; c.ControllerSite != "" && d.ControllerSite != "" && (c.ControllerSite != d.ControllerSite || c.LogicalSite != d.LogicalSite) {
+		} else if c, d := a.sources[fact.source], b.sources[fact.source]; c.ID != "" && d.ID != "" && (c.ControllerSite != d.ControllerSite || c.LogicalSite != d.LogicalSite) {
 			quality = "unverified"
 		}
 		if was && now && old.value == next.value && quality == "" {
