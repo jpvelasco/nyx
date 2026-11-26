@@ -41,6 +41,7 @@ type OmadaNetwork struct {
 	Gateway     string `json:"gateway"`
 	Isolated    bool   `json:"isolated"`
 	DHCPEnabled bool   `json:"dhcp_enabled"`
+	DHCPState   string `json:"dhcp_state"`
 	DHCPStart   string `json:"dhcp_start,omitempty"`
 	DHCPEnd     string `json:"dhcp_end,omitempty"`
 	LeaseTime   int    `json:"lease_time,omitempty"`
@@ -131,7 +132,15 @@ func (s *OmadaService) ListNetworks(ctx context.Context, opts OmadaOptions) ([]O
 }
 
 func flattenOmadaNetwork(n omadabackend.Network) OmadaNetwork {
+	state := "unknown"
+	if n.DHCPKnown {
+		state = "disabled"
+		if n.DHCPEnabled {
+			state = "enabled"
+		}
+	}
 	return OmadaNetwork{
+		DHCPState:   state,
 		ID:          n.ID,
 		Name:        n.Name,
 		Purpose:     n.Purpose,

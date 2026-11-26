@@ -81,3 +81,16 @@ func TestGetLANMulticasts(t *testing.T) {
 		t.Fatalf("rows = %+v err=%v", rows, err)
 	}
 }
+
+func TestSnoopingVisibility(t *testing.T) {
+	for _, tc := range []struct {
+		body  string
+		known bool
+	}{{`{}`, false}, {`{"status":false}`, true}, {`{"enable":false}`, true}} {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { writeEnvelope(w, 0, "", tc.body) }))
+		got, err := c.GetDHCPSnoopStatus(t.Context(), "site")
+		if (err == nil) != tc.known || (got != nil && got.Enabled) {
+			t.Fatalf("unexpected DHCP snooping result %+v, %v", got, err)
+		}
+	}
+}

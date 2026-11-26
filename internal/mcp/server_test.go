@@ -311,7 +311,7 @@ func TestHandleToolsList_Shape(t *testing.T) {
 			t.Errorf("tool %s: schema type = %q", tl.Name, tl.InputSchema.Type)
 		}
 	}
-	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "credentials_status", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_list_logs", "omada_plan_port", "omada_apply_port_profile", "omada_plan_lan", "omada_apply_lan", "omada_list_ssids", "omada_plan_ssid", "omada_apply_ssid", "opnsense_get_info", "opnsense_firewall_log", "opnsense_firewall_log_stats", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_get_firewall_rule", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_vlans", "opnsense_plan_vlan", "opnsense_apply_vlan", "opnsense_plan_filter", "opnsense_apply_filter", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_unbound_settings", "opnsense_list_unbound_overrides", "opnsense_get_unbound_status", "opnsense_plan_unbound_override", "opnsense_apply_unbound_override", "opnsense_plan_dhcp", "opnsense_apply_dhcp", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_list_kea_subnets", "opnsense_list_kea_reservations", "opnsense_list_wireguard_servers", "opnsense_list_wireguard_clients", "opnsense_get_wireguard_status", "opnsense_inventory", "topology"} {
+	for _, want := range []string{"discover_subnet", "check_routes", "check_vpn", "verify_isolation", "run_audit", "load_spec", "get_interfaces", "ping_target", "run_doctor", "provider_list", "credentials_status", "omada_get_info", "omada_list_networks", "omada_list_acls", "omada_list_clients", "omada_inventory", "omada_import", "omada_plan", "omada_apply_acl", "omada_list_port_forwardings", "omada_list_one_to_one_nat", "omada_get_nat_settings", "omada_nat_facts", "omada_get_uplink_info", "omada_list_switch_ports", "omada_list_lan_profiles", "omada_list_gateway_dhcp_users", "omada_get_client_topology", "omada_dhcp_path", "omada_get_dhcp_server_info", "omada_get_dhcp_snoop_status", "omada_list_dhcp_snoops", "omada_list_lan_multicasts", "omada_list_logs", "omada_plan_port", "omada_apply_port_profile", "omada_plan_lan", "omada_apply_lan", "omada_list_ssids", "omada_plan_ssid", "omada_apply_ssid", "opnsense_get_info", "opnsense_firewall_log", "opnsense_firewall_log_stats", "opnsense_list_interfaces", "opnsense_list_firewall_rules", "opnsense_get_firewall_rule", "opnsense_list_clients", "opnsense_list_port_forward_rules", "opnsense_list_one_to_one_rules", "opnsense_list_source_nat_rules", "opnsense_list_aliases", "opnsense_get_nat", "opnsense_plan_nat", "opnsense_apply_nat", "opnsense_list_vlans", "opnsense_plan_vlan", "opnsense_apply_vlan", "opnsense_plan_filter", "opnsense_apply_filter", "opnsense_list_services", "opnsense_list_gateways", "opnsense_list_bridges", "opnsense_list_interface_settings", "opnsense_get_dnsmasq_settings", "opnsense_get_unbound_settings", "opnsense_list_unbound_overrides", "opnsense_get_unbound_status", "opnsense_plan_unbound_override", "opnsense_apply_unbound_override", "opnsense_plan_dhcp", "opnsense_apply_dhcp", "opnsense_get_pf_statistics", "opnsense_list_kernel_routes", "opnsense_get_kea_status", "opnsense_list_router_advertisements", "opnsense_list_kea_subnets", "opnsense_list_kea_reservations", "opnsense_list_wireguard_servers", "opnsense_list_wireguard_clients", "opnsense_get_wireguard_status", "opnsense_inventory", "topology"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("missing tool %q", want)
 		}
@@ -2497,6 +2497,10 @@ func (s *stubOpnsenseSvc) ListKernelRoutes(_ context.Context, opts service.Opnse
 	return s.routes, s.err
 }
 
+func (s *stubOpnsenseSvc) ListRouterAdvertisements(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseRouterAdvertisement, error) {
+	s.lastOpts = opts
+	return []service.OpnsenseRouterAdvertisement{{Interface: "opt1", State: "disabled"}}, s.err
+}
 func (s *stubOpnsenseSvc) ListKeaSubnets(_ context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKeaSubnet, error) {
 	s.lastOpts = opts
 	if s.err != nil {
@@ -3495,4 +3499,23 @@ func TestDispatchTopology_FingerprintAndDetailGate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDispatchRouterAdvertisements(t *testing.T) {
+	args := map[string]any{"host": "firewall.example", "api_key": "fixture-key", "api_secret": "fixture-secret"}
+	for _, tc := range []struct {
+		stub   *stubOpnsenseSvc
+		want   string
+		failed bool
+	}{{&stubOpnsenseSvc{}, "disabled", false}, {&stubOpnsenseSvc{err: errors.New("unavailable")}, "unknown", true}} {
+		got, failed := serverWithOpnsenseStub(tc.stub).DispatchToolForTest(t.Context(), "opnsense_list_router_advertisements", args)
+		if failed != tc.failed || !strings.Contains(got, tc.want) {
+			t.Fatalf("unexpected RADVD result %q, %t", got, failed)
+		}
+	}
+}
+
+func (s *stubOpnsenseSvc) GetKeaStatus(_ context.Context, opts service.OpnsenseOptions) (map[string]bool, error) {
+	s.lastOpts = opts
+	return map[string]bool{"running": false}, s.err
 }

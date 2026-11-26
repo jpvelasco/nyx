@@ -37,6 +37,16 @@ func servicePolicyFinding(spec *intent.Spec, b intent.ServicePolicyBinding, find
 		result.Observed["flow"] = "new_connection"
 	}
 	result.Observed["established_reply"] = "unmeasured"
+	if b.Discovery != nil {
+		d := findings[*b.Discovery]
+		state, _ := d.Observed["discovery"].(string)
+		if state == "" {
+			state = "unknown"
+		}
+		result.Observed["mdns_discovery"] = state
+		result.Observed["reflection_change_impact"] = "Removing the reflection rule can prevent discovery of this name across these networks."
+		result.Observed["service_change_impact"] = "Removing the service exception can block new application connections even when discovery succeeds."
+	}
 	checks := serviceFirewallChecks(spec, b.Policy.Name, findings)
 	result.Observed["firewall_checks"] = checks
 	if len(checks) == 0 {

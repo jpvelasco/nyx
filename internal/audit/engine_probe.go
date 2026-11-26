@@ -34,6 +34,8 @@ func (e *Engine) runViaProbe(ctx context.Context, a intent.Assertion) (*models.C
 	switch a.Type {
 	case "isolation":
 		return e.runIsolationViaProbe(ctx, a, probeP)
+	case "mdns_lookup":
+		return e.mdnsLookup(ctx, a, probeP)
 	case "port_check":
 		return e.runPortCheckViaProbe(ctx, a, probeP)
 	}

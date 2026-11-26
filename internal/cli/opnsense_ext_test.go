@@ -16,6 +16,9 @@ func TestOpnsenseFirewallListCommands(t *testing.T) {
 		body    string
 		want    string
 	}{
+		{"dnsmasq-settings", "/api/dnsmasq/settings/get", `{"dnsmasq":{"enable":"1","dhcp":{"enable_ra":"0"},"dhcp_ranges":{"media":{"start_addr":"10.0.50.1","end_addr":"10.0.50.5","interface":{"opt1":{"selected":1}}}}}}`, `"interface": "opt1"`},
+		{"kea-status", "/api/kea/service/status", `{"running":false}`, `"running": false`},
+		{"list-router-advertisements", "/api/radvd/settings/search_entry", `{"total":1,"rows":[{"interface":"opt1","enabled":"0","mode":"managed"}]}`, `"state": "disabled"`},
 		{"list-aliases", "/api/firewall/alias/search_item", `{"total":1,"rows":[{"uuid":"alias-1","name":"servers","enabled":"1"}]}`, `"name": "servers"`},
 		{"list-firewall-rules", "/api/firewall/filter/search_rule", `{"total":1,"rows":[{"uuid":"rule-1","description":"Allow servers","enabled":"1"}]}`, `Allow servers`},
 	} {

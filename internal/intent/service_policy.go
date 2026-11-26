@@ -13,6 +13,7 @@ type ServicePolicy struct {
 	Policy          string `yaml:"policy" json:"policy"`
 	Measurement     string `yaml:"measurement" json:"measurement"`
 	PositiveControl string `yaml:"positive_control" json:"positive_control"`
+	Discovery       string `yaml:"discovery,omitempty" json:"discovery,omitempty"`
 }
 
 // ServicePolicyBinding records the assertion indexes and validated test endpoint.
@@ -20,6 +21,7 @@ type ServicePolicyBinding struct {
 	Policy          Policy
 	Measurement     int
 	PositiveControl int
+	Discovery       *int
 	Destination     netip.Addr
 	Protocol        string
 	Port            int
@@ -118,6 +120,18 @@ func (s *Spec) bindServicePolicy(decl ServicePolicy, indices map[string]int) (Se
 	}
 	if a.Type == "port_check" && (control.Expect != "open" || (a.Expect == "open") != (b.Expected == "allow")) {
 		return b, fmt.Errorf("positive control must expect open and source expectation must match the policy")
+	}
+	if decl.Discovery != "" {
+		i, found := indices[decl.Discovery]
+		if !found {
+			return b, fmt.Errorf("discovery must name a declared mdns_lookup assertion")
+		}
+		d := s.Assertions[i]
+		ip, err := netip.ParseAddr(d.ExpectIP)
+		if d.Type != "mdns_lookup" || s.ValidateMDNSLookup(d) != nil || d.Runner != a.Runner || !s.EndpointCovers(b.Policy.From, d.From) || !s.EndpointCovers(b.Policy.To, d.To) || err != nil || ip != b.Destination || b.Expected != "allow" || a.Type != "port_check" {
+			return b, fmt.Errorf("discovery must test the allowed service address from its source probe and networks")
+		}
+		b.Discovery = &i
 	}
 	return b, nil
 }

@@ -29,6 +29,11 @@ func buildOpnsenseExtraCommands() []*cobra.Command {
 		buildOpnsenseListCmd("list-vlans", "List configured VLAN devices", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 			return service.NewOpnsenseService().ListVLANs(ctx, opts)
 		}),
+		buildProviderReadCmd("opnsense", "dnsmasq-settings", "Read Dnsmasq settings, DHCP pools and router advertisement state", toOpnsenseOptions, service.NewOpnsenseService().GetDnsmasqSettings),
+		buildProviderReadCmd("opnsense", "kea-status", "Read the Kea DHCP service state", toOpnsenseOptions, service.NewOpnsenseService().GetKeaStatus),
+		buildOpnsenseListCmd("list-router-advertisements", "Read configured IPv6 router advertisement interfaces and modes", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+			return service.NewOpnsenseService().ListRouterAdvertisements(ctx, opts)
+		}),
 		buildOpnsenseListCmd("list-kea-subnets", "List Kea DHCPv4 subnets", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 			return service.NewOpnsenseService().ListKeaSubnets(ctx, opts)
 		}),
@@ -68,21 +73,7 @@ func buildOpnsenseExtraCommands() []*cobra.Command {
 }
 
 func buildOpnsenseListCmd(use, short string, fetch func(context.Context, service.OpnsenseOptions) (any, error)) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   use,
-		Short: short,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return withProviderSession("opnsense", func(ctx context.Context, opts providers.ImportOptions) error {
-				v, err := fetch(ctx, toOpnsenseOptions(opts))
-				if err != nil {
-					return err
-				}
-				return printJSON(v)
-			})
-		},
-	}
-	addProviderFlags(cmd, "opnsense")
-	return cmd
+	return buildProviderReadCmd("opnsense", use, short, toOpnsenseOptions, fetch)
 }
 
 type opnsenseNatFlags struct {

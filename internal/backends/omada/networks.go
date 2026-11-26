@@ -35,6 +35,7 @@ type Network struct {
 	GatewaySubnet string // e.g. "10.0.10.1/24"
 	Isolated      bool
 	DHCPEnabled   bool
+	DHCPKnown     bool
 	DeviceMac     string // MAC of the device this LAN is bound to
 	DHCPStart     string
 	DHCPEnd       string
@@ -179,7 +180,7 @@ type rawNetwork struct {
 	GatewaySubnet string     `json:"gatewaySubnet"`
 	Isolated      bool       `json:"isolation"`
 	DHCPSettings  struct {
-		Enable      bool   `json:"enable"`
+		Enable      *bool  `json:"enable"`
 		IPAddrStart string `json:"ipaddrStart"`
 		IPAddrEnd   string `json:"ipaddrEnd"`
 		LeaseTime   int    `json:"leasetime"`
@@ -210,7 +211,8 @@ func (n *Network) UnmarshalJSON(data []byte) error {
 		VLANID:        raw.VLANID,
 		GatewaySubnet: raw.GatewaySubnet,
 		Isolated:      raw.Isolated,
-		DHCPEnabled:   raw.DHCPSettings.Enable,
+		DHCPEnabled:   raw.DHCPSettings.Enable != nil && *raw.DHCPSettings.Enable,
+		DHCPKnown:     raw.DHCPSettings.Enable != nil,
 		DeviceMac:     raw.DeviceMac,
 		DHCPStart:     raw.DHCPSettings.IPAddrStart,
 		DHCPEnd:       raw.DHCPSettings.IPAddrEnd,

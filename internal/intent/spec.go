@@ -547,6 +547,12 @@ func (supports ProviderLookup) validateAssertions(spec *Spec, probeNames map[str
 			return fmt.Errorf("assertion[%d]: %w", i, err)
 		}
 		a.Provider = provider
+		if a.Type == "mdns_lookup" {
+			if err := spec.ValidateMDNSLookup(a); err != nil {
+				return fmt.Errorf("assertion[%d]: %w", i, err)
+			}
+			continue
+		}
 		validate, known := assertionValidators[a.Type]
 		if !known {
 			return fmt.Errorf("assertion[%d]: unknown type %q", i, a.Type)

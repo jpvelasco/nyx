@@ -120,3 +120,19 @@ func requireNonEmpty(flag, value string) error {
 	}
 	return nil
 }
+
+// buildProviderReadCmd gives controller list/read commands the same credential
+// resolution, context and structured output as the other provider commands.
+func buildProviderReadCmd[P, R any](provider, use, short string, options func(providers.ImportOptions) P, fetch func(context.Context, P) (R, error)) *cobra.Command {
+	cmd := &cobra.Command{Use: use, Short: short, RunE: func(_ *cobra.Command, _ []string) error {
+		return withProviderSession(provider, func(ctx context.Context, opts providers.ImportOptions) error {
+			result, err := fetch(ctx, options(opts))
+			if err != nil {
+				return err
+			}
+			return printJSON(result)
+		})
+	}}
+	addProviderFlags(cmd, provider)
+	return cmd
+}

@@ -229,8 +229,11 @@ func dhcpPathVerdicts(rep *OmadaDHCPPathReport) []string {
 		out = append(out, "trunk native VLAN differs from the VLAN Omada associates with the client — untagged DHCP may be mistagged")
 	}
 	for _, lan := range rep.LANs {
-		if !lan.DHCPEnabled {
-			out = append(out, "DHCP is disabled on LAN "+lan.Name)
+		switch lan.DHCPState {
+		case "disabled":
+			out = append(out, "Omada DHCP is disabled on LAN "+lan.Name)
+		case "unknown":
+			out = append(out, "Omada DHCP configuration is unknown on LAN "+lan.Name)
 		}
 		if lan.DHCPGuard {
 			out = append(out, "DHCP guard is on for LAN "+lan.Name+" — rogue/relayed offers may be dropped")

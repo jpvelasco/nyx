@@ -51,10 +51,12 @@ type DnsmasqHost struct {
 // DnsmasqSettings is the observe subset of GET /api/dnsmasq/settings/get:
 // enabled, listening interfaces, DHCP ranges, and static hosts.
 type DnsmasqSettings struct {
-	Enabled    bool           `json:"enabled"`
-	Interfaces []string       `json:"interfaces,omitempty"`
-	Ranges     []DnsmasqRange `json:"ranges,omitempty"`
-	Hosts      []DnsmasqHost  `json:"hosts,omitempty"`
+	State                string         `json:"state"`
+	RouterAdvertisements string         `json:"router_advertisements"`
+	Enabled              bool           `json:"enabled"`
+	Interfaces           []string       `json:"interfaces,omitempty"`
+	Ranges               []DnsmasqRange `json:"ranges,omitempty"`
+	Hosts                []DnsmasqHost  `json:"hosts,omitempty"`
 }
 
 // PfStatistics is the observe subset of GET /api/diagnostics/firewall/pf_statistics.
@@ -253,27 +255,42 @@ func parseDnsmasqSettings(raw []byte) (*DnsmasqSettings, error) {
 		Enable    json.RawMessage `json:"enable"`
 		Interface json.RawMessage `json:"interface"`
 		DHCP      json.RawMessage `json:"dhcp"`
+		Ranges    json.RawMessage `json:"dhcp_ranges"`
 		Hosts     json.RawMessage `json:"hosts"`
 	}
 	if err := json.Unmarshal(src, &rec); err != nil {
 		return nil, err
 	}
 	out := &DnsmasqSettings{
-		Enabled:    decodeLooseBool(rec.Enable),
-		Interfaces: selectedKeys(rec.Interface),
+		Enabled:              decodeLooseBool(rec.Enable),
+		State:                configToggle(rec.Enable),
+		RouterAdvertisements: configToggle(firstField(rec.DHCP, "enable_ra")),
+		Interfaces:           selectedKeys(rec.Interface),
 	}
-	if ranges := uuidKeyed(firstField(rec.DHCP, "range")); len(ranges) > 0 {
-		for uuid, row := range ranges {
-			var r struct {
-				Interface string `json:"interface"`
-				Start     string `json:"start"`
-				End       string `json:"end"`
-			}
-			if json.Unmarshal(row, &r) != nil || r.Start == "" {
-				continue
-			}
-			out.Ranges = append(out.Ranges, DnsmasqRange{UUID: uuid, Interface: r.Interface, Start: r.Start, End: r.End})
+	ranges := rec.Ranges
+	if len(ranges) == 0 {
+		ranges = firstField(rec.DHCP, "range")
+	}
+	for uuid, row := range uuidKeyed(ranges) {
+		var r struct {
+			Interface json.RawMessage `json:"interface"`
+			StartAddr string          `json:"start_addr"`
+			EndAddr   string          `json:"end_addr"`
+			Start     string          `json:"start"`
+			End       string          `json:"end"`
 		}
+		if json.Unmarshal(row, &r) != nil {
+			continue
+		}
+		start := firstNonEmpty(r.StartAddr, r.Start)
+		if start == "" {
+			continue
+		}
+		var iface string
+		if json.Unmarshal(r.Interface, &iface) != nil {
+			iface = strings.Join(selectedKeys(r.Interface), ",")
+		}
+		out.Ranges = append(out.Ranges, DnsmasqRange{UUID: uuid, Interface: iface, Start: start, End: firstNonEmpty(r.EndAddr, r.End)})
 	}
 	hostBlob := rec.Hosts
 	if len(hostBlob) == 0 {
@@ -396,4 +413,16 @@ func firstNonZero(vals ...int) int {
 		}
 	}
 	return 0
+}
+
+// configToggle decodes a model flag while retaining absent or unfamiliar values.
+func configToggle(v json.RawMessage) string {
+	switch strings.ToLower(strings.Trim(string(v), `"`)) {
+	case "1", "true":
+		return "enabled"
+	case "0", "false":
+		return "disabled"
+	default:
+		return "unknown"
+	}
 }

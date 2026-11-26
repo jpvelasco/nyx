@@ -42,8 +42,8 @@ type dhcpServerInfoWire struct {
 }
 
 type dhcpSnoopStatusWire struct {
-	Enable bool `json:"enable"`
-	Status bool `json:"status"`
+	Enable *bool `json:"enable"`
+	Status *bool `json:"status"`
 }
 
 type namedToggleRow struct {
@@ -73,7 +73,10 @@ func (c *Client) GetDHCPSnoopStatus(ctx context.Context, siteID string) (*DHCPSn
 	if err := c.get(ctx, fmt.Sprintf("sites/%s/dhcpSnoops/status", siteID), &raw); err != nil {
 		return nil, fmt.Errorf("getting DHCP snooping status for site %s: %w", siteID, err)
 	}
-	return &DHCPSnoopStatus{Enabled: raw.Enable || raw.Status}, nil
+	if raw.Enable == nil && raw.Status == nil {
+		return nil, fmt.Errorf("DHCP snooping setting was not reported")
+	}
+	return &DHCPSnoopStatus{Enabled: (raw.Enable != nil && *raw.Enable) || (raw.Status != nil && *raw.Status)}, nil
 }
 
 // GetDHCPSnoops returns the paged DHCP snooping rule list.

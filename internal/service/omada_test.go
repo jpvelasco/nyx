@@ -191,14 +191,14 @@ func TestOmadaServiceListNetworks(t *testing.T) {
 	if trusted.Name != "Trusted" || trusted.CIDR != "10.0.10.0/24" || trusted.Gateway != "10.0.10.1" {
 		t.Errorf("trusted = %+v, want name/cidr/gateway derived from gatewaySubnet", trusted)
 	}
-	if trusted.VLANID != 10 || !trusted.DHCPEnabled || trusted.Isolated {
+	if trusted.VLANID != 10 || !trusted.DHCPEnabled || trusted.DHCPState != "enabled" || trusted.Isolated {
 		t.Errorf("trusted = %+v, want vlan 10, dhcp on, not isolated", trusted)
 	}
 	if trusted.DHCPStart != "10.0.10.20" || trusted.DHCPEnd != "10.0.10.200" || !trusted.DHCPGuard {
 		t.Errorf("trusted pool/posture = %+v", trusted)
 	}
 	iot := nets[1]
-	if iot.VLANID != 20 || iot.DHCPEnabled || !iot.Isolated {
+	if iot.VLANID != 20 || iot.DHCPEnabled || iot.DHCPState != "disabled" || !iot.Isolated {
 		t.Errorf("iot = %+v, want vlan 20, dhcp off, isolated", iot)
 	}
 }

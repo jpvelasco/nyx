@@ -111,6 +111,9 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_plan_dhcp":               (*Server).toolOpnsensePlanDHCP,
 	"opnsense_apply_dhcp":              (*Server).toolOpnsenseApplyDHCP,
 	"topology":                         (*Server).toolTopology,
+
+	"opnsense_get_kea_status":             (*Server).toolOpnsenseGetKeaStatus,
+	"opnsense_list_router_advertisements": (*Server).toolOpnsenseListRouterAdvertisements,
 }
 
 // ToolNames returns the registered MCP tool names in sorted order.
@@ -907,6 +910,12 @@ func (s *Server) toolOpnsenseGetPfStatistics(ctx context.Context, args map[strin
 	})
 }
 
+func (s *Server) toolOpnsenseListRouterAdvertisements(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "OPNsense router advertisement visibility unknown", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.ListRouterAdvertisements(ctx, opts)
+	})
+}
+
 func (s *Server) toolOpnsenseListKeaSubnets(ctx context.Context, args map[string]interface{}) toolDispatchResult {
 	return s.opnsenseReadJSON(ctx, args, "opnsense kea subnets request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 		return s.opnsenseSvc.ListKeaSubnets(ctx, opts)
@@ -1622,4 +1631,10 @@ func firewallLogLimit(args map[string]interface{}, maxLimit int) (int, error) {
 		return 0, fmt.Errorf("limit must be an integer between 1 and %d", maxLimit)
 	}
 	return int(number), nil
+}
+
+func (s *Server) toolOpnsenseGetKeaStatus(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "OPNsense Kea service visibility unknown", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.GetKeaStatus(ctx, opts)
+	})
 }

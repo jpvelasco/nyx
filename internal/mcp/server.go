@@ -169,6 +169,8 @@ type opnsenseSurface interface {
 	GetUnboundStatus(ctx context.Context, opts service.OpnsenseOptions) (bool, error)
 	GetPfStatistics(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsensePfStatistics, error)
 	ListKernelRoutes(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKernelRoute, error)
+	GetKeaStatus(ctx context.Context, opts service.OpnsenseOptions) (map[string]bool, error)
+	ListRouterAdvertisements(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseRouterAdvertisement, error)
 	ListKeaSubnets(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKeaSubnet, error)
 	ListKeaReservations(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKeaReservation, error)
 	ListWireGuardServers(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseWireGuardServer, error)
@@ -883,6 +885,14 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		{
 			Name:        "opnsense_list_kernel_routes",
 			Description: "List the OPNsense kernel routing table (GET diagnostics/interface/get_routes). A 403 means the API user lacks the Diagnostics: Interfaces page privilege.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name: "opnsense_get_kea_status", Description: "Read the Kea DHCP service state independently of configured subnets. Unavailable responses leave the running state unknown.", InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_router_advertisements",
+			Description: "Read configured OPNsense IPv6 router advertisement interfaces, enablement and modes. A missing or unauthorized API leaves visibility unknown.",
 			InputSchema: opnsenseToolSchema(),
 		},
 		{

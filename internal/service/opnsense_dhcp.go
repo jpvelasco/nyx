@@ -10,10 +10,12 @@ import (
 
 // OpnsenseDnsmasqSettings is the observe subset of Dnsmasq settings.
 type OpnsenseDnsmasqSettings struct {
-	Enabled    bool                   `json:"enabled"`
-	Interfaces []string               `json:"interfaces,omitempty"`
-	Ranges     []OpnsenseDnsmasqRange `json:"ranges,omitempty"`
-	Hosts      []OpnsenseDnsmasqHost  `json:"hosts,omitempty"`
+	State                string                 `json:"state"`
+	RouterAdvertisements string                 `json:"router_advertisements"`
+	Enabled              bool                   `json:"enabled"`
+	Interfaces           []string               `json:"interfaces,omitempty"`
+	Ranges               []OpnsenseDnsmasqRange `json:"ranges,omitempty"`
+	Hosts                []OpnsenseDnsmasqHost  `json:"hosts,omitempty"`
 }
 
 // OpnsenseDnsmasqRange is one DHCP range.
@@ -87,7 +89,7 @@ func flattenDnsmasq(in *opnsensebackend.DnsmasqSettings) *OpnsenseDnsmasqSetting
 	if in == nil {
 		return nil
 	}
-	out := &OpnsenseDnsmasqSettings{Enabled: in.Enabled, Interfaces: in.Interfaces}
+	out := &OpnsenseDnsmasqSettings{Enabled: in.Enabled, State: in.State, RouterAdvertisements: in.RouterAdvertisements, Interfaces: in.Interfaces}
 	for _, r := range in.Ranges {
 		out.Ranges = append(out.Ranges, OpnsenseDnsmasqRange{UUID: r.UUID, Interface: r.Interface, Start: r.Start, End: r.End})
 	}
@@ -468,4 +470,20 @@ func applyKea(ctx context.Context, client *opnsensebackend.Client, plan *Opnsens
 		res.Outcome = "deleted"
 	}
 	return nil
+}
+
+// OpnsenseRouterAdvertisement exposes the configured RADVD interface and mode.
+type OpnsenseRouterAdvertisement = opnsensebackend.RouterAdvertisement
+
+func (s *OpnsenseService) ListRouterAdvertisements(ctx context.Context, opts OpnsenseOptions) ([]OpnsenseRouterAdvertisement, error) {
+	return s.client(opts).GetRouterAdvertisements(ctx)
+}
+
+// GetKeaStatus reports the service state independently from configured pools.
+func (s *OpnsenseService) GetKeaStatus(ctx context.Context, opts OpnsenseOptions) (map[string]bool, error) {
+	running, err := s.client(opts).GetKeaServiceStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]bool{"running": running}, nil
 }
