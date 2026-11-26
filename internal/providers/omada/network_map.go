@@ -142,6 +142,7 @@ func observeMapPort(facts *topology.ObservationSet, p backend.SwitchPort, profil
 	facts.Links = append(facts.Links, topology.LinkObservation{From: ref, To: target, Relation: "native", Evidence: "port VLAN configuration"})
 	if p.ProfileOverride || profile.ID == "" {
 		facts.Gaps = append(facts.Gaps, "effective tagged VLANs")
+		facts.Links = append(facts.Links, topology.LinkObservation{From: ref, Relation: "tagged", Evidence: "effective port membership unavailable"})
 		return
 	}
 	for _, tag := range profile.TagNetworkIDs {

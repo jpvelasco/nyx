@@ -152,7 +152,7 @@ func TestNetworkMapCLIAndMCP(t *testing.T) {
 	for _, l := range m.Links {
 		counts[l.Relation+"/"+l.State]++
 	}
-	for key, n := range map[string]int{"neighbor/observed": 2, "uplink/observed": 1, "gateway/observed": 1, "gateway/inferred": 1, "gateway/missing": 1, "native/observed": 1, "tagged/observed": 1, "segment/observed": 1} {
+	for key, n := range map[string]int{"neighbor/observed": 2, "uplink/observed": 1, "gateway/observed": 1, "gateway/inferred": 1, "gateway/missing": 1, "native/observed": 1, "tagged/observed": 1, "tagged/missing": 1, "segment/observed": 1} {
 		if counts[key] != n {
 			t.Errorf("%s = %d, want %d; links %+v", key, counts[key], n, m.Links)
 		}
