@@ -1159,7 +1159,7 @@ func TestValidateACLCheckBidirectional(t *testing.T) {
 		{"opnsense", "enforced", false},
 	} {
 		a := Assertion{Type: "acl_check", Provider: tc.provider, Policy: "test-policy", Expect: tc.expect, ExpectBidirectional: &bidirectional}
-		if err := validateACLCheckAssertion(0, &a); (err == nil) != tc.valid {
+		if err := ValidateSpec(&Spec{Version: 1, Site: "example", Assertions: []Assertion{a}}); (err == nil) != tc.valid {
 			t.Errorf("provider %s and expect %s: validation = %v, want valid %t", tc.provider, tc.expect, err, tc.valid)
 		}
 	}

@@ -128,13 +128,17 @@ func fillMissingFields(provider string, entry credentials.Entry) error {
 	}
 	fields := append([]string{}, missing...)
 	if needOptional {
-		fields = append(fields, credentials.OptionalFields[provider]...)
+		for _, f := range credentials.FieldsFor(provider) {
+			if !f.Required {
+				fields = append(fields, f.Name)
+			}
+		}
 	}
 	for _, field := range fields {
 		if strings.TrimSpace(entry[field]) != "" {
 			continue
 		}
-		val, err := promptField(field)
+		val, err := promptField(provider, field)
 		if err != nil {
 			return err
 		}
@@ -145,8 +149,8 @@ func fillMissingFields(provider string, entry credentials.Entry) error {
 	return nil
 }
 
-func promptField(field string) (string, error) {
-	if credentials.IsSecret(field) {
+func promptField(provider, field string) (string, error) {
+	if credentials.SecretField(provider, field) {
 		fmt.Fprintf(promptOut, "%s: ", field)
 		secret, err := readPassword(int(syscall.Stdin))
 		fmt.Fprintln(promptOut)
@@ -280,9 +284,9 @@ Diagnose). Unknown providers skip the live step.`,
 					continue
 				}
 				if credentialsVerifyLive {
-					if _, known := credentials.Requirements[provider]; known {
+					if provider == "omada" || provider == "opnsense" || provider == "probe" {
 						if err := liveVerify(liveCtx, provider, entry); err != nil {
-							msg := fmt.Sprintf("%s/%s: live: %s", provider, name, sanitizeLiveError(err, entry))
+							msg := fmt.Sprintf("%s/%s: live: %s", provider, name, sanitizeLiveError(provider, err, entry))
 							fmt.Printf("%s\n", msg)
 							problems = append(problems, msg)
 							failed = true
@@ -352,17 +356,11 @@ func liveVerify(ctx context.Context, provider string, entry credentials.Entry) e
 
 // sanitizeLiveError strips stored secret values from a live-check error
 // so a controller/transport message cannot echo them back.
-func sanitizeLiveError(err error, entry credentials.Entry) string {
+func sanitizeLiveError(provider string, err error, entry credentials.Entry) string {
 	if err == nil {
 		return ""
 	}
-	msg := err.Error()
-	for field, val := range entry {
-		if credentials.IsSecret(field) && val != "" {
-			msg = strings.ReplaceAll(msg, val, "[redacted]")
-		}
-	}
-	return msg
+	return (credentials.Connection{Provider: provider}).RedactError(err, entry).Error()
 }
 
 func init() {

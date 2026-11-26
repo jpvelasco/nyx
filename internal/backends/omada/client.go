@@ -78,6 +78,7 @@ type apiError struct {
 	Msg        string
 }
 
+func (e *apiError) HTTPStatus() int { return e.StatusCode }
 func (e *apiError) Error() string {
 	if e.Msg != "" {
 		return e.Msg
@@ -394,10 +395,16 @@ func (c *Client) fetchInfo(ctx context.Context) (*ControllerInfo, error) {
 
 	var env apiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		if resp.StatusCode >= http.StatusBadRequest {
+			return nil, &apiError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("decoding info response: %v", err)}
+		}
 		return nil, fmt.Errorf("decoding info response: %w", err)
 	}
 	if env.ErrorCode != 0 {
-		return nil, fmt.Errorf("controller returned error %d: %s", env.ErrorCode, env.Msg)
+		return nil, &apiError{StatusCode: resp.StatusCode, ErrorCode: env.ErrorCode, Msg: fmt.Sprintf("controller returned error %d: %s", env.ErrorCode, env.Msg)}
+	}
+	if resp.StatusCode >= http.StatusBadRequest {
+		return nil, &apiError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("controller info returned HTTP %d", resp.StatusCode)}
 	}
 	var info ControllerInfo
 	if err := json.Unmarshal(env.Result, &info); err != nil {

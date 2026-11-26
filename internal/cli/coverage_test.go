@@ -18,7 +18,10 @@ import (
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
+	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/snapshot"
+	"github.com/jpvelasco/nyx/internal/testutil/providerfixture"
+	"github.com/spf13/cobra"
 )
 
 func saveRestoreGlobals(t *testing.T) {
@@ -39,6 +42,7 @@ func saveRestoreGlobals(t *testing.T) {
 		discoverProbes       string
 		discoverTiming       int
 		discoverMinRate      int
+		providerProfile      string
 		providerHost         string
 		providerClientID     string
 		providerClientSecret string
@@ -58,7 +62,7 @@ func saveRestoreGlobals(t *testing.T) {
 		routeTarget: routeTarget, vpnTarget: vpnTarget, vpnExpect: vpnExpect,
 		isolationFrom: isolationFrom, isolationTo: isolationTo,
 		discoverSubnet: discoverSubnet, discoverProbes: discoverProbes, discoverTiming: discoverTiming, discoverMinRate: discoverMinRate,
-		providerHost: providerHost, providerClientID: providerClientID, providerClientSecret: providerClientSecret,
+		providerProfile: providerProfile, providerHost: providerHost, providerClientID: providerClientID, providerClientSecret: providerClientSecret,
 		providerSite: providerSite, providerDebug: providerDebug, providerOutFile: providerOutFile,
 		providerSkipTLS: providerSkipTLS, providerCACertPth: providerCACertPath,
 		initOutput: initOutput, warnVirtual: warnVirtual,
@@ -71,6 +75,7 @@ func saveRestoreGlobals(t *testing.T) {
 		routeTarget, vpnTarget, vpnExpect = saved.routeTarget, saved.vpnTarget, saved.vpnExpect
 		isolationFrom, isolationTo = saved.isolationFrom, saved.isolationTo
 		discoverSubnet, discoverProbes, discoverTiming, discoverMinRate = saved.discoverSubnet, saved.discoverProbes, saved.discoverTiming, saved.discoverMinRate
+		providerProfile = saved.providerProfile
 		providerHost, providerClientID, providerClientSecret = saved.providerHost, saved.providerClientID, saved.providerClientSecret
 		providerSite, providerDebug, providerOutFile = saved.providerSite, saved.providerDebug, saved.providerOutFile
 		providerSkipTLS, providerCACertPath = saved.providerSkipTLS, saved.providerCACertPth
@@ -617,6 +622,11 @@ type fakeProvider struct {
 	name string
 }
 
+func buildInfoCmd(p providers.Adapter) *cobra.Command {
+	op, _ := service.ControllerInfo(p)
+	return infoCommand(op)
+}
+
 func (f *fakeProvider) Name() string { return f.name }
 func (f *fakeProvider) Capabilities() []string {
 	return []string{"info", "import", "check"}
@@ -650,8 +660,7 @@ func (e *errProvider) Check(ctx context.Context, opts providers.ImportOptions) (
 
 func registerFakeProvider(t *testing.T) {
 	t.Helper()
-	providers.Reset()
-	t.Cleanup(providers.Reset)
+	providerfixture.IsolateProviders(t)
 	if err := providers.Register(&fakeProvider{name: "fake"}); err != nil {
 		t.Fatal(err)
 	}
@@ -686,7 +695,7 @@ func TestBuildInfoCmd_HostFromEnv(t *testing.T) {
 	t.Setenv("OMADA_HOST", "10.0.0.9")
 	t.Setenv("OMADA_CLIENT_ID", "env-user")
 	t.Setenv("OMADA_CLIENT_SECRET", "env-pass")
-	cmd := buildInfoCmd(&fakeProvider{name: "fake"})
+	cmd := buildInfoCmd(&fakeProvider{name: "omada"})
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatalf("info with OMADA_HOST: %v", err)
 	}
@@ -696,7 +705,7 @@ func TestBuildInfoCmd_MissingHostError(t *testing.T) {
 	saveRestoreGlobals(t)
 	t.Setenv("OMADA_HOST", "")
 	t.Setenv("NYX_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
-	cmd := buildInfoCmd(&fakeProvider{name: "fake"})
+	cmd := buildInfoCmd(&fakeProvider{name: "omada"})
 	err := cmd.RunE(cmd, nil)
 	if err == nil || !strings.Contains(err.Error(), "OMADA_HOST") {
 		t.Fatalf("error = %v, want missing-host message naming OMADA_HOST", err)

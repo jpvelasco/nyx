@@ -49,42 +49,11 @@ func TestSetGetRoundtrip(t *testing.T) {
 	}
 }
 
-func TestOverlayFillsEmptyKeysOnly(t *testing.T) {
-	s, path := newTestStore(t)
-	if err := s.Set("omada", "default", Entry{
-		"host":          "192.168.1.1",
-		"client_id":     "cid-1",
-		"client_secret": "secret",
-		"site":          "Home",
-	}); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-
-	dest := Fields{Host: "flag-host"}
-	Overlay(path, "omada", "default", &dest)
-	if dest.Host != "flag-host" {
-		t.Errorf("host = %q, want flag value preserved", dest.Host)
-	}
-	if dest.ClientID != "cid-1" || dest.ClientSecret != "secret" || dest.Site != "Home" {
-		t.Errorf("dest = %+v, want store fill for empty keys", dest)
-	}
-
-	Overlay(path, "omada", "missing", &dest)
-	if dest.ClientID != "cid-1" {
-		t.Error("missing entry must not clear dest")
-	}
-
-	Overlay(filepath.Join(t.TempDir(), "nope.json"), "omada", "default", &dest)
-	Overlay("", "omada", "default", nil)
-}
-
-// BDD S2.1 (docs/bdd/mcp-credentials.md) store step: the typed overlay
-// target carries the OPNsense key/secret pair via its own fields.
 func TestMissingRequiredAndIsSecret(t *testing.T) {
-	if !IsSecret("client_secret") || !IsSecret("api_secret") {
+	if !SecretField("omada", "client_secret") || !SecretField("opnsense", "api_secret") {
 		t.Error("client_secret and api_secret must be secrets")
 	}
-	if IsSecret("host") || IsSecret("client_id") || IsSecret("api_key") || IsSecret("key") {
+	if SecretField("omada", "host") || SecretField("omada", "client_id") || !SecretField("opnsense", "api_key") || SecretField("omada", "key") {
 		t.Error("non-secret fields must not be treated as secrets")
 	}
 	got := MissingRequired("omada", Entry{"host": "h"})
@@ -126,33 +95,6 @@ func TestStoreStatus(t *testing.T) {
 	}
 	if !byProv["opnsense"].Complete || len(byProv["opnsense"].MissingFields) != 0 {
 		t.Errorf("opnsense status = %+v", byProv["opnsense"])
-	}
-}
-
-func TestOverlayOpnsenseFields(t *testing.T) {
-	s, path := newTestStore(t)
-	if err := s.Set("opnsense", "default", Entry{
-		"host":       "10.0.10.1",
-		"api_key":    "key-1",
-		"api_secret": "secret-1",
-	}); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-
-	dest := Fields{APIKey: "flag-key"}
-	Overlay(path, "opnsense", "default", &dest)
-	if dest.APIKey != "flag-key" || dest.APISecret != "secret-1" || dest.Host != "10.0.10.1" {
-		t.Errorf("dest = %+v, want flag key preserved, store fill for empty keys", dest)
-	}
-
-	// An entry without api_key/api_secret leaves the OPNsense fields empty.
-	if err := s.Set("omada", "default", Entry{"host": "10.0.10.2"}); err != nil {
-		t.Fatalf("Set omada: %v", err)
-	}
-	dest2 := Fields{}
-	Overlay(path, "omada", "default", &dest2)
-	if dest2.APIKey != "" || dest2.APISecret != "" {
-		t.Errorf("OPNsense fields filled from entry without them: %+v", dest2)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 )
@@ -14,9 +15,11 @@ import (
 // ClientID/ClientSecret carry the vendor's credential pair: for Omada the
 // Open API client credentials, for OPNsense the API key/secret.
 type ImportOptions struct {
+	Connection             credentials.Connection `json:"-" yaml:"-"`
+	Credentials            credentials.Entry      `json:"-" yaml:"-"`
 	Host                   string
-	ClientID               string
-	ClientSecret           string
+	ClientID               string `json:"-" yaml:"-"`
+	ClientSecret           string `json:"-" yaml:"-"`
 	Site                   string
 	Debug                  bool
 	SkipTLSVerify          bool
@@ -29,10 +32,11 @@ type ImportOptions struct {
 
 // ProviderInfo holds version and connection metadata returned by Info.
 type ProviderInfo struct {
-	Provider string            `json:"provider"`
-	Host     string            `json:"host"`
-	Version  string            `json:"version"`
-	Extra    map[string]string `json:"extra,omitempty"`
+	Configured bool              `json:"-" yaml:"-"` // Preserved for the Omada MCP view.
+	Provider   string            `json:"provider"`
+	Host       string            `json:"host"`
+	Version    string            `json:"version"`
+	Extra      map[string]string `json:"extra,omitempty"`
 }
 
 // ImportResult holds a generated spec and import summary.
@@ -178,14 +182,23 @@ type WLANScheduleObserver interface {
 	ObserveWLANSchedule(ctx context.Context, opts ImportOptions) (WLANScheduleObservation, error)
 }
 
-// Provider is implemented by each vendor backend.
-type Provider interface {
-	Name() string
-	Capabilities() []string
+// InfoReader reads controller metadata through the registered adapter.
+type InfoReader interface {
 	Info(ctx context.Context, opts ImportOptions) (*ProviderInfo, error)
+}
+
+// ACLChecker checks one declared policy on its owner.
+type ACLChecker interface {
+	CheckACL(ctx context.Context, req ACLCheckRequest, opts ImportOptions) (*models.CheckResult, error)
+}
+
+// Provider is the original full-service provider contract.
+type Provider interface {
+	Adapter
+	InfoReader
+	ACLChecker
 	ImportSpec(ctx context.Context, opts ImportOptions) (*ImportResult, error)
 	Check(ctx context.Context, opts ImportOptions) (*AuditResult, error)
-	CheckACL(ctx context.Context, req ACLCheckRequest, opts ImportOptions) (*models.CheckResult, error)
 }
 
 // NatRuleSpec is the flat desired-state of a NAT rule, valid across all
@@ -263,4 +276,16 @@ type ErrCapabilityUnsupported struct {
 
 func (e *ErrCapabilityUnsupported) Error() string {
 	return "provider \"" + e.Provider + "\" does not support \"" + e.Capability + "\""
+}
+
+// ConnectionOptions adapts resolved credential fields for existing and new providers.
+func ConnectionOptions(c credentials.Connection, values credentials.Entry) ImportOptions {
+	opts := ImportOptions{Connection: c, Credentials: values, Host: values["host"], Site: values["site"]}
+	switch c.Provider {
+	case "opnsense":
+		opts.ClientID, opts.ClientSecret = values["api_key"], values["api_secret"]
+	default:
+		opts.ClientID, opts.ClientSecret = values["client_id"], values["client_secret"]
+	}
+	return opts
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/logger"
 	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/spf13/cobra"
 )
@@ -88,7 +89,7 @@ var doctorCmd = &cobra.Command{
 		// When --spec is provided, we load it first so the briefing can match networks.
 		var specForBriefing *intent.Spec
 		if specFile != "" {
-			spec, err := intent.LoadSpec(specFile)
+			spec, err := providers.Specs.LoadSpec(specFile)
 			if err == nil {
 				specForBriefing = spec
 			}
@@ -192,7 +193,7 @@ func runSpecChecks(path string) []models.CheckResult {
 	checks = append(checks, *fileCheck)
 
 	validCheck := models.NewCheckResult("doctor", "spec_valid", "local", path)
-	spec, err := intent.ParseSpec(data)
+	spec, err := providers.Specs.ParseSpec(data)
 	if err != nil {
 		validCheck.Status = models.StatusFail
 		validCheck.Summary = fmt.Sprintf("spec validation failed: %v", err)

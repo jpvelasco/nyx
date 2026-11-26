@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/jpvelasco/nyx/internal/audit"
-	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/recommendations"
 	"github.com/jpvelasco/nyx/internal/report"
 	"github.com/jpvelasco/nyx/internal/snapshot"
@@ -37,7 +37,7 @@ var auditCmd = &cobra.Command{
 			return fmt.Errorf("spec file %q not found\n\n  Create one with:\n    nyx init --output %s\n\n  Then run:\n    nyx audit --spec %s", specFile, specFile, specFile)
 		}
 
-		spec, err := intent.LoadSpec(specFile)
+		spec, err := providers.Specs.LoadSpec(specFile)
 		if err != nil {
 			return fmt.Errorf("loading spec: %w", err)
 		}
@@ -50,6 +50,19 @@ var auditCmd = &cobra.Command{
 		defer cancel()
 
 		engine := audit.NewEngine(spec)
+		profiles, err := cmd.Flags().GetStringToString("provider-profile")
+		if err != nil {
+			return err
+		}
+		for name, profile := range profiles {
+			if strings.TrimSpace(profile) == "" {
+				return fmt.Errorf("--provider-profile: empty profile for %s", name)
+			}
+			if _, ok := providers.LookupAdapter(name); !ok {
+				return fmt.Errorf("--provider-profile: unknown provider %q", name)
+			}
+		}
+		engine.CredentialProfiles = profiles
 		engine.Interface = GetSelectedInterface()
 		engine.WarnVirtual = warnVirtual
 		engine.SkipHostKeyVerify = skipHostKeyVerify

@@ -8,6 +8,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/spf13/cobra"
 )
 
@@ -81,7 +82,7 @@ func verifyIsolationViaEngine(ctx context.Context) (*models.CheckResult, error) 
 	if isolationFrom == "" {
 		return nil, fmt.Errorf("--from is required when --spec is provided (it is resolved as a zone or network in the spec)")
 	}
-	spec, err := intent.LoadSpec(specFile)
+	spec, err := providers.Specs.LoadSpec(specFile)
 	if err != nil {
 		return nil, fmt.Errorf("loading spec %s: %w", specFile, err)
 	}

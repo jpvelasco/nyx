@@ -446,7 +446,7 @@ func TestLiveVerifyDefaultAndSanitizeNil(t *testing.T) {
 	if err := liveVerify(context.Background(), "custom", credentials.Entry{"token": "x"}); err != nil {
 		t.Fatalf("unknown provider liveVerify = %v", err)
 	}
-	if got := sanitizeLiveError(nil, credentials.Entry{"client_secret": "s"}); got != "" {
+	if got := sanitizeLiveError("omada", nil, credentials.Entry{"client_secret": "s"}); got != "" {
 		t.Fatalf("nil sanitize = %q", got)
 	}
 }
