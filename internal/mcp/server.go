@@ -1179,10 +1179,7 @@ func omadaNatToolSchema() inputSchema {
 	}, []string{"operation"})
 }
 
-// opnsenseNatToolSchema returns the OPNsense NAT-mutation tool schema:
-// credential fields plus the mutation request shape. Dry-run defaults true;
-// a real apply writes config.xml and then POSTs firewall/filter/apply
-// (S3.9) so the change is in the dataplane.
+// opnsenseVLANToolSchema describes the shared VLAN, bridge and assignment inputs.
 func opnsenseVLANToolSchema(apply bool) inputSchema {
 	fields := map[string]propSchema{
 		"kind":        {Type: "string", Description: "vlan (default), bridge or assignment"},
@@ -1200,6 +1197,10 @@ func opnsenseVLANToolSchema(apply bool) inputSchema {
 	return opnsenseToolSchemaExtra(fields, nil)
 }
 
+// opnsenseNatToolSchema returns the OPNsense NAT-mutation tool schema:
+// credential fields plus the mutation request shape. Dry-run defaults true;
+// a real apply writes config.xml and then POSTs firewall/filter/apply
+// (S3.9) so the change is in the dataplane.
 func opnsenseNatToolSchema() inputSchema {
 	return opnsenseToolSchemaExtra(map[string]propSchema{
 		"operation":        {Type: "string", Description: "NAT collection: port_forward, one_to_one, or source_nat"},

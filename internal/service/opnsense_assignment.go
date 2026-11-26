@@ -79,7 +79,7 @@ func assignmentTarget(ctx context.Context, c *fw.Client, req OpnsenseVLANRequest
 	if req.Tag < 1 || req.Tag > 4094 || req.Parent == "" || !assignmentName.MatchString(req.Description) || req.UUID != "" || req.Delete || len(req.Members) > 0 {
 		return vlanAssignment{}, errors.New("assignment requires a VLAN parent, tag and interface description and accepts no UUID, delete or bridge members")
 	}
-	vlans, err := c.GetVLANs(ctx)
+	vlans, err := c.AssignmentVLANs(ctx)
 	if err != nil {
 		return vlanAssignment{}, err
 	}

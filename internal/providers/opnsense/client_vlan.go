@@ -42,9 +42,20 @@ const AssignIPGapWarning = "creating the VLAN or bridge device does not assign i
 
 // GetVLANs returns configured VLAN devices (GET search_item).
 func (c *Client) GetVLANs(ctx context.Context) ([]VLAN, error) {
+	return c.vlans(ctx, false)
+}
+
+// AssignmentVLANs requires a complete inventory to resolve a device before a write.
+func (c *Client) AssignmentVLANs(ctx context.Context) ([]VLAN, error) { return c.vlans(ctx, true) }
+
+func (c *Client) vlans(ctx context.Context, strict bool) ([]VLAN, error) {
 	var raw []json.RawMessage
-	if _, err := fetchPagedList(ctx, c, vlanSearchPath, listPageSize, &raw); err != nil {
+	total, err := fetchPagedList(ctx, c, vlanSearchPath, listPageSize, &raw)
+	if err != nil {
 		return nil, remapPagedDecode(err, "decoding VLAN settings response")
+	}
+	if strict && (raw == nil || len(raw) != total) {
+		return nil, fmt.Errorf("incomplete VLAN inventory before assignment")
 	}
 	out := make([]VLAN, 0, len(raw))
 	for _, row := range raw {
@@ -57,9 +68,15 @@ func (c *Client) GetVLANs(ctx context.Context) ([]VLAN, error) {
 			Vlanif      string `json:"vlanif"`
 		}
 		if err := json.Unmarshal(row, &rec); err != nil || rec.UUID == "" {
+			if strict {
+				return nil, fmt.Errorf("invalid VLAN identity before assignment")
+			}
 			continue
 		}
 		tag, _ := strconv.Atoi(rec.Tag)
+		if strict && (tag < 1 || tag > 4094 || rec.If == "") {
+			return nil, fmt.Errorf("invalid VLAN parent or tag before assignment")
+		}
 		out = append(out, VLAN{
 			UUID:        rec.UUID,
 			Parent:      rec.If,
