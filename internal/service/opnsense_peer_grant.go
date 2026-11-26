@@ -19,6 +19,7 @@ const PeerApprovalEnv = "NYX_WIREGUARD_PEER_APPROVAL"
 // A local operator prepares one file and configures its path on the Nyx process. MCP accepts no file, network, key or endpoint arguments.
 type ApprovedPeer struct {
 	Profile         string   `json:"profile"`
+	CACertPath      string   `json:"ca_cert_path,omitempty"`
 	Host            string   `json:"host"`
 	UUID            string   `json:"uuid,omitempty"`
 	Name            string   `json:"name"`
@@ -96,6 +97,7 @@ func peerMatches(current, desired opnsense.SelectedPeer) bool {
 
 // ApplyApprovedPeer reconciles one exact operator-prepared record and verifies the result with a fresh UUID read.
 func (s *OpnsenseService) ApplyApprovedPeer(ctx context.Context, opts OpnsenseOptions, a ApprovedPeer, dry bool) (*WireGuardPeerPlan, error) {
+	opts.CACertPath = a.CACertPath
 	d, err := a.desired()
 	if err != nil {
 		return nil, err

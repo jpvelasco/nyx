@@ -334,7 +334,7 @@ operator-managed JSON file for the selected firewall. It contains `profile`,
 `host`, `name`, `public_key` (the peer’s base64 WireGuard public key),
 `servers` (an array of exact server UUIDs), `allowed_networks` (an array of
 canonical CIDRs), and `enabled` (a boolean). Include `uuid` when targeting an
-existing peer. Without a UUID, Nyx identifies an existing match by both name
+existing peer. For a private firewall CA, include `ca_cert_path` with the operator’s PEM file path. Without a UUID, Nyx identifies an existing match by both name
 and public key before creating a peer. Keep the file outside source control.
 Remove it or clear the environment setting to withdraw that authorization.
 
