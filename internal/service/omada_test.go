@@ -233,8 +233,9 @@ func TestOmadaServiceListGatewayDHCPUsers(t *testing.T) {
 		case "/openapi/v1/abc123/sites":
 			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"HQ"}]}`)
 		case "/openapi/v1/abc123/sites/s1/gateways/aa-bb-cc-dd-ee-00/dhcp/user-list":
-			writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[
-				{"ipAddress":"10.0.10.20","macAddress":"aa-bb-cc-dd-ee-01","name":"pc1","netName":"Trusted","leftLeaseTime":3600}]}`)
+			writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[
+				{"ipAddress":"10.0.10.20","macAddress":"aa-bb-cc-dd-ee-01","name":"pc1","netName":"Trusted","leftLeaseTime":3600},
+				{"leftLeaseTime":"00:30:00"}]}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -245,7 +246,8 @@ func TestOmadaServiceListGatewayDHCPUsers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListGatewayDHCPUsers: %v", err)
 	}
-	if len(rows) != 1 || rows[0].IP != "10.0.10.20" || rows[0].NetworkName != "Trusted" {
+	if len(rows) != 2 || rows[0].IP != "10.0.10.20" || rows[0].NetworkName != "Trusted" ||
+		rows[0].LeftLeaseSec != 3600 || rows[1].LeftLeaseTime != "00:30:00" {
 		t.Fatalf("rows = %+v", rows)
 	}
 	if _, err := NewOmadaService().ListGatewayDHCPUsers(context.Background(), OmadaOptions{

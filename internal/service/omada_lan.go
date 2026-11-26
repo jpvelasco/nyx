@@ -10,11 +10,12 @@ import (
 
 // OmadaGatewayDHCPUser is one row of the per-gateway DHCP lease table.
 type OmadaGatewayDHCPUser struct {
-	IP           string `json:"ip"`
-	MAC          string `json:"mac"`
-	Name         string `json:"name,omitempty"`
-	NetworkName  string `json:"network_name,omitempty"`
-	LeftLeaseSec int    `json:"left_lease_sec,omitempty"`
+	IP            string `json:"ip"`
+	MAC           string `json:"mac"`
+	Name          string `json:"name,omitempty"`
+	NetworkName   string `json:"network_name,omitempty"`
+	LeftLeaseSec  int    `json:"left_lease_sec,omitempty"`
+	LeftLeaseTime string `json:"left_lease_time,omitempty"`
 }
 
 // OmadaDHCPServerInfo is the per-network DHCP pool panel (available IPs).
@@ -79,11 +80,12 @@ func (s *OmadaService) ListGatewayDHCPUsers(ctx context.Context, opts OmadaOptio
 	out := make([]OmadaGatewayDHCPUser, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, OmadaGatewayDHCPUser{
-			IP:           r.IP,
-			MAC:          r.MAC,
-			Name:         r.Name,
-			NetworkName:  r.NetworkName,
-			LeftLeaseSec: r.LeftLeaseSec,
+			IP:            r.IP,
+			MAC:           r.MAC,
+			Name:          r.Name,
+			NetworkName:   r.NetworkName,
+			LeftLeaseSec:  r.LeftLeaseSec,
+			LeftLeaseTime: r.LeftLeaseTime,
 		})
 	}
 	return out, nil

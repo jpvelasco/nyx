@@ -2,7 +2,9 @@ package omada
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 )
 
 // ConnectedClient represents a client connected to the network. The
@@ -43,19 +45,35 @@ func (c *Client) GetClients(ctx context.Context, siteID string) ([]ConnectedClie
 // (GET sites/{siteId}/gateways/{gatewayMac}/dhcp/user-list). pageSize is
 // required; page starts at 1. MACs may be dash-separated.
 type GatewayDHCPUser struct {
-	IP           string
-	MAC          string
-	Name         string
-	NetworkName  string
-	LeftLeaseSec int
+	IP            string
+	MAC           string
+	Name          string
+	NetworkName   string
+	LeftLeaseSec  int
+	LeftLeaseTime string // Controller display value when it does not give a count of seconds.
+}
+
+// Omada returns some display fields as either text or a JSON integer.
+type textOrInteger string
+
+func (v *textOrInteger) UnmarshalJSON(data []byte) error {
+	if data[0] == '"' || string(data) == "null" {
+		return json.Unmarshal(data, (*string)(v))
+	}
+	var n int64
+	if err := json.Unmarshal(data, &n); err != nil {
+		return err
+	}
+	*v = textOrInteger(strconv.FormatInt(n, 10))
+	return nil
 }
 
 type gatewayDHCPUserRow struct {
-	IPAddress     string `json:"ipAddress"`
-	MACAddress    string `json:"macAddress"`
-	Name          string `json:"name"`
-	NetName       string `json:"netName"`
-	LeftLeaseTime int    `json:"leftLeaseTime"`
+	IPAddress     string        `json:"ipAddress"`
+	MACAddress    string        `json:"macAddress"`
+	Name          string        `json:"name"`
+	NetName       string        `json:"netName"`
+	LeftLeaseTime textOrInteger `json:"leftLeaseTime"`
 }
 
 // GetGatewayDHCPUsers returns the gateway's DHCP lease table. gatewayMAC
@@ -68,13 +86,19 @@ func (c *Client) GetGatewayDHCPUsers(ctx context.Context, siteID, gatewayMAC str
 	}
 	out := make([]GatewayDHCPUser, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, GatewayDHCPUser{
-			IP:           r.IPAddress,
-			MAC:          r.MACAddress,
-			Name:         r.Name,
-			NetworkName:  r.NetName,
-			LeftLeaseSec: r.LeftLeaseTime,
-		})
+		user := GatewayDHCPUser{
+			IP:          r.IPAddress,
+			MAC:         r.MACAddress,
+			Name:        r.Name,
+			NetworkName: r.NetName,
+		}
+		raw := string(r.LeftLeaseTime)
+		if seconds, err := strconv.Atoi(raw); err == nil {
+			user.LeftLeaseSec = seconds
+		} else {
+			user.LeftLeaseTime = raw
+		}
+		out = append(out, user)
 	}
 	return out, nil
 }
@@ -101,23 +125,22 @@ type ClientTopologyNode struct {
 }
 
 type rawTopologyNode struct {
-	NodeType   string `json:"nodeType"`
+	NodeType   textOrInteger `json:"nodeType"`
 	ClientNode struct {
 		MAC        string `json:"mac"`
 		Name       string `json:"name"`
 		Model      string `json:"model"`
 		ClientType string `json:"clientType"`
 		UpOswInfo  struct {
-			MAC       string `json:"mac"`
-			Name      string `json:"name"`
-			Port      string `json:"port"`
-			LinkSpeed int    `json:"linkSpeed"`
+			MAC       string        `json:"mac"`
+			Name      string        `json:"name"`
+			Port      textOrInteger `json:"port"`
+			LinkSpeed int           `json:"linkSpeed"`
 		} `json:"upOswInfo"`
 		UpApInfo struct {
-			MAC   string `json:"mac"`
-			Name  string `json:"name"`
-			RSSI  int    `json:"rssi"`
-			Radio string `json:"radio"`
+			MAC  string `json:"mac"`
+			Name string `json:"name"`
+			RSSI int    `json:"rssi"`
 		} `json:"upApInfo"`
 	} `json:"clientNode"`
 	DeviceNode struct {
@@ -147,15 +170,21 @@ func (c *Client) GetClientTopology(ctx context.Context, siteID, clientMAC string
 	}
 	out := make([]ClientTopologyNode, 0, len(raw))
 	for _, n := range raw {
-		node := ClientTopologyNode{NodeType: n.NodeType}
-		if n.NodeType == "clientNode" || n.ClientNode.MAC != "" {
+		node := ClientTopologyNode{NodeType: string(n.NodeType)}
+		switch n.NodeType {
+		case "0":
+			node.NodeType = "deviceNode"
+		case "1":
+			node.NodeType = "clientNode"
+		}
+		if node.NodeType == "clientNode" || (node.NodeType != "deviceNode" && n.ClientNode.MAC != "") {
 			node.MAC = n.ClientNode.MAC
 			node.Name = n.ClientNode.Name
 			node.Model = n.ClientNode.Model
 			node.ClientType = n.ClientNode.ClientType
 			node.SwitchMAC = n.ClientNode.UpOswInfo.MAC
 			node.SwitchName = n.ClientNode.UpOswInfo.Name
-			node.SwitchPort = n.ClientNode.UpOswInfo.Port
+			node.SwitchPort = string(n.ClientNode.UpOswInfo.Port)
 			node.LinkSpeed = n.ClientNode.UpOswInfo.LinkSpeed
 			node.APMAC = n.ClientNode.UpApInfo.MAC
 			node.APName = n.ClientNode.UpApInfo.Name
