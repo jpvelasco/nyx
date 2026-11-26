@@ -34,7 +34,7 @@ func TestPeerCommandDryRun(t *testing.T) {
 	defer firewall.Close()
 	for _, apply := range []bool{false, true} {
 		cmd := opnsensePeerCommand(apply)
-		cmd.SetArgs([]string{"--host", strings.TrimPrefix(firewall.URL, "https://"), "--api-key", "fixture", "--api-secret", "fixture-secret", "--skip-tls-verify", "--uuid", id, "--action", "remove"})
+		cmd.SetArgs([]string{"--host", strings.TrimPrefix(firewall.URL, "https://"), "--api-key", "fixture", "--api-secret", "fixture-secret", "--skip-tls-verify", "--uuid", id, "--action", "toggle", "--enabled=false"})
 		out := captureStdout(func() {
 			if err := cmd.Execute(); err != nil {
 				t.Fatal(err)
@@ -50,6 +50,7 @@ func TestPeerCommandDryRun(t *testing.T) {
 }
 
 func TestApprovedPeerBothTransports(t *testing.T) {
+	saveRestoreGlobals(t)
 	const serverID = "00000000-0000-4000-8000-a00000000002"
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -96,5 +97,17 @@ func TestApprovedPeerBothTransports(t *testing.T) {
 	out, failed := rpc.DispatchToolForTest(t.Context(), "opnsense_apply_approved_wireguard_peer", nil)
 	if failed || !strings.Contains(out, "planned") || strings.Contains(out, key) {
 		t.Fatal(out)
+	}
+	timeout = "invalid"
+	if err := cmd.ExecuteContext(t.Context()); err == nil {
+		t.Fatal("accepted invalid command timeout")
+	}
+	t.Setenv("OPNSENSE_HOST", "")
+	if err := cmd.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "configure the approved") {
+		t.Fatal("accepted unconfigured approved connection")
+	}
+	t.Setenv(service.PeerApprovalEnv, filepath.Join(dir, "missing"))
+	if err := cmd.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "operator-prepared") {
+		t.Fatal("accepted missing approval")
 	}
 }

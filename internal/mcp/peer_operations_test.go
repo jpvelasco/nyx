@@ -3,9 +3,12 @@ package mcp
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
@@ -141,5 +144,19 @@ func TestApprovedPeerToolRejectsOverrides(t *testing.T) {
 		if _, failed := s.dispatchTool(t.Context(), "opnsense_apply_approved_wireguard_peer", args); !failed {
 			t.Fatal("accepted missing or overridden approval")
 		}
+	}
+	file := filepath.Join(t.TempDir(), "approval.json")
+	if err := os.WriteFile(file, []byte(`{"profile":"default"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(service.PeerApprovalEnv, file)
+	if out, failed := s.dispatchTool(t.Context(), "opnsense_apply_approved_wireguard_peer", nil); !failed || !strings.Contains(out, "configure the approved") {
+		t.Fatal("unconfigured connection did not fail", out)
+	}
+	t.Setenv("OPNSENSE_HOST", "firewall.example")
+	t.Setenv("OPNSENSE_API_KEY", "fixture")
+	t.Setenv("OPNSENSE_API_SECRET", "fixture")
+	if out, failed := s.dispatchTool(t.Context(), "opnsense_apply_approved_wireguard_peer", map[string]any{"dry_run": false}); !failed || !strings.Contains(out, "incomplete approved peer") {
+		t.Fatal("incomplete grant did not fail before network access", out)
 	}
 }
