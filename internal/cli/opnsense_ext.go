@@ -264,7 +264,11 @@ func buildOpnsenseApplyVLANCmd() *cobra.Command {
 					return err
 				}
 				if res.Kind == "assignment" && !jsonOutput {
-					return printVLANAssignment(res.Outcome, res.Assignment, res.Warning)
+					action := res.Outcome
+					if res.DryRun {
+						action = "(dry-run) " + action
+					}
+					return printVLANAssignment(action, res.Assignment, res.Warning)
 				}
 				return printApply(res, res.Outcome, res.DryRun)
 			})

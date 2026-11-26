@@ -73,6 +73,9 @@ func TestRoutedVLANManualHandoffCommands(t *testing.T) {
 		cmd.SetArgs([]string{"--kind", "assignment", "--tag", "30", "--parent", "igb0", "--description", "gaming", "--address", "10.0.30.1/24"})
 		var err error
 		out := captureStdout(func() { err = cmd.Execute() })
+		if strings.Contains(out, "(dry-run)") != (cmd.Name() == "apply-vlan") {
+			t.Errorf("%s preview label: %q", cmd.Name(), out)
+		}
 		if err != nil || !strings.Contains(out, "manual gaming") || !strings.Contains(out, "GUI") {
 			t.Fatalf("%s: %s %v", cmd.Name(), out, err)
 		}
