@@ -33,6 +33,11 @@ func TestClientLocationEvidence(t *testing.T) {
 			if got.Status != tc.status || len(got.Path.Resources) != tc.path || got.DownstreamPort != "unknown" {
 				t.Fatalf("%+v", got)
 			}
+			for _, l := range got.Path.Links {
+				if (l.Relation == "native" || l.Relation == "tagged") && l.State != "inferred" {
+					t.Fatal("configured port membership cannot establish client VLAN")
+				}
+			}
 			b, _ := json.Marshal(got)
 			if strings.Contains(string(b), "private") || strings.Contains(string(b), "192.0.2.") {
 				t.Error("default output leaked private evidence")

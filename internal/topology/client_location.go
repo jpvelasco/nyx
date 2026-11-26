@@ -40,14 +40,14 @@ type ClientLocation struct {
 
 type attachmentKey struct{ source, kind, native string }
 
-// LocateClient traces configured topology from current managed attachments.
-// A managed port identifies the last visible uplink. An unmanaged downstream
-// port has no observable identity in a controller's inventory.
+// ClientMapInput combines topology and client observations from a single connection.
 type ClientMapInput struct {
 	MapInput
 	Evidence []ClientObservation
 }
 
+// LocateClient traces configured topology from current managed attachments.
+// The controller cannot identify a downstream unmanaged switch port.
 func LocateClient(sources []ClientMapInput, detail bool) ClientLocation {
 	inputs := make([]MapInput, 0, len(sources))
 	for _, source := range sources {
@@ -113,10 +113,14 @@ func attachmentPath(m NetworkMap, starts, wired map[string]bool) NetworkMap {
 			continue
 		}
 		switch l.Relation {
-		case "native":
+		case "native", "tagged":
 			if !wired[l.From] {
 				continue
 			}
+			// A configured port VLAN is a candidate. A wired client may tag
+			// traffic, or sit behind an unmanaged switch on this port.
+			l.State = "inferred"
+			l.Evidence = "configured port membership"
 		case "uplink", "device", "gateway":
 		default:
 			continue
