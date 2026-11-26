@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/testutil"
+	"github.com/spf13/cobra"
 )
 
 func TestOmadaPendingCLIProjection(t *testing.T) {
@@ -77,5 +78,23 @@ func TestOmadaPendingCLIProjection(t *testing.T) {
 	out = captureStdout(func() { runErr = cmd.Execute() })
 	if runErr != nil || !strings.Contains(out, "verified_complete") {
 		t.Fatal("selected readback", runErr)
+	}
+	for _, tc := range []struct {
+		command func() *cobra.Command
+		args    []string
+	}{
+		{buildOmadaPendingDevicesCmd, []string{"--page-size", "101"}},
+		{buildOmadaAdoptionStatusCmd, []string{"--mac", "invalid"}},
+		{buildStageFirmwareCmd, []string{"--file", filepath.Join(dir, "absent.bin")}},
+		{buildStageFirmwareCmd, []string{"--file", file, "--mac", "invalid", "--expected-version", "next"}},
+		{buildStagedFirmwareCmd, []string{"--reference", strings.Repeat("A", 26), "--confirm-reboot"}},
+	} {
+		cmd := tc.command()
+		cmd.SilenceErrors, cmd.SilenceUsage = true, true
+		cmd.SetArgs(append(base, tc.args...))
+		out := captureStdout(func() { runErr = cmd.ExecuteContext(t.Context()) })
+		if runErr == nil || out != "" {
+			t.Errorf("%s accepted invalid maintenance input or emitted a successful result", cmd.Name())
+		}
 	}
 }

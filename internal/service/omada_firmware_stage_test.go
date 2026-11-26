@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -14,6 +14,7 @@ func TestStagedFirmwareBindingAndReboot(t *testing.T) {
 	var started atomic.Bool
 	var uploaded atomic.Int32
 	var identityMissing atomic.Bool
+	var rejectStart atomic.Bool
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/openapi/authorize/token":
@@ -34,6 +35,10 @@ func TestStagedFirmwareBindingAndReboot(t *testing.T) {
 			uploaded.Add(1)
 			writeOmadaEnvelope(w, 0, `{"fileId":"image"}`)
 		case strings.HasSuffix(r.URL.Path, "/start-manually-upgrade"):
+			if rejectStart.Load() {
+				http.Error(w, "private.example", http.StatusForbidden)
+				return
+			}
 			started.Store(true)
 			writeOmadaEnvelope(w, 0, `{"taskId":"task"}`)
 		case strings.HasSuffix(r.URL.Path, "/manually-upgrade-tasks/task"):
@@ -79,8 +84,15 @@ func TestStagedFirmwareBindingAndReboot(t *testing.T) {
 			}
 		})
 	}
-	out, err := svc.upgradeStaged(t.Context(), opts, dir, id, true, func(model, rev string) bool { return model == "fixture-model" && rev == "fixture-rev" })
-	if err != nil || out.Status != "verified" || out.Observed != "fixture-next" || uploaded.Load() != 1 {
+	supported := func(model, rev string) bool { return model == "fixture-model" && rev == "fixture-rev" }
+	rejectStart.Store(true)
+	out, err := svc.upgradeStaged(t.Context(), opts, dir, id, true, supported)
+	if err == nil || out.Status != "unverified" || started.Load() || uploaded.Load() != 1 || strings.Contains(err.Error(), "private.example") {
+		t.Fatal("unconfirmed activation reported as successful or exposed the vendor message")
+	}
+	rejectStart.Store(false)
+	out, err = svc.upgradeStaged(t.Context(), opts, dir, id, true, supported)
+	if err != nil || out.Status != "verified" || out.Observed != "fixture-next" || uploaded.Load() != 2 {
 		t.Fatalf("readback %+v, %v", out, err)
 	}
 	root, err := os.OpenRoot(dir)
@@ -126,5 +138,8 @@ func TestStagedFirmwareFileValidation(t *testing.T) {
 		if _, _, err := loadFirmware(dir, ref); err == nil {
 			t.Fatal("corrupt manifest accepted")
 		}
+	}
+	if _, err := saveFirmware(filepath.Join(dir, ref, "firmware"), stagedFirmware{}, []byte("fixture")); err == nil {
+		t.Fatal("created a stage through a regular file")
 	}
 }
