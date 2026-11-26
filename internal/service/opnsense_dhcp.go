@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/netip"
+	"slices"
 	"strings"
 
 	opnsensebackend "github.com/jpvelasco/nyx/internal/providers/opnsense"
@@ -101,16 +103,17 @@ func flattenDnsmasq(in *opnsensebackend.DnsmasqSettings) *OpnsenseDnsmasqSetting
 
 // OpnsenseDHCPRequest is a plan/apply DHCP range/host/reservation mutation.
 type OpnsenseDHCPRequest struct {
-	Backend   string // auto (default), dnsmasq, kea
-	Kind      string // range, host, reservation
-	Interface string
-	Start     string
-	End       string
-	IP        string
-	MAC       string
-	Hostname  string
-	UUID      string
-	Delete    bool
+	CreateOnly bool   // Preserve an existing resource if a composed create plan becomes an update.
+	Backend    string // auto (default), dnsmasq, kea
+	Kind       string // range, host, reservation
+	Interface  string
+	Start      string
+	End        string
+	IP         string
+	MAC        string
+	Hostname   string
+	UUID       string
+	Delete     bool
 }
 
 // OpnsenseDHCPPlan previews a DHCP mutation.
@@ -233,6 +236,31 @@ func planDnsmasq(ctx context.Context, client *opnsensebackend.Client, plan *Opns
 	if !req.Delete && (req.Start == "" || req.End == "") && req.UUID == "" {
 		return nil, fmt.Errorf("start and end are required to create a DHCP range")
 	}
+	if req.CreateOnly {
+		if err := client.CheckDnsmasqPoolOwner(ctx); err != nil {
+			return nil, err
+		}
+		if !settings.Enabled || (len(settings.Interfaces) > 0 && !slices.Contains(settings.Interfaces, req.Interface)) {
+			return nil, fmt.Errorf("enable Dnsmasq on the selected interface and review its advertised DNS settings")
+		}
+		start, _ := netip.ParseAddr(req.Start)
+		end, _ := netip.ParseAddr(req.End)
+		matches := 0
+		for _, row := range settings.Ranges {
+			first, e1 := netip.ParseAddr(row.Start)
+			last, e2 := netip.ParseAddr(row.End)
+			if e1 != nil || e2 != nil || first.Compare(last) > 0 {
+				return nil, fmt.Errorf("could not verify an existing DHCP range")
+			}
+			if first.Compare(end) > 0 || last.Compare(start) < 0 {
+				continue
+			}
+			matches++
+			if matches > 1 || row.Interface != req.Interface || first != start || last != end {
+				return nil, fmt.Errorf("an existing DHCP range overlaps the requested pool")
+			}
+		}
+	}
 	cur, ok := opnsensebackend.FindDnsmasqRange(settings.Ranges, req.UUID, req.Interface, req.Start, req.End)
 	if req.Delete {
 		if !ok {
@@ -349,6 +377,9 @@ func (s *OpnsenseService) ApplyDHCP(ctx context.Context, opts OpnsenseOptions, r
 		return nil, err
 	}
 	res := &OpnsenseDHCPApplyResult{Outcome: plan.Action, Backend: plan.Backend, Kind: plan.Kind, UUID: plan.UUID, DryRun: dryRun}
+	if err := preserveExisting(req.CreateOnly, plan.Action); err != nil {
+		return nil, err
+	}
 	if dryRun || plan.Action == "unchanged" {
 		return res, nil
 	}

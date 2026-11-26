@@ -318,6 +318,7 @@ Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `O
 | `omada_apply_port_profile` | Bind a switch port to a LAN profile with the desired VLAN membership (find-or-create the matching profile, then bind). Idempotent (`unchanged`/`bound`/`created_and_bound`); dry-run is the default |
 | `omada_plan_nat` / `omada_apply_nat` | Omada NAT plan/apply. The Open API exposes NAT reads but no live-site write path, so both always refuse with current-state evidence and the write-surface explanation — configure via the controller UI or use `opnsense_plan_nat`/`opnsense_apply_nat` |
 | `opnsense_plan_nat` / `opnsense_apply_nat` | OPNsense NAT plan/apply: port forwards, one-to-one, and source NAT with double-NAT guard, idempotent creates, and dry-run default |
+| `plan_segment` / `apply_segment` | Plan and provision a routed IPv4 VLAN across a selected Omada site and OPNsense firewall, with management isolation and source verification. CLI `nyx segment plan` / `apply`. [Segment provisioning](docs/segment-provisioning.md) |
 | `plan_port_forward` / `apply_port_forward` | Composed playbook: plan or apply a port-forward on the backend that owns the egress-path NAT, selected from the live topology report. Routes to OPNsense when it owns NAT, reports the Omada hold when the managed gateway owns it, and refuses on double-NAT or indeterminate topologies. Dry-run default |
 | `opnsense_get_info` | Fetch OPNsense system metadata (version, product, arch) |
 | `opnsense_list_interfaces` | List OPNsense interfaces with IP configuration |

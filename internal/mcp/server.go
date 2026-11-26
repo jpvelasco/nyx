@@ -218,6 +218,7 @@ type Server struct {
 	opnsenseSvc opnsenseSurface
 	topoSvc     topologySurface
 	playbookSvc playbookSurface
+	segmentSvc  service.SegmentService
 	// logger writes MCP operation records to the shared rotating log file.
 	// The writer is the stdout RPC channel, so nothing is ever logged to
 	// it; a nil logger disables file logging (tests).
@@ -254,6 +255,7 @@ func NewServerWithLogger(sl *slog.Logger) *Server {
 		opnsenseSvc:     service.NewOpnsenseService(),
 		topoSvc:         topoSvc,
 		playbookSvc:     service.NewPlaybookService(topoSvc),
+		segmentSvc:      service.SegmentService{Topology: topoSvc},
 		logger:          sl,
 		credEnv:         credEnvFrom(OmadaCredEnvVars),
 		opnsenseCredEnv: credEnvFrom(OpnsenseCredEnvVars),
@@ -745,6 +747,8 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			Description: "Apply an Omada NAT mutation. Always refused: the Omada Open API exposes no live-site NAT write path, so nothing can mutate — the result carries identical before/after evidence and the write-surface explanation. Use provider opnsense for NAT writes.",
 			InputSchema: omadaNatToolSchema(),
 		},
+		{Name: "plan_segment", Description: "Preview the owners, dependencies and manual steps for a routed IPv4 segment in an Omada site behind OPNsense.", InputSchema: segmentSchema(false)},
+		{Name: "apply_segment", Description: "Reconcile a routed IPv4 segment, with management isolation before client access. Dry-run by default.", InputSchema: segmentSchema(true)},
 		{
 			Name:        "plan_port_forward",
 			Description: "Composed playbook (#140): plan a port-forward rule on the backend that owns the egress-path NAT, selected from the topology report. Routes to opnsense_plan_nat semantics when OPNsense owns NAT; reports the Omada hold when the managed gateway owns it; refuses on double-NAT or indeterminate topologies. Read-only.",
@@ -1117,16 +1121,20 @@ func portForwardToolSchema() inputSchema {
 		"label":         {Type: "string", Description: "Rule name"},
 		"dry_run":       {Type: "boolean", Description: "Preview only (apply tool). Default true."},
 	}
+	addPlaybookCredentials(props)
+	return inputSchema{
+		Type:       "object",
+		Properties: props,
+		Required:   []string{"external_port", "target"},
+	}
+}
+
+func addPlaybookCredentials(props map[string]propSchema) {
 	for _, k := range []string{"profile", "host", "client_id", "client_secret", "site", "skip_tls_verify", "ca_cert_path"} {
 		props["omada_"+k] = propSchema{Type: propTypeFor(k), Description: "Omada " + k + " (OMADA_* env fallback)"}
 	}
 	for _, k := range []string{"profile", "host", "api_key", "api_secret", "skip_tls_verify", "ca_cert_path"} {
 		props["opnsense_"+k] = propSchema{Type: propTypeFor(k), Description: "OPNsense " + k + " (OPNSENSE_* env fallback)"}
-	}
-	return inputSchema{
-		Type:       "object",
-		Properties: props,
-		Required:   []string{"external_port", "target"},
 	}
 }
 

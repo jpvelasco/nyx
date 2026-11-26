@@ -10,6 +10,7 @@ import (
 
 // OpnsenseVLANRequest is a plan/apply VLAN or bridge-member mutation.
 type OpnsenseVLANRequest struct {
+	CreateOnly  bool   // Preserve an existing resource if a composed create plan becomes an update.
 	Kind        string // vlan (default) | bridge | assignment
 	Address     string // static interface address/prefix for assignment
 	Parent      string
@@ -158,6 +159,9 @@ func (s *OpnsenseService) ApplyVLAN(ctx context.Context, opts OpnsenseOptions, r
 		return nil, err
 	}
 	res := plan.result(dryRun)
+	if err := preserveExisting(req.CreateOnly, plan.Action); err != nil {
+		return nil, err
+	}
 	if dryRun || plan.Action == "unchanged" {
 		return res, nil
 	}

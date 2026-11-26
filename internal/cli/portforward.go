@@ -8,6 +8,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var (
@@ -146,6 +147,10 @@ func init() {
 	f.StringVar(&pfLabel, "label", "", "Rule name")
 	f.BoolVar(&pfApply, "apply", false, "Apply through the selected backend (dry-run by default)")
 	f.BoolVar(&pfDryRun, "dry-run", true, "Preview only (with --apply)")
+	bindPlaybookFlags(f)
+}
+
+func bindPlaybookFlags(f *pflag.FlagSet) {
 	f.StringVar(&pfOmadaProfile, "omada-profile", "", "Named Omada credential profile")
 	f.StringVar(&pfOpnsenseProfile, "opnsense-profile", "", "Named OPNsense credential profile")
 	f.StringVar(&pfOmadaHost, "omada-host", "", "Omada controller IP or hostname (omit to skip Omada)")

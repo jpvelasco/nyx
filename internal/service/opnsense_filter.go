@@ -105,6 +105,7 @@ func (s *OpnsenseService) ListAliases(ctx context.Context, opts OpnsenseOptions)
 
 // OpnsenseFilterRequest is a plan/apply filter-rule or alias mutation.
 type OpnsenseFilterRequest struct {
+	CreateOnly      bool   // Preserve an existing resource if a composed create plan becomes an update.
 	Kind            string // filter (default) | alias
 	UUID            string
 	Name            string
@@ -257,6 +258,9 @@ func (s *OpnsenseService) ApplyFilter(ctx context.Context, opts OpnsenseOptions,
 		return nil, err
 	}
 	res := &OpnsenseFilterApplyResult{Outcome: plan.Action, Kind: plan.Kind, UUID: plan.UUID, DryRun: dryRun}
+	if err := preserveExisting(req.CreateOnly, plan.Action); err != nil {
+		return nil, err
+	}
 	if dryRun || plan.Action == "unchanged" {
 		return res, nil
 	}

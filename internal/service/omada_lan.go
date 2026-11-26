@@ -185,6 +185,7 @@ func (s *OmadaService) GetClientTopology(ctx context.Context, opts OmadaOptions,
 
 // OmadaLANRequest is a plan/apply LAN mutation.
 type OmadaLANRequest struct {
+	CreateOnly    bool // Preserve an existing resource if a composed create plan becomes an update.
 	Name          string
 	VLAN          int
 	GatewaySubnet string
@@ -254,6 +255,18 @@ func (s *OmadaService) PlanLAN(ctx context.Context, opts OmadaOptions, req Omada
 	if err != nil {
 		return nil, err
 	}
+	if req.CreateOnly {
+		matches := 0
+		for _, row := range nets {
+			if row.VLANID != req.VLAN && !strings.EqualFold(row.Name, req.Name) {
+				continue
+			}
+			matches++
+			if matches > 1 || !strings.EqualFold(row.Name, req.Name) || row.VLANID != req.VLAN || !strings.EqualFold(row.Purpose, "vlan") || !row.DHCPKnown || row.DHCPEnabled || row.GatewaySubnet != "" || row.Primary {
+				return nil, fmt.Errorf("VLAN tag or role is already owned by another network")
+			}
+		}
+	}
 	cur, ok := omadabackend.FindNetwork(nets, req.Name)
 	plan := &OmadaLANPlan{Network: req.Name}
 	if req.Delete {
@@ -287,6 +300,9 @@ func (s *OmadaService) ApplyLAN(ctx context.Context, opts OmadaOptions, req Omad
 		return nil, err
 	}
 	res := &OmadaLANApplyResult{Outcome: plan.Action, ID: plan.ID, DryRun: dryRun}
+	if err := preserveExisting(req.CreateOnly, plan.Action); err != nil {
+		return nil, err
+	}
 	if dryRun || plan.Action == "unchanged" {
 		return res, nil
 	}

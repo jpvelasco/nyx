@@ -72,6 +72,8 @@ var toolHandlers = map[string]toolHandler{
 	"omada_apply_ssid":                 (*Server).toolOmadaApplySSID,
 	"omada_plan_nat":                   (*Server).toolOmadaPlanNat,
 	"omada_apply_nat":                  (*Server).toolOmadaApplyNat,
+	"plan_segment":                     (*Server).toolPlanSegment,
+	"apply_segment":                    (*Server).toolApplySegment,
 	"plan_port_forward":                (*Server).toolPlanPortForward,
 	"apply_port_forward":               (*Server).toolApplyPortForward,
 	"opnsense_list_interfaces":         (*Server).toolOpnsenseListInterfaces,
@@ -1524,7 +1526,7 @@ func (s *Server) playbookOptionsFromArgs(args map[string]interface{}) (service.P
 		return opts, msg
 	}
 	if opts.Omada == nil && opts.Opnsense == nil {
-		return opts, "the port-forward playbook requires a host for at least one provider: set omada_host or opnsense_host (or the OMADA_HOST / OPNSENSE_HOST environment variables or the credential store)"
+		return opts, "the playbook requires a host for at least one provider: set omada_host or opnsense_host (or the OMADA_HOST / OPNSENSE_HOST environment variables or the credential store)"
 	}
 	return opts, ""
 }
