@@ -16,11 +16,22 @@ func wireGuardPeerBinding(apply bool) operationBinding {
 		p["name"] = propSchema{Type: "string", Description: "Peer name for a create preview"}
 		p["allowed_networks"] = propSchema{Type: "string", Description: "Comma-separated desired canonical network prefixes"}
 	}
-	return operationBinding{tool: tool{Name: name, Description: desc, InputSchema: opnsenseToolSchemaExtra(p, []string{"action"})}, call: func(s *Server, ctx context.Context, args map[string]interface{}) toolDispatchResult {
-		opts, msg := s.opnsenseOptionsFromArgs(args, true)
-		if msg != "" {
-			return errResult(msg)
+	p["profile"] = propSchema{Type: "string", Description: "Configured OPNsense connection profile (default: default)"}
+	return operationBinding{tool: tool{Name: name, Description: desc, InputSchema: inputSchema{Type: "object", Properties: p, Required: []string{"action"}}}, call: func(s *Server, ctx context.Context, args map[string]interface{}) toolDispatchResult {
+		for k, v := range args {
+			field, exists := p[k]
+			if !exists {
+				return errResult("unsupported peer operation argument")
+			}
+			if _, ok := v.(string); field.Type == "string" && !ok {
+				return errResult(k + " must be a string")
+			}
 		}
+		opts, msg := s.opnsenseOptionsFromArgs(map[string]interface{}{"profile": argString(args, "profile")}, true)
+		if msg != "" {
+			return errResult("configure the selected OPNsense profile")
+		}
+		opts.CACertPath = s.env("NYX_WIREGUARD_CA")
 		req := service.WireGuardPeerRequest{Action: argString(args, "action"), UUID: argString(args, "uuid"), Name: argString(args, "name"), AllowedNetworks: splitCSV(argString(args, "allowed_networks"))}
 		if raw, ok := args["enabled"]; ok {
 			v, ok := raw.(bool)

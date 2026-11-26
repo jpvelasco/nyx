@@ -5,16 +5,15 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
-	"github.com/jpvelasco/nyx/internal/mcp"
-	"github.com/jpvelasco/nyx/internal/service"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
-
-	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/jpvelasco/nyx/internal/mcp"
+	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
@@ -98,5 +97,4 @@ func TestApprovedPeerBothTransports(t *testing.T) {
 	if failed || !strings.Contains(out, "planned") || strings.Contains(out, key) {
 		t.Fatal(out)
 	}
-
 }

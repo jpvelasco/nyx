@@ -86,3 +86,39 @@ func TestSelectedPeerPublicTransport(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectedPeerInventoryRequiresCompleteRows(t *testing.T) {
+	const id = "00000000-0000-4000-8000-a00000000001"
+	row := `{"uuid":"` + id + `","enabled":"0"}`
+	reply := ""
+	status := http.StatusOK
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(reply))
+	})
+	for _, body := range []string{`{}`, `{"rows":null}`, `{"rows":[],"total":1}`, `{"rows":[null],"total":1}`, `{"rows":[{"uuid":"invalid","enabled":true}],"total":1}`, `{"rows":[{"uuid":"` + id + `"}],"total":1}`, `{"rows":[` + row + `,` + row + `],"total":2}`} {
+		reply = body
+		if _, err := c.WireGuardPeersForChange(t.Context()); err == nil {
+			t.Fatal("accepted incomplete or ambiguous inventory")
+		}
+	}
+	for _, body := range []string{`{"rows":[],"total":0}`, `{"rows":[` + row + `],"total":1}`} {
+		reply = body
+		if _, err := c.WireGuardPeersForChange(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	status = http.StatusForbidden
+	if _, err := c.SelectedPeer(t.Context(), id); err == nil {
+		t.Fatal("accepted unauthorized read")
+	}
+	if _, err := c.SaveSelectedPeer(t.Context(), id, SelectedPeer{}); err == nil {
+		t.Fatal("accepted unauthorized save")
+	}
+	if err := c.RevokeWireGuardPeer(t.Context(), id, true); err == nil {
+		t.Fatal("accepted unauthorized revocation")
+	}
+	if _, err := c.WireGuardPeersForChange(t.Context()); err == nil {
+		t.Fatal("accepted unauthorized listing")
+	}
+}

@@ -3,7 +3,6 @@ package mcp
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -16,7 +15,7 @@ func TestPeerPreviewAndRevocation(t *testing.T) {
 	const other = "00000000-0000-4000-8000-a00000000002"
 	enabled, exists, deny, reloadFail := true, true, false, false
 	disables, deletes, reloads := 0, 0, 0
-	firewall := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	firewall, ca := testutil.CASignedServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if deny {
 			w.WriteHeader(http.StatusForbidden)
 			testutil.WriteBody(w, "restricted device error")
@@ -57,8 +56,11 @@ func TestPeerPreviewAndRevocation(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer firewall.Close()
-	args := map[string]interface{}{"host": strings.TrimPrefix(firewall.URL, "https://"), "api_key": "test", "api_secret": "fixture-secret", "skip_tls_verify": true}
+	t.Setenv("OPNSENSE_HOST", strings.TrimPrefix(firewall, "https://"))
+	t.Setenv("OPNSENSE_API_KEY", "fixture")
+	t.Setenv("OPNSENSE_API_SECRET", "fixture-secret")
+	t.Setenv("NYX_WIREGUARD_CA", ca)
+	args := map[string]interface{}{}
 	s := NewServerWithLogger(nil)
 	call := func(name string, wantError bool, needle string) {
 		t.Helper()
@@ -69,6 +71,24 @@ func TestPeerPreviewAndRevocation(t *testing.T) {
 	}
 	const plan = "opnsense_plan_wireguard_peer"
 	const revoke = "opnsense_revoke_wireguard_peer"
+	for _, name := range []string{plan, revoke} {
+		for _, field := range []string{"host", "skip_tls_verify", "ca_cert_path", "api_secret"} {
+			args[field] = "other.example"
+			call(name, true, "unsupported")
+			delete(args, field)
+		}
+		args["profile"] = false
+		call(name, true, "must be a string")
+		args["profile"] = "unconfigured"
+		call(name, true, "configure the selected")
+		delete(args, "profile")
+	}
+	args["enabled"] = "no"
+	call(revoke, true, "must be a boolean")
+	delete(args, "enabled")
+	args["dry_run"] = "no"
+	call(revoke, true, "must be a boolean")
+	delete(args, "dry_run")
 	args["action"] = "create"
 	args["name"] = "iot"
 	args["allowed_networks"] = "10.0.11.0/24"

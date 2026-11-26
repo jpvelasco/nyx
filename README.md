@@ -333,6 +333,9 @@ Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `O
 
 ### Approved WireGuard peer changes
 
+The peer preview and revocation MCP tools use a configured OPNsense `profile`.
+For a private CA, set `NYX_WIREGUARD_CA` to its PEM file on the Nyx process.
+
 Set `NYX_WIREGUARD_PEER_APPROVAL` in the Nyx process environment to a private
 operator-managed JSON file for the selected firewall. It contains `profile`,
 `host`, `name`, `public_key` (the peer’s base64 WireGuard public key),
