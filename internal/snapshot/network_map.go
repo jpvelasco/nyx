@@ -68,7 +68,8 @@ func SaveNetworkMapCapture(name string, c NetworkMapCapture, replace bool) error
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	// Owner execute permits directory traversal; capture files are owner-only (0600).
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil { // nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		return errors.New("unable to create the private map snapshot directory")
 	}
 	if replace {
