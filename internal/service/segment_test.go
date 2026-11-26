@@ -184,6 +184,12 @@ func TestSegmentProvisionAndResume(t *testing.T) {
 	if steps[len(steps)-1].Status != "verified" || f.writes != count {
 		t.Fatal("resume repeated a write or left measurements unverified")
 	}
+	f.rules = append(f.rules, map[string]string{"uuid": "negated", "action": "pass", "interface": "lan", "interfacenot": "1", "enabled": "1"})
+	steps = call(false)
+	if steps[0].Status != "review" || f.writes != count {
+		t.Fatal("negated interface allowed a broad pass")
+	}
+	f.rules = f.rules[:2]
 	f.rules = append(f.rules, map[string]string{"uuid": "floating", "action": "pass", "source_net": "any", "destination_net": "any", "enabled": "1"})
 	steps = call(false)
 	if steps[0].Status != "review" || f.writes != count {
@@ -266,6 +272,18 @@ func TestSegmentConstraints(t *testing.T) {
 		t.Fatal("accepted implicit site")
 	}
 }
+func TestSegmentApplyCancellationWhileBusy(t *testing.T) {
+	f, opts := newSegmentFixture(t)
+	segmentWrite <- struct{}{}
+	defer func() { <-segmentWrite }()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	svc := SegmentService{}
+	if _, err := svc.Reconcile(ctx, opts, f.req, false); !errors.Is(err, context.Canceled) || f.writes != 0 {
+		t.Fatalf("busy apply %v", err)
+	}
+}
+
 func TestSegmentUncertainWrites(t *testing.T) {
 	for _, mode := range []string{"write error", "readback error", "mismatch"} {
 		calls, writes := 0, 0

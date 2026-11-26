@@ -98,7 +98,7 @@ func (e *segmentProviders) checkRules(rows []OpnsenseInterface) error {
 		}
 		relevant := len(rule.Interface) == 0
 		for _, name := range rule.Interface {
-			if name == e.iface || !known[name] {
+			if name == e.iface || !known[name] || rule.ExtraConditions {
 				relevant = true
 			}
 		}

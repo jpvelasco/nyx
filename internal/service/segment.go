@@ -145,6 +145,10 @@ func preserveExisting(createOnly bool, action string) error {
 	return nil
 }
 
+// Segment writes share activation queues on the appliance. Serialize composed
+// applies within this process, including between concurrent MCP sessions.
+var segmentWrite = make(chan struct{}, 1)
+
 type segmentAudit func(context.Context, *intent.Spec) (*models.AuditReport, error)
 
 type SegmentService struct {
@@ -160,6 +164,14 @@ func (s SegmentService) Reconcile(ctx context.Context, opts PlaybookOptions, r S
 	}
 	if opts.Omada == nil || opts.Opnsense == nil || opts.Omada.Site == "" {
 		return nil, errors.New("segment planning requires an explicitly selected Omada site and OPNsense firewall")
+	}
+	if !dry {
+		select {
+		case segmentWrite <- struct{}{}:
+			defer func() { <-segmentWrite }()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	topo, err := s.Topology.Report(ctx, TopologyOptions{Omada: opts.Omada, Opnsense: opts.Opnsense})
 	if err != nil {

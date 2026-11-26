@@ -120,7 +120,11 @@ func (s *OpnsenseService) PlanVLAN(ctx context.Context, opts OpnsenseOptions, re
 	if !identifiedByUUID && (req.Parent == "" || req.Tag <= 0) {
 		return nil, fmt.Errorf("parent and tag are required (or uuid for delete)")
 	}
-	vlans, err := client.GetVLANs(ctx)
+	read := client.GetVLANs
+	if req.CreateOnly {
+		read = client.AssignmentVLANs
+	}
+	vlans, err := read(ctx)
 	if err != nil {
 		return nil, err
 	}
