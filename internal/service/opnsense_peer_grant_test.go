@@ -108,3 +108,29 @@ func TestApprovedPeerFileBoundary(t *testing.T) {
 		t.Fatal("accepted nonexisting local approval")
 	}
 }
+
+func TestPeerPlanValidationAndOverlaps(t *testing.T) {
+	const id = "00000000-0000-4000-8000-a00000000001"
+	const other = "00000000-0000-4000-8000-a00000000002"
+	yes, no := true, false
+	f := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"rows":[{"uuid":"` + id + `","name":"trusted","enabled":"1","tunneladdress":"10.0.10.0/24"},{"uuid":"` + other + `","name":"management","enabled":"0","tunneladdress":"10.0.11.0/24"}],"total":2}`))
+	}))
+	defer f.Close()
+	svc := NewOpnsenseService()
+	opts := OpnsenseOptions{Host: strings.TrimPrefix(f.URL, "https://"), SkipTLSVerify: true}
+	for _, r := range []WireGuardPeerRequest{{Action: "missing"}, {Action: "create"}, {Action: "update", UUID: "invalid"}, {Action: "update", UUID: id}, {Action: "toggle", UUID: id}, {Action: "remove", UUID: id, Name: "other"}, {Action: "create", Name: "other", AllowedNetworks: []string{"invalid"}}, {Action: "update", UUID: id, AllowedNetworks: []string{"10.0.10.0/24"}, Enabled: &no}, {Action: "create", Name: "trusted", AllowedNetworks: []string{"10.0.10.0/24"}}} {
+		if _, err := svc.PlanWireGuardPeer(t.Context(), opts, r); err == nil {
+			t.Fatalf("accepted invalid %s", r.Action)
+		}
+	}
+	for _, tc := range []struct {
+		req WireGuardPeerRequest
+		out string
+	}{{WireGuardPeerRequest{Action: "update", UUID: id, AllowedNetworks: []string{"10.0.10.0/24,10.0.10.0/24"}}, "unchanged"}, {WireGuardPeerRequest{Action: "update", UUID: id, AllowedNetworks: []string{"10.0.11.0/24"}}, "overlap"}, {WireGuardPeerRequest{Action: "toggle", UUID: id, Enabled: &yes}, "unchanged"}, {WireGuardPeerRequest{Action: "remove", UUID: "00000000-0000-4000-8000-a00000000003"}, "absent"}} {
+		p, err := svc.PlanWireGuardPeer(t.Context(), opts, tc.req)
+		if err != nil || p.Outcome != tc.out {
+			t.Fatal(p, err)
+		}
+	}
+}
