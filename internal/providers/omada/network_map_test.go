@@ -31,7 +31,7 @@ func TestObserveNetworkPartialCollections(t *testing.T) {
 		case "switches/02-aa-bb-cc-dd-02/lldp-neighbors":
 			rows = `[{"portId":8,"deviceId":"` + ap + `"}]`
 		case "devices/uplink-info":
-			rows = `[{"mac":"` + ap + `","uplinkDeviceMac":"` + sw + `","uplinkDevicePort":"8"}]`
+			rows = `[{"mac":"` + ap + `","uplinkDeviceMac":"` + sw + `","uplinkDevicePort":"8"},{"mac":"","uplinkDevicePort":"?"}]`
 		case "lan-networks":
 			rows = `[{"id":"management","vlan":11,"deviceMac":"02:aa:bb:cc:dd:01"},{"id":"gaming","vlan":30,"gatewaySubnet":"10.0.30.1/24"}]`
 		case "lan-profiles":
@@ -48,6 +48,9 @@ func TestObserveNetworkPartialCollections(t *testing.T) {
 		writeEnvelope(w, 0, "", rows)
 	})
 	p := &OmadaProvider{}
+	if _, err := p.ObserveNetwork(t.Context(), providers.ImportOptions{Host: ts.URL, ClientID: "client", ClientSecret: "secret", SkipTLSVerify: true, Site: "missing"}); err == nil {
+		t.Fatal("selected absent site reported inventory")
+	}
 	opts := providers.ImportOptions{Host: ts.URL, ClientID: "client", ClientSecret: "secret", SkipTLSVerify: true}
 	for _, fail := range []string{"", "ssids", "networks/devices", "lan-profiles"} {
 		failed = fail
