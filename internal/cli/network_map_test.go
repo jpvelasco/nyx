@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -120,14 +121,15 @@ func TestNetworkMapCLIAndMCP(t *testing.T) {
 	configureMapFixtures(t)
 	oldOutput := outputPath
 	t.Cleanup(func() { outputPath = oldOutput })
-	outputPath = filepath.Join(t.TempDir(), "map.json")
+	fixtureDir := t.TempDir()
+	outputPath = filepath.Join(fixtureDir, "map.json")
 	cmd := newNetworkMapCmd()
 	cmd.SetContext(t.Context())
 	cmd.SetArgs([]string{"--skip-tls-verify"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(outputPath)
+	b, err := fs.ReadFile(os.DirFS(fixtureDir), "map.json")
 	if err != nil {
 		t.Fatal(err)
 	}
