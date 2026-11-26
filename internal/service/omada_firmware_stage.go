@@ -65,7 +65,7 @@ func (s *OmadaService) StageFirmware(ctx context.Context, opts OmadaOptions, dir
 }
 
 func saveFirmware(dir string, manifest stagedFirmware, data []byte) (string, error) {
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil { // nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission — owner traversal is required for this private directory
 		return "", errors.New("cannot create private firmware staging directory")
 	}
 	tmp, err := os.CreateTemp(dir, ".staging-")
@@ -97,8 +97,8 @@ func loadFirmware(dir, ref string) (stagedFirmware, []byte, error) {
 	if !firmwareReference.MatchString(ref) {
 		return m, nil, errors.New("invalid firmware reference")
 	}
-	// #nosec G304 -- dir is set by the operator and ref is a fixed-format opaque identifier.
-	f, err := os.Open(filepath.Join(dir, ref))
+	// Resolve the opaque reference beneath the operator’s private staging directory.
+	f, err := os.OpenInRoot(dir, ref)
 	if err != nil {
 		return m, nil, errors.New("staged firmware unavailable")
 	}

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"path/filepath"
+
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -67,13 +67,17 @@ func TestStagedFirmwareBindingAndReboot(t *testing.T) {
 	if err != nil || out.Status != "verified" || out.Observed != "fixture-next" || uploaded.Load() != 1 {
 		t.Fatalf("readback %+v, %v", out, err)
 	}
-	file := filepath.Join(dir, id)
-	b, err := os.ReadFile(file)
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	b, err := root.ReadFile(id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	b[len(b)-1] ^= 1
-	if err := os.WriteFile(file, b, 0600); err != nil {
+	if err := root.WriteFile(id, b, 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.UpgradeStagedFirmware(t.Context(), opts, dir, id, true); err == nil {
