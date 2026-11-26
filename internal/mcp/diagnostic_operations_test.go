@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -23,6 +22,16 @@ func TestDiagnosticToolDiscoveryAndBounds(t *testing.T) {
 		}
 		if _, failed := s.dispatchTool(t.Context(), name, nil); !failed {
 			t.Errorf("accepted missing connection for %s", name)
+		}
+		for _, key := range []string{"host", "site", "api_key", "ca_cert_path", "skip_tls_verify"} {
+			if got, failed := s.dispatchTool(t.Context(), name, map[string]any{key: "other.example"}); !failed || !strings.Contains(got, "unsupported diagnostic argument") {
+				t.Fatal("accepted connection override", name, key)
+			}
+		}
+	}
+	for _, bad := range []map[string]any{{"profile": 2}, {"include_private_details": "false"}} {
+		if _, failed := s.dispatchTool(t.Context(), "omada_ap_channel_info", bad); !failed {
+			t.Fatal("accepted invalid diagnostic argument")
 		}
 	}
 	for _, value := range []any{float64(-1), float64(201), 0.5, "50"} {
@@ -44,7 +53,7 @@ func TestDiagnosticStatePrivacyAndFailures(t *testing.T) {
 	hermeticCreds(t)
 	status := http.StatusOK
 	calls := 0
-	firewall := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	firewall, ca := testutil.CASignedServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if r.URL.Path != "/api/diagnostics/firewall/query_states" || r.Method != http.MethodPost {
 			t.Errorf("unexpected state request")
@@ -65,8 +74,8 @@ func TestDiagnosticStatePrivacyAndFailures(t *testing.T) {
 		}
 		testutil.WriteBody(w, `{"total":1,"current":1,"rowCount":1,"rows":[{"source":"host.example"}]}`)
 	}))
-	defer firewall.Close()
-	args := map[string]any{"host": strings.TrimPrefix(firewall.URL, "https://"), "api_key": "key", "api_secret": "fixture-secret", "skip_tls_verify": true, "page_size": float64(2), "sort": "age:desc"}
+	configureDiagnosticFirewall(t, firewall, ca)
+	args := map[string]any{"page_size": float64(2), "sort": "age:desc"}
 	s := NewServerWithLogger(nil)
 	if _, failed := s.dispatchTool(t.Context(), "opnsense_query_states", args); !failed || calls != 0 {
 		t.Fatal("unscoped query accepted")
@@ -91,7 +100,7 @@ func TestOmadaDiagnosticPrivacyAndEmpty(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 	t.Setenv("USERPROFILE", dir)
-	controller := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	controller, ca := testutil.CASignedServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body string
 		switch r.URL.Path {
 		case "/api/info":
@@ -99,7 +108,7 @@ func TestOmadaDiagnosticPrivacyAndEmpty(t *testing.T) {
 		case "/openapi/authorize/token":
 			body = `{"accessToken":"fixture-token"}`
 		case "/openapi/v1/fixture/sites":
-			body = `[{"id":"site","name":"test"}]`
+			body = `[{"id":"site","name":"management"}]`
 		case "/openapi/v1/fixture/sites/site/networks/devices":
 			body = `[{"name":"access-point.example","type":"AP","mac":"02-00-00-00-00-01"}]`
 		case "/openapi/v1/fixture/sites/site/aps/02-00-00-00-00-01/radios":
@@ -121,8 +130,8 @@ func TestOmadaDiagnosticPrivacyAndEmpty(t *testing.T) {
 		}
 		testutil.WriteBody(w, `{"errorCode":0,"result":`+body+`}`)
 	}))
-	defer controller.Close()
-	args := map[string]any{"host": strings.TrimPrefix(controller.URL, "https://"), "client_id": "client", "client_secret": "fixture-secret", "skip_tls_verify": true}
+	configureDiagnosticController(t, controller, ca)
+	args := map[string]any{}
 	s := NewServerWithLogger(nil)
 	for _, details := range []bool{false, true} {
 		args["include_private_details"] = details
@@ -131,6 +140,7 @@ func TestOmadaDiagnosticPrivacyAndEmpty(t *testing.T) {
 			t.Fatal(got)
 		}
 	}
+	delete(args, "include_private_details")
 	got, failed := s.dispatchTool(t.Context(), "omada_wlan_optimization", args)
 	if failed || !strings.Contains(got, `"total": 0`) {
 		t.Fatal(got)
@@ -140,6 +150,7 @@ func TestOmadaDiagnosticPrivacyAndEmpty(t *testing.T) {
 	if failed || !strings.Contains(got, "success_devices") {
 		t.Fatal(got)
 	}
+	delete(args, "history_id")
 	got, failed = s.dispatchTool(t.Context(), "omada_controller_firmware", args)
 	if failed || !strings.Contains(got, "up_to_date") {
 		t.Fatal(got)
@@ -155,12 +166,28 @@ func TestOmadaDiagnosticPrivacyAndEmpty(t *testing.T) {
 	if failed || !strings.Contains(got, `"total": 0`) {
 		t.Fatal(got)
 	}
+}
 
+func configureDiagnosticController(t *testing.T, host, ca string) {
+	t.Helper()
+	t.Setenv("OMADA_HOST", host)
+	t.Setenv("OMADA_CLIENT_ID", "fixture")
+	t.Setenv("OMADA_CLIENT_SECRET", "fixture")
+	t.Setenv("OMADA_SITE", "management")
+	t.Setenv("NYX_OMADA_CA_CERT", ca)
+}
+
+func configureDiagnosticFirewall(t *testing.T, host, ca string) {
+	t.Helper()
+	t.Setenv("OPNSENSE_HOST", strings.TrimPrefix(host, "https://"))
+	t.Setenv("OPNSENSE_API_KEY", "fixture")
+	t.Setenv("OPNSENSE_API_SECRET", "fixture")
+	t.Setenv("NYX_OPNSENSE_CA_CERT", ca)
 }
 
 func TestDiagnosticReadErrorsDoNotExposeVendorPayload(t *testing.T) {
 	hermeticCreds(t)
-	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	host, ca := testutil.CASignedServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/info":
 			testutil.WriteBody(w, `{"errorCode":0,"result":{"controllerVer":"6.3.0","omadacId":"fixture"}}`)
@@ -172,9 +199,10 @@ func TestDiagnosticReadErrorsDoNotExposeVendorPayload(t *testing.T) {
 			http.Error(w, "private.example", http.StatusForbidden)
 		}
 	}))
-	defer ts.Close()
+	configureDiagnosticController(t, host, ca)
+	configureDiagnosticFirewall(t, host, ca)
 	s := NewServerWithLogger(nil)
-	a := map[string]any{"host": ts.URL, "client_id": "fixture", "client_secret": "fixture", "skip_tls_verify": true}
+	a := map[string]any{}
 	for _, n := range []string{"omada_wlan_optimization", "omada_site_config_drift", "omada_ap_channel_info"} {
 		got, failed := s.dispatchTool(t.Context(), n, a)
 		if !failed || strings.Contains(got, "private.example") {
@@ -189,7 +217,7 @@ func TestDiagnosticReadErrorsDoNotExposeVendorPayload(t *testing.T) {
 		key   string
 		value any
 	}{{"page", float64(0)}, {"page_size", float64(201)}, {"sort", "invalid"}} {
-		a = map[string]any{"host": ts.URL, "api_key": "fixture", "api_secret": "fixture", "search": "selected", tc.key: tc.value}
+		a = map[string]any{"search": "selected", tc.key: tc.value}
 		if _, failed := s.dispatchTool(t.Context(), "opnsense_query_states", a); !failed {
 			t.Fatal("accepted invalid state query", tc.key)
 		}
