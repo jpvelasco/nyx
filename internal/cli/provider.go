@@ -5,21 +5,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
-	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
 	"github.com/jpvelasco/nyx/internal/intent"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/report"
+	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/storepath"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
 var (
+	providerProfile      string
 	providerHost         string
 	providerClientID     string
 	providerClientSecret string
@@ -39,10 +40,7 @@ var providerListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all registered providers and their capabilities",
 	RunE: func(_ *cobra.Command, _ []string) error {
-		list := providers.List()
-		sort.Slice(list, func(i, j int) bool {
-			return list[i].Name() < list[j].Name()
-		})
+		list := providers.Adapters()
 		if jsonOutput {
 			type entry struct {
 				Name         string   `json:"name"`
@@ -78,28 +76,23 @@ var providerListCmd = &cobra.Command{
 // BuildProviderSubcommands creates `nyx <vendor> import/check/info` subcommands
 // for each registered provider and adds them to root.
 func BuildProviderSubcommands(root *cobra.Command) {
-	for _, p := range providers.List() {
-		p := p
+	for _, p := range providers.Adapters() {
 		vendorCmd := &cobra.Command{
 			Use:   p.Name(),
 			Short: fmt.Sprintf("%s provider commands", p.Name()),
 		}
 
-		caps := map[string]bool{}
-		for _, c := range p.Capabilities() {
-			caps[c] = true
+		if op, ok := service.ControllerInfo(p); ok {
+			vendorCmd.AddCommand(infoCommand(op))
 		}
-
-		if caps["info"] {
-			vendorCmd.AddCommand(buildInfoCmd(p))
+		legacy, _ := p.(providers.Provider)
+		if slices.Contains(p.Capabilities(), "import") {
+			vendorCmd.AddCommand(buildImportCmd(legacy))
 		}
-		if caps["import"] {
-			vendorCmd.AddCommand(buildImportCmd(p))
+		if slices.Contains(p.Capabilities(), "check") {
+			vendorCmd.AddCommand(buildCheckCmd(legacy))
 		}
-		if caps["check"] {
-			vendorCmd.AddCommand(buildCheckCmd(p))
-		}
-		if caps["inventory"] {
+		if slices.Contains(p.Capabilities(), "inventory") {
 			vendorCmd.AddCommand(buildInventoryCmd(p))
 		}
 
@@ -121,18 +114,18 @@ func BuildProviderSubcommands(root *cobra.Command) {
 	}
 }
 
-func buildInfoCmd(p providers.Provider) *cobra.Command {
+func infoCommand(op service.InfoOperation) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "info",
-		Short: fmt.Sprintf("Show %s controller version and connection info", p.Name()),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			opts := providerImportOptions(p.Name())
-			if err := requireProviderHost(opts, p.Name()); err != nil {
+		Use:   op.CLIName,
+		Short: fmt.Sprintf("Show %s controller version and connection info", op.Provider),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			opts := resolveProviderOptions(cmd, op.Provider, op.Authenticated)
+			if err := validateProviderOptions(opts, op.Provider, op.Authenticated); err != nil {
 				return err
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			info, err := p.Info(ctx, opts)
+			info, err := op.Read(ctx, opts)
 			if err != nil {
 				return err
 			}
@@ -150,7 +143,7 @@ func buildInfoCmd(p providers.Provider) *cobra.Command {
 			return nil
 		},
 	}
-	addProviderFlags(cmd, p.Name())
+	addProviderFlags(cmd, op.Provider)
 	return cmd
 }
 
@@ -158,7 +151,7 @@ func buildImportCmd(p providers.Provider) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "import",
 		Short: fmt.Sprintf("Import network topology from %s and generate a spec", p.Name()),
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			dur, err := parseTimeoutFlag(timeout)
 			if err != nil {
 				return err
@@ -169,14 +162,14 @@ func buildImportCmd(p providers.Provider) *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), dur)
 			defer cancel()
 
-			opts := providerImportOptions(p.Name())
+			opts := providerCommandOptions(cmd, p.Name())
 			opts.Debug = providerDebug
-			if err := requireProviderHost(opts, p.Name()); err != nil {
+			if err := requireProviderConnection(opts, p.Name()); err != nil {
 				return err
 			}
 			result, err := p.ImportSpec(ctx, opts)
 			if err != nil {
-				return err
+				return opts.Connection.RedactError(err, opts.Credentials)
 			}
 			for _, w := range result.Warnings {
 				fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
@@ -222,14 +215,14 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), dur)
 			defer cancel()
 
-			opts := providerImportOptions(p.Name())
+			opts := providerCommandOptions(cmd, p.Name())
 			opts.Debug = providerDebug
-			if err := requireProviderHost(opts, p.Name()); err != nil {
+			if err := requireProviderConnection(opts, p.Name()); err != nil {
 				return err
 			}
 			result, err := p.Check(ctx, opts)
 			if err != nil {
-				return err
+				return opts.Connection.RedactError(err, opts.Credentials)
 			}
 			for _, w := range result.Warnings {
 				fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
@@ -260,16 +253,16 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 	return cmd
 }
 
-func buildInventoryCmd(p providers.Provider) *cobra.Command {
+func buildInventoryCmd(p providers.Adapter) *cobra.Command {
 	var includeFirewallDetails bool
 	var inventorySpec string
 	cmd := &cobra.Command{
 		Use:   "inventory",
 		Short: fmt.Sprintf("Show the current %s site inventory (devices, networks, ACL scopes, clients)", p.Name()),
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			var segmentEdges []intent.SegmentEdge
 			if inventorySpec != "" {
-				spec, err := intent.LoadSpec(inventorySpec)
+				spec, err := providers.Specs.LoadSpec(inventorySpec)
 				if err != nil {
 					return err
 				}
@@ -289,15 +282,15 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), dur)
 			defer cancel()
 
-			opts := providerImportOptions(p.Name())
+			opts := providerCommandOptions(cmd, p.Name())
 			opts.Debug = providerDebug
 			opts.IncludeFirewallDetails = includeFirewallDetails
-			if err := requireProviderHost(opts, p.Name()); err != nil {
+			if err := requireProviderConnection(opts, p.Name()); err != nil {
 				return err
 			}
 			res, err := inv.Inventory(ctx, opts)
 			if err != nil {
-				return err
+				return opts.Connection.RedactError(err, opts.Credentials)
 			}
 			for _, w := range res.Warnings {
 				fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
@@ -334,117 +327,92 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 	return cmd
 }
 
-// providerEnvNames lists the per-provider env var names for the credential
-// fields. The opnsense provider carries the API pair under OPNSENSE_API_KEY /
-// OPNSENSE_API_SECRET (matching `nyx topology`) and has no site.
-//
-// #nosec G101 — env var names, not credential values
-const (
-	omadaHostEnv = "OMADA_HOST"
-	// #nosec G101
-	omadaCredEnv = "OMADA_CLIENT_ID / OMADA_CLIENT_SECRET"
-)
-
-var providerEnvNames = map[string][4]string{
-	// host, credential 1, credential 2, site
-	"omada":    {"OMADA_HOST", "OMADA_CLIENT_ID", "OMADA_CLIENT_SECRET", "OMADA_SITE"},
-	"opnsense": {"OPNSENSE_HOST", "OPNSENSE_API_KEY", "OPNSENSE_API_SECRET", ""},
+// The built-in option fields retain the existing flags. New adapters read their
+// own declared fields from the command that was invoked.
+func providerCommandOptions(cmd *cobra.Command, name string) providers.ImportOptions {
+	return resolveProviderOptions(cmd, name, true)
 }
 
-// providerImportOptions builds ImportOptions from flags, then per-provider
-// env vars, then the Windows Credential Manager (omada:
-// nyx-omada-<host>; opnsense: nyx-opnsense-<host>; no-op off Windows),
-// then the encrypted credential store. Flags win over env; env wins
-// over the Credential Manager; the store wins over nothing. Missing
-// host after all four is left empty so the provider surfaces its own
-// connection error.
-func providerImportOptions(providerName string) providers.ImportOptions {
-	names, ok := providerEnvNames[providerName]
-	// Unknown providers keep the historical omada env names.
-	if !ok {
-		names = providerEnvNames["omada"]
-	}
-	opts := providers.ImportOptions{
-		Host:          storepath.FirstNonEmpty(providerHost, os.Getenv(names[0])),
-		ClientID:      storepath.FirstNonEmpty(providerClientID, os.Getenv(names[1])),
-		ClientSecret:  storepath.FirstNonEmpty(providerClientSecret, os.Getenv(names[2])),
-		Site:          storepath.FirstNonEmpty(providerSite, os.Getenv(names[3])),
-		SkipTLSVerify: providerSkipTLS,
-		CACertPath:    providerCACertPath,
-		Logger:        slogLog,
-	}
-	// Windows Credential Manager layer, between env vars and the store
-	// (no-op off Windows — see credmanager). Fill-only: never overwrite
-	// flags/env and never supply the host from WM.
-	switch providerName {
+func resolveProviderOptions(cmd *cobra.Command, name string, authenticated bool) providers.ImportOptions {
+	values := credentials.Entry{"host": providerHost, "site": providerSite}
+	switch name {
 	case "omada":
-		opts.ClientID, opts.ClientSecret = credmanager.OverlayOmada(opts.Host, opts.ClientID, opts.ClientSecret)
+		values["client_id"], values["client_secret"] = providerClientID, providerClientSecret
 	case "opnsense":
-		opts.ClientID, opts.ClientSecret = credmanager.OverlayOpnsense(opts.Host, opts.ClientID, opts.ClientSecret)
-	}
-	// Overlay is fill-only: a partial store entry must never clear values
-	// already resolved from flags or env vars.
-	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
-		fields := credentials.Fields{
-			Host:         opts.Host,
-			ClientID:     opts.ClientID,
-			ClientSecret: opts.ClientSecret,
-			Site:         opts.Site,
-			APIKey:       opts.ClientID,
-			APISecret:    opts.ClientSecret,
-		}
-		credentials.Overlay(storepath.StoreFile(), providerName, "default", &fields)
-		opts.Host = fields.Host
-		opts.Site = fields.Site
-		if providerName == "opnsense" {
-			opts.ClientID = fields.APIKey
-			opts.ClientSecret = fields.APISecret
-		} else {
-			if fields.ClientID != "" {
-				opts.ClientID = fields.ClientID
-			}
-			if fields.ClientSecret != "" {
-				opts.ClientSecret = fields.ClientSecret
+		values["api_key"], values["api_secret"] = providerClientID, providerClientSecret
+	default:
+		if cmd != nil {
+			for _, field := range credentials.FieldsFor(name) {
+				if field.Name != "host" && field.Name != "site" {
+					values[field.Name], _ = cmd.Flags().GetString(strings.ReplaceAll(field.Name, "_", "-"))
+				}
 			}
 		}
 	}
+	c := credentials.Connection{Provider: name, Profile: providerProfile}
+	// CLI info accepts a host from the default store.
+	if !authenticated {
+		c.Profile = c.ProfileName()
+	}
+	opts := providers.ConnectionOptions(c, credentials.Resolve(c, values, os.Getenv, storepath.StoreFile(), authenticated))
+	opts.SkipTLSVerify, opts.CACertPath, opts.Logger = providerSkipTLS, providerCACertPath, slogLog
 	return opts
 }
 
-// requireProviderHost errors when no host was resolved from flags, env, or
-// the store, naming the provider's env vars in the hint.
+func providerImportOptions(name string) providers.ImportOptions {
+	return providerCommandOptions(nil, name)
+}
+
+func requireProviderConnection(opts providers.ImportOptions, name string) error {
+	return validateProviderOptions(opts, name, true)
+}
+
+func validateProviderOptions(opts providers.ImportOptions, name string, authenticated bool) error {
+	if authenticated && (opts.Connection.ProfileName() != "default" || (name != "omada" && name != "opnsense")) {
+		if err := opts.Connection.Require(opts.Credentials); err != nil {
+			return err
+		}
+	}
+	return requireProviderHost(opts, name)
+}
+
 func requireProviderHost(opts providers.ImportOptions, providerName string) error {
 	if opts.Host != "" {
 		return nil
 	}
-	hostEnv, credEnv := omadaHostEnv, omadaCredEnv
-	providerName = strings.ToLower(providerName)
-	if names, ok := providerEnvNames[providerName]; ok && names[0] != "" {
-		hostEnv = names[0]
-		credEnv = names[1] + " / " + names[2]
+	var envs []string
+	for _, f := range credentials.FieldsFor(providerName) {
+		if f.Required && f.Env != "" {
+			envs = append(envs, f.Env)
+		}
 	}
-	return fmt.Errorf("controller host is required: pass --host, set %s, or run `nyx credentials set %s --set host=...` (credentials: %s)",
-		hostEnv, providerName, credEnv)
+	hint := ""
+	if len(envs) > 0 && opts.Connection.ProfileName() == "default" {
+		hint = "set " + strings.Join(envs, " / ") + ", "
+	}
+	return fmt.Errorf("controller host is required: pass --host, %sor run `nyx credentials set %s %s --set host=...`", hint, providerName, opts.Connection.ProfileName())
 }
 
 func addProviderFlags(cmd *cobra.Command, providerName string) {
-	cmd.Flags().StringVar(&providerHost, "host", "", "Controller IP or hostname")
-	idName, secretName, idHelp, secretHelp := providerCredFlagNames(providerName)
-	cmd.Flags().StringVar(&providerClientID, idName, "", idHelp)
-	cmd.Flags().StringVar(&providerClientSecret, secretName, "", secretHelp)
-	cmd.Flags().BoolVar(&providerSkipTLS, "skip-tls-verify", false, "Skip TLS certificate verification (like curl -k)")
-	cmd.Flags().StringVar(&providerCACertPath, "ca-cert", "", "Path to custom CA certificate PEM file")
-}
-
-// providerCredFlagNames returns the CLI flag names and help text for the
-// credential pair. Both providers still bind onto providerClientID /
-// providerClientSecret; only the user-facing names differ. Unknown
-// providers keep the historical Omada flags.
-func providerCredFlagNames(providerName string) (idName, secretName, idHelp, secretHelp string) {
-	if strings.EqualFold(providerName, "opnsense") {
-		return "api-key", "api-secret", "OPNsense API key", "OPNsense API secret"
+	flags := cmd.Flags()
+	flags.StringVar(&providerHost, "host", "", "Controller IP or hostname")
+	flags.StringVar(&providerProfile, "profile", "", "Named credential profile (defaults to default)")
+	for _, f := range credentials.FieldsFor(providerName) {
+		var dest *string
+		switch {
+		case f.Name == "host" || f.Name == "site":
+			continue
+		case providerName == "omada" && f.Name == "client_id", providerName == "opnsense" && f.Name == "api_key":
+			dest = &providerClientID
+		case providerName == "omada" && f.Name == "client_secret", providerName == "opnsense" && f.Name == "api_secret":
+			dest = &providerClientSecret
+		default:
+			dest = new(string)
+		}
+		flags.StringVar(dest, strings.ReplaceAll(f.Name, "_", "-"), "", f.Description)
 	}
-	return "client-id", "client-secret", "Omada Open API client ID", "Omada Open API client secret"
+	flags.BoolVar(&providerSkipTLS, "skip-tls-verify", false, "Skip TLS certificate verification (like curl -k)")
+	flags.StringVar(&providerCACertPath, "ca-cert", "", "Path to custom CA certificate PEM file")
 }
 
 func marshalSpecYAML(result *providers.ImportResult, providerName string) ([]byte, error) {
@@ -458,5 +426,5 @@ func marshalSpecYAML(result *providers.ImportResult, providerName string) ([]byt
 }
 
 func init() {
-	providerCmd.AddCommand(providerListCmd)
+	providerCmd.AddCommand(providerListCmd, providerCapabilitiesCmd())
 }

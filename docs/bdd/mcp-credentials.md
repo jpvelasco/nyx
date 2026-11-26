@@ -29,7 +29,25 @@ marked **Implemented** are mirrored 1:1 by tests in `internal/mcp` and
 - Nothing in this change writes credentials into tool output, logs, or
   evidence.
 
-### Resolution order (all providers)
+### Selecting a connection
+
+Vendor commands accept `--profile` and MCP vendor tools accept `profile`.
+Use `omada_profile` and `opnsense_profile` on multi-provider MCP tools, or
+`--omada-profile` and `--opnsense-profile` on `topology` and `port-forward`.
+For `nyx audit`, `--provider-profile omada=trusted,opnsense=management`
+selects each adapter independently. Store a named record with
+`nyx credentials set omada trusted` and enter the credentials at the prompt.
+The record can also carry `site` for an adapter's own selected site and
+`logical_site` for an operator-defined grouping across adapters.
+
+A named profile uses explicit inputs and only the selected encrypted entry.
+If a caller overrides its host or site, they must supply credentials for that
+target. An incomplete named entry reports the missing field names. The
+unqualified default continues to use the resolution order below and accepts
+store entries created by older releases. Authentication-free Omada info reads
+only host/site metadata and can read the host of an explicitly selected profile.
+
+### Resolution order (default connection)
 
 | Field | 1. explicit arg | 2. env var | 3. Credential Manager (Windows only) | 4. store entry `<provider>/default` |
 | --- | --- | --- | --- | --- |
@@ -43,7 +61,7 @@ marked **Implemented** are mirrored 1:1 by tests in `internal/mcp` and
 
 An explicitly supplied value at any level always wins over every lower level.
 Store read failures are silently ignored (the same posture as
-`credentials.Overlay`), falling through to the missing-credentials error.
+`credentials.Resolve`), falling through to the missing-credentials error.
 Credential Manager reads follow the same posture: missing entries (and
 non-Windows platforms, which report
 "windows credential manager is not supported on this platform") fall through

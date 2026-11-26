@@ -169,12 +169,16 @@ type Assertion struct {
 
 // LoadSpec reads and parses a YAML spec file
 func LoadSpec(path string) (*Spec, error) {
+	return ProviderLookup(BuiltinProviderRole).LoadSpec(path)
+}
+
+func (supports ProviderLookup) LoadSpec(path string) (*Spec, error) {
 	// #nosec G304 — path from CLI flag, not user-controlled
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading spec file: %w", err)
 	}
-	return ParseSpec(data)
+	return supports.ParseSpec(data)
 }
 
 // ParseSpec parses YAML bytes into a Spec.
@@ -185,6 +189,10 @@ func LoadSpec(path string) (*Spec, error) {
 // The decoder reports the unknown key and its line. To correct a parse
 // error, fix or remove the offending key and re-run the command.
 func ParseSpec(data []byte) (*Spec, error) {
+	return ProviderLookup(BuiltinProviderRole).ParseSpec(data)
+}
+
+func (supports ProviderLookup) ParseSpec(data []byte) (*Spec, error) {
 	var spec Spec
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
@@ -204,7 +212,7 @@ func ParseSpec(data []byte) (*Spec, error) {
 	if !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parsing spec YAML: %w", err)
 	}
-	if err := ValidateSpec(&spec); err != nil {
+	if err := supports.ValidateSpec(&spec); err != nil {
 		return nil, err
 	}
 	return &spec, nil
@@ -212,13 +220,17 @@ func ParseSpec(data []byte) (*Spec, error) {
 
 // ValidateSpec checks for structural validity
 func ValidateSpec(spec *Spec) error {
+	return ProviderLookup(BuiltinProviderRole).ValidateSpec(spec)
+}
+
+func (supports ProviderLookup) ValidateSpec(spec *Spec) error {
 	if spec.Version != 1 {
 		return fmt.Errorf("unsupported spec version: %d (expected 1)", spec.Version)
 	}
 	if spec.Site == "" {
 		return fmt.Errorf("spec must have a site name")
 	}
-	if err := validateNetworks(spec.Networks); err != nil {
+	if err := supports.validateNetworks(spec.Networks); err != nil {
 		return err
 	}
 	if err := validateVPNs(spec.VPN); err != nil {
@@ -234,16 +246,16 @@ func ValidateSpec(spec *Spec) error {
 	if err := validateInventory(spec.Inventory); err != nil {
 		return err
 	}
-	return validateAssertions(spec, probeNames)
+	return supports.validateAssertions(spec, probeNames)
 }
 
-func validateNetworks(networks []Network) error {
+func (supports ProviderLookup) validateNetworks(networks []Network) error {
 	names := make(map[string]bool)
 	for i, n := range networks {
-		if n.Edge != "" && n.Edge != "omada" && n.Edge != "opnsense" {
-			return fmt.Errorf("network[%d]: edge must be omada or opnsense", i)
+		if n.Edge != "" && !supports(n.Edge, RoleEdge) {
+			return fmt.Errorf("network[%d]: edge must be a supported edge provider", i)
 		}
-		if n.Observer != "" && (n.Edge == "" || n.Observer == n.Edge || (n.Observer != "omada" && n.Observer != "opnsense")) {
+		if n.Observer != "" && (n.Edge == "" || n.Observer == n.Edge || !supports(n.Observer, RoleObserver)) {
 			return fmt.Errorf("network[%d]: observer must be a supported provider distinct from edge", i)
 		}
 		if n.Name == "" {
@@ -469,9 +481,6 @@ func validateNetworkHealthAssertion(i int, a *Assertion) error {
 }
 
 func validateACLDriftAssertion(i int, a *Assertion) error {
-	if a.Provider != "omada" && a.Provider != "opnsense" {
-		return fmt.Errorf("assertion[%d]: acl_drift requires provider omada or opnsense", i)
-	}
 	if a.Runner != "" && a.Runner != "local" {
 		return fmt.Errorf("assertion[%d]: acl_drift reads controller rules locally", i)
 	}
@@ -482,9 +491,6 @@ func validateACLDriftAssertion(i int, a *Assertion) error {
 // field contract: an omada provider (the RF planning schedule exists only
 // on Omada controllers) and a local runner.
 func validateWLANScheduleLivenessAssertion(i int, a *Assertion) error {
-	if a.Provider != "omada" {
-		return fmt.Errorf("assertion[%d]: wlan_schedule_liveness requires provider omada", i)
-	}
 	if a.Runner != "" && a.Runner != "local" {
 		return fmt.Errorf("assertion[%d]: wlan_schedule_liveness reads controller state locally", i)
 	}
@@ -492,17 +498,11 @@ func validateWLANScheduleLivenessAssertion(i int, a *Assertion) error {
 }
 
 func validateACLCheckAssertion(i int, a *Assertion) error {
-	if a.Provider == "" {
-		return fmt.Errorf("assertion[%d]: acl_check requires 'provider'", i)
-	}
 	if a.Policy == "" {
 		return fmt.Errorf("assertion[%d]: acl_check requires 'policy'", i)
 	}
 	if a.Expect == "" {
 		return fmt.Errorf("assertion[%d]: acl_check requires 'expect' (enforced or not_enforced)", i)
-	}
-	if a.ExpectBidirectional != nil && (a.Provider != "omada" || a.Expect != "enforced") {
-		return fmt.Errorf("assertion[%d]: expect_bidirectional requires provider omada and expect enforced", i)
 	}
 	if !aclCheckExpects[a.Expect] {
 		return fmt.Errorf("assertion[%d]: acl_check expect must be 'enforced' or 'not_enforced', got %q", i, a.Expect)
@@ -521,9 +521,6 @@ var aclCheckExpects = map[string]bool{"enforced": true, "not_enforced": true}
 // nat_router|bridge|indeterminate|unknown|present). Unknown expect values
 // are rejected here rather than evaluated at run time.
 func validateNatCheckAssertion(i int, a *Assertion) error {
-	if a.Provider == "" || (a.Provider != "omada" && a.Provider != "opnsense") {
-		return fmt.Errorf("assertion[%d]: nat_check requires 'provider' (omada or opnsense)", i)
-	}
 	if a.NatMode == "" || !natCheckModes[a.NatMode] {
 		return fmt.Errorf("assertion[%d]: nat_check requires 'nat_mode' (automatic, hybrid, advanced, disabled, nat_router, bridge, indeterminate, unknown, or present)", i)
 	}
@@ -537,7 +534,7 @@ var natCheckModes = map[string]bool{
 	"unknown": true, "present": true,
 }
 
-func validateAssertions(spec *Spec, probeNames map[string]bool) error {
+func (supports ProviderLookup) validateAssertions(spec *Spec, probeNames map[string]bool) error {
 	for i, a := range spec.Assertions {
 		provider, err := spec.AssertionProvider(a)
 		if err != nil {
@@ -547,6 +544,15 @@ func validateAssertions(spec *Spec, probeNames map[string]bool) error {
 		validate, known := assertionValidators[a.Type]
 		if !known {
 			return fmt.Errorf("assertion[%d]: unknown type %q", i, a.Type)
+		}
+		switch a.Type {
+		case "acl_drift", "wlan_schedule_liveness", "acl_check", "nat_check":
+			if !supports(a.Provider, a.Type) {
+				return fmt.Errorf("assertion[%d]: provider %q does not support %s", i, a.Provider, a.Type)
+			}
+		}
+		if a.Type == "acl_check" && a.ExpectBidirectional != nil && (!supports(a.Provider, RoleBidirectionalACL) || a.Expect != "enforced") {
+			return fmt.Errorf("assertion[%d]: expect_bidirectional requires provider support and expect enforced", i)
 		}
 		if err := validate(i, &a); err != nil {
 			return err

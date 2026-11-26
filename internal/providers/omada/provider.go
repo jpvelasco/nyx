@@ -43,6 +43,9 @@ func (o *OmadaProvider) Capabilities() []string {
 	return []string{"info", "import", "check", "inventory"}
 }
 
+// PublicInfo reports that the controller metadata endpoint needs only a host.
+func (o *OmadaProvider) PublicInfo() bool { return true }
+
 // Info returns basic controller information without requiring authentication.
 func (o *OmadaProvider) Info(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInfo, error) {
 	client, err := newProviderClient(ctx, opts)
@@ -51,9 +54,10 @@ func (o *OmadaProvider) Info(ctx context.Context, opts providers.ImportOptions) 
 	}
 	info := client.Info()
 	return &providers.ProviderInfo{
-		Provider: "omada",
-		Host:     opts.Host,
-		Version:  info.ControllerVer,
+		Configured: info.Configured,
+		Provider:   "omada",
+		Host:       opts.Host,
+		Version:    info.ControllerVer,
 		Extra: map[string]string{
 			"api_version": info.APIVer,
 			"omada_cid":   info.OmadaCID,
@@ -88,6 +92,9 @@ func (o *OmadaProvider) Check(ctx context.Context, opts providers.ImportOptions)
 		return nil, err
 	}
 	engine := audit.NewEngine(imported.Spec)
+	if opts.Connection.ProfileName() != "default" {
+		engine.ControllerOptions = map[string]providers.ImportOptions{"omada": opts}
+	}
 	// Forward the TLS options so the audit-engine-backed assertions that talk
 	// to the controller (acl_check, nat_check) honor the same
 	// --skip-tls-verify / --ca-cert the import used. The import path and the

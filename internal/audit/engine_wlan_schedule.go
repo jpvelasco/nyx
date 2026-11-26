@@ -15,14 +15,15 @@ import (
 const wlanScheduleMargin = 20 * time.Minute
 
 func (e *Engine) runWLANScheduleLiveness(ctx context.Context, provider string) (*models.CheckResult, error) {
-	observer, ok := providers.Get(provider).(providers.WLANScheduleObserver)
+	adapter, _ := providers.LookupAdapter(provider)
+	observer, ok := adapter.(providers.WLANScheduleObserver)
 	opts := e.controllerOptions(provider)
 	var observation providers.WLANScheduleObservation
 	var unavailable string
 	switch {
 	case !ok:
 		unavailable = "provider does not support WLAN schedule observation"
-	case opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "":
+	case opts.Connection.Require(opts.Credentials) != nil:
 		unavailable = "provider credentials are missing"
 	default:
 		var err error

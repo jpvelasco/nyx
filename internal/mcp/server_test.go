@@ -19,6 +19,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/service"
+	"github.com/jpvelasco/nyx/internal/testutil/providerfixture"
 	"github.com/jpvelasco/nyx/internal/topology"
 )
 
@@ -300,8 +301,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 85 {
-		t.Fatalf("expected 85 tools, got %d", len(list.Tools))
+	if len(list.Tools) != len(ToolNames()) {
+		t.Fatalf("expected %d callable tools, got %d", len(ToolNames()), len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -441,6 +442,7 @@ func TestHandleToolCall_Timeout(t *testing.T) {
 	svc := &blockingOmadaSvc{started: make(chan struct{})}
 	server := &Server{reader: &bytes.Buffer{}, writer: &bytes.Buffer{}, checkSvc: service.NewCheckService(), omadaSvc: svc}
 	server.initialized = true
+	useInfoStub(server)
 
 	resp := server.handleToolCall(context.Background(), &jsonRPCRequest{
 		ID:     json.RawMessage(`9`),
@@ -465,6 +467,7 @@ func TestServe_ContinuesAfterToolCallTimeout(t *testing.T) {
 	var in bytes.Buffer
 	var out bytes.Buffer
 	server := &Server{reader: &in, writer: &out, checkSvc: service.NewCheckService(), omadaSvc: &blockingOmadaSvc{started: make(chan struct{})}}
+	useInfoStub(server)
 	server.initialized = true
 
 	in.WriteString(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"omada_get_info","arguments":{"host":"omada.local"}}}` + "\n")
@@ -821,8 +824,7 @@ func TestDispatchVerifyIsolation_PingError(t *testing.T) {
 }
 
 func TestDispatchProviderList_RegisteredProviders(t *testing.T) {
-	providers.Reset()
-	t.Cleanup(providers.Reset)
+	providerfixture.IsolateProviders(t)
 	if err := providers.Register(&dummyProvider{}); err != nil {
 		t.Fatal(err)
 	}
@@ -2759,7 +2761,7 @@ func (s *stubTopoSvc) Report(_ context.Context, opts service.TopologyOptions) (*
 
 func serverWithOpnsenseStub(stub *stubOpnsenseSvc) *Server {
 	omada, opnsense := credEnvReaders()
-	return &Server{
+	return useInfoStub(&Server{
 		reader:          &bytes.Buffer{},
 		writer:          &bytes.Buffer{},
 		checkSvc:        service.NewCheckService(),
@@ -2767,12 +2769,12 @@ func serverWithOpnsenseStub(stub *stubOpnsenseSvc) *Server {
 		topoSvc:         &stubTopoSvc{},
 		credEnv:         omada,
 		opnsenseCredEnv: opnsense,
-	}
+	})
 }
 
 func serverWithOmadaStub(stub *stubOmadaSvc) *Server {
 	omada, opnsense := credEnvReaders()
-	return &Server{
+	return useInfoStub(&Server{
 		reader:          &bytes.Buffer{},
 		writer:          &bytes.Buffer{},
 		checkSvc:        service.NewCheckService(),
@@ -2780,7 +2782,7 @@ func serverWithOmadaStub(stub *stubOmadaSvc) *Server {
 		topoSvc:         &stubTopoSvc{},
 		credEnv:         omada,
 		opnsenseCredEnv: opnsense,
-	}
+	})
 }
 
 func TestDispatchOmadaNatReads(t *testing.T) {

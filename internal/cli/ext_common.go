@@ -38,7 +38,7 @@ func withProviderSession(provider string, fn func(ctx context.Context, opts prov
 	ctx, cancel := context.WithTimeout(context.Background(), dur)
 	defer cancel()
 	opts := providerImportOptions(provider)
-	if err := requireProviderHost(opts, provider); err != nil {
+	if err := requireProviderConnection(opts, provider); err != nil {
 		return err
 	}
 	return fn(ctx, opts)

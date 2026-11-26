@@ -149,6 +149,7 @@ func TestHandleToolCallTimeoutEmitsWarnLog(t *testing.T) {
 	handler, cap := newCapturingLogHandler()
 	server := NewServerWithLogger(slog.New(handler))
 	server.omadaSvc = &blockingOmadaSvc{started: make(chan struct{})}
+	useInfoStub(server)
 	server.initialized = true
 	server.reader = &bytes.Buffer{}
 	server.writer = &bytes.Buffer{}

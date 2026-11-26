@@ -1,6 +1,10 @@
 package mcp
 
-import "os"
+import (
+	"os"
+
+	"github.com/jpvelasco/nyx/internal/credentials"
+)
 
 // OmadaCredEnvVars and OpnsenseCredEnvVars are the canonical environment
 // variable names the server reads for provider credentials, in display
@@ -8,8 +12,8 @@ import "os"
 // renders harness snippets from them, so both stay in sync with the
 // resolution order (tool args -> env vars -> encrypted store).
 var (
-	OmadaCredEnvVars    = []string{"OMADA_HOST", "OMADA_CLIENT_ID", "OMADA_CLIENT_SECRET", "OMADA_SITE"}
-	OpnsenseCredEnvVars = []string{"OPNSENSE_HOST", "OPNSENSE_API_KEY", "OPNSENSE_API_SECRET"}
+	OmadaCredEnvVars    = credentialEnvNames("omada")
+	OpnsenseCredEnvVars = credentialEnvNames("opnsense")
 )
 
 // credEnvFrom builds an env-var lookup map for the given names. A missing
@@ -20,4 +24,14 @@ func credEnvFrom(names []string) map[string]func(string) string {
 		envs[name] = os.Getenv
 	}
 	return envs
+}
+
+func credentialEnvNames(provider string) []string {
+	var names []string
+	for _, f := range credentials.FieldsFor(provider) {
+		if f.Env != "" {
+			names = append(names, f.Env)
+		}
+	}
+	return names
 }
