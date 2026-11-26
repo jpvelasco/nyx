@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/backends/nmap"
-	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/probe"
+	"github.com/jpvelasco/nyx/internal/providers"
 )
 
 // NmapCheck returns a CheckResult for whether nmap is available.
@@ -49,7 +49,7 @@ func SpecFileCheck(path string) *models.CheckResult {
 // returns nil when the spec cannot be loaded — the caller's file/validity
 // checks already surface that.
 func ProbeChecks(path string) []*models.CheckResult {
-	spec, err := intent.LoadSpec(path)
+	spec, err := providers.Specs.LoadSpec(path)
 	if err != nil {
 		return nil
 	}
@@ -73,7 +73,7 @@ func SpecValidCheck(path string) *models.CheckResult {
 		result.Finish()
 		return result
 	}
-	if _, err := intent.ParseSpec(data); err != nil {
+	if _, err := providers.Specs.ParseSpec(data); err != nil {
 		result.Status = models.StatusFail
 		result.Summary = fmt.Sprintf("spec invalid: %v", err)
 	} else {

@@ -20,8 +20,8 @@ func (e *Engine) runNatCheck(ctx context.Context, a intent.Assertion) (*models.C
 	if err != nil {
 		return natCheckErrorResult(a.Provider, err.Error()), nil
 	}
-	p := providers.Get(providerName)
-	if p == nil {
+	p, exists := providers.LookupAdapter(providerName)
+	if !exists {
 		return natCheckErrorResult(providerName, fmt.Sprintf("provider %q not found in registry", providerName)), nil
 	}
 	checker, ok := p.(providers.NatChecker)

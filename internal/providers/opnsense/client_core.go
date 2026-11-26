@@ -177,7 +177,8 @@ type apiStatusError struct {
 	err  error
 }
 
-func (e *apiStatusError) Error() string { return e.err.Error() }
+func (e *apiStatusError) HTTPStatus() int { return e.code }
+func (e *apiStatusError) Error() string   { return e.err.Error() }
 
 // stableError marks a failure that must not be retried: the failure is
 // deterministic (bad credentials, missing resource, client-side 4xx).

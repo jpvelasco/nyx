@@ -32,7 +32,8 @@ func withACLDrift(assertions []intent.Assertion) []intent.Assertion {
 }
 
 func (e *Engine) runACLDrift(ctx context.Context, provider string) (*models.CheckResult, error) {
-	observer, ok := providers.Get(provider).(providers.ACLObserver)
+	adapter, _ := providers.LookupAdapter(provider)
+	observer, ok := adapter.(providers.ACLObserver)
 	opts := e.controllerOptions(provider)
 	var observation providers.ACLObservation
 	var unavailable string

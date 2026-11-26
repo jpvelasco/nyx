@@ -32,10 +32,11 @@ type ImportOptions struct {
 
 // ProviderInfo holds version and connection metadata returned by Info.
 type ProviderInfo struct {
-	Provider string            `json:"provider"`
-	Host     string            `json:"host"`
-	Version  string            `json:"version"`
-	Extra    map[string]string `json:"extra,omitempty"`
+	Configured bool              `json:"-" yaml:"-"` // Preserved for the Omada MCP view.
+	Provider   string            `json:"provider"`
+	Host       string            `json:"host"`
+	Version    string            `json:"version"`
+	Extra      map[string]string `json:"extra,omitempty"`
 }
 
 // ImportResult holds a generated spec and import summary.
@@ -181,14 +182,23 @@ type WLANScheduleObserver interface {
 	ObserveWLANSchedule(ctx context.Context, opts ImportOptions) (WLANScheduleObservation, error)
 }
 
-// Provider is implemented by each vendor backend.
-type Provider interface {
-	Name() string
-	Capabilities() []string
+// InfoReader reads controller metadata through the registered adapter.
+type InfoReader interface {
 	Info(ctx context.Context, opts ImportOptions) (*ProviderInfo, error)
+}
+
+// ACLChecker checks one declared policy on its owner.
+type ACLChecker interface {
+	CheckACL(ctx context.Context, req ACLCheckRequest, opts ImportOptions) (*models.CheckResult, error)
+}
+
+// Provider is the original full-service provider contract.
+type Provider interface {
+	Adapter
+	InfoReader
+	ACLChecker
 	ImportSpec(ctx context.Context, opts ImportOptions) (*ImportResult, error)
 	Check(ctx context.Context, opts ImportOptions) (*AuditResult, error)
-	CheckACL(ctx context.Context, req ACLCheckRequest, opts ImportOptions) (*models.CheckResult, error)
 }
 
 // NatRuleSpec is the flat desired-state of a NAT rule, valid across all

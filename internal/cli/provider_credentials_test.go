@@ -10,6 +10,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/credentials/credmanager"
 	"github.com/jpvelasco/nyx/internal/providers"
+	"github.com/jpvelasco/nyx/internal/testutil/providerfixture"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -346,12 +347,12 @@ func (p *singleKeyController) Info(_ context.Context, opts providers.ImportOptio
 	return nil, fmt.Errorf("adapter rejected %s", p.received)
 }
 func TestThirdProviderCredentialFlagsAndErrors(t *testing.T) {
+	providerfixture.IsolateProviders(t)
 	saveRestoreGlobals(t)
 	p := &singleKeyController{fakeProvider: fakeProvider{name: "sensor"}}
 	if err := providers.Register(p); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(providers.Reset)
 	writeCredentialStore(t, "omada", nil)
 	t.Setenv("SENSOR_TOKEN", "ambient-fixture")
 	cmd := buildInfoCmd(p)

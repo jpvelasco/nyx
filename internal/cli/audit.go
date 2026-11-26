@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/jpvelasco/nyx/internal/audit"
-	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/recommendations"
@@ -38,7 +37,7 @@ var auditCmd = &cobra.Command{
 			return fmt.Errorf("spec file %q not found\n\n  Create one with:\n    nyx init --output %s\n\n  Then run:\n    nyx audit --spec %s", specFile, specFile, specFile)
 		}
 
-		spec, err := intent.LoadSpec(specFile)
+		spec, err := providers.Specs.LoadSpec(specFile)
 		if err != nil {
 			return fmt.Errorf("loading spec: %w", err)
 		}
@@ -59,7 +58,7 @@ var auditCmd = &cobra.Command{
 			if strings.TrimSpace(profile) == "" {
 				return fmt.Errorf("--provider-profile: empty profile for %s", name)
 			}
-			if providers.Get(name) == nil {
+			if _, ok := providers.LookupAdapter(name); !ok {
 				return fmt.Errorf("--provider-profile: unknown provider %q", name)
 			}
 		}
