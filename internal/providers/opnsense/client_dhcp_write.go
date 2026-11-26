@@ -262,7 +262,7 @@ func (c *Client) CheckDnsmasqPoolOwner(ctx context.Context) error {
 		return fmt.Errorf("cannot verify competing DHCP service: %w", err)
 	}
 	if running {
-		return fmt.Errorf("Kea is running; review the DHCP owner before creating this pool")
+		return fmt.Errorf("the Kea service is running, review the DHCP owner before creating this pool")
 	}
 	return nil
 }
