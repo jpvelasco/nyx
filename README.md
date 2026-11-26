@@ -304,9 +304,9 @@ Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `O
 | `run_doctor` | Check environment health + optional spec validation + probe SSH reachability/auth (read-only) |
 | `provider_list` | List registered providers |
 | `provider_capabilities` | List registered operations and configured connection profiles and sites. `observe: true` verifies controller information access for the selection. The CLI equivalent is `nyx provider capabilities --provider <name> --profile <profile> --observe --json`. |
-| `omada_ap_channel_info` / `omada_wlan_optimization` | Read AP channels or WLAN optimization history. Supply `history_id` for a run’s per-AP diagnostics. Pages accept `offset` and `limit`. AP names and MACs require `include_private_details`. |
+| `omada_ap_channel_info` / `omada_wlan_optimization` | Read AP channels or WLAN optimization history. Supply `history_id` for a run’s per-AP diagnostics. Select the configured connection with `profile`. For a private CA, set `NYX_OMADA_CA_CERT` on the Nyx process. Pages accept `offset` and `limit`. AP names and MACs require `include_private_details`. |
 | `omada_controller_firmware` / `omada_site_config_drift` | Read hardware controller firmware status or compare a site with its saved baseline (`nyx omada site-config snapshot`). Run the same read before and after a change to compare the results. Gateway runtime block-state visibility is tracked in [#308](https://github.com/jpvelasco/nyx/issues/308). |
-| `opnsense_query_states` | Inspect a page of states matching `search` or `rule_id`. Counts are returned by default. Set `include_private_details` for the matching state rows and endpoints. |
+| `opnsense_query_states` | Inspect a page of states matching `search` or `rule_id` on a configured `profile`. Set `NYX_OPNSENSE_CA_CERT` on the Nyx process for a private firewall CA. Counts are returned by default. Set `include_private_details` for the matching state rows and endpoints. |
 | `omada_get_info` | Fetch Omada controller metadata (no auth) |
 | `omada_list_networks` | List Omada LAN networks/VLANs for a site |
 | `omada_list_acls` | List Omada ACL + gateway ACL rules for a site |

@@ -11,6 +11,39 @@ import (
 	"github.com/jpvelasco/nyx/internal/snapshot"
 )
 
+// diagnosticBinding confines reads to configured connections with operator-managed TLS trust.
+func diagnosticBinding(name, description string, props map[string]propSchema, read func(*Server, context.Context, map[string]interface{}) toolDispatchResult) operationBinding {
+	if props == nil {
+		props = map[string]propSchema{}
+	}
+	props["profile"] = propSchema{Type: "string", Description: "Configured provider connection profile (default: default)"}
+	return operationBinding{tool: tool{Name: name, Description: description, InputSchema: inputSchema{Type: "object", Properties: props}}, call: func(s *Server, ctx context.Context, args map[string]interface{}) toolDispatchResult {
+		for k, value := range args {
+			p, ok := props[k]
+			if !ok {
+				return errResult("unsupported diagnostic argument")
+			}
+			switch p.Type {
+			case "string":
+				if _, ok := value.(string); !ok {
+					return errResult(k + " must be a string")
+				}
+			case "boolean":
+				if _, ok := value.(bool); !ok {
+					return errResult(k + " must be a boolean")
+				}
+			}
+		}
+		return read(s, ctx, args)
+	}}
+}
+
+func (s *Server) omadaDiagnosticOptions(args map[string]interface{}) (service.OmadaOptions, string) {
+	opts, msg := s.omadaOptionsFromArgs(map[string]interface{}{"profile": argString(args, "profile")}, true)
+	opts.CACertPath = s.env("NYX_OMADA_CA_CERT")
+	return opts, msg
+}
+
 // Diagnostic reads share the typed service methods used by the CLI and return a bounded page to MCP.
 func diagnosticBindings() []operationBinding {
 	type omadaRead func(context.Context, service.OmadaOptions, map[string]interface{}, diagnosticWindow) (any, error)
@@ -20,21 +53,24 @@ func diagnosticBindings() []operationBinding {
 		}
 		extra["offset"] = propSchema{Type: "integer", Description: "First row to return (default 0)"}
 		extra["limit"] = propSchema{Type: "integer", Description: "Maximum rows to return (default 50, maximum 200)"}
-		return operationBinding{tool: tool{Name: name, Description: description, InputSchema: omadaToolSchemaExtra(extra, nil)}, call: func(s *Server, ctx context.Context, args map[string]interface{}) toolDispatchResult {
+		return diagnosticBinding(name, description, extra, func(s *Server, ctx context.Context, args map[string]interface{}) toolDispatchResult {
 			w, err := diagnosticPage(args)
 			if err != nil {
 				return errResult(err.Error())
 			}
-			opts, msg := s.omadaOptionsFromArgs(args, true)
+			opts, msg := s.omadaDiagnosticOptions(args)
 			if msg != "" {
-				return errResult(msg)
+				return errResult("configure the selected Omada profile")
+			}
+			if opts.Site == "" {
+				return errResult("configure an explicit site for the selected Omada profile")
 			}
 			data, err := read(ctx, opts, args, w)
 			if err != nil {
 				return diagnosticFailure(err)
 			}
 			return untrustedDataResult(data, "Controller diagnostics")
-		}}
+		})
 	}
 	svc := service.NewOmadaService()
 	return []operationBinding{
@@ -70,17 +106,17 @@ func diagnosticBindings() []operationBinding {
 			}
 			return diagnosticRows(changes, w), nil
 		}),
-		{tool: tool{Name: "omada_controller_firmware", Description: "Read the hardware controller's running version and vendor update status.", InputSchema: omadaToolSchema()}, call: func(s *Server, ctx context.Context, args map[string]interface{}) toolDispatchResult {
-			opts, msg := s.omadaOptionsFromArgs(args, true)
+		diagnosticBinding("omada_controller_firmware", "Read the hardware controller's running version and vendor update status.", nil, func(s *Server, ctx context.Context, args map[string]interface{}) toolDispatchResult {
+			opts, msg := s.omadaDiagnosticOptions(args)
 			if msg != "" {
-				return errResult(msg)
+				return errResult("configure the selected Omada profile")
 			}
 			v, err := svc.ControllerFirmware(ctx, opts)
 			if err != nil {
 				return diagnosticFailure(err)
 			}
 			return untrustedDataResult(v, "Controller firmware status")
-		}},
+		}),
 		stateInspectionBinding(),
 	}
 }
@@ -130,11 +166,12 @@ func stateInspectionBinding() operationBinding {
 		"search": {Type: "string", Description: "State table search tokens"}, "rule_id": {Type: "string", Description: "Limit rows to this pf rule ID"}, "sort": {Type: "string", Description: "Sort one field as field:asc or field:desc"},
 		"page": {Type: "integer", Description: "Page number, starting at 1"}, "page_size": {Type: "integer", Description: "Rows per page (default 50, maximum 200)"}, "include_private_details": {Type: "boolean", Description: "Include raw state rows with endpoints and identifiers"},
 	}
-	return operationBinding{tool: tool{Name: "opnsense_query_states", Description: "Inspect one page of the firewall state table scoped to a search or rule ID.", InputSchema: opnsenseToolSchemaExtra(props, nil)}, call: func(s *Server, ctx context.Context, args map[string]interface{}) toolDispatchResult {
-		opts, msg := s.opnsenseOptionsFromArgs(args, true)
+	return diagnosticBinding("opnsense_query_states", "Inspect one page of the firewall state table scoped to a search or rule ID.", props, func(s *Server, ctx context.Context, args map[string]interface{}) toolDispatchResult {
+		opts, msg := s.opnsenseOptionsFromArgs(map[string]interface{}{"profile": argString(args, "profile")}, true)
 		if msg != "" {
-			return errResult(msg)
+			return errResult("configure the selected OPNsense profile")
 		}
+		opts.CACertPath = s.env("NYX_OPNSENSE_CA_CERT")
 		q := opnsense.StateQuery{Search: strings.TrimSpace(argString(args, "search")), RuleID: strings.TrimSpace(argString(args, "rule_id"))}
 		if q.Search == "" && q.RuleID == "" {
 			return errResult("supply a search or rule_id to scope state inspection")
@@ -162,5 +199,5 @@ func stateInspectionBinding() operationBinding {
 			return okResult(toJSON(map[string]int{"total": page.Total, "page": page.Page, "matched_on_page": len(page.Rows)}))
 		}
 		return untrustedDataResult(page, "State table rows")
-	}}
+	})
 }
