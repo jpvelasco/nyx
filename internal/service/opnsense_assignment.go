@@ -245,19 +245,17 @@ func runAssignment(ctx context.Context, c *fw.Client, req OpnsenseVLANRequest, d
 	if id != stagedID || !staged.onlyAdded(before, id) {
 		return nil, errors.New("staged assignments changed; review the pending queue before activating it")
 	}
-	if err := c.ActivateAssignments(ctx); err != nil {
-		return nil, fmt.Errorf("assignment activation uncertain; re-read the plan before retrying: %w", err)
-	}
+	activationErr := c.ActivateAssignments(ctx)
 	after, err := readAssignmentView(ctx, c)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(activationErr, err)
 	}
 	actual, err := target.inspect(after)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(activationErr, err)
 	}
 	if after.pending || actual != id {
-		return nil, errors.New("assignment activation could not be verified by readback")
+		return nil, errors.Join(errors.New("assignment activation uncertain; re-read the plan before retrying"), activationErr)
 	}
 	res.Outcome = "assigned"
 	res.UUID = id

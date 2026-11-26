@@ -77,7 +77,7 @@ func TestVLANAssignmentLifecycle(t *testing.T) {
 				t.Fatalf("preview %v %v adds=%d", preview, err, adds)
 			}
 			applied, err := s.ApplyVLAN(ctx, opts, req, false)
-			if tc.activation != "ok" {
+			if tc.activation == "staged" {
 				if err == nil || !strings.Contains(err.Error(), "uncertain") {
 					t.Fatalf("unconfirmed activation: %v", err)
 				}
@@ -169,6 +169,35 @@ func TestAssignmentDoesNotActivateOtherChanges(t *testing.T) {
 		if after.onlyAdded(before, "opt3") {
 			t.Fatal("accepted unrelated or unconfirmed changes")
 		}
+	}
+}
+
+func TestAssignmentTargetRequiresUniqueExistingVLAN(t *testing.T) {
+	req := OpnsenseVLANRequest{Kind: "assignment", Address: "10.0.30.1/24", Tag: 30, Parent: "igb0", Description: "gaming"}
+	for _, view := range []string{
+		`{"total":0,"rows":[]}`,
+		`{"total":1,"rows":[{"uuid":"other","if":"igb1","tag":"40","vlanif":"vlan40"}]}`,
+		`{"total":2,"rows":[{"uuid":"one","if":"igb0","tag":"30","vlanif":"vlan30"},{"uuid":"two","if":"igb0","tag":"30","vlanif":"vlan31"}]}`,
+		`{"total":1,"rows":[{"uuid":"one","if":"igb0","tag":"30","vlanif":"igb0"}]}`,
+	} {
+		ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "GET" || !strings.HasSuffix(r.URL.Path, "/vlan_settings/search_item") {
+				t.Error("contacted a non-target surface")
+			}
+			testutil.WriteBody(w, view)
+		})
+		if _, err := NewOpnsenseService().ApplyVLAN(t.Context(), opnsenseOptions(ts), req, false); err == nil {
+			t.Error("accepted missing or ambiguous VLAN identity")
+		}
+	}
+	req.Tag = 0
+	if _, err := assignmentTarget(t.Context(), nil, req); err == nil {
+		t.Error("accepted tag zero")
+	}
+	req.Tag = 30
+	req.Address = "0.0.0.0/0"
+	if _, err := assignmentTarget(t.Context(), nil, req); err == nil {
+		t.Error("accepted unspecified address")
 	}
 }
 
