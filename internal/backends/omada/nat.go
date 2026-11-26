@@ -6,9 +6,22 @@ import (
 	"fmt"
 )
 
+// PortForwardWAN preserves the WAN bindings that affect a forwarding rule's scope.
+type PortForwardWAN struct {
+	Interfaces        []string `json:"interfaceWanPortId,omitempty"`
+	VirtualInterfaces []string `json:"virtualWanId,omitempty"`
+	Addresses         []struct {
+		WAN     string `json:"wanId"`
+		Address string `json:"ip"`
+	} `json:"wanIps,omitempty"`
+	HasIPAddress  *bool `json:"existWanIp,omitempty"`
+	HasVirtualWAN *bool `json:"existVirtualWan,omitempty"`
+}
+
 // PortForwarding is one NAT port-forwarding rule on an Omada gateway
 // (GET sites/{siteId}/nat/port-forwardings).
 type PortForwarding struct {
+	PortForwardWAN
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
 	Enabled          bool     `json:"status"`
@@ -23,6 +36,7 @@ type PortForwarding struct {
 
 // portForwardingRow is the raw wire shape of a port-forwarding entry.
 type portForwardingRow struct {
+	PortForwardWAN
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
 	Status           bool     `json:"status"`
@@ -56,6 +70,7 @@ func (c *Client) GetPortForwardings(ctx context.Context, siteID string) ([]PortF
 	pfs := make([]PortForwarding, 0, len(rows))
 	for _, r := range rows {
 		pfs = append(pfs, PortForwarding{
+			PortForwardWAN:   r.PortForwardWAN,
 			ID:               r.ID,
 			Name:             r.Name,
 			Enabled:          r.Status,
@@ -74,13 +89,14 @@ func (c *Client) GetPortForwardings(ctx context.Context, siteID string) ([]PortF
 // OneToOneNAT is one one-to-one NAT rule on an Omada gateway
 // (GET sites/{siteId}/nat/one-to-one-nat).
 type OneToOneNAT struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Enabled     bool   `json:"status"`
-	InternalIP  string `json:"internalIp"`
-	ExternalIP  string `json:"externalIp"`
-	DMZ         bool   `json:"dmz"`
-	Description string `json:"description"`
+	Interfaces  []string `json:"interfaceIds,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Enabled     bool     `json:"status"`
+	InternalIP  string   `json:"internalIp"`
+	ExternalIP  string   `json:"externalIp"`
+	DMZ         bool     `json:"dmz"`
+	Description string   `json:"description"`
 }
 
 // GetOneToOneNAT returns one-to-one NAT rules for a site.

@@ -116,7 +116,7 @@ func (o *OmadaProvider) Check(ctx context.Context, opts providers.ImportOptions)
 // LAN networks with their gateway bindings, both ACL scopes and their rule
 // counts, and the active client count. It is read-only and never mutates.
 func (o *OmadaProvider) Inventory(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInventory, error) {
-	client, site, err := openACLSite(ctx, opts)
+	client, site, err := openSite(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -135,8 +135,8 @@ func (o *OmadaProvider) Inventory(ctx context.Context, opts providers.ImportOpti
 	}, nil
 }
 
-// openACLSite opens a read session and resolves the configured site. On success the caller owns logout.
-func openACLSite(ctx context.Context, opts providers.ImportOptions) (*omadabackend.Client, omadabackend.Site, error) {
+// openSite opens a read session and resolves the configured site. On success the caller owns logout.
+func openSite(ctx context.Context, opts providers.ImportOptions) (*omadabackend.Client, omadabackend.Site, error) {
 	client, err := newProviderClient(ctx, opts)
 	if err != nil {
 		return nil, omadabackend.Site{}, fmt.Errorf("connecting to omada controller: %w", err)
@@ -158,7 +158,7 @@ func openACLSite(ctx context.Context, opts providers.ImportOptions) (*omadabacke
 
 func (o *OmadaProvider) ObserveACLs(ctx context.Context, opts providers.ImportOptions, _ []intent.Network) (providers.ACLObservation, error) {
 	var observed providers.ACLObservation
-	client, site, err := openACLSite(ctx, opts)
+	client, site, err := openSite(ctx, opts)
 	if err != nil {
 		return observed, err
 	}
@@ -187,7 +187,7 @@ func (o *OmadaProvider) ObserveACLs(ctx context.Context, opts providers.ImportOp
 // runs in the controller's own wall clock and local clock drift cancels.
 func (o *OmadaProvider) ObserveWLANSchedule(ctx context.Context, opts providers.ImportOptions) (providers.WLANScheduleObservation, error) {
 	var observed providers.WLANScheduleObservation
-	client, site, err := openACLSite(ctx, opts)
+	client, site, err := openSite(ctx, opts)
 	if err != nil {
 		return observed, err
 	}
@@ -728,29 +728,9 @@ func networkByName(nets []omadabackend.Network, name string) (omadabackend.Netwo
 	return omadabackend.Network{}, fmt.Errorf("no network named %q; available: %s", name, strings.Join(names, ", "))
 }
 
-// omadaNatHoldNote is the single source of truth for the Omada NAT write
-// surface (#139): the Open API exposes live-site NAT reads (port
-// forwardings, one-to-one NAT, ALG, settings) but no live-site NAT write
-// path — port-forward writes exist only on the controller's internal web
-// API, which nyx does not call. PlanNat/ApplyNat therefore HOLD clearly:
-// a structured refusal with current-state evidence, never a silent
-// capability absence.
-const omadaNatHoldNote = "the Omada Open API exposes NAT reads (port forwardings, one-to-one NAT) but no live-site NAT write path; port-forward writes exist only on the controller's internal web API, which nyx does not call"
-
-// NatWriteSurface returns the documented explanation of the Omada NAT
-// write gap. Tool output, provider surfaces, and docs share this string,
-// so the story cannot drift.
+// NatWriteSurface describes the published API and the device evidence Nyx requires for writes.
 func NatWriteSurface() string {
-	return omadaNatHoldNote
-}
-
-// omadaNatHoldWarnings builds the refusal explanation: the write-surface
-// note plus the actionable paths (controller UI, or the OPNsense NAT
-// write path when the site routes through OPNsense).
-func omadaNatHoldWarnings() []string {
-	return []string{
-		omadaNatHoldNote + " — configure NAT via the controller UI, or use provider opnsense (its NAT write path is fully supported).",
-	}
+	return "the Omada 6.3 hardware-controller Open API publishes port-forward and one-to-one NAT writes. This controller/gateway operation has no verified write support in Nyx. Review the selected rule in the controller UI."
 }
 
 // validateOmadaNatRequest checks the request shape shared with the
@@ -781,117 +761,60 @@ func validateOmadaNatRequest(req providers.NatApplyRequest) error {
 	return nil
 }
 
-// omadaNatCollection reads the current rules for a NAT collection as
-// JSON evidence, so a refusal still carries the state it refused to
-// change.
-func omadaNatCollection(ctx context.Context, client *omadabackend.Client, siteID, operation string) (string, error) {
-	switch operation {
-	case "port_forward":
-		rows, err := client.GetPortForwardings(ctx, siteID)
-		if err != nil {
-			return "", fmt.Errorf("reading port-forwarding rules: %w", err)
-		}
-		data, err := json.Marshal(rows)
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
-	case "one_to_one":
-		rows, err := client.GetOneToOneNAT(ctx, siteID)
-		if err != nil {
-			return "", fmt.Errorf("reading one-to-one NAT rules: %w", err)
-		}
-		data, err := json.Marshal(rows)
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
-	default:
-		return "[]", nil
-	}
-}
-
-// PlanNat previews an Omada NAT mutation by refusing it clearly (#139):
-// the Open API exposes no live-site NAT write path, so the plan carries
-// the current rules as Before evidence and an outcome of "refused" with
-// the write-surface explanation. It issues zero writes.
+// PlanNat compares the request with the selected site's current rules.
 func (o *OmadaProvider) PlanNat(ctx context.Context, req providers.NatApplyRequest, opts providers.ImportOptions) (*providers.NatPlan, error) {
 	if err := validateOmadaNatRequest(req); err != nil {
 		return nil, err
 	}
-	client, err := newProviderClient(ctx, opts)
+	client, site, err := openSite(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	if err := client.Login(ctx, opts.ClientID, opts.ClientSecret); err != nil {
+	defer client.Logout(ctx)
+	plan := &providers.NatPlan{Provider: "omada", DryRun: true, Outcome: "refused", Endpoints: []string{omadaNatReadPath(req.Operation)}, Warnings: []string{NatWriteSurface()}}
+	comparison := newNATComparison(req)
+	plan.Comparison = &comparison
+	var evidence any
+	switch req.Operation {
+	case "port_forward":
+		rows, err := client.GetPortForwardings(ctx, site.EffectiveID())
+		if err != nil {
+			return nil, fmt.Errorf("reading port-forwarding rules: %w", err)
+		}
+		evidence = rows
+		for _, r := range rows {
+			considerCandidate(&comparison, req, r.ID, r.Name, r.DMZ || portsMayOverlap(req.Spec.Port, r.ExternalPort) && protocolsMayOverlap(req.Spec.Protocol, r.Protocol))
+		}
+	case "one_to_one":
+		rows, err := client.GetOneToOneNAT(ctx, site.EffectiveID())
+		if err != nil {
+			return nil, fmt.Errorf("reading one-to-one NAT rules: %w", err)
+		}
+		evidence = rows
+		for _, r := range rows {
+			considerCandidate(&comparison, req, r.ID, r.Name, req.Spec.Target == r.InternalIP && req.Spec.Target != "" || req.Spec.Destination == r.ExternalIP && req.Spec.Destination != "")
+		}
+	}
+	data, err := json.Marshal(evidence)
+	if err != nil {
 		return nil, err
 	}
-	defer client.Logout(ctx) //nolint:errcheck
-
-	sites, err := client.GetSites(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetching sites: %w", err)
-	}
-	site, err := omadabackend.SelectSite(sites, opts.Site)
-	if err != nil {
-		return nil, err
-	}
-	before, err := omadaNatCollection(ctx, client, site.EffectiveID(), req.Operation)
-	if err != nil {
-		return nil, err
-	}
-	return &providers.NatPlan{
-		Provider:  "omada",
-		DryRun:    true,
-		Outcome:   "refused",
-		Endpoints: []string{omadaNatReadPath(req.Operation)},
-		Before:    before,
-		Warnings:  omadaNatHoldWarnings(),
-	}, nil
+	plan.Before = string(data)
+	return plan, nil
 }
 
-// ApplyNat refuses every Omada NAT mutation (#139): the Open API exposes
-// no live-site NAT write path, so even a non-dry-run request is refused
-// with identical Before/After evidence — nothing can mutate. The
-// write-surface explanation tells the operator where the change belongs.
+// ApplyNat refreshes the preview to reconcile a potentially attempted operation.
+// Model-specific write verification is outstanding for both published collections.
 func (o *OmadaProvider) ApplyNat(ctx context.Context, req providers.NatApplyRequest, opts providers.ImportOptions) (*providers.NatApplyResult, error) {
-	if err := validateOmadaNatRequest(req); err != nil {
-		return nil, err
-	}
-	client, err := newProviderClient(ctx, opts)
+	plan, err := o.PlanNat(ctx, req, opts)
 	if err != nil {
 		return nil, err
 	}
-	if err := client.Login(ctx, opts.ClientID, opts.ClientSecret); err != nil {
-		return nil, err
-	}
-	defer client.Logout(ctx) //nolint:errcheck
-
-	sites, err := client.GetSites(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetching sites: %w", err)
-	}
-	site, err := omadabackend.SelectSite(sites, opts.Site)
-	if err != nil {
-		return nil, err
-	}
-	before, err := omadaNatCollection(ctx, client, site.EffectiveID(), req.Operation)
-	if err != nil {
-		return nil, err
-	}
-	return &providers.NatApplyResult{
-		Provider:  "omada",
-		DryRun:    req.DryRun,
-		Outcome:   "refused",
-		Endpoints: []string{omadaNatReadPath(req.Operation)},
-		Before:    before,
-		After:     before,
-		Warnings:  omadaNatHoldWarnings(),
-	}, nil
+	return &providers.NatApplyResult{Provider: plan.Provider, DryRun: req.DryRun, Outcome: plan.Outcome, Comparison: plan.Comparison, Endpoints: plan.Endpoints, Before: plan.Before, After: plan.Before, Warnings: plan.Warnings}, nil
 }
 
 // omadaNatReadPath is the read endpoint a plan/apply surfaces as its
-// evidence path — the only NAT endpoint the Open API gives nyx.
+// evidence path.
 func omadaNatReadPath(operation string) string {
 	switch operation {
 	case "port_forward":

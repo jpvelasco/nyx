@@ -732,12 +732,12 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		},
 		{
 			Name:        "omada_plan_nat",
-			Description: "Preview an Omada NAT mutation. The Omada Open API exposes NAT reads but no live-site NAT write path, so the plan always refuses with the current rules as before-evidence and the write-surface explanation — configure via the controller UI, or use provider opnsense.",
+			Description: "Compare requested NAT selectors with current site rules and report candidate conflicts and published operation scope.",
 			InputSchema: omadaNatToolSchema(),
 		},
 		{
 			Name:        "omada_apply_nat",
-			Description: "Apply an Omada NAT mutation. Always refused: the Omada Open API exposes no live-site NAT write path, so nothing can mutate — the result carries identical before/after evidence and the write-surface explanation. Use provider opnsense for NAT writes.",
+			Description: "Refresh the NAT comparison before retrying a change. Unverified controller and gateway operations return a refusal with current evidence.",
 			InputSchema: omadaNatToolSchema(),
 		},
 		{
@@ -1184,16 +1184,18 @@ func propTypeFor(key string) string {
 // dry_run flag documented even though the surface always refuses.
 func omadaNatToolSchema() inputSchema {
 	return omadaToolSchemaExtra(map[string]propSchema{
-		"operation":  {Type: "string", Description: "NAT collection: port_forward or one_to_one"},
-		"action":     {Type: "string", Description: "create (default), update, delete, or toggle. update/delete/toggle require rule_uuid. Always refused: the Omada Open API exposes no live-site NAT write path."},
-		"rule_uuid":  {Type: "string", Description: "Target rule ID for update/delete/toggle"},
-		"protocol":   {Type: "string", Description: "IP protocol, lowercase (e.g. tcp, udp); empty = any"},
-		"port":       {Type: "string", Description: "External (WAN) port or range"},
-		"local_port": {Type: "string", Description: "Forwarded (internal) port or range"},
-		"target":     {Type: "string", Description: "Forwarded internal address (port_forward) or internal IP (one_to_one)"},
-		"source":     {Type: "string", Description: "Source restriction (limited addresses)"},
-		"label":      {Type: "string", Description: "Rule name"},
-		"dry_run":    {Type: "boolean", Description: "Preview only. Default true; the surface always refuses regardless."},
+		"wan_interfaces":   {Type: "string", Description: "Comma-separated WAN interface IDs"},
+		"external_address": {Type: "string", Description: "External address of a one-to-one rule"},
+		"operation":        {Type: "string", Description: "NAT collection: port_forward or one_to_one"},
+		"action":           {Type: "string", Description: "create (default), update, delete, or toggle. update/delete/toggle require rule_uuid."},
+		"rule_uuid":        {Type: "string", Description: "Target rule ID for update/delete/toggle"},
+		"protocol":         {Type: "string", Description: "IP protocol, lowercase (e.g. tcp, udp); empty = any"},
+		"port":             {Type: "string", Description: "External (WAN) port or range"},
+		"local_port":       {Type: "string", Description: "Forwarded (internal) port or range"},
+		"target":           {Type: "string", Description: "Forwarded internal address (port_forward) or internal IP (one_to_one)"},
+		"source":           {Type: "string", Description: "Source restriction (limited addresses)"},
+		"label":            {Type: "string", Description: "Rule name"},
+		"dry_run":          {Type: "boolean", Description: "Preview only. Default true; the surface always refuses regardless."},
 	}, []string{"operation"})
 }
 
