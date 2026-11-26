@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,7 +17,8 @@ func TestSwitchPortPlanParity(t *testing.T) {
 	configureMapFixtures(t)
 	old := outputPath
 	t.Cleanup(func() { outputPath = old })
-	outputPath = filepath.Join(t.TempDir(), "plan.json")
+	fixtureDir := t.TempDir()
+	outputPath = filepath.Join(fixtureDir, "plan.json")
 	const mac = "02:aa:bb:cc:dd:02"
 	const policy = `{"management_vlan":11,"ports":[{"port":8,"role":"ap-uplink","native":"management","tagged":["gaming"]},{"port":9,"role":"access","native":"gaming","client_mac":"02:aa:bb:cc:dd:05"},{"port":1,"role":"access","native":"gaming"}]}`
 	cmd := newSwitchPortsCmd()
@@ -25,7 +27,7 @@ func TestSwitchPortPlanParity(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(outputPath)
+	b, err := fs.ReadFile(os.DirFS(fixtureDir), "plan.json")
 	if err != nil {
 		t.Fatal(err)
 	}
