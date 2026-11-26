@@ -74,7 +74,7 @@ func TestMaintenanceReadsWithOperatorCA(t *testing.T) {
 	t.Setenv("OMADA_CLIENT_ID", opts.ClientID)
 	t.Setenv("OMADA_CLIENT_SECRET", opts.ClientSecret)
 	t.Setenv("OMADA_SITE", opts.Site)
-	t.Setenv("NYX_OMADA_MAINTENANCE_CA", ca)
+	t.Setenv("NYX_OMADA_CA_CERT", ca)
 	t.Setenv("NYX_CREDENTIALS_FILE", filepath.Join(dir, "store.json"))
 	ref, err := service.NewOmadaService().StageFirmware(t.Context(), opts, service.FirmwareStageDir(), "AA-BB-CC-DD-EE-00", "next", strings.NewReader("synthetic image"))
 	if err != nil {

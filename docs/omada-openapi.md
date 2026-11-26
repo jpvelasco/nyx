@@ -311,7 +311,7 @@ An operator can stage a local image with `nyx omada firmware stage --site
 The command returns an opaque reference. Configure that connection's site in
 its credential profile, then give `omada_staged_firmware` the reference and
 profile, or use `nyx omada firmware staged --site <site> --reference <ref>`.
-For a private CA, the operator can set `NYX_OMADA_MAINTENANCE_CA` to its PEM file in the MCP process environment. Nyx checks the stored image digest, controller, site, and target identity. The
+For a private CA, the operator can set `NYX_OMADA_CA_CERT` to its PEM file in the MCP process environment. Nyx checks the stored image digest, controller, site, and target identity. The
 stage stays in the private `firmware` directory beside the credential store.
 The MCP operation previews by default. A reboot also requires `confirm_reboot`
 and hardware support evidence for that model and revision. The support list
