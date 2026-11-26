@@ -119,7 +119,7 @@ func (e *Engine) runIsolationViaProbe(ctx context.Context, a intent.Assertion, p
 		anyTested = true
 		if err != nil || isPingBlocked(output) {
 			var remoteErr *probe.RemoteError
-			if isPingBlocked(output) && (err == nil || (errors.As(err, &remoteErr) && remoteErr.Status() == 1)) && endpointCovers(e.Spec, a.From, probeP.VLAN) {
+			if isPingBlocked(output) && (err == nil || (errors.As(err, &remoteErr) && remoteErr.Status() == 1)) && e.Spec.EndpointCovers(a.From, probeP.VLAN) {
 				unreachable = append(unreachable, gw)
 			}
 			// Remote exit non-zero (e.g. 100% loss) or output confirms loss.
@@ -242,9 +242,8 @@ func classifyPortProbeResult(err error) string {
 	}
 	var remoteErr *probe.RemoteError
 	if errors.As(err, &remoteErr) {
-		if remoteErr.Status() == 126 || remoteErr.Status() == 127 {
-			// Command not executable / not found: netcat is missing on the
-			// probe, so the port was never actually checked.
+		if remoteErr.Status() != 1 {
+			// Syntax, tooling and execution errors cannot establish a nonconnection.
 			return "unmeasured"
 		}
 		return "closed"

@@ -112,6 +112,10 @@ func NewEngine(spec *intent.Spec) *Engine {
 // Engine is designed for single-use; Run resets internal state for safety
 // but callers should create a new Engine via NewEngine for each audit.
 func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
+	bindings, err := e.Spec.BindServicePolicies()
+	if err != nil {
+		return nil, err
+	}
 	runStart := time.Now()
 	ctx, runSpan := otel.Tracer(auditTracerName).Start(ctx, "nyx.audit.run")
 	defer runSpan.End()
@@ -215,6 +219,9 @@ func (e *Engine) Run(ctx context.Context) (*models.AuditReport, error) {
 	}
 
 	wg.Wait()
+	for _, binding := range bindings {
+		findings = append(findings, servicePolicyFinding(e.Spec, binding, findings))
+	}
 	if len(e.Spec.Policies) > 0 || slices.ContainsFunc(assertions, func(a intent.Assertion) bool { return a.Type == "acl_drift" }) {
 		for _, direction := range uncoveredDirections(e.Spec, findings) {
 			r := models.NewCheckResult("audit", "uncovered_direction", "local", direction)

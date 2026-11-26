@@ -150,11 +150,11 @@ func uncoveredDirections(spec *intent.Spec, findings []models.CheckResult) []str
 			continue
 		}
 		for _, n := range spec.Networks {
-			if !slices.Contains(blocked, n.Gateway) || !endpointCovers(spec, a.To, n.Name) {
+			if !slices.Contains(blocked, n.Gateway) || !spec.EndpointCovers(a.To, n.Name) {
 				continue
 			}
 			covered := slices.ContainsFunc(spec.Policies, func(p intent.Policy) bool {
-				return endpointCovers(spec, p.From, source) && endpointCovers(spec, p.To, n.Name)
+				return spec.EndpointCovers(p.From, source) && spec.EndpointCovers(p.To, n.Name)
 			})
 			if !covered {
 				uncovered = append(uncovered, source+" -> "+n.Name)
@@ -163,25 +163,4 @@ func uncoveredDirections(spec *intent.Spec, findings []models.CheckResult) []str
 	}
 	slices.Sort(uncovered)
 	return slices.Compact(uncovered)
-}
-
-func endpointCovers(spec *intent.Spec, declared, actual string) bool {
-	if actual == "" {
-		return false
-	}
-	for endpoint := range strings.SplitSeq(declared, ",") {
-		name := intent.NormalizeZoneRef(strings.TrimSpace(endpoint))
-		if name == "" {
-			continue
-		}
-		if strings.EqualFold(name, "any") || strings.EqualFold(name, actual) {
-			return true
-		}
-		for _, n := range spec.Networks {
-			if strings.EqualFold(n.Name, actual) && strings.EqualFold(n.Zone, name) {
-				return true
-			}
-		}
-	}
-	return false
 }

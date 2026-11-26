@@ -14,14 +14,15 @@ import (
 
 // Spec is the top-level intent file
 type Spec struct {
-	Version    int         `yaml:"version" json:"version"`
-	Site       string      `yaml:"site" json:"site"`
-	Networks   []Network   `yaml:"networks" json:"networks"`
-	VPN        []VPNConfig `yaml:"vpn" json:"vpn"`
-	Probes     []Probe     `yaml:"probes,omitempty" json:"probes,omitempty"`
-	Policies   []Policy    `yaml:"policies" json:"policies"`
-	Assertions []Assertion `yaml:"assertions" json:"assertions"`
-	Inventory  *Inventory  `yaml:"inventory,omitempty" json:"inventory,omitempty"`
+	Version         int             `yaml:"version" json:"version"`
+	Site            string          `yaml:"site" json:"site"`
+	Networks        []Network       `yaml:"networks" json:"networks"`
+	VPN             []VPNConfig     `yaml:"vpn" json:"vpn"`
+	Probes          []Probe         `yaml:"probes,omitempty" json:"probes,omitempty"`
+	Policies        []Policy        `yaml:"policies" json:"policies"`
+	Assertions      []Assertion     `yaml:"assertions" json:"assertions"`
+	ServicePolicies []ServicePolicy `yaml:"service_policies,omitempty" json:"service_policies,omitempty"`
+	Inventory       *Inventory      `yaml:"inventory,omitempty" json:"inventory,omitempty"`
 }
 
 // Inventory is an observation snapshot of the controller's device inventory,
@@ -137,6 +138,7 @@ type PolicyException struct {
 
 // Assertion defines a check to evaluate
 type Assertion struct {
+	Name            string  `yaml:"name,omitempty" json:"name,omitempty"`
 	Type            string  `yaml:"type" json:"type"`
 	Network         string  `yaml:"network,omitempty" json:"network,omitempty"`
 	From            string  `yaml:"from,omitempty" json:"from,omitempty"`
@@ -246,7 +248,11 @@ func (supports ProviderLookup) ValidateSpec(spec *Spec) error {
 	if err := validateInventory(spec.Inventory); err != nil {
 		return err
 	}
-	return supports.validateAssertions(spec, probeNames)
+	if err := supports.validateAssertions(spec, probeNames); err != nil {
+		return err
+	}
+	_, err = spec.BindServicePolicies()
+	return err
 }
 
 func (supports ProviderLookup) validateNetworks(networks []Network) error {
