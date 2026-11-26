@@ -188,3 +188,24 @@ func TestNetworkMapSelectionErrors(t *testing.T) {
 		t.Errorf("canceled map: %v", err)
 	}
 }
+
+func TestMapCommandErrorsPrecedeExport(t *testing.T) {
+	configureMapFixtures(t)
+	previousOutput, previousTimeout := outputPath, timeout
+	t.Cleanup(func() { outputPath, timeout = previousOutput, previousTimeout })
+	outputPath = t.TempDir()
+	for _, tc := range []struct{ selector, duration, want string }{
+		{"fixture-map/home", "invalid", "timeout"}, {"absent/home", "1s", "unregistered"}, {"fixture-map/home", "1s", "opening output file"},
+	} {
+		timeout = tc.duration
+		cmd := newNetworkMapCmd()
+		cmd.SetContext(t.Context())
+		cmd.SetArgs([]string{"--connection", tc.selector})
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("wanted %s, got %v", tc.want, err)
+		}
+	}
+}
