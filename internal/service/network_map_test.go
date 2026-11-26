@@ -8,6 +8,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/testutil/providerfixture"
 	"github.com/jpvelasco/nyx/internal/topology"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -32,6 +33,15 @@ func TestNetworkMapConnectionAvailability(t *testing.T) {
 	svc := NewTopologyService()
 	if _, err := svc.Map(ctx, NetworkMapOptions{}); err == nil {
 		t.Fatal("no sources")
+	}
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Map(ctx, NetworkMapOptions{}); err == nil || err.Error() != "unable to enumerate configured connections" {
+		t.Fatalf("unsafe store error: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
 	}
 	reader := new(mapTestReader)
 	if err := providers.Register(reader); err != nil {
