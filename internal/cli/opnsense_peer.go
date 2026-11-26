@@ -3,12 +3,12 @@ package cli
 import (
 	"context"
 	"errors"
-	"github.com/jpvelasco/nyx/internal/credentials"
-	"github.com/jpvelasco/nyx/internal/storepath"
 	"os"
 
+	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/service"
+	"github.com/jpvelasco/nyx/internal/storepath"
 	"github.com/spf13/cobra"
 )
 
