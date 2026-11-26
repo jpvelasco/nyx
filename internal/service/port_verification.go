@@ -34,25 +34,36 @@ func verifyPortEvidence(ctx context.Context, c *backend.Client, site string, req
 	}
 	nodes, err := c.GetClientTopology(ctx, site, mac.String())
 	if err == nil {
+		var observed string
 		for _, n := range nodes {
-			if n.NodeType != "clientNode" || backend.NormalizeMAC(n.MAC) != backend.NormalizeMAC(mac.String()) || n.SwitchPort == "" {
+			if n.NodeType != "clientNode" || backend.NormalizeMAC(n.MAC) != backend.NormalizeMAC(mac.String()) || n.SwitchPort == "" || n.SwitchMAC == "" {
 				continue
 			}
+			state := "different attachment"
 			if backend.NormalizeMAC(n.SwitchMAC) == backend.NormalizeMAC(req.SwitchMAC) && n.SwitchPort == strconv.Itoa(req.Port) {
-				result.Connectivity = "attached"
-			} else {
-				result.Connectivity = "different attachment"
+				state = "attached"
 			}
+			if observed != "" && observed != state {
+				observed = "unverified"
+				break
+			}
+			observed = state
+		}
+		if observed != "" {
+			result.Connectivity = observed
 		}
 	}
 	rows := []backend.ConnectedClient{{MAC: mac.String()}}
 	if err := c.EnrichFromDHCP(ctx, site, rows, nets); err == nil && rows[0].IP != "" {
-		if strings.EqualFold(rows[0].NetworkName, req.Native) {
-			result.DHCP = "lease on desired native network"
-		} else if rows[0].NetworkName != "" {
-			result.DHCP = "lease on another network"
-		} else {
+		requested, targetErr := resolveNetworkID(nets, req.Native)
+		leased, leaseErr := resolveNetworkID(nets, rows[0].NetworkName)
+		switch {
+		case targetErr != nil || leaseErr != nil:
 			result.DHCP = "lease network unknown"
+		case requested == leased:
+			result.DHCP = "lease on desired native network"
+		default:
+			result.DHCP = "lease on another network"
 		}
 	}
 	return result

@@ -906,6 +906,7 @@ func TestManagedPortVerificationAndSharedClients(t *testing.T) {
 	const sw = "bb:11:22:33:44:55"
 	port := "8"
 	lease := true
+	conflicting := false
 	clients := `[{"mac":"` + a + `"},{"mac":"` + b + `"}]`
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -918,7 +919,11 @@ func TestManagedPortVerificationAndSharedClients(t *testing.T) {
 			if strings.Contains(r.URL.Path, "dd-05/") {
 				mac = b
 			}
-			writeOmadaEnvelope(w, 0, `[{"nodeType":"clientNode","clientNode":{"mac":"`+mac+`","upOswInfo":{"mac":"`+sw+`","port":"`+port+`"}}}]`)
+			node := `{"nodeType":"clientNode","clientNode":{"mac":"` + mac + `","upOswInfo":{"mac":"` + sw + `","port":"` + port + `"}}}`
+			if conflicting {
+				node += `,{"nodeType":"clientNode","clientNode":{"mac":"` + mac + `","upOswInfo":{"mac":"` + sw + `","port":"9"}}}`
+			}
+			writeOmadaEnvelope(w, 0, "["+node+"]")
 		case strings.HasSuffix(r.URL.Path, "/dhcp/user-list"):
 			rows := "[]"
 			if lease {
@@ -958,6 +963,12 @@ func TestManagedPortVerificationAndSharedClients(t *testing.T) {
 	if v := apply(); v.Membership != "observed" || v.Connectivity != "attached" || v.DHCP != "lease on desired native network" {
 		t.Fatalf("wrong post-apply evidence %+v", v)
 	}
+	conflicting = true
+	req.Native = "n1"
+	if v := apply(); v.Connectivity != "unverified" || v.DHCP != "lease on desired native network" {
+		t.Fatalf("conflicting attachment or native network ID mislabeled: %+v", v)
+	}
+	conflicting = false
 	port = "9"
 	lease = false
 	if v := apply(); v.Membership != "observed" || v.Connectivity != "different attachment" || v.DHCP != "unverified" {
