@@ -93,7 +93,7 @@ func (e *segmentProviders) checkRules(rows []OpnsenseInterface) error {
 	}
 	source, _ := netip.ParsePrefix(e.req.Gateway)
 	for _, rule := range rules {
-		if rule.Disabled || !strings.EqualFold(rule.Action, "pass") {
+		if rule.Disabled && !rule.EnabledUnknown || strings.EqualFold(rule.Action, "block") || strings.EqualFold(rule.Action, "reject") {
 			continue
 		}
 		relevant := len(rule.Interface) == 0
@@ -104,6 +104,9 @@ func (e *segmentProviders) checkRules(rows []OpnsenseInterface) error {
 		}
 		if !relevant {
 			continue
+		}
+		if rule.EnabledUnknown || !strings.EqualFold(rule.Action, "pass") {
+			return errors.New("could not verify state or action of a rule covering the segment")
 		}
 		if len(rule.Interface) == 1 && !rule.ExtraConditions {
 			want := e.filterRequest("permit_dns")
