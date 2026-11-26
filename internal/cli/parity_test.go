@@ -12,6 +12,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/providers"
 	omadaprov "github.com/jpvelasco/nyx/internal/providers/omada"
 	opnsenseprov "github.com/jpvelasco/nyx/internal/providers/opnsense"
+	"github.com/jpvelasco/nyx/internal/service"
 )
 
 // mcpCapabilityTools maps each provider to the MCP tools that cover every
@@ -112,6 +113,14 @@ func TestProviderCapabilitySurfaceParity(t *testing.T) {
 	for _, p := range providers.List() {
 		for _, cap := range p.Capabilities() {
 			t.Run(p.Name()+"/"+cap, func(t *testing.T) {
+				// Map combines multiple providers and lives under the topology command.
+				if cap == providers.NetworkMapCapability {
+					command, _, err := rootCmd.Find([]string{"topology", service.NetworkMapCommand})
+					if err != nil || command.Name() != service.NetworkMapCommand || !toolRegistered(service.NetworkMapTool) {
+						t.Fatal("configured-provider map is missing from CLI or MCP")
+					}
+					return
+				}
 				// MCP side: the capability must have a mapping, and every
 				// mapped tool must actually be registered.
 				tools, ok := mcpCapabilityTools[p.Name()][cap]

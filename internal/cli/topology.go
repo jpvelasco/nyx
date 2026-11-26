@@ -346,6 +346,7 @@ func describeFingerprintEdge(edge topology.FingerprintEdge) string {
 }
 
 func init() {
+	topologyCmd.AddCommand(newNetworkMapCmd())
 	addTopologyFingerprintFlags(topologyCmd)
 	topologyCmd.Flags().StringVar(&topoOmadaProfile, "omada-profile", "", "Named Omada credential profile")
 	topologyCmd.Flags().StringVar(&topoOpnsenseProfile, "opnsense-profile", "", "Named OPNsense credential profile")

@@ -85,8 +85,9 @@ type inputSchema struct {
 }
 
 type propSchema struct {
-	Type        string `json:"type"`
-	Description string `json:"description"`
+	Items       *propSchema `json:"items,omitempty"`
+	Type        string      `json:"type"`
+	Description string      `json:"description,omitempty"`
 }
 
 type toolsListResult struct {
