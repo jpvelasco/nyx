@@ -33,8 +33,8 @@ func ParsePerformancePath(text string) ([]PerformanceTarget, error) {
 		return nil, errors.New("path must contain one array")
 	}
 	for _, t := range targets {
-		_, profile, named := strings.Cut(t.Connection, "/")
-		if !named || profile == "" {
+		provider, profile, named := strings.Cut(t.Connection, "/")
+		if !named || provider == "" || profile == "" || strings.Contains(profile, "/") {
 			return nil, errors.New("each hop requires its provider/profile connection")
 		}
 		switch t.Kind {
@@ -104,16 +104,16 @@ func AssessHop(n int, kind string, a, b PassiveSample) HopPerformance {
 	if a.Status != "available" || b.Status != "available" || elapsed <= 0 {
 		return r
 	}
+	if a.FlowSet != b.FlowSet {
+		r.Status = "flow_set_changed"
+		return r
+	}
 	pairs := [][2]*uint64{{a.RxBytes, b.RxBytes}, {a.TxBytes, b.TxBytes}, {a.RxErrors, b.RxErrors}, {a.TxErrors, b.TxErrors}, {a.Drops, b.Drops}}
 	for _, pair := range pairs {
 		if pair[0] != nil && pair[1] != nil && *pair[1] < *pair[0] {
 			r.Status = "counter_reset"
 			return r
 		}
-	}
-	if a.FlowSet != b.FlowSet {
-		r.Status = "flow_set_changed"
-		return r
 	}
 	rate := func(first, last *uint64) *float64 {
 		if first == nil || last == nil {
@@ -148,7 +148,7 @@ func AssessHop(n int, kind string, a, b PassiveSample) HopPerformance {
 		r.Recommendation = "Compare this gateway monitor with the other hops during the same workload."
 	case r.RxBPS != nil && r.TxBPS != nil && *r.RxBPS == 0 && *r.TxBPS == 0:
 		r.Status = "idle"
-	case r.RxBPS != nil || r.TxBPS != nil || b.RxRate != nil || b.TxRate != nil || b.Utilization != nil || b.LatencyMS != nil || b.Loss != nil || b.Drops != nil || b.LinkUp != nil:
+	case r.RxBPS != nil || r.TxBPS != nil || b.RxRate != nil || b.TxRate != nil || b.Utilization != nil || b.Interference != nil || b.LatencyMS != nil || b.Loss != nil || b.Drops != nil || b.LinkUp != nil:
 		r.Status = "observed"
 	}
 	return r
