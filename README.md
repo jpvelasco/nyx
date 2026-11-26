@@ -528,6 +528,19 @@ conflicting attachments retain their status. A switch downstream of the last
 managed uplink can hide the physical port. Private detail includes observed
 addresses, SSIDs and device labels.
 
+`nyx topology performance PATH-JSON --interval 5s` and MCP `path_performance`
+read the same selected path twice. Build the JSON array in path order from
+`topology map` or `locate-client`. Each hop supplies its `connection`
+(`provider/profile`) and `kind`. A `switch_port` takes `switch_mac` and `port`.
+A `channel` takes `band` (`2g`, `5g`, `6g`), `channel` and optionally `ap_mac`
+for radio interference. An `interface`, `gateway` or `shaper_queue` takes its
+`name` (queue ID for a shaper). Results identify hops by their input position.
+Both samples carry timestamps. Configured speed, current link state,
+reported rate and counter-derived mean traffic rate are separate fields.
+An idle link and a reset counter have distinct statuses. Throughput remains
+unknown without an end-to-end transfer measurement. Repeat the same path,
+interval and workload to compare a change.
+
 `nyx topology --fingerprint` adds an architecture summary from the configured
 Omada and OPNsense providers. It shows inferred enforcement and bridge roles,
 observed managed upstream links, and VLAN gateway provider assignments. The

@@ -38,6 +38,8 @@ func Register(p Adapter) error {
 		switch capability {
 		case "info":
 			_, supported = p.(InfoReader)
+		case PerformanceCapability:
+			_, supported = p.(PerformanceObserver)
 		case ClientLocationCapability:
 			_, supported = p.(ClientObserver)
 		case NetworkMapCapability:

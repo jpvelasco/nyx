@@ -62,6 +62,12 @@ func configureMapFixtures(t *testing.T) {
 			envelope(`{"accessToken":"tok"}`)
 		case "/openapi/v1/fixture-controller/sites":
 			envelope(`[{"id":"s1","name":"fixture-site"}]`)
+		case "switches/ports/counters":
+			envelope(`[{"switchMac":"02:aa:bb:cc:dd:02","port":8,"linkSpeed":0,"rxBytes":100,"txBytes":200,"rxErrors":0,"txErrors":0,"portStatus":{"linkStatus":1,"linkSpeed":3,"txRate":1000}}]`)
+		case "aps/02-aa-bb-cc-dd-03/radios":
+			envelope(`{"wp5g":{"actualChannel":"36 / 5180MHz","interUtil":30}}`)
+		case "dashboard/channels":
+			envelope(`{"5g channel stat":[{"channel":36,"channelUtilization":90}]}`)
 		case "networks/client":
 			envelope(`[{"mac":"02:aa:bb:cc:dd:04","type":"wireless"}]`)
 		case "clients/02-aa-bb-cc-dd-04/client-link-topology":
@@ -101,6 +107,10 @@ func configureMapFixtures(t *testing.T) {
 			testutil.WriteBody(w, `{"dnsmasq":{"enable":"1"}}`)
 		case "/api/dnsmasq/leases/search":
 			testutil.WriteBody(w, `{"rows":[]}`)
+		case "/api/routes/gateway/status":
+			testutil.WriteBody(w, `{"items":[{"name":"gateway","delay":"2.5 ms","loss":"1 %"}]}`)
+		case "/api/trafficshaper/service/statistics":
+			testutil.WriteBody(w, `{"status":"ok","items":[{"id":"1.1","type":"queue","flows":[{"Source":"192.0.2.1","Destination":"192.0.2.2","Prot":"tcp","drop_pkt":2}]}]}`)
 		case "/api/diagnostics/interface/get_arp":
 			testutil.WriteBody(w, `[{"mac":"02:aa:bb:cc:dd:04","ip":"10.0.30.10","intf":"vlan30"}]`)
 		case "/api/diagnostics/interface/get_ndp":
@@ -108,7 +118,7 @@ func configureMapFixtures(t *testing.T) {
 		case "/api/interfaces/vlan_settings/search_item":
 			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"gaming-zone","if":"igb0","vlanif":"vlan30","tag":"30"}]}`)
 		case "/api/interfaces/overview/interfaces_info":
-			testutil.WriteBody(w, `{"rows":[{"identifier":"lan","device":"igb0","link_type":"ether","macaddr":"02:aa:bb:cc:dd:01","enabled":true},{"identifier":"opt1","device":"vlan30","addr4":"10.0.30.1/24","enabled":true}]}`)
+			testutil.WriteBody(w, `{"rows":[{"identifier":"lan","device":"igb0","link_type":"ether","macaddr":"02:aa:bb:cc:dd:01","enabled":true},{"identifier":"opt1","device":"vlan30","addr4":"10.0.30.1/24","enabled":true,"statistics":{"rx":{"bytes":0},"tx":{"bytes":0}}}]}`)
 		default:
 			t.Errorf("unexpected firewall route %s", r.URL.Path)
 			http.NotFound(w, r)

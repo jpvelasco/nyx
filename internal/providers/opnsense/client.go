@@ -96,22 +96,24 @@ func (si SystemInformation) stripVersionPrefix(prefix string) string {
 // controller answers interfaces_info?details=true; they stay zero on the
 // legacy map shape.
 type Interface struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	DHCP        bool     `json:"dhcp"`
-	IP          string   `json:"ipv4"`
-	Subnet      int      `json:"-"`
-	Gateway     string   `json:"ipv4_gateway"`
-	Device      string   `json:"device,omitempty"`
-	MAC         string   `json:"mac,omitempty"`
-	LinkType    string   `json:"link_type,omitempty"`
-	Enabled     bool     `json:"enabled,omitempty"`
-	MTU         int      `json:"mtu,omitempty"`
-	Members     []string `json:"members,omitempty"`
-	RxPackets   uint64   `json:"rx_packets,omitempty"`
-	RxBytes     uint64   `json:"rx_bytes,omitempty"`
-	TxPackets   uint64   `json:"tx_packets,omitempty"`
-	TxBytes     uint64   `json:"tx_bytes,omitempty"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description"`
+	DHCP            bool     `json:"dhcp"`
+	IP              string   `json:"ipv4"`
+	Subnet          int      `json:"-"`
+	Gateway         string   `json:"ipv4_gateway"`
+	Device          string   `json:"device,omitempty"`
+	MAC             string   `json:"mac,omitempty"`
+	LinkType        string   `json:"link_type,omitempty"`
+	Enabled         bool     `json:"enabled,omitempty"`
+	MTU             int      `json:"mtu,omitempty"`
+	Members         []string `json:"members,omitempty"`
+	ReportedRxBytes *uint64  `json:"-"`
+	ReportedTxBytes *uint64  `json:"-"`
+	RxPackets       uint64   `json:"rx_packets,omitempty"`
+	RxBytes         uint64   `json:"rx_bytes,omitempty"`
+	TxPackets       uint64   `json:"tx_packets,omitempty"`
+	TxBytes         uint64   `json:"tx_bytes,omitempty"`
 }
 
 // Service is one row from POST /api/core/service/search.
@@ -273,12 +275,12 @@ func parseInterfaces(raw []byte) ([]Interface, error) {
 			Gateways   []string `json:"gateways"`
 			Statistics struct {
 				RX struct {
-					Packets uint64 `json:"packets"`
-					Bytes   uint64 `json:"bytes"`
+					Packets uint64  `json:"packets"`
+					Bytes   *uint64 `json:"bytes"`
 				} `json:"rx"`
 				TX struct {
-					Packets uint64 `json:"packets"`
-					Bytes   uint64 `json:"bytes"`
+					Packets uint64  `json:"packets"`
+					Bytes   *uint64 `json:"bytes"`
 				} `json:"tx"`
 			} `json:"statistics"`
 			Config struct {
@@ -300,16 +302,22 @@ func parseInterfaces(raw []byte) ([]Interface, error) {
 				continue
 			}
 			iface := Interface{
-				Name:        name,
-				Description: row.Description,
-				Device:      firstNonEmpty(row.Device, row.Config.IF),
-				MAC:         row.MAC,
-				LinkType:    row.LinkType,
-				Enabled:     row.Enabled || row.Config.Enable == "1",
-				RxPackets:   row.Statistics.RX.Packets,
-				RxBytes:     row.Statistics.RX.Bytes,
-				TxPackets:   row.Statistics.TX.Packets,
-				TxBytes:     row.Statistics.TX.Bytes,
+				Name:            name,
+				Description:     row.Description,
+				Device:          firstNonEmpty(row.Device, row.Config.IF),
+				MAC:             row.MAC,
+				LinkType:        row.LinkType,
+				Enabled:         row.Enabled || row.Config.Enable == "1",
+				RxPackets:       row.Statistics.RX.Packets,
+				ReportedRxBytes: row.Statistics.RX.Bytes,
+				TxPackets:       row.Statistics.TX.Packets,
+				ReportedTxBytes: row.Statistics.TX.Bytes,
+			}
+			if iface.ReportedRxBytes != nil {
+				iface.RxBytes = *iface.ReportedRxBytes
+			}
+			if iface.ReportedTxBytes != nil {
+				iface.TxBytes = *iface.ReportedTxBytes
 			}
 			if mtu, err := strconv.Atoi(row.Config.MTU); err == nil {
 				iface.MTU = mtu

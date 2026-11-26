@@ -110,8 +110,8 @@ func TestProviderIdentity(t *testing.T) {
 		t.Errorf("Name() = %q, want omada", p.Name())
 	}
 	caps := p.Capabilities()
-	if len(caps) != 6 || caps[0] != "info" || caps[1] != "import" || caps[2] != "check" || caps[3] != "inventory" || caps[4] != providers.NetworkMapCapability || caps[5] != providers.ClientLocationCapability {
-		t.Errorf("Capabilities() = %v, want [info import check inventory network_map client_location]", caps)
+	if len(caps) != 7 || caps[0] != "info" || caps[1] != "import" || caps[2] != "check" || caps[3] != "inventory" || caps[4] != providers.NetworkMapCapability || caps[5] != providers.ClientLocationCapability || caps[6] != providers.PerformanceCapability {
+		t.Errorf("Capabilities() = %v, want [info import check inventory network_map client_location path_performance]", caps)
 	}
 }
 
