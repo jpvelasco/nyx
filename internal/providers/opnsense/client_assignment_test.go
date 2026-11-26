@@ -1,6 +1,7 @@
 package opnsense
 
 import (
+	"errors"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -62,6 +63,21 @@ func TestAssignmentRequiresCompleteVLANInventory(t *testing.T) {
 		c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) { testutil.WriteBody(w, body) })
 		if _, err := c.AssignmentVLANs(t.Context()); err == nil {
 			t.Fatal("accepted incomplete VLAN target inventory")
+		}
+	}
+}
+
+func TestAssignmentHTTPFailures(t *testing.T) {
+	for _, status := range []int{http.StatusForbidden, http.StatusNotFound} {
+		c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) })
+		if _, err := c.Assignments(t.Context()); err == nil || errors.Is(err, ErrAssignmentUnavailable) != (status == http.StatusNotFound) {
+			t.Fatalf("assignment inventory %d: %v", status, err)
+		}
+		if _, err := c.AssignmentsPending(t.Context()); err == nil || errors.Is(err, ErrAssignmentUnavailable) != (status == http.StatusNotFound) {
+			t.Fatalf("queue %d: %v", status, err)
+		}
+		if err := c.ActivateAssignments(t.Context()); err == nil {
+			t.Fatal("ignored HTTP error")
 		}
 	}
 }

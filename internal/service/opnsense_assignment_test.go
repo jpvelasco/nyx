@@ -208,3 +208,65 @@ func TestAssignmentRejectsSubnetAndBroadcast(t *testing.T) {
 		}
 	}
 }
+
+func TestAssignmentRechecksQueueBeforeAndAfterActivation(t *testing.T) {
+	for _, fault := range []string{"stage_reply", "staged_inventory", "staged_identity", "unrelated_change", "active_inventory", "active_identity"} {
+		t.Run(fault, func(t *testing.T) {
+			adds, activations := 0, 0
+			server := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/interfaces/vlan_settings/search_item":
+					testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"v1","if":"igb0","tag":"30","vlanif":"vlan30"}]}`)
+				case "/api/diagnostics/interface/get_routes":
+					testutil.WriteBody(w, `[{"destination":"default"}]`)
+				case "/api/interfaces/assignment/pending":
+					if adds > 0 && activations == 0 {
+						testutil.WriteBody(w, `{"status":"pending"}`)
+					} else {
+						testutil.WriteBody(w, `{"status":"ok"}`)
+					}
+				case "/api/interfaces/assignment/search_item":
+					if adds == 0 {
+						testutil.WriteBody(w, `{"total":0,"rows":[]}`)
+						return
+					}
+					if fault == "staged_inventory" || fault == "active_inventory" && activations == 1 {
+						w.WriteHeader(http.StatusForbidden)
+						return
+					}
+					role := "gaming"
+					if fault == "staged_identity" || fault == "active_identity" && activations == 1 {
+						role = "management"
+					}
+					rows := []map[string]string{{"identifier": "opt3", "if": "vlan30", "descr": role, "enable": "1", "type4": "staticv4", "ipaddr": "10.0.30.1/24", "pending_action": "update"}}
+					if fault == "unrelated_change" {
+						rows = append(rows, map[string]string{"identifier": "opt4", "if": "vlan40", "descr": "servers", "pending_action": "update"})
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"total": len(rows), "rows": rows})
+				case "/api/interfaces/assignment/add_item":
+					adds++
+					if fault == "stage_reply" {
+						http.Error(w, "lost", http.StatusBadGateway)
+						return
+					}
+					testutil.WriteBody(w, `{"result":"saved","uuid":"opt3"}`)
+				case "/api/interfaces/assignment/reconfigure":
+					activations++
+					testutil.WriteBody(w, `{"status":"ok"}`)
+				default:
+					t.Error("unexpected call", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			})
+			req := OpnsenseVLANRequest{Kind: "assignment", Parent: "igb0", Tag: 30, Description: "gaming", Address: "10.0.30.1/24"}
+			_, err := NewOpnsenseService().ApplyVLAN(t.Context(), opnsenseOptions(server), req, false)
+			wantActivations := 0
+			if strings.HasPrefix(fault, "active_") {
+				wantActivations = 1
+			}
+			if err == nil || adds != 1 || activations != wantActivations {
+				t.Fatalf("err %v, adds %d, activations %d", err, adds, activations)
+			}
+		})
+	}
+}
