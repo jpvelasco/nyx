@@ -150,7 +150,7 @@ func (s *OmadaService) ListACLs(ctx context.Context, opts OmadaOptions) ([]Omada
 // and a proposed intent spec. It is read-only: nothing is applied. The
 // proposal is validated before any controller request is made.
 func (s *OmadaService) Plan(ctx context.Context, opts OmadaOptions, proposedYAML string) (*OmadaPlan, error) {
-	proposed, err := intent.ParseSpec([]byte(proposedYAML))
+	proposed, err := providers.Specs.ParseSpec([]byte(proposedYAML))
 	if err != nil {
 		return nil, err
 	}

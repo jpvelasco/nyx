@@ -59,10 +59,15 @@ func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.C
 	}
 
 	// Look up provider from registry
-	p := providers.Get(providerName)
-	if p == nil {
+	p, exists := providers.LookupAdapter(providerName)
+	if !exists {
 		return aclCheckErrorResult(providerName, a.Policy,
 			fmt.Sprintf("provider %q not found in registry", providerName)), nil
+	}
+
+	checker, ok := p.(providers.ACLChecker)
+	if !ok {
+		return aclCheckErrorResult(providerName, a.Policy, fmt.Sprintf("provider %q does not support acl_check", providerName)), nil
 	}
 
 	// Build import options from environment (backward-compatible with existing env var pattern)
@@ -90,6 +95,6 @@ func (e *Engine) runACLCheck(ctx context.Context, a intent.Assertion) (*models.C
 		ExpectBidirectional: a.ExpectBidirectional,
 	}
 
-	result, err := p.CheckACL(ctx, req, opts)
+	result, err := checker.CheckACL(ctx, req, opts)
 	return result, opts.Connection.RedactError(err, opts.Credentials)
 }

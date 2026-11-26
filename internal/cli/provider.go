@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,6 +13,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/intent"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/report"
+	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/storepath"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -39,10 +40,7 @@ var providerListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all registered providers and their capabilities",
 	RunE: func(_ *cobra.Command, _ []string) error {
-		list := providers.List()
-		sort.Slice(list, func(i, j int) bool {
-			return list[i].Name() < list[j].Name()
-		})
+		list := providers.Adapters()
 		if jsonOutput {
 			type entry struct {
 				Name         string   `json:"name"`
@@ -78,28 +76,23 @@ var providerListCmd = &cobra.Command{
 // BuildProviderSubcommands creates `nyx <vendor> import/check/info` subcommands
 // for each registered provider and adds them to root.
 func BuildProviderSubcommands(root *cobra.Command) {
-	for _, p := range providers.List() {
-		p := p
+	for _, p := range providers.Adapters() {
 		vendorCmd := &cobra.Command{
 			Use:   p.Name(),
 			Short: fmt.Sprintf("%s provider commands", p.Name()),
 		}
 
-		caps := map[string]bool{}
-		for _, c := range p.Capabilities() {
-			caps[c] = true
+		if op, ok := service.ControllerInfo(p); ok {
+			vendorCmd.AddCommand(infoCommand(op))
 		}
-
-		if caps["info"] {
-			vendorCmd.AddCommand(buildInfoCmd(p))
+		legacy, _ := p.(providers.Provider)
+		if slices.Contains(p.Capabilities(), "import") {
+			vendorCmd.AddCommand(buildImportCmd(legacy))
 		}
-		if caps["import"] {
-			vendorCmd.AddCommand(buildImportCmd(p))
+		if slices.Contains(p.Capabilities(), "check") {
+			vendorCmd.AddCommand(buildCheckCmd(legacy))
 		}
-		if caps["check"] {
-			vendorCmd.AddCommand(buildCheckCmd(p))
-		}
-		if caps["inventory"] {
+		if slices.Contains(p.Capabilities(), "inventory") {
 			vendorCmd.AddCommand(buildInventoryCmd(p))
 		}
 
@@ -121,20 +114,20 @@ func BuildProviderSubcommands(root *cobra.Command) {
 	}
 }
 
-func buildInfoCmd(p providers.Provider) *cobra.Command {
+func infoCommand(op service.InfoOperation) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "info",
-		Short: fmt.Sprintf("Show %s controller version and connection info", p.Name()),
+		Use:   op.CLIName,
+		Short: fmt.Sprintf("Show %s controller version and connection info", op.Provider),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			opts := providerCommandOptions(cmd, p.Name())
-			if err := validateProviderOptions(opts, p.Name(), p.Name() != "omada"); err != nil {
+			opts := resolveProviderOptions(cmd, op.Provider, op.Authenticated)
+			if err := validateProviderOptions(opts, op.Provider, op.Authenticated); err != nil {
 				return err
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			info, err := p.Info(ctx, opts)
+			info, err := op.Read(ctx, opts)
 			if err != nil {
-				return opts.Connection.RedactError(err, opts.Credentials)
+				return err
 			}
 			if jsonOutput {
 				enc := json.NewEncoder(os.Stdout)
@@ -150,7 +143,7 @@ func buildInfoCmd(p providers.Provider) *cobra.Command {
 			return nil
 		},
 	}
-	addProviderFlags(cmd, p.Name())
+	addProviderFlags(cmd, op.Provider)
 	return cmd
 }
 
@@ -260,7 +253,7 @@ func buildCheckCmd(p providers.Provider) *cobra.Command {
 	return cmd
 }
 
-func buildInventoryCmd(p providers.Provider) *cobra.Command {
+func buildInventoryCmd(p providers.Adapter) *cobra.Command {
 	var includeFirewallDetails bool
 	var inventorySpec string
 	cmd := &cobra.Command{
@@ -269,7 +262,7 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var segmentEdges []intent.SegmentEdge
 			if inventorySpec != "" {
-				spec, err := intent.LoadSpec(inventorySpec)
+				spec, err := providers.Specs.LoadSpec(inventorySpec)
 				if err != nil {
 					return err
 				}
@@ -337,6 +330,10 @@ func buildInventoryCmd(p providers.Provider) *cobra.Command {
 // The built-in option fields retain the existing flags. New adapters read their
 // own declared fields from the command that was invoked.
 func providerCommandOptions(cmd *cobra.Command, name string) providers.ImportOptions {
+	return resolveProviderOptions(cmd, name, true)
+}
+
+func resolveProviderOptions(cmd *cobra.Command, name string, authenticated bool) providers.ImportOptions {
 	values := credentials.Entry{"host": providerHost, "site": providerSite}
 	switch name {
 	case "omada":
@@ -353,7 +350,6 @@ func providerCommandOptions(cmd *cobra.Command, name string) providers.ImportOpt
 		}
 	}
 	c := credentials.Connection{Provider: name, Profile: providerProfile}
-	authenticated := cmd == nil || cmd.Name() != "info" || name != "omada"
 	// CLI info accepts a host from the default store.
 	if !authenticated {
 		c.Profile = c.ProfileName()
@@ -430,5 +426,5 @@ func marshalSpecYAML(result *providers.ImportResult, providerName string) ([]byt
 }
 
 func init() {
-	providerCmd.AddCommand(providerListCmd)
+	providerCmd.AddCommand(providerListCmd, providerCapabilitiesCmd())
 }

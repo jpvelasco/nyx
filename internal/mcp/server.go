@@ -206,6 +206,7 @@ type playbookSurface interface {
 
 // Server is the MCP stdio server
 type Server struct {
+	readInfo    func(context.Context, service.InfoOperation, providers.ImportOptions) (*providers.ProviderInfo, error)
 	reader      io.Reader
 	writer      io.Writer
 	initialized bool
@@ -513,20 +514,6 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			},
 		},
 		{
-			Name:        "omada_get_info",
-			Description: "Fetch metadata (version, API version, omada CID) from an Omada SDN controller without authentication.",
-			InputSchema: inputSchema{
-				Type: "object",
-				Properties: map[string]propSchema{
-					"profile":         {Type: "string", Description: "Named Omada credential profile"},
-					"host":            {Type: "string", Description: "Omada controller hostname or IP"},
-					"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
-					"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
-				},
-				Required: nil,
-			},
-		},
-		{
 			Name:        "omada_list_networks",
 			Description: "List LAN networks/VLANs configured on an Omada SDN controller site.",
 			InputSchema: omadaToolSchema(),
@@ -774,11 +761,6 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"profile_name": {Type: "string", Description: "Optional name for a new profile; derived when empty"},
 				"dry_run":      {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
 			}, []string{"switch_mac", "port", "native"}),
-		},
-		{
-			Name:        "opnsense_get_info",
-			Description: "Fetch system metadata (version, product, arch) from an OPNsense firewall. Reads the Dashboard-privileged system-information endpoint (no System: Firmware privilege required).",
-			InputSchema: opnsenseToolSchema(),
 		},
 		{
 			Name:        "opnsense_list_interfaces",
@@ -1099,6 +1081,10 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		},
 	}
 
+	for _, binding := range sharedBindings() {
+		tools = append(tools, binding.tool)
+	}
+
 	return &jsonRPCResponse{
 		JSONRPC: "2.0",
 		ID:      req.ID,
@@ -1340,6 +1326,14 @@ func statusResult(result *models.CheckResult) toolDispatchResult {
 
 func (s *Server) dispatchTool(ctx context.Context, name string, args map[string]interface{}) (string, bool) {
 	handler, ok := toolHandlers[name]
+	if !ok {
+		for _, binding := range sharedBindings() {
+			if binding.tool.Name == name {
+				handler, ok = binding.call, true
+				break
+			}
+		}
+	}
 	if !ok {
 		return fmt.Sprintf("unknown tool: %s", name), true
 	}
