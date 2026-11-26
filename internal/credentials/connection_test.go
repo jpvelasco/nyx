@@ -2,6 +2,8 @@ package credentials
 
 import (
 	"encoding/json"
+	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -97,5 +99,83 @@ func TestCredentialSchemaRegistration(t *testing.T) {
 	copy[1].Secret = false
 	if !SecretField("sensor", "token") {
 		t.Fatal("returned fields alias registered schema")
+	}
+}
+
+func TestConnectionDiagnosticRedaction(t *testing.T) {
+	c := Connection{Provider: "opnsense"}
+	values := Entry{"host": "firewall.example", "api_key": "fixture", "api_secret": "fixture-long"}
+	if c.Require(values) != nil || c.RedactError(nil, values) != nil {
+		t.Fatal("valid credentials were rejected")
+	}
+	if err := c.Require(Entry{"api_key": "fixture"}); err == nil || strings.Contains(err.Error(), "fixture") {
+		t.Fatal("missing credentials must expose field names only")
+	}
+	original := errors.New("timeout")
+	if c.RedactError(original, values) != original {
+		t.Fatal("unchanged error lost its identity")
+	}
+	got := c.RedactError(errors.New("fixture-long rejected fixture"), values)
+	if got.Error() != "[redacted] rejected [redacted]" {
+		t.Fatal("overlapping credential values were disclosed")
+	}
+}
+
+func TestLegacyConnectionStoreAndMissingPaths(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	c := Connection{Provider: "legacy"}
+	if err := c.Require(nil); err == nil {
+		t.Fatal("missing legacy host")
+	}
+	if got := Resolve(c, nil, nil, "", true); got["host"] != "" {
+		t.Fatal("unconfigured connection resolved a host")
+	}
+	store, err := Open(DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Set("probe", "management", Entry{"host": "probe.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Set(c.Provider, c.ProfileName(), Entry{"host": "controller.example", "client_secret": "fixture-secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.Connections()) != 1 {
+		t.Fatal("SSH probe appeared as a controller connection")
+	}
+	values := Resolve(c, nil, nil, "", true)
+	if c.Require(values) != nil || values["client_secret"] != "fixture-secret" {
+		t.Fatal("legacy stored entry did not resolve")
+	}
+	if got := Resolve(c, nil, nil, "", false); len(got) != 0 {
+		t.Fatal("unqualified metadata read consulted store")
+	}
+	if err = os.WriteFile(DefaultPath(), []byte("corrupt"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := Resolve(c, nil, nil, "", true); len(got) != 0 {
+		t.Fatal("damaged store returned credentials")
+	}
+}
+
+func TestDefaultControllerEnvironmentAndStore(t *testing.T) {
+	store, path := newTestStore(t)
+	for _, tc := range []struct{ provider, key, secret, env string }{{"omada", "client_id", "client_secret", "OMADA_CLIENT_ID"}, {"opnsense", "api_key", "api_secret", "OPNSENSE_API_KEY"}} {
+		c := Connection{Provider: tc.provider}
+		if err := store.Set(c.Provider, c.ProfileName(), Entry{"host": "controller.example", tc.key: "stored-key", tc.secret: "stored-secret"}); err != nil {
+			t.Fatal(err)
+		}
+		env := func(name string) string {
+			if name == tc.env {
+				return "from-env"
+			}
+			return ""
+		}
+		got := Resolve(c, nil, env, path, true)
+		if got[tc.key] != "from-env" || got[tc.secret] != "stored-secret" || got["host"] != "controller.example" {
+			t.Fatal("default environment and encrypted store precedence changed")
+		}
 	}
 }
