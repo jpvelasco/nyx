@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -55,14 +56,15 @@ func TestUniFiSwitchAndOPNsenseRouterMap(t *testing.T) {
 	}
 	old := outputPath
 	t.Cleanup(func() { outputPath = old })
-	outputPath = filepath.Join(t.TempDir(), "map.json")
+	fixtureDir := t.TempDir()
+	outputPath = filepath.Join(fixtureDir, "map.json")
 	cmd := newNetworkMapCmd()
 	cmd.SetContext(t.Context())
 	cmd.SetArgs([]string{"--connection", "unifi/home", "--connection", "opnsense/home", "--skip-tls-verify"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(outputPath)
+	raw, err := fs.ReadFile(os.DirFS(fixtureDir), "map.json")
 	if err != nil {
 		t.Fatal(err)
 	}
