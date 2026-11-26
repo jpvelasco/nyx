@@ -300,8 +300,8 @@ func TestHandleToolsList_Shape(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected toolsListResult, got %T", resp.Result)
 	}
-	if len(list.Tools) != 85 {
-		t.Fatalf("expected 85 tools, got %d", len(list.Tools))
+	if len(list.Tools) != 87 {
+		t.Fatalf("expected 87 tools, got %d", len(list.Tools))
 	}
 	names := map[string]string{}
 	for _, tl := range list.Tools {
@@ -2074,6 +2074,12 @@ func (s *stubOmadaSvc) Plan(_ context.Context, opts service.OmadaOptions, _ stri
 	return s.plan, s.err
 }
 
+func (s *stubOmadaSvc) ACLOrder(_ context.Context, opts service.OmadaOptions, req service.OmadaACLOrderRequest, dryRun bool) (*service.OmadaACLOrderResult, error) {
+	s.calls++
+	s.lastOpts = opts
+	return &service.OmadaACLOrderResult{Scope: req.Scope, DryRun: dryRun}, s.err
+}
+
 func (s *stubOmadaSvc) ApplyACL(_ context.Context, opts service.OmadaOptions, req service.OmadaACLApplyRequest) (*service.OmadaACLApplyResult, error) {
 	s.calls++
 	s.lastOpts = opts
@@ -3492,5 +3498,13 @@ func TestDispatchTopology_FingerprintAndDetailGate(t *testing.T) {
 				t.Errorf("untrusted_data wrapper present = %t, want %t: %s", wrapped, tc.detail, text)
 			}
 		})
+	}
+}
+
+func TestFirewallSchemaRefusesDroppedSelectors(t *testing.T) {
+	for _, args := range []map[string]any{{"destination_port": float64(53)}, {"destnation_port": "53"}, {"dry_run": "false"}} {
+		if err := validateMutationArgs(args, opnsenseFilterToolSchema(true)); err == nil {
+			t.Fatal("accepted a malformed selector")
+		}
 	}
 }

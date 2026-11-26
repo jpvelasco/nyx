@@ -71,6 +71,9 @@ type ACLType int
 
 // Scope is the collection label for a fetched ACL type.
 func (t ACLType) Scope() string {
+	if t == ACLTypeEAP {
+		return "eap"
+	}
 	if t == ACLTypeGateway {
 		return "gateway"
 	}
@@ -308,6 +311,9 @@ func (c *Client) GetGatewayACLRules(ctx context.Context, siteID string) ([]ACLRu
 // aclScopePath is the Open API collection for one ACL scope. Reads and
 // writes share the same per-scope path.
 func aclScopePath(siteID string, typ ACLType) string {
+	if typ == ACLTypeEAP {
+		return fmt.Sprintf("sites/%s/acls/eap-acls", siteID)
+	}
 	if typ == ACLTypeSwitch {
 		return fmt.Sprintf("sites/%s/acls/osw-acls", siteID)
 	}

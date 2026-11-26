@@ -286,3 +286,20 @@ func AliasMatchesWrite(a Alias, w AliasWrite) bool {
 	}
 	return true
 }
+
+// ExactFilterMatch applies the defaults used when a new service exception is
+// created. A request with no source port means any source port in this comparison.
+func ExactFilterMatch(r FirewallRule, w FilterWrite) bool {
+	// Metadata does not participate in semantic identity. Callers inspect additional
+	// enforcement conditions before accepting or modifying a candidate.
+	w.Description = ""
+	r.Protocol = firstNonEmpty(r.Protocol, "any")
+	r.SourcePort = firstNonEmpty(r.SourcePort, "any")
+	r.DestPort = firstNonEmpty(r.DestPort, "any")
+	r.Direction = firstNonEmpty(r.Direction, "in")
+	w.Protocol = firstNonEmpty(w.Protocol, "any")
+	w.SourcePort = firstNonEmpty(w.SourcePort, "any")
+	w.DestPort = firstNonEmpty(w.DestPort, "any")
+	w.Direction = firstNonEmpty(w.Direction, "in")
+	return FilterMatchesWrite(r, w)
+}

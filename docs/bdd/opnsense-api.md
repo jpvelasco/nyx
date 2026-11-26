@@ -511,3 +511,7 @@ When `PlanDHCP` / `ApplyDHCP` is called with kind=range
 Then the backend is `dnsmasq`, a missing range is `create`, dry-run issues zero POSTs, and a real apply POSTs add_range then `dnsmasq/service/reconfigure`
 And if neither backend is running the write errors with `no running DHCP backend`
 And the tests: `TestDetectDHCPBackend`, `TestOpnsenseServicePlanApplyDHCP`
+
+### Directional service exceptions
+
+`opnsense_plan_filter` and `opnsense_apply_filter` accept `source_port`, `destination_port`, `direction` and `address_family`. The corresponding CLI flags use hyphens. For example, a rule can permit inbound UDP destination port 53 from `iot` to a single resolver address on the selected interface. A scoped preview shows the existing sequence when available, its current rule, and the desired selectors. A repeated request recognizes an equivalent rule regardless of its description. The result of a write is checked against a fresh firewall inventory. Verifying delivery requires a separate service check from the intended source.
