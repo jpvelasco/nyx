@@ -1,11 +1,13 @@
 package service
 
 import (
+	"maps"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	backend "github.com/jpvelasco/nyx/internal/backends/omada"
 	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/providers"
 	omadaprovider "github.com/jpvelasco/nyx/internal/providers/omada"
@@ -102,5 +104,82 @@ func TestSwitchPortPlanUncertainAttachments(t *testing.T) {
 	}
 	if _, err := s.PlanSwitchPorts(ctx, opts, "omada/home", sw, topology.SwitchPortPolicy{}); err == nil {
 		t.Fatal("empty policy accepted")
+	}
+}
+
+func TestAPAttachmentRequiresConsistentObservations(t *testing.T) {
+	const sw = "02:aa:bb:cc:dd:02"
+	const ap = "02:aa:bb:cc:dd:03"
+	const client = "02:aa:bb:cc:dd:04"
+	const peer = "02:aa:bb:cc:dd:05"
+	base := omadaPortBaseHandler(t, omadaPortStateFresh())
+	rows := map[string]string{}
+	denied := ""
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		for route, body := range rows {
+			if strings.HasSuffix(r.URL.Path, route) {
+				if route == denied {
+					w.WriteHeader(http.StatusForbidden)
+				} else {
+					writeOmadaEnvelope(w, 0, body)
+				}
+				return
+			}
+		}
+		base(w, r)
+	})
+	ctx := t.Context()
+	c, site, err := NewOmadaService().session(ctx, omadaPortOpts(ts.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Logout(ctx)
+	const inventory = "/networks/client"
+	const topology = "/client-link-topology"
+	const neighbors = "/lldp-neighbors"
+	const devices = "/networks/devices"
+	const uplinks = "/devices/uplink-info"
+	const node = `{"nodeType":"clientNode","clientNode":{"mac":"` + client + `","upApInfo":{"mac":"` + ap + `"}}}`
+	const uplink = `{"mac":"` + ap + `","uplinkDeviceMac":"` + sw + `","uplinkDevicePort":"8"}`
+	defaults := map[string]string{inventory: `[{"type":"wireless","mac":"` + peer + `"},{"mac":"` + client + `"},{"mac":"` + client + `"}]`, topology: `[` + node + `]`, neighbors: `[{"portId":8,"deviceId":"` + ap + `"}]`, devices: `[{"type":"ap","mac":"` + ap + `"}]`, uplinks: `[` + uplink + `,{"mac":"` + peer + `","uplinkDeviceMac":"` + peer + `","uplinkDevicePort":"1"}]`}
+	for _, tc := range []struct {
+		name, route, replace  string
+		deny, wantErr, wantAP bool
+	}{
+		{name: "AP with matching LLDP", wantAP: true},
+		{name: "LLDP conflict", route: neighbors, replace: `[{"portId":8,"deviceId":"` + peer + `"}]`},
+		{name: "missing AP port", route: uplinks, replace: strings.ReplaceAll(defaults[uplinks], `"8"`, `"?"`), wantErr: true},
+		{name: "missing client MAC", route: inventory, replace: `[{}]`, wantErr: true},
+		{name: "missing attachment", route: topology, replace: `[]`, wantErr: true},
+		{name: "multiple attachments", route: topology, replace: `[` + node + `,` + node + `]`, wantErr: true},
+		{name: "unresolved switch location", route: topology, replace: `[{"nodeType":"clientNode","clientNode":{"mac":"` + client + `"}}]`, wantErr: true},
+		{name: "clients unavailable", route: inventory, deny: true, wantErr: true},
+		{name: "client topology unavailable", route: topology, deny: true, wantErr: true},
+		{name: "devices unavailable", route: devices, deny: true, wantErr: true},
+		{name: "uplinks unavailable", route: uplinks, deny: true, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows = maps.Clone(defaults)
+			denied = ""
+			if tc.deny {
+				denied = tc.route
+			} else if tc.route != "" {
+				rows[tc.route] = tc.replace
+			}
+			got, err := readPortAttachments(ctx, c, site.EffectiveID(), sw)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("incomplete evidence accepted")
+				}
+				return
+			}
+			if err != nil || got[8] == nil {
+				t.Fatalf("missing test port: %v", err)
+			}
+			downstream := []string{backend.NormalizeMAC(ap)}
+			if got[8].matches("ap-uplink", "", downstream) != tc.wantAP || got[8].matches("ap-uplink", "", nil) || got[8].matches("management", "", downstream) {
+				t.Fatalf("wrong AP attachment assessment: %+v", got[8])
+			}
+		})
 	}
 }
