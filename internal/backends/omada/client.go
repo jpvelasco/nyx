@@ -227,6 +227,12 @@ func NewClient(ctx context.Context, host string, skipTLSVerify bool, caCertPath 
 	tlsConfig := buildTLSConfig(skipTLSVerify, caCertPath)
 
 	httpClient := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if req.URL.Scheme != via[0].URL.Scheme || !strings.EqualFold(req.URL.Host, via[0].URL.Host) || len(via) >= 10 {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: tlsConfig,

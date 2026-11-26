@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-const maxDeviceFirmwareBytes = 64 << 20
+const MaxDeviceFirmwareBytes = 64 << 20
 
 // DeviceUpgrade describes a verified firmware workflow against one site device.
 type DeviceUpgrade struct {
@@ -80,12 +80,12 @@ func (c *Client) uploadDeviceFirmware(ctx context.Context, siteID string, image 
 	if err != nil {
 		return "", err
 	}
-	n, err := io.Copy(part, io.LimitReader(image, maxDeviceFirmwareBytes+1))
+	n, err := io.Copy(part, io.LimitReader(image, MaxDeviceFirmwareBytes+1))
 	if err != nil {
 		return "", err
 	}
-	if n == 0 || n > maxDeviceFirmwareBytes {
-		return "", fmt.Errorf("image must contain 1 to %d bytes", maxDeviceFirmwareBytes)
+	if n == 0 || n > MaxDeviceFirmwareBytes {
+		return "", fmt.Errorf("image must contain 1 to %d bytes", MaxDeviceFirmwareBytes)
 	}
 	if err := form.Close(); err != nil {
 		return "", err
@@ -139,14 +139,20 @@ func (c *Client) verifyDeviceFirmware(ctx context.Context, siteID string, result
 }
 
 func (c *Client) deviceFirmware(ctx context.Context, siteID, mac string) (string, error) {
+	d, err := c.ManagedDevice(ctx, siteID, mac)
+	return strings.TrimSpace(d.FirmwareVersion), err
+}
+
+// ManagedDevice finds one exact MAC in the selected site inventory.
+func (c *Client) ManagedDevice(ctx context.Context, siteID, mac string) (Device, error) {
 	devices, err := c.GetDevices(ctx, siteID)
 	if err != nil {
-		return "", err
+		return Device{}, err
 	}
 	for _, candidate := range devices {
 		if parsed, err := net.ParseMAC(candidate.MAC); err == nil && parsed.String() == mac {
-			return strings.TrimSpace(candidate.FirmwareVersion), nil
+			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("the target device was not found in the selected site")
+	return Device{}, fmt.Errorf("the target device was not found in the selected site")
 }

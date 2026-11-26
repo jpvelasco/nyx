@@ -24,7 +24,7 @@ func sharedBindings() []operationBinding {
 			out = append(out, infoBinding(op))
 		}
 	}
-	return out
+	return append(out, maintenanceBindings()...)
 }
 
 func infoBinding(op service.InfoOperation) operationBinding {

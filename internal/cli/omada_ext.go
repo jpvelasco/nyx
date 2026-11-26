@@ -26,6 +26,8 @@ func buildOmadaExtraCommands() []*cobra.Command {
 	return []*cobra.Command{
 		buildOmadaControllerFirmwareCmd(),
 		buildOmadaFirmwareCmd(),
+		buildOmadaPendingDevicesCmd(),
+		buildOmadaAdoptionStatusCmd(),
 		buildOmadaUplinkInfoCmd(),
 		buildProviderReadCmd("omada", "list-networks", "List networks and configured DHCP state", toOmadaOptions, service.NewOmadaService().ListNetworks),
 		buildProviderReadCmd("omada", "dhcp-snoop-status", "Read site DHCP snooping state", toOmadaOptions, service.NewOmadaService().GetDHCPSnoopStatus),

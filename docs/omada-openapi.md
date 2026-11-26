@@ -293,3 +293,27 @@ start reports an unverified outcome. Inspect the controller before retrying.
 These site endpoints target managed devices. Use the controller UI to install
 an image on the controller itself. The published hardware-controller update
 operation does not accept a local image.
+
+### Selected-device adoption and staged maintenance
+
+Use `nyx omada pending-devices --site <site>` or `omada_pending_devices` to
+read one page of pending devices. Add `--include-private-details` or
+`include_private_details` when you need the MAC to select one device. Start
+adoption in the controller UI. `nyx omada adoption-status --site <site>
+--mac <device-mac> --wait 30s` and `omada_adoption_status` can follow that
+selection. An adopting detail status establishes a start. Verified completion
+requires the exact device in the selected site's managed inventory. An expired
+wait reports the last observed state. A success response that precedes managed
+inventory readback remains unverified.
+
+An operator can stage a local image with `nyx omada firmware stage --site
+<site> --mac <device-mac> --expected-version <version> --file <image.bin>`.
+The command returns an opaque reference. Configure that connection's site in
+its credential profile, then give `omada_staged_firmware` the reference and
+profile, or use `nyx omada firmware staged --site <site> --reference <ref>`.
+For a private CA, the operator can set `NYX_OMADA_MAINTENANCE_CA` to its PEM file in the MCP process environment. Nyx checks the stored image digest, controller, site, and target identity. The
+stage stays in the private `firmware` directory beside the credential store.
+The MCP operation previews by default. A reboot also requires `confirm_reboot`
+and hardware support evidence for that model and revision. The support list
+currently has no verified entries. Use the existing operator workflow above
+for manual maintenance.
