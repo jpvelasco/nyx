@@ -157,3 +157,41 @@ func TestOmadaDiagnosticPrivacyAndEmpty(t *testing.T) {
 	}
 
 }
+
+func TestDiagnosticReadErrorsDoNotExposeVendorPayload(t *testing.T) {
+	hermeticCreds(t)
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/info":
+			testutil.WriteBody(w, `{"errorCode":0,"result":{"controllerVer":"6.3.0","omadacId":"fixture"}}`)
+		case "/openapi/authorize/token":
+			testutil.WriteBody(w, `{"errorCode":0,"result":{"accessToken":"fixture"}}`)
+		case "/openapi/v1/fixture/sites":
+			testutil.WriteBody(w, `{"errorCode":0,"result":[{"id":"site","name":"management"}]}`)
+		default:
+			http.Error(w, "private.example", http.StatusForbidden)
+		}
+	}))
+	defer ts.Close()
+	s := NewServerWithLogger(nil)
+	a := map[string]any{"host": ts.URL, "client_id": "fixture", "client_secret": "fixture", "skip_tls_verify": true}
+	for _, n := range []string{"omada_wlan_optimization", "omada_site_config_drift", "omada_ap_channel_info"} {
+		got, failed := s.dispatchTool(t.Context(), n, a)
+		if !failed || strings.Contains(got, "private.example") {
+			t.Fatal(n, got)
+		}
+	}
+	a["history_id"] = "private-run"
+	if _, failed := s.dispatchTool(t.Context(), "omada_wlan_optimization", a); !failed {
+		t.Fatal("accepted unreadable history")
+	}
+	for _, tc := range []struct {
+		key   string
+		value any
+	}{{"page", float64(0)}, {"page_size", float64(201)}, {"sort", "invalid"}} {
+		a = map[string]any{"host": ts.URL, "api_key": "fixture", "api_secret": "fixture", "search": "selected", tc.key: tc.value}
+		if _, failed := s.dispatchTool(t.Context(), "opnsense_query_states", a); !failed {
+			t.Fatal("accepted invalid state query", tc.key)
+		}
+	}
+}
