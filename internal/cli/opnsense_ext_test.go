@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/testutil"
+	"github.com/spf13/cobra"
 )
 
 func TestOpnsenseFirewallListCommands(t *testing.T) {
@@ -49,5 +50,37 @@ func TestOpnsenseFirewallListCommands(t *testing.T) {
 			}
 			t.Fatalf("command %q was not registered", tc.command)
 		})
+	}
+}
+
+func TestRoutedVLANManualHandoffCommands(t *testing.T) {
+	saveRestoreGlobals(t)
+	controller := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Error("manual handoff must only read")
+		}
+		if strings.HasSuffix(r.URL.Path, "/vlan_settings/search_item") {
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"v1","if":"igb0","tag":"30","vlanif":"vlan30"}]}`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer controller.Close()
+	t.Setenv("NYX_CREDENTIALS_FILE", t.TempDir()+"/credentials.json")
+	for _, cmd := range []*cobra.Command{buildOpnsensePlanVLANCmd(), buildOpnsenseApplyVLANCmd()} {
+		providerHost = controller.URL
+		providerClientID = "fixture"
+		providerClientSecret = "fixture"
+		providerSkipTLS = true
+		jsonOutput = false
+		cmd.SetArgs([]string{"--kind", "assignment", "--tag", "30", "--parent", "igb0", "--description", "gaming", "--address", "10.0.30.1/24"})
+		var err error
+		out := captureStdout(func() { err = cmd.Execute() })
+		if strings.Contains(out, "(dry-run)") != (cmd.Name() == "apply-vlan") {
+			t.Errorf("%s preview label: %q", cmd.Name(), out)
+		}
+		if err != nil || !strings.Contains(out, "manual gaming") || !strings.Contains(out, "GUI") {
+			t.Fatalf("%s: %s %v", cmd.Name(), out, err)
+		}
 	}
 }

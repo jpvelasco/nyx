@@ -283,3 +283,17 @@ func TestMutationCommandBuildersHaveRunE(t *testing.T) {
 		}
 	}
 }
+
+func TestVLANAssignmentArguments(t *testing.T) {
+	saveRestoreOmadaExtGlobals(t)
+	var flags opnsenseVLANFlags
+	cmd := &cobra.Command{Use: "plan-vlan"}
+	bindOpnsenseVLANFlags(cmd, &flags)
+	if err := cmd.ParseFlags([]string{"--kind", "assignment", "--address", "10.0.30.1/24", "--tag", "30", "--parent", "igb0", "--description", "gaming"}); err != nil {
+		t.Fatal(err)
+	}
+	req := flags.request()
+	if req.Address != "10.0.30.1/24" || req.Kind != "assignment" || req.Tag != 30 || req.Parent != "igb0" || req.Description != "gaming" {
+		t.Fatal("assignment inputs did not reach the request")
+	}
+}

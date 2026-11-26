@@ -182,9 +182,9 @@ func buildOpnsenseApplyNatCmd() *cobra.Command {
 }
 
 type opnsenseVLANFlags struct {
-	kind, parent, description, uuid, members string
-	tag                                      int
-	delete                                   bool
+	kind, parent, description, uuid, members, address string
+	tag                                               int
+	delete                                            bool
 }
 
 func (f opnsenseVLANFlags) request() service.OpnsenseVLANRequest {
@@ -195,12 +195,14 @@ func (f opnsenseVLANFlags) request() service.OpnsenseVLANRequest {
 		Description: f.description,
 		UUID:        f.uuid,
 		Members:     splitCSV(f.members),
+		Address:     f.address,
 		Delete:      f.delete,
 	}
 }
 
 func bindOpnsenseVLANFlags(cmd *cobra.Command, f *opnsenseVLANFlags) {
-	cmd.Flags().StringVar(&f.kind, "kind", "", "vlan (default) or bridge")
+	cmd.Flags().StringVar(&f.kind, "kind", "", "vlan (default), bridge or assignment")
+	cmd.Flags().StringVar(&f.address, "address", "", "Static IPv4 or IPv6 interface address/prefix for assignment")
 	cmd.Flags().StringVar(&f.parent, "parent", "", "Parent interface (required for VLAN create/update)")
 	cmd.Flags().IntVar(&f.tag, "tag", 0, "VLAN tag (required for VLAN create/update)")
 	cmd.Flags().StringVar(&f.description, "description", "", "Description")
@@ -210,16 +212,27 @@ func bindOpnsenseVLANFlags(cmd *cobra.Command, f *opnsenseVLANFlags) {
 	addProviderFlags(cmd, "opnsense")
 }
 
+func printVLANAssignment(action string, target *service.OpnsenseAssignmentTarget, warning string) error {
+	fmt.Printf("%s %s (%s VLAN %d) %s\n", action, target.Name, target.Parent, target.Tag, target.Address)
+	if warning != "" {
+		fmt.Println(warning)
+	}
+	return nil
+}
+
 func buildOpnsensePlanVLANCmd() *cobra.Command {
 	var f opnsenseVLANFlags
 	cmd := &cobra.Command{
 		Use:   "plan-vlan",
-		Short: "Preview a VLAN or bridge-member change (read-only)",
+		Short: "Preview a VLAN, interface assignment or bridge-member change",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return withProviderSession("opnsense", func(ctx context.Context, opts providers.ImportOptions) error {
 				plan, err := service.NewOpnsenseService().PlanVLAN(ctx, toOpnsenseOptions(opts), f.request())
 				if err != nil {
 					return err
+				}
+				if plan.Kind == "assignment" && !jsonOutput {
+					return printVLANAssignment(plan.Action, plan.Assignment, plan.Warning)
 				}
 				return printPlan(plan, plan.Action)
 			})
@@ -234,12 +247,19 @@ func buildOpnsenseApplyVLANCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "apply-vlan",
-		Short: "Create, update, or delete a VLAN (or update bridge members). Dry-run by default",
+		Short: "Manage a VLAN, assign its address or update bridge members. Dry-run by default",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return withProviderSession("opnsense", func(ctx context.Context, opts providers.ImportOptions) error {
 				res, err := service.NewOpnsenseService().ApplyVLAN(ctx, toOpnsenseOptions(opts), f.request(), dryRun)
 				if err != nil {
 					return err
+				}
+				if res.Kind == "assignment" && !jsonOutput {
+					action := res.Outcome
+					if res.DryRun {
+						action = "(dry-run) " + action
+					}
+					return printVLANAssignment(action, res.Assignment, res.Warning)
 				}
 				return printApply(res, res.Outcome, res.DryRun)
 			})

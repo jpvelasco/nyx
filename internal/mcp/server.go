@@ -939,36 +939,11 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		},
 		{
 			Name:        "opnsense_list_vlans",
-			Description: "List OPNsense VLAN devices (parent, tag, description). Read-only. Creating a VLAN does not assign it to an opt or set IP — that stays GUI-only.",
+			Description: "List configured OPNsense VLAN devices (parent, tag, description). Read-only.",
 			InputSchema: opnsenseToolSchema(),
 		},
-		{
-			Name:        "opnsense_plan_vlan",
-			Description: "Preview creating/updating/deleting an OPNsense VLAN device, or updating a bridge's members. Always states the assign/IP gap. Read-only.",
-			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
-				"kind":        {Type: "string", Description: "vlan (default) or bridge"},
-				"parent":      {Type: "string", Description: "Parent NIC for a VLAN (e.g. igb0)"},
-				"tag":         {Type: "integer", Description: "VLAN tag"},
-				"description": {Type: "string", Description: "Optional description"},
-				"uuid":        {Type: "string", Description: "Existing VLAN or bridge uuid"},
-				"members":     {Type: "string", Description: "Comma-separated bridge members"},
-				"delete":      {Type: "boolean", Description: "Preview a VLAN delete"},
-			}, nil),
-		},
-		{
-			Name:        "opnsense_apply_vlan",
-			Description: "Create/update/delete an OPNsense VLAN device or update bridge members, then reconfigure. Dry-run default. The device is not assigned to an opt and has no IP until the operator does that in the GUI.",
-			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
-				"kind":        {Type: "string", Description: "vlan (default) or bridge"},
-				"parent":      {Type: "string", Description: "Parent NIC for a VLAN (e.g. igb0)"},
-				"tag":         {Type: "integer", Description: "VLAN tag"},
-				"description": {Type: "string", Description: "Optional description"},
-				"uuid":        {Type: "string", Description: "Existing VLAN or bridge uuid"},
-				"members":     {Type: "string", Description: "Comma-separated bridge members"},
-				"delete":      {Type: "boolean", Description: "Delete the VLAN device"},
-				"dry_run":     {Type: "boolean", Description: "Preview only. Default true."},
-			}, nil),
-		},
+		{Name: "opnsense_plan_vlan", Description: "Preview a VLAN device, optional interface assignment with static addressing, or bridge member change. Read-only.", InputSchema: opnsenseVLANToolSchema(false)},
+		{Name: "opnsense_apply_vlan", Description: "Manage a VLAN device, assign its address, or update bridge members. Dry-run by default. Assignment checks the pending queue and verifies configuration readback.", InputSchema: opnsenseVLANToolSchema(true)},
 		{
 			Name:        "opnsense_plan_filter",
 			Description: "Preview creating, updating, or deleting an OPNsense MVC filter rule or alias. Read-only.",
@@ -1205,6 +1180,24 @@ func omadaNatToolSchema() inputSchema {
 		"label":      {Type: "string", Description: "Rule name"},
 		"dry_run":    {Type: "boolean", Description: "Preview only. Default true; the surface always refuses regardless."},
 	}, []string{"operation"})
+}
+
+// opnsenseVLANToolSchema describes the shared VLAN, bridge and assignment inputs.
+func opnsenseVLANToolSchema(apply bool) inputSchema {
+	fields := map[string]propSchema{
+		"kind":        {Type: "string", Description: "vlan (default), bridge or assignment"},
+		"parent":      {Type: "string", Description: "VLAN parent interface"},
+		"tag":         {Type: "integer", Description: "VLAN tag"},
+		"description": {Type: "string", Description: "Description; required interface name for assignment"},
+		"uuid":        {Type: "string", Description: "Existing VLAN or bridge UUID"},
+		"members":     {Type: "string", Description: "Comma-separated bridge members"},
+		"address":     {Type: "string", Description: "Static IPv4 or IPv6 interface address with prefix length for assignment"},
+		"delete":      {Type: "boolean", Description: "Delete the VLAN device"},
+	}
+	if apply {
+		fields["dry_run"] = propSchema{Type: "boolean", Description: "Preview only. Default true."}
+	}
+	return opnsenseToolSchemaExtra(fields, nil)
 }
 
 // opnsenseNatToolSchema returns the OPNsense NAT-mutation tool schema:

@@ -10,7 +10,8 @@ import (
 
 // OpnsenseVLANRequest is a plan/apply VLAN or bridge-member mutation.
 type OpnsenseVLANRequest struct {
-	Kind        string // vlan (default) | bridge
+	Kind        string // vlan (default) | bridge | assignment
+	Address     string // static interface address/prefix for assignment
 	Parent      string
 	Tag         int
 	Description string
@@ -21,28 +22,27 @@ type OpnsenseVLANRequest struct {
 
 // OpnsenseVLANPlan previews a VLAN/bridge mutation.
 type OpnsenseVLANPlan struct {
-	Action   string   `json:"action"`
-	Kind     string   `json:"kind"`
-	UUID     string   `json:"uuid,omitempty"`
-	Warning  string   `json:"warning"`
-	Warnings []string `json:"warnings,omitempty"`
+	Assignment *OpnsenseAssignmentTarget `json:"assignment,omitempty"`
+	Action     string                    `json:"action"`
+	Kind       string                    `json:"kind"`
+	UUID       string                    `json:"uuid,omitempty"`
+	Warning    string                    `json:"warning"`
+	Warnings   []string                  `json:"warnings,omitempty"`
 }
 
 // OpnsenseVLANApplyResult is the apply outcome.
 type OpnsenseVLANApplyResult struct {
-	Outcome  string   `json:"outcome"`
-	Kind     string   `json:"kind"`
-	UUID     string   `json:"uuid,omitempty"`
-	DryRun   bool     `json:"dry_run"`
-	Warning  string   `json:"warning"`
-	Warnings []string `json:"warnings,omitempty"`
+	Assignment *OpnsenseAssignmentTarget `json:"assignment,omitempty"`
+	Outcome    string                    `json:"outcome"`
+	Kind       string                    `json:"kind"`
+	UUID       string                    `json:"uuid,omitempty"`
+	DryRun     bool                      `json:"dry_run"`
+	Warning    string                    `json:"warning"`
+	Warnings   []string                  `json:"warnings,omitempty"`
 }
 
-func vlanKind(kind string) string {
-	if strings.EqualFold(kind, "bridge") {
-		return "bridge"
-	}
-	return "vlan"
+func (p *OpnsenseVLANPlan) result(dryRun bool) *OpnsenseVLANApplyResult {
+	return &OpnsenseVLANApplyResult{Assignment: p.Assignment, Outcome: p.Action, Kind: p.Kind, UUID: p.UUID, DryRun: dryRun, Warning: p.Warning, Warnings: p.Warnings}
 }
 
 // OpnsenseVLAN is a configured VLAN device.
@@ -70,7 +70,21 @@ func (s *OpnsenseService) ListVLANs(ctx context.Context, opts OpnsenseOptions) (
 // PlanVLAN previews creating, updating, or deleting a VLAN device, or
 // updating a bridge's members. The assign/IP gap is always stated.
 func (s *OpnsenseService) PlanVLAN(ctx context.Context, opts OpnsenseOptions, req OpnsenseVLANRequest) (*OpnsenseVLANPlan, error) {
-	kind := vlanKind(req.Kind)
+	kind := strings.ToLower(req.Kind)
+	if kind == "assignment" {
+		plan, _, _, err := planAssignment(ctx, s.client(opts), req)
+		return plan, err
+	}
+	if req.Address != "" {
+		return nil, fmt.Errorf("address is only valid for assignment")
+	}
+	switch kind {
+	case "", "vlan":
+		kind = "vlan"
+	case "bridge":
+	default:
+		return nil, fmt.Errorf("unknown VLAN operation kind")
+	}
 	plan := &OpnsenseVLANPlan{Kind: kind, UUID: req.UUID, Warning: opnsensebackend.AssignIPGapWarning, Warnings: []string{opnsensebackend.AssignIPGapWarning}}
 	client := s.client(opts)
 	if kind == "bridge" {
@@ -136,18 +150,14 @@ func (s *OpnsenseService) PlanVLAN(ctx context.Context, opts OpnsenseOptions, re
 // ApplyVLAN creates/updates/deletes a VLAN device or updates bridge members.
 // Dry-run by default at the MCP layer. A real apply reconfigures.
 func (s *OpnsenseService) ApplyVLAN(ctx context.Context, opts OpnsenseOptions, req OpnsenseVLANRequest, dryRun bool) (*OpnsenseVLANApplyResult, error) {
+	if strings.EqualFold(req.Kind, "assignment") {
+		return runAssignment(ctx, s.client(opts), req, dryRun)
+	}
 	plan, err := s.PlanVLAN(ctx, opts, req)
 	if err != nil {
 		return nil, err
 	}
-	res := &OpnsenseVLANApplyResult{
-		Outcome:  plan.Action,
-		Kind:     plan.Kind,
-		UUID:     plan.UUID,
-		DryRun:   dryRun,
-		Warning:  plan.Warning,
-		Warnings: plan.Warnings,
-	}
+	res := plan.result(dryRun)
 	if dryRun || plan.Action == "unchanged" {
 		return res, nil
 	}
