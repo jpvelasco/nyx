@@ -46,9 +46,8 @@ on-path NAT router, and defers to that backend's plan/apply surface:
 
 - OPNsense owns NAT: the plan previews the rule; --apply creates it
   (dry-run by default; pass --apply --dry-run=false for the real write).
-- The managed Omada gateway owns NAT: the playbook reports the honest
-  hold — the Omada Open API exposes no live-site NAT write path, so the
-  rule must be configured via the controller UI.
+- The managed Omada gateway owns NAT: the playbook compares current rules and reports
+  the outstanding device verification for live writes.
 - Double-NAT or indeterminate topologies refuse with an explanation.
 
 Credentials for omada and/or opnsense resolve like every other command:
@@ -126,6 +125,9 @@ func renderPortForwardPlan(p *service.PortForwardPlan) {
 		fmt.Printf(" (rule %s)", p.RuleUUID)
 	}
 	fmt.Println()
+	if p.Comparison != nil {
+		fmt.Printf("NAT comparison: %s (%d candidates)\n", p.Comparison.Observation, len(p.Comparison.Candidates))
+	}
 	for _, w := range p.Warnings {
 		fmt.Printf("warning: %s\n", w)
 	}

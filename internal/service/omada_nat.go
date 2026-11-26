@@ -253,8 +253,7 @@ func (s *OmadaService) GetFirewallSettings(ctx context.Context, opts OmadaOption
 
 // OmadaNatApplyRequest is an Omada NAT plan/apply request (#139). The
 // surface mirrors the OPNsense pair so agents can carry the same intent
-// across providers; the Omada Open API exposes no live-site NAT write
-// path, so PlanNat/ApplyNat HOLD clearly with evidence.
+// across providers. Omada returns a read-only comparison until hardware support is verified.
 type OmadaNatApplyRequest struct {
 	Operation string // "port_forward" | "one_to_one" (Omada has no source_nat)
 	Action    string // "create" | "update" | "delete" | "toggle" (default "create")

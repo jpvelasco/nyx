@@ -1445,10 +1445,7 @@ func subArgs(args map[string]interface{}, prefix string) map[string]interface{} 
 	return sub
 }
 
-// omadaNatRequestFromArgs parses the shared NAT mutation intent for the
-// Omada surface (#139). The surface always refuses — the Open API exposes
-// no live-site NAT write path — but the request is validated exactly like
-// the OPNsense pair so agents carry identical intent shapes.
+// omadaNatRequestFromArgs decodes the selected NAT collection and comparison fields.
 func omadaNatRequestFromArgs(args map[string]interface{}) (service.OmadaNatApplyRequest, string) {
 	req := service.OmadaNatApplyRequest{
 		Operation: argString(args, "operation"),
@@ -1456,6 +1453,8 @@ func omadaNatRequestFromArgs(args map[string]interface{}) (service.OmadaNatApply
 		RuleUUID:  argString(args, "rule_uuid"),
 		DryRun:    argBoolDefault(args, "dry_run", true),
 	}
+	req.Spec.Interfaces = splitCSV(argString(args, "wan_interfaces"))
+	req.Spec.Destination = argString(args, "external_address")
 	req.Spec.Protocol = argString(args, "protocol")
 	req.Spec.Source = argString(args, "source")
 	req.Spec.Port = argString(args, "port")

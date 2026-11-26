@@ -233,31 +233,44 @@ type NatApplyRequest struct {
 	DryRun         bool        // preview without mutating
 }
 
+// NatComparison records candidates that warrant inspection before a planned NAT change.
+// A candidate may overlap on a different WAN or carry additional controller selectors.
+type NatComparison struct {
+	Action      string            `json:"action"`
+	Method      string            `json:"catalog_method,omitempty"`
+	Path        string            `json:"catalog_path,omitempty"`
+	Requested   map[string]string `json:"requested,omitempty"`
+	Candidates  []string          `json:"candidate_rule_ids"`
+	Observation string            `json:"observation"`
+}
+
 // NatApplyResult is the structured outcome of an apply attempt, with
 // before/after evidence. Before and After hold the JSON array of the
 // collection's rules as seen by the controller; they are identical when
 // nothing was mutated. Endpoints lists the exact API paths touched.
 type NatApplyResult struct {
-	Provider  string   `json:"provider"`
-	DryRun    bool     `json:"dry_run"`
-	Outcome   string   `json:"outcome"` // "created" | "updated" | "deleted" | "unchanged" | "refused"
-	RuleUUID  string   `json:"rule_uuid,omitempty"`
-	Endpoints []string `json:"endpoints"`
-	Before    string   `json:"before"`
-	After     string   `json:"after"`
-	Warnings  []string `json:"warnings,omitempty"`
+	Comparison *NatComparison `json:"comparison,omitempty"`
+	Provider   string         `json:"provider"`
+	DryRun     bool           `json:"dry_run"`
+	Outcome    string         `json:"outcome"` // "created" | "updated" | "deleted" | "unchanged" | "refused"
+	RuleUUID   string         `json:"rule_uuid,omitempty"`
+	Endpoints  []string       `json:"endpoints"`
+	Before     string         `json:"before"`
+	After      string         `json:"after"`
+	Warnings   []string       `json:"warnings,omitempty"`
 }
 
 // NatPlan is the preview of a NAT mutation: what would be done, against
 // which endpoints, with the current state as Before evidence.
 type NatPlan struct {
-	Provider  string   `json:"provider"`
-	DryRun    bool     `json:"dry_run"`
-	Outcome   string   `json:"outcome"` // "would_create" | "would_update" | "would_delete" | "unchanged" | "refused"
-	RuleUUID  string   `json:"rule_uuid,omitempty"`
-	Endpoints []string `json:"endpoints"`
-	Before    string   `json:"before"`
-	Warnings  []string `json:"warnings,omitempty"`
+	Comparison *NatComparison `json:"comparison,omitempty"`
+	Provider   string         `json:"provider"`
+	DryRun     bool           `json:"dry_run"`
+	Outcome    string         `json:"outcome"` // "would_create" | "would_update" | "would_delete" | "unchanged" | "refused"
+	RuleUUID   string         `json:"rule_uuid,omitempty"`
+	Endpoints  []string       `json:"endpoints"`
+	Before     string         `json:"before"`
+	Warnings   []string       `json:"warnings,omitempty"`
 }
 
 // NatMutationProvider is the optional NAT mutation surface a provider may

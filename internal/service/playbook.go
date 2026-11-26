@@ -67,14 +67,15 @@ type PlaybookOptions struct {
 // PortForwardPlan is the composed plan: which backend the topology
 // selected, why, what that backend's plan says, and the evidence trail.
 type PortForwardPlan struct {
-	Provider string   `json:"provider"`
-	Decision string   `json:"decision"`
-	Risk     string   `json:"risk"`
-	Outcome  string   `json:"outcome"`
-	RuleUUID string   `json:"rule_uuid,omitempty"`
-	Before   string   `json:"before"`
-	Warnings []string `json:"warnings,omitempty"`
-	Playbook string   `json:"playbook"`
+	Comparison *providers.NatComparison `json:"comparison,omitempty"`
+	Provider   string                   `json:"provider"`
+	Decision   string                   `json:"decision"`
+	Risk       string                   `json:"risk"`
+	Outcome    string                   `json:"outcome"`
+	RuleUUID   string                   `json:"rule_uuid,omitempty"`
+	Before     string                   `json:"before"`
+	Warnings   []string                 `json:"warnings,omitempty"`
+	Playbook   string                   `json:"playbook"`
 }
 
 // OpnsenseNatSurface is the OPNsense service's plan/apply pair the
@@ -179,14 +180,15 @@ func (s *PlaybookService) PlanPortForward(ctx context.Context, opts PlaybookOpti
 		return nil, err
 	}
 	return &PortForwardPlan{
-		Provider: owner,
-		Decision: PlaybookDecisionNatOwner,
-		Risk:     rep.Risk,
-		Outcome:  plan.Outcome,
-		RuleUUID: plan.RuleUUID,
-		Before:   plan.Before,
-		Warnings: plan.Warnings,
-		Playbook: playbookTrail(rep) + "; routed to " + owner + " (the on-path NAT router)",
+		Provider:   owner,
+		Decision:   PlaybookDecisionNatOwner,
+		Risk:       rep.Risk,
+		Outcome:    plan.Outcome,
+		RuleUUID:   plan.RuleUUID,
+		Before:     plan.Before,
+		Comparison: plan.Comparison,
+		Warnings:   plan.Warnings,
+		Playbook:   playbookTrail(rep) + "; routed to " + owner + " (the on-path NAT router)",
 	}, nil
 }
 
@@ -228,14 +230,15 @@ func (s *PlaybookService) ApplyPortForward(ctx context.Context, opts PlaybookOpt
 		return nil, err
 	}
 	return &PortForwardPlan{
-		Provider: owner,
-		Decision: PlaybookDecisionNatOwner,
-		Risk:     rep.Risk,
-		Outcome:  res.Outcome,
-		RuleUUID: res.RuleUUID,
-		Before:   res.Before,
-		Warnings: res.Warnings,
-		Playbook: playbookTrail(rep) + "; routed to " + owner + " (the on-path NAT router)" + fmt.Sprintf("; dry_run=%v", res.DryRun),
+		Provider:   owner,
+		Decision:   PlaybookDecisionNatOwner,
+		Risk:       rep.Risk,
+		Outcome:    res.Outcome,
+		RuleUUID:   res.RuleUUID,
+		Before:     res.Before,
+		Comparison: res.Comparison,
+		Warnings:   res.Warnings,
+		Playbook:   playbookTrail(rep) + "; routed to " + owner + " (the on-path NAT router)" + fmt.Sprintf("; dry_run=%v", res.DryRun),
 	}, nil
 }
 

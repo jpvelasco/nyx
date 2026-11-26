@@ -319,7 +319,7 @@ Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `O
 | `omada_list_lan_profiles` | List a site's LAN profiles — the VLAN membership sets (native + tagged) ports bind to |
 | `omada_plan_port` | Preview bringing one switch port to a desired VLAN membership: current vs. desired state and whether an existing profile can be rebound or a new one must be created (read-only) |
 | `omada_apply_port_profile` | Bind a switch port to a LAN profile with the desired VLAN membership (find-or-create the matching profile, then bind). Idempotent (`unchanged`/`bound`/`created_and_bound`); dry-run is the default |
-| `omada_plan_nat` / `omada_apply_nat` | Omada NAT plan/apply. The Open API exposes NAT reads but no live-site write path, so both always refuse with current-state evidence and the write-surface explanation — configure via the controller UI or use `opnsense_plan_nat`/`opnsense_apply_nat` |
+| `omada_plan_nat` / `omada_apply_nat` | Compare the requested NAT rule with current site rules. Includes conflict candidates, catalog operation and device verification status. Writes require verified hardware support. |
 | `opnsense_plan_nat` / `opnsense_apply_nat` | OPNsense NAT plan/apply: port forwards, one-to-one, and source NAT with double-NAT guard, idempotent creates, and dry-run default |
 | `plan_segment` / `apply_segment` | Plan and provision a routed IPv4 VLAN across a selected Omada site and OPNsense firewall, with management isolation and source verification. CLI `nyx segment plan` / `apply`. [Segment provisioning](docs/segment-provisioning.md) |
 | `plan_port_forward` / `apply_port_forward` | Composed playbook: plan or apply a port-forward on the backend that owns the egress-path NAT, selected from the live topology report. Routes to OPNsense when it owns NAT, reports the Omada hold when the managed gateway owns it, and refuses on double-NAT or indeterminate topologies. Dry-run default |
@@ -339,8 +339,7 @@ nyx port-forward --port 443 --target 10.0.40.10 --protocol tcp --label web
 The playbook observes the NAT topology (`nyx topology`), selects the on-path
 NAT router, and defers to that backend's plan/apply surface: OPNsense plans
 and (with `--apply --dry-run=false`) creates the rule; the managed Omada
-gateway produces the honest hold (no Open API write path — configure via the
-controller UI); double-NAT or indeterminate topologies refuse with the
+gateway returns a rule comparison and reports outstanding hardware verification; double-NAT or indeterminate topologies refuse with the
 explanation. The same surface is exposed to agents as the
 `plan_port_forward` / `apply_port_forward` MCP tools.
 

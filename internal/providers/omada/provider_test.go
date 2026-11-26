@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1493,11 +1494,7 @@ func TestLookupACLMatch_NamedRuleMustCoverRequestedEndpoints(t *testing.T) {
 	}
 }
 
-// TestPlanNatHoldsClearly pins the Omada NAT write surface (#139): the
-// Open API exposes no live-site NAT write path (port-forward writes exist
-// only on the controller's internal web API, which nyx does not call), so
-// PlanNat reads the collection as Before evidence and refuses — never a
-// silent capability absence, never a mutation.
+// TestPlanNatHoldsClearly verifies the published catalog and device verification boundary.
 func TestPlanNatHoldsClearly(t *testing.T) {
 	var writes []string
 	ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1601,7 +1598,7 @@ func TestApplyNatAlwaysRefuses(t *testing.T) {
 			t.Fatalf("ApplyNat(dryRun=%v): %v", dryRun, err)
 		}
 		if res.Outcome != "refused" {
-			t.Errorf("ApplyNat(dryRun=%v) outcome = %q, want refused — the Open API exposes no NAT write path", dryRun, res.Outcome)
+			t.Errorf("ApplyNat(dryRun=%v) outcome = %q, want refused for an unverified gateway", dryRun, res.Outcome)
 		}
 		if res.Before != res.After {
 			t.Errorf("ApplyNat(dryRun=%v) must not change the evidence", dryRun)
@@ -1726,5 +1723,79 @@ func TestPlanNatErrorPaths(t *testing.T) {
 		providers.ImportOptions{Host: ts.URL, ClientID: "admin", ClientSecret: "wrong", SkipTLSVerify: true})
 	if err == nil {
 		t.Fatal("a failed login must surface as an error, not a refusal")
+	}
+}
+
+func TestNATComparisonReconcilesOperatorWrite(t *testing.T) {
+	rows := `[]`
+	var reads, writes int
+	ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/openapi/authorize/token":
+			writeEnvelope(w, 0, "", `{"accessToken":"fixture"}`)
+		case r.Method != http.MethodGet:
+			writes++
+			http.NotFound(w, r)
+		case strings.HasSuffix(r.URL.Path, "/port-forwardings"):
+			reads++
+			total := 0
+			if rows != "[]" {
+				total = 1
+			}
+			writeEnvelope(w, 0, "", fmt.Sprintf(`{"totalRows":%d,"data":%s}`, total, rows))
+		case strings.HasSuffix(r.URL.Path, "/one-to-one-nat"):
+			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"one","internalIp":"192.0.2.10","externalIp":"192.0.2.4","interfaceIds":["wan"]}]}`)
+		case strings.HasSuffix(r.URL.Path, "/sites"):
+			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"siteId":"fixture","name":"example"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	opts := providers.ImportOptions{Host: ts.URL, ClientID: "fixture", ClientSecret: "fixture", Site: "example", SkipTLSVerify: true}
+	p := &OmadaProvider{}
+	req := providers.NatApplyRequest{Operation: "port_forward", Spec: providers.NatRuleSpec{Port: "443", Target: "192.0.2.10", Protocol: "tcp"}}
+	first, err := p.PlanNat(t.Context(), req, opts)
+	if err != nil || first.Comparison.Observation != "no_candidate_reported" || first.Comparison.Method != "POST" {
+		t.Fatalf("first read: %+v %v", first, err)
+	}
+	// The operator's controller timed out after saving the rule. The next apply must inspect the committed state.
+	rows = `[{"id":"web","externalPort":"440-445","protocol":1,"interfaceWanPortId":["wan"],"limitedAddresses":["trusted"],"from":1}]`
+	second, err := p.ApplyNat(t.Context(), req, opts)
+	if err != nil || len(second.Comparison.Candidates) != 1 || second.Comparison.Candidates[0] != "web" || second.Comparison.Observation != "inspect_candidate" || !strings.Contains(second.Before, "interfaceWanPortId") || second.Before != second.After || reads != 2 || writes != 0 {
+		t.Fatalf("reconciliation: %+v %v", second, err)
+	}
+	req.Operation = "one_to_one"
+	req.Action = "delete"
+	req.RuleUUID = "one"
+	one, err := p.PlanNat(t.Context(), req, opts)
+	if err != nil || one.Comparison.Method != "DELETE" || len(one.Comparison.Candidates) != 1 || !strings.Contains(one.Before, "interfaceIds") {
+		t.Fatalf("one-to-one: %+v %v", one, err)
+	}
+}
+
+func TestNATConflictCandidates(t *testing.T) {
+	for _, tc := range []struct {
+		left, right string
+		want        bool
+	}{{"53", "53", true}, {"80", "443", false}, {"60-80", "80-100", true}, {"ports", "443", true}, {"0", "443", true}, {"65536", "53", true}, {"90-80", "53", true}} {
+		if got := portsMayOverlap(tc.left, tc.right); got != tc.want {
+			t.Errorf("%s and %s: %v", tc.left, tc.right, got)
+		}
+	}
+	if protocolsMayOverlap("udp", "TCP") || protocolsMayOverlap("tcp", "UDP") || !protocolsMayOverlap("udp", "ALL") || !protocolsMayOverlap("", "UDP") {
+		t.Fatal("protocol overlap")
+	}
+	for _, a := range []string{"create", "update", "toggle"} {
+		r := providers.NatApplyRequest{Action: a, Operation: "port_forward", Spec: providers.NatRuleSpec{Label: "web"}, RuleUUID: "selected"}
+		c := newNATComparison(r)
+		considerCandidate(&c, r, "other", "other", false)
+		if len(c.Candidates) != 0 {
+			t.Fatal("unrelated rule")
+		}
+		considerCandidate(&c, r, "selected", "web", false)
+		considerCandidate(&c, r, "selected", "web", false)
+		if c.Observation != "ambiguous_candidates" {
+			t.Fatal("duplicate identity", c)
+		}
 	}
 }

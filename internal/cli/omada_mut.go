@@ -363,21 +363,13 @@ func buildOmadaApplySSIDCmd() *cobra.Command {
 	return cmd
 }
 
-// buildOmadaPlanNatCmd previews an Omada NAT mutation. The Omada Open API
-// exposes NAT reads but no live-site NAT write path, so the plan always
-// refuses with the current rules as before-evidence and the write-surface
-// explanation (#139).
+// buildOmadaPlanNatCmd compares planned selectors with current live-site NAT rules.
 func buildOmadaPlanNatCmd() *cobra.Command {
 	var f omadaNatFlags
 	cmd := &cobra.Command{
 		Use:   "plan-nat",
-		Short: "Preview an Omada NAT mutation (always refused: no Open API write path)",
-		Long: `Preview an Omada NAT mutation.
-
-The Omada Open API exposes NAT reads (port forwardings, one-to-one NAT)
-but no live-site NAT write path, so the plan always refuses with the
-current rules as before-evidence and the write-surface explanation.
-Configure NAT via the controller UI, or use provider opnsense.`,
+		Short: "Compare a proposed Omada NAT rule with the site inventory",
+		Long:  `Read the selected collection and show possible conflicts. Use JSON output for rule IDs and the published operation. Live writes require verified support for the controller and gateway.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			req, err := f.request()
 			if err != nil {
@@ -403,12 +395,8 @@ func buildOmadaApplyNatCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "apply-nat",
-		Short: "Apply an Omada NAT mutation (always refused: no Open API write path)",
-		Long: `Apply an Omada NAT mutation.
-
-The Omada Open API exposes no live-site NAT write path, so every apply is
-refused with identical before/after evidence — nothing can mutate,
-dry-run or not. Use provider opnsense for NAT writes.`,
+		Short: "Reconcile a proposed Omada NAT change against the current rules",
+		Long:  `Fetch fresh evidence before retrying a change. The hardware-controller catalog documents site writes. Nyx returns the observed rules and the verification status for this operation.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			req, err := f.request()
 			if err != nil {
@@ -434,15 +422,16 @@ dry-run or not. Use provider opnsense for NAT writes.`,
 
 // omadaNatFlags carries the NAT mutation intent for the CLI surface.
 type omadaNatFlags struct {
-	operation string
-	action    string
-	ruleUUID  string
-	protocol  string
-	source    string
-	port      string
-	localPort string
-	target    string
-	label     string
+	interfaces, externalAddress string
+	operation                   string
+	action                      string
+	ruleUUID                    string
+	protocol                    string
+	source                      string
+	port                        string
+	localPort                   string
+	target                      string
+	label                       string
 }
 
 func (f omadaNatFlags) request() (service.OmadaNatApplyRequest, error) {
@@ -451,6 +440,8 @@ func (f omadaNatFlags) request() (service.OmadaNatApplyRequest, error) {
 		Action:    f.action,
 		RuleUUID:  f.ruleUUID,
 	}
+	req.Spec.Interfaces = splitCSV(f.interfaces)
+	req.Spec.Destination = f.externalAddress
 	req.Spec.Protocol = f.protocol
 	req.Spec.Source = f.source
 	req.Spec.Port = f.port
@@ -477,6 +468,8 @@ func (f omadaNatFlags) request() (service.OmadaNatApplyRequest, error) {
 }
 
 func bindOmadaNatFlags(cmd *cobra.Command, f *omadaNatFlags) {
+	cmd.Flags().StringVar(&f.interfaces, "wan-interfaces", "", "Comma-separated WAN interface IDs")
+	cmd.Flags().StringVar(&f.externalAddress, "external-address", "", "External address of a one-to-one rule")
 	cmd.Flags().StringVar(&f.operation, "operation", "", "NAT collection: port_forward or one_to_one (required)")
 	cmd.Flags().StringVar(&f.action, "action", "create", "create (default), update, delete, or toggle")
 	cmd.Flags().StringVar(&f.ruleUUID, "rule-uuid", "", "Target rule ID for update/delete/toggle")
