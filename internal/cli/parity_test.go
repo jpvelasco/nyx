@@ -160,6 +160,8 @@ func TestProviderCapabilitySurfaceParity(t *testing.T) {
 var mcpMutationCLI = map[string]string{
 	"omada_plan":                      "plan",
 	"omada_apply_acl":                 "apply-acl",
+	"omada_plan_acl_order":            "plan-acl-order",
+	"omada_apply_acl_order":           "apply-acl-order",
 	"omada_plan_port":                 "plan-port",
 	"omada_apply_port_profile":        "apply-port-profile",
 	"omada_plan_lan":                  "plan-lan",

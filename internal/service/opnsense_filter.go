@@ -11,6 +11,7 @@ import (
 // OpnsenseFirewallRule is a firewall filter rule in a flat, agent-friendly
 // shape. Disabled is true when the rule is not active.
 type OpnsenseFirewallRule struct {
+	Sequence    string   `json:"sequence,omitempty"`
 	UUID        string   `json:"uuid"`
 	Enabled     bool     `json:"enabled"`
 	Disabled    bool     `json:"disabled"`
@@ -64,7 +65,7 @@ func (s *OpnsenseService) GetFirewallRule(ctx context.Context, opts OpnsenseOpti
 
 func flattenFirewallRule(r opnsensebackend.FirewallRule) OpnsenseFirewallRule {
 	return OpnsenseFirewallRule{
-		UUID:        r.RuleUUID,
+		UUID: r.RuleUUID, Sequence: r.Sequence,
 		Enabled:     !r.Disabled,
 		Disabled:    r.Disabled,
 		Action:      r.Action,
@@ -104,26 +105,32 @@ func (s *OpnsenseService) ListAliases(ctx context.Context, opts OpnsenseOptions)
 
 // OpnsenseFilterRequest is a plan/apply filter-rule or alias mutation.
 type OpnsenseFilterRequest struct {
-	Kind        string // filter (default) | alias
-	UUID        string
-	Name        string
-	Action      string
-	Interface   string
-	Protocol    string
-	Source      string
-	Destination string
-	Addresses   []string
-	AliasType   string
-	Description string
-	Enabled     bool
-	Delete      bool
+	Kind            string // filter (default) | alias
+	UUID            string
+	Name            string
+	Action          string
+	Interface       string
+	Protocol        string
+	SourcePort      string
+	DestinationPort string
+	Direction       string
+	AddressFamily   string
+	Source          string
+	Destination     string
+	Addresses       []string
+	AliasType       string
+	Description     string
+	Enabled         bool
+	Delete          bool
 }
 
 // OpnsenseFilterPlan previews a filter/alias mutation.
 type OpnsenseFilterPlan struct {
-	Action string `json:"action"`
-	Kind   string `json:"kind"`
-	UUID   string `json:"uuid,omitempty"`
+	Before  *OpnsenseFirewallRule `json:"before,omitempty"`
+	Desired *OpnsenseFirewallRule `json:"desired,omitempty"`
+	Action  string                `json:"action"`
+	Kind    string                `json:"kind"`
+	UUID    string                `json:"uuid,omitempty"`
 }
 
 // OpnsenseFilterApplyResult is the apply outcome.
@@ -143,6 +150,9 @@ func filterKind(kind string) string {
 
 // PlanFilter previews creating, updating, or deleting a filter rule or alias.
 func (s *OpnsenseService) PlanFilter(ctx context.Context, opts OpnsenseOptions, req OpnsenseFilterRequest) (*OpnsenseFilterPlan, error) {
+	if err := req.validateSelectors(); err != nil {
+		return nil, err
+	}
 	kind := filterKind(req.Kind)
 	plan := &OpnsenseFilterPlan{Kind: kind, UUID: req.UUID}
 	client := s.client(opts)
@@ -186,7 +196,10 @@ func (s *OpnsenseService) PlanFilter(ctx context.Context, opts OpnsenseOptions, 
 	if err != nil {
 		return nil, err
 	}
-	cur, ok := opnsensebackend.FindFilterRule(rules, req.UUID, req.Name)
+	cur, ok, err := req.findRule(rules)
+	if err != nil {
+		return nil, err
+	}
 	if req.Delete {
 		if !ok {
 			plan.Action = "unchanged"
@@ -196,16 +209,30 @@ func (s *OpnsenseService) PlanFilter(ctx context.Context, opts OpnsenseOptions, 
 		plan.UUID = cur.RuleUUID
 		return plan, nil
 	}
-	w := opnsensebackend.FilterWrite{
-		Action: firstNonEmptySvc(req.Action, "block"), Interface: req.Interface, Protocol: req.Protocol,
-		Source: req.Source, Destination: req.Destination, Description: req.Description, Enabled: req.Enabled,
+	w := req.write()
+	if req.scoped() {
+		plan.Desired = &OpnsenseFirewallRule{
+			Enabled: w.Enabled, Disabled: !w.Enabled, Action: w.Action,
+			Interfaces: strings.Split(w.Interface, ","),
+			Protocol:   firstNonEmptySvc(w.Protocol, "any"),
+			Source:     w.Source, Destination: w.Destination,
+			SourcePort: firstNonEmptySvc(w.SourcePort, "any"),
+			DestPort:   firstNonEmptySvc(w.DestPort, "any"),
+			Direction:  firstNonEmptySvc(w.Direction, "in"),
+			IPProtocol: w.IPProtocol, Label: w.Description,
+		}
+		if ok {
+			before := flattenFirewallRule(cur)
+			plan.Before = &before
+			plan.Desired.Sequence = cur.Sequence
+		}
 	}
 	if !ok {
 		plan.Action = "create"
 		return plan, nil
 	}
 	plan.UUID = cur.RuleUUID
-	if opnsensebackend.FilterMatchesWrite(cur, w) {
+	if (req.scoped() && opnsensebackend.ExactFilterMatch(cur, w)) || (!req.scoped() && opnsensebackend.FilterMatchesWrite(cur, w)) {
 		plan.Action = "unchanged"
 		return plan, nil
 	}
@@ -263,10 +290,7 @@ func (s *OpnsenseService) ApplyFilter(ctx context.Context, opts OpnsenseOptions,
 		}
 		return res, nil
 	}
-	w := opnsensebackend.FilterWrite{
-		Action: firstNonEmptySvc(req.Action, "block"), Interface: req.Interface, Protocol: req.Protocol,
-		Source: req.Source, Destination: req.Destination, Description: req.Description, Enabled: req.Enabled,
-	}
+	w := req.write()
 	switch plan.Action {
 	case "create":
 		id, err := client.CreateFilterRule(ctx, w)
@@ -288,6 +312,16 @@ func (s *OpnsenseService) ApplyFilter(ctx context.Context, opts OpnsenseOptions,
 	}
 	if err := client.ApplyFirewallFilter(ctx); err != nil {
 		return nil, err
+	}
+	if req.scoped() {
+		rows, err := client.GetFirewallRules(ctx)
+		if err != nil {
+			return nil, err
+		}
+		observed, ok := opnsensebackend.FindFilterRule(rows, res.UUID, "")
+		if res.UUID == "" || !ok || !opnsensebackend.ExactFilterMatch(observed, w) || observed.ExtraConditions {
+			return nil, fmt.Errorf("filter readback did not confirm the requested service exception")
+		}
 	}
 	return res, nil
 }

@@ -134,19 +134,21 @@ type GatewayStatus struct {
 // FirewallRule represents a single firewall rule from OPNsense
 // (GET /api/firewall/filter/search_rule row shape).
 type FirewallRule struct {
-	RuleUUID    string   `json:"uuid"`
-	Enabled     string   `json:"enabled"` // "1" = enabled
-	Action      string   `json:"action"`  // pass / block / reject
-	Interface   []string `json:"interface"`
-	Protocol    string   `json:"protocol"`
-	Source      string   `json:"source_net"`
-	Destination string   `json:"destination_net"`
-	SourcePort  string   `json:"source_port,omitempty"`
-	DestPort    string   `json:"destination_port,omitempty"`
-	Direction   string   `json:"direction,omitempty"`
-	IPProtocol  string   `json:"ipprotocol,omitempty"`
-	Label       string   `json:"description"`
-	Categories  []string `json:"categories,omitempty"`
+	Sequence        string   `json:"sequence,omitempty"`
+	ExtraConditions bool     `json:"-"`
+	RuleUUID        string   `json:"uuid"`
+	Enabled         string   `json:"enabled"` // "1" = enabled
+	Action          string   `json:"action"`  // pass / block / reject
+	Interface       []string `json:"interface"`
+	Protocol        string   `json:"protocol"`
+	Source          string   `json:"source_net"`
+	Destination     string   `json:"destination_net"`
+	SourcePort      string   `json:"source_port,omitempty"`
+	DestPort        string   `json:"destination_port,omitempty"`
+	Direction       string   `json:"direction,omitempty"`
+	IPProtocol      string   `json:"ipprotocol,omitempty"`
+	Label           string   `json:"description"`
+	Categories      []string `json:"categories,omitempty"`
 	// Disabled is derived from Enabled after decoding.
 	Disabled bool
 }
@@ -481,9 +483,21 @@ func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
 	for _, row := range raw {
 		var fields struct {
 			*FirewallRule
-			Interface  json.RawMessage `json:"interface"`
-			Categories json.RawMessage `json:"categories"`
-			Enabled    json.RawMessage `json:"enabled"`
+			Interface    json.RawMessage `json:"interface"`
+			Categories   json.RawMessage `json:"categories"`
+			Enabled      json.RawMessage `json:"enabled"`
+			SourceNot    json.RawMessage `json:"source_not"`
+			DestNot      json.RawMessage `json:"destination_not"`
+			InterfaceNot json.RawMessage `json:"interfacenot"`
+			Quick        json.RawMessage `json:"quick"`
+			Schedule     string          `json:"sched"`
+			Gateway      string          `json:"gateway"`
+			TagMatch     string          `json:"tagged"`
+			ICMPTypes    string          `json:"icmptype"`
+			ICMP6Types   string          `json:"icmp6type"`
+			TCPFlags     string          `json:"tcpflags1"`
+			TCPMasks     string          `json:"tcpflags2"`
+			ReceivedOn   json.RawMessage `json:"received-on"`
 		}
 		var rule FirewallRule
 		fields.FirewallRule = &rule
@@ -495,6 +509,9 @@ func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
 		}
 		rule.Interface = decodeStringList(fields.Interface)
 		rule.Categories = decodeStringList(fields.Categories)
+		rule.ExtraConditions = decodeLooseBool(fields.SourceNot) || decodeLooseBool(fields.DestNot) || decodeLooseBool(fields.InterfaceNot) || (len(fields.Quick) > 0 && !decodeLooseBool(fields.Quick)) ||
+			fields.Schedule != "" || fields.Gateway != "" || len(decodeStringList(fields.ReceivedOn)) > 0 ||
+			fields.TagMatch != "" || fields.ICMPTypes != "" || fields.ICMP6Types != "" || fields.TCPFlags != "" || fields.TCPMasks != ""
 		rule.Disabled = !decodeLooseBool(fields.Enabled)
 		if rule.Disabled {
 			rule.Enabled = "0"

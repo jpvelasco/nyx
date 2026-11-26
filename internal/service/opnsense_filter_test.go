@@ -2,11 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/testutil"
-	"net/http"
 )
 
 func TestOpnsenseServiceListFirewallRules(t *testing.T) {
@@ -178,5 +179,82 @@ func TestOpnsenseServiceFilter_Errors(t *testing.T) {
 	}
 	if _, err := svc.ApplyFilter(context.Background(), lopts, OpnsenseFilterRequest{Action: "block", Source: "guest", Destination: "iot", Enabled: true}, false); err == nil {
 		t.Fatal("expected filter create write error")
+	}
+}
+
+func TestScopedDNSFilter(t *testing.T) {
+	const address = "10.0.40.1"
+	req := OpnsenseFilterRequest{Source: "iot", Destination: address, Interface: "opt3", Action: "pass", Protocol: "udp", DestinationPort: "53", Direction: "in", AddressFamily: "ipv4", Enabled: true}
+	rules := []map[string]string{}
+	writes := 0
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/firewall/filter/search_rule":
+			_ = json.NewEncoder(w).Encode(map[string]any{"total": len(rules), "rows": rules})
+		case "/api/firewall/filter/add_rule":
+			var payload struct {
+				Rule map[string]string `json:"rule"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Error(err)
+			}
+			rule := payload.Rule
+			if rule["destination_net"] != address || rule["destination_port"] != "53" || rule["protocol"] != "udp" || rule["direction"] != "in" || rule["ipprotocol"] != "inet" {
+				t.Error("DNS scope lost")
+			}
+			writes++
+			rule["uuid"] = "dns-rule"
+			rules = append(rules, rule)
+			testutil.WriteBody(w, `{"result":"saved","uuid":"dns-rule"}`)
+		case "/api/firewall/filter/apply":
+			testutil.WriteBody(w, `{"status":"ok"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	s := NewOpnsenseService()
+	opts := opnsenseOptions(ts)
+	res, err := s.ApplyFilter(t.Context(), opts, req, false)
+	if err != nil || res.Outcome != "created" {
+		t.Fatalf("apply %v %v", res, err)
+	}
+	req.Name = "local DNS"
+	again, err := s.ApplyFilter(t.Context(), opts, req, false)
+	if err != nil || again.Outcome != "unchanged" || writes != 1 {
+		t.Fatalf("repeat %v %v writes=%d", again, err, writes)
+	}
+}
+
+func TestFilterSelectorValidation(t *testing.T) {
+	base := OpnsenseFilterRequest{Source: "iot", Destination: "resolver", Interface: "opt3", Protocol: "udp", SourcePort: "1000-2000", DestinationPort: "53", Direction: "in", AddressFamily: "ipv4"}
+	if err := base.validateSelectors(); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []func(*OpnsenseFilterRequest){func(r *OpnsenseFilterRequest) { r.Source = "" }, func(r *OpnsenseFilterRequest) { r.DestinationPort = "0" }, func(r *OpnsenseFilterRequest) { r.SourcePort = "2000-1000" }, func(r *OpnsenseFilterRequest) { r.DestinationPort = "65536" }, func(r *OpnsenseFilterRequest) { r.Protocol = "icmp" }, func(r *OpnsenseFilterRequest) { r.Direction = "sideways" }, func(r *OpnsenseFilterRequest) { r.AddressFamily = "v7" }, func(r *OpnsenseFilterRequest) { r.Kind = "alias" }} {
+		bad := base
+		invalid(&bad)
+		if err := bad.validateSelectors(); err == nil {
+			t.Fatal("accepted unsupported selectors")
+		}
+	}
+}
+
+func TestScopedFilterRequiresRestrictedSelectorsOnUpdate(t *testing.T) {
+	ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/search_rule") {
+			t.Error("unexpected write")
+			http.NotFound(w, r)
+			return
+		}
+		testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"dns","enabled":"1","action":"pass","interface":"opt3","source_net":"iot","destination_net":"resolver","protocol":"udp","source_port":"2000","destination_port":"53","direction":"in"}]}`)
+	})
+	req := OpnsenseFilterRequest{UUID: "dns", Action: "pass", Source: "iot", Destination: "resolver", Protocol: "udp", DestinationPort: "53", Interface: "opt3", Enabled: true}
+	if _, err := NewOpnsenseService().ApplyFilter(t.Context(), opnsenseOptions(ts), req, false); err == nil || !strings.Contains(err.Error(), "omitted selector") {
+		t.Fatalf("implicit widening: %v", err)
+	}
+	req.SourcePort = "2000"
+	res, err := NewOpnsenseService().ApplyFilter(t.Context(), opnsenseOptions(ts), req, false)
+	if err != nil || res.Outcome != "unchanged" {
+		t.Fatalf("explicit selection: %+v %v", res, err)
 	}
 }

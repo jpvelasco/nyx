@@ -111,6 +111,7 @@ type contentBlock struct {
 // omadaSurface is the Omada observation and read-only planning surface
 // exposed to agents, plus the dry-run-default ACL mutation tool.
 type omadaSurface interface {
+	ACLOrder(context.Context, service.OmadaOptions, service.OmadaACLOrderRequest, bool) (*service.OmadaACLOrderResult, error)
 	Info(ctx context.Context, opts service.OmadaOptions) (*service.OmadaInfo, error)
 	ListNetworks(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaNetwork, error)
 	ListACLs(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaACLRule, error)
@@ -561,6 +562,8 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"post_audit":  {Type: "boolean", Description: "Run a targeted isolation audit after a real apply. Default true."},
 			}, []string{"from", "to", "action"}),
 		},
+		{Name: "omada_plan_acl_order", Description: "Read the rule IDs and priorities at one enforcement point or preview their new order.", InputSchema: aclOrderSchema(false)},
+		{Name: "omada_apply_acl_order", Description: "Reorder the complete ACL scope with an expected-order check and readback. Dry-run by default.", InputSchema: aclOrderSchema(true)},
 		{
 			Name:        "omada_list_port_forwardings",
 			Description: "List the Omada gateway's NAT port-forwarding rules for a site.",
@@ -947,39 +950,12 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		{
 			Name:        "opnsense_plan_filter",
 			Description: "Preview creating, updating, or deleting an OPNsense MVC filter rule or alias. Read-only.",
-			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
-				"kind":        {Type: "string", Description: "filter (default) or alias"},
-				"uuid":        {Type: "string", Description: "Existing rule or alias uuid"},
-				"name":        {Type: "string", Description: "Rule description or alias name"},
-				"action":      {Type: "string", Description: "pass, block, or reject"},
-				"interface":   {Type: "string", Description: "Filter interface (lan, opt1, bridge0)"},
-				"source":      {Type: "string", Description: "Source net or alias name"},
-				"destination": {Type: "string", Description: "Destination net or alias name"},
-				"addresses":   {Type: "string", Description: "Comma-separated alias members"},
-				"alias_type":  {Type: "string", Description: "Alias type (network, host)"},
-				"description": {Type: "string", Description: "Optional description"},
-				"enabled":     {Type: "boolean", Description: "Whether the rule or alias is enabled"},
-				"delete":      {Type: "boolean", Description: "Preview a delete"},
-			}, nil),
+			InputSchema: opnsenseFilterToolSchema(false),
 		},
 		{
 			Name:        "opnsense_apply_filter",
 			Description: "Create, update, or delete an OPNsense MVC filter rule or alias, then apply/reconfigure. Dry-run default.",
-			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
-				"kind":        {Type: "string", Description: "filter (default) or alias"},
-				"uuid":        {Type: "string", Description: "Existing rule or alias uuid"},
-				"name":        {Type: "string", Description: "Rule description or alias name"},
-				"action":      {Type: "string", Description: "pass, block, or reject"},
-				"interface":   {Type: "string", Description: "Filter interface (lan, opt1, bridge0)"},
-				"source":      {Type: "string", Description: "Source net or alias name"},
-				"destination": {Type: "string", Description: "Destination net or alias name"},
-				"addresses":   {Type: "string", Description: "Comma-separated alias members"},
-				"alias_type":  {Type: "string", Description: "Alias type (network, host)"},
-				"description": {Type: "string", Description: "Optional description"},
-				"enabled":     {Type: "boolean", Description: "Whether the rule or alias is enabled"},
-				"delete":      {Type: "boolean", Description: "Delete the rule or alias"},
-				"dry_run":     {Type: "boolean", Description: "Preview only. Default true."},
-			}, nil),
+			InputSchema: opnsenseFilterToolSchema(true),
 		},
 		{
 			Name:        "opnsense_plan_unbound_override",
@@ -1193,6 +1169,44 @@ func opnsenseVLANToolSchema(apply bool) inputSchema {
 		"members":     {Type: "string", Description: "Comma-separated bridge members"},
 		"address":     {Type: "string", Description: "Static IPv4 or IPv6 interface address with prefix length for assignment"},
 		"delete":      {Type: "boolean", Description: "Delete the VLAN device"},
+	}
+	if apply {
+		fields["dry_run"] = propSchema{Type: "boolean", Description: "Preview only. Default true."}
+	}
+	return opnsenseToolSchemaExtra(fields, nil)
+}
+
+func aclOrderSchema(apply bool) inputSchema {
+	fields := map[string]propSchema{
+		"scope":    {Type: "string", Description: "Enforcement point: switch, gateway or eap"},
+		"expected": {Type: "string", Description: "Comma-separated IDs in observed order"},
+		"desired":  {Type: "string", Description: "Comma-separated IDs in desired order"},
+	}
+	if apply {
+		fields["dry_run"] = propSchema{Type: "boolean", Description: "Preview only. Default true."}
+	}
+	return omadaToolSchemaExtra(fields, []string{"scope"})
+}
+
+func opnsenseFilterToolSchema(apply bool) inputSchema {
+	fields := map[string]propSchema{
+		"kind":             {Type: "string", Description: "filter (default) or alias"},
+		"uuid":             {Type: "string", Description: "Existing rule or alias uuid"},
+		"name":             {Type: "string", Description: "Rule description or alias name"},
+		"action":           {Type: "string", Description: "pass, block, or reject"},
+		"interface":        {Type: "string", Description: "Filter interface (lan, opt1, bridge0)"},
+		"source":           {Type: "string", Description: "Source net or alias name"},
+		"destination":      {Type: "string", Description: "Destination net or alias name"},
+		"addresses":        {Type: "string", Description: "Comma-separated alias members"},
+		"alias_type":       {Type: "string", Description: "Alias type (network, host)"},
+		"description":      {Type: "string", Description: "Optional description"},
+		"enabled":          {Type: "boolean", Description: "Whether the rule or alias is enabled"},
+		"protocol":         {Type: "string", Description: "IP protocol, e.g. tcp or udp"},
+		"source_port":      {Type: "string", Description: "TCP/UDP source port or numeric range"},
+		"destination_port": {Type: "string", Description: "TCP/UDP destination port or numeric range"},
+		"direction":        {Type: "string", Description: "in, out or any"},
+		"address_family":   {Type: "string", Description: "ipv4, ipv6 or dual"},
+		"delete":           {Type: "boolean", Description: "Delete the selected rule or alias"},
 	}
 	if apply {
 		fields["dry_run"] = propSchema{Type: "boolean", Description: "Preview only. Default true."}

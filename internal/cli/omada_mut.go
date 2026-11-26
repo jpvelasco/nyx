@@ -483,3 +483,33 @@ func bindOmadaNatFlags(cmd *cobra.Command, f *omadaNatFlags) {
 	cmd.Flags().StringVar(&f.target, "target", "", "Forwarded internal address")
 	cmd.Flags().StringVar(&f.label, "label", "", "Rule name")
 }
+
+func buildOmadaACLOrderCmd(apply bool) *cobra.Command {
+	var scope, before, after string
+	dryRun := true
+	name := "plan-acl-order"
+	if apply {
+		name = "apply-acl-order"
+	}
+	cmd := &cobra.Command{Use: name, Short: "Inspect or reorder the ACL rules at one enforcement point", Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			req := service.OmadaACLOrderRequest{Scope: scope, Expected: splitCSV(before), Desired: splitCSV(after)}
+			return withProviderSession("omada", func(ctx context.Context, opts providers.ImportOptions) error {
+				res, err := service.NewOmadaService().ACLOrder(ctx, toOmadaOptions(opts), req, dryRun)
+				if err != nil {
+					return err
+				}
+				return printJSON(res)
+			})
+		},
+	}
+	cmd.Flags().StringVar(&scope, "scope", "", "ACL enforcement point: switch, gateway or eap")
+	cmd.Flags().StringVar(&before, "expected", "", "Comma-separated rule IDs in observed order")
+	cmd.Flags().StringVar(&after, "desired", "", "Comma-separated rule IDs in desired order")
+	cmd.Flags().StringVar(&providerSite, "site", "", "Controller site name")
+	addProviderFlags(cmd, "omada")
+	if apply {
+		addDryRunFlag(cmd, &dryRun)
+	}
+	return cmd
+}
