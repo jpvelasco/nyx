@@ -113,3 +113,13 @@ func TestPeerPreviewAndRevocation(t *testing.T) {
 		t.Fatal(deletes)
 	}
 }
+
+func TestApprovedPeerToolRejectsOverrides(t *testing.T) {
+	hermeticCreds(t)
+	s := NewServerWithLogger(nil)
+	for _, args := range []map[string]interface{}{nil, {"dry_run": "false"}, {"public_key": "fixture"}, {"file": "other.json"}, {"host": "other.example"}} {
+		if _, failed := s.dispatchTool(t.Context(), "opnsense_apply_approved_wireguard_peer", args); !failed {
+			t.Fatal("accepted missing or overridden approval")
+		}
+	}
+}

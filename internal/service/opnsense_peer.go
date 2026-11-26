@@ -70,7 +70,7 @@ func intersects(left, right []netip.Prefix) bool {
 	return false
 }
 
-// PlanWireGuardPeer previews a selected peer change. Only exact-UUID revocation can be executed through Nyx.
+// PlanWireGuardPeer previews a selected peer change.
 func (s *OpnsenseService) PlanWireGuardPeer(ctx context.Context, opts OpnsenseOptions, r WireGuardPeerRequest) (*WireGuardPeerPlan, error) {
 	plan := &WireGuardPeerPlan{Action: r.Action, UUID: r.UUID, Name: r.Name, Outcome: "planned"}
 	switch r.Action {

@@ -38,12 +38,42 @@ func wireGuardPeerBinding(apply bool) operationBinding {
 			dry = v
 		}
 		plan, err := service.NewOpnsenseService().RevokeWireGuardPeer(ctx, opts, req, dry)
-		if err != nil {
-			if plan != nil {
-				return errResult(toJSON(map[string]any{"error": err.Error(), "plan": plan}))
+		return peerResult(plan, err)
+	}}
+}
+
+func approvedPeerBinding() operationBinding {
+	return operationBinding{tool: tool{Name: "opnsense_apply_approved_wireguard_peer", Description: "Preview or reconcile the exact peer state supplied by the operator in the Nyx process configuration.", InputSchema: inputSchema{Type: "object", Properties: map[string]propSchema{"dry_run": {Type: "boolean", Description: "Preview the approved peer state (default true)"}}}}, call: func(s *Server, ctx context.Context, args map[string]interface{}) toolDispatchResult {
+		dry := true
+		for k, val := range args {
+			if k != "dry_run" {
+				return errResult("only dry_run is accepted for this operator-approved change")
 			}
+			var ok bool
+			dry, ok = val.(bool)
+			if !ok {
+				return errResult("dry_run must be a boolean")
+			}
+		}
+		approval, err := service.LoadApprovedPeer(s.env(service.PeerApprovalEnv))
+		if err != nil {
 			return errResult(err.Error())
 		}
-		return okResult(toJSON(plan))
+		opts, msg := s.opnsenseOptionsFromArgs(map[string]interface{}{"profile": approval.Profile}, true)
+		if msg != "" {
+			return errResult("configure the approved OPNsense profile")
+		}
+		plan, err := service.NewOpnsenseService().ApplyApprovedPeer(ctx, opts, approval, dry)
+		return peerResult(plan, err)
 	}}
+}
+
+func peerResult(plan *service.WireGuardPeerPlan, err error) toolDispatchResult {
+	if err != nil {
+		if plan != nil {
+			return errResult(toJSON(map[string]any{"plan": plan, "error": err.Error()}))
+		}
+		return errResult(err.Error())
+	}
+	return okResult(toJSON(plan))
 }

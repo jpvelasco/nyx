@@ -2,6 +2,10 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"github.com/jpvelasco/nyx/internal/credentials"
+	"github.com/jpvelasco/nyx/internal/storepath"
+	"os"
 
 	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/service"
@@ -40,5 +44,36 @@ func opnsensePeerCommand(apply bool) *cobra.Command {
 		flags.StringSliceVar(&req.AllowedNetworks, "allowed-networks", nil, "Desired canonical IPv4 or IPv6 network prefixes")
 	}
 	addProviderFlags(cmd, "opnsense")
+	return cmd
+}
+
+func approvedPeerCommand() *cobra.Command {
+	var dry bool
+	cmd := &cobra.Command{Use: "apply-approved-wireguard-peer", Short: "Reconcile the peer defined in the operator's local approval file", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		a, err := service.LoadApprovedPeer(os.Getenv(service.PeerApprovalEnv))
+		if err != nil {
+			return err
+		}
+		c := credentials.Connection{Provider: "opnsense", Profile: a.Profile}
+		v := credentials.Resolve(c, nil, os.Getenv, storepath.StoreFile(), true)
+		if c.Require(v) != nil {
+			return errors.New("configure the approved OPNsense profile")
+		}
+		timeout, err := extraTimeout()
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+		defer cancel()
+		opts := toOpnsenseOptions(providers.ConnectionOptions(c, v))
+		plan, err := service.NewOpnsenseService().ApplyApprovedPeer(ctx, opts, a, dry)
+		if plan != nil {
+			if e := printJSON(plan); e != nil {
+				return e
+			}
+		}
+		return err
+	}}
+	cmd.Flags().BoolVar(&dry, "dry-run", true, "Preview the operator-approved peer state")
 	return cmd
 }

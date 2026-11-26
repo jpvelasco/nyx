@@ -99,7 +99,7 @@ func (c *Client) doWithReplay(ctx context.Context, method, path string, body []b
 			lastErr = tlsutil.Annotate(fmt.Errorf("connecting to OPNsense at %s: %w", c.host, err))
 		} else {
 			endpoint := strings.TrimPrefix(req.URL.Path, "/api")
-			if c.Debug && endpoint != firewallLogPath && endpoint != firewallStatsPath {
+			if c.Debug && endpoint != firewallLogPath && endpoint != firewallStatsPath && !strings.HasPrefix(endpoint, "/wireguard/") {
 				c.debugDump(resp, method, path)
 			}
 			lastErr = classifyStatus(resp, path)
