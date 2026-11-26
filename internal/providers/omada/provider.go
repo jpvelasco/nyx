@@ -116,7 +116,7 @@ func (o *OmadaProvider) Check(ctx context.Context, opts providers.ImportOptions)
 // LAN networks with their gateway bindings, both ACL scopes and their rule
 // counts, and the active client count. It is read-only and never mutates.
 func (o *OmadaProvider) Inventory(ctx context.Context, opts providers.ImportOptions) (*providers.ProviderInventory, error) {
-	client, site, err := openSite(ctx, opts)
+	client, site, err := openACLSite(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -135,8 +135,8 @@ func (o *OmadaProvider) Inventory(ctx context.Context, opts providers.ImportOpti
 	}, nil
 }
 
-// openSite opens a read session and resolves the configured site. On success the caller owns logout.
-func openSite(ctx context.Context, opts providers.ImportOptions) (*omadabackend.Client, omadabackend.Site, error) {
+// openACLSite opens a read session and resolves the configured site. On success the caller owns logout.
+func openACLSite(ctx context.Context, opts providers.ImportOptions) (*omadabackend.Client, omadabackend.Site, error) {
 	client, err := newProviderClient(ctx, opts)
 	if err != nil {
 		return nil, omadabackend.Site{}, fmt.Errorf("connecting to omada controller: %w", err)
@@ -158,7 +158,7 @@ func openSite(ctx context.Context, opts providers.ImportOptions) (*omadabackend.
 
 func (o *OmadaProvider) ObserveACLs(ctx context.Context, opts providers.ImportOptions, _ []intent.Network) (providers.ACLObservation, error) {
 	var observed providers.ACLObservation
-	client, site, err := openSite(ctx, opts)
+	client, site, err := openACLSite(ctx, opts)
 	if err != nil {
 		return observed, err
 	}
@@ -187,7 +187,7 @@ func (o *OmadaProvider) ObserveACLs(ctx context.Context, opts providers.ImportOp
 // runs in the controller's own wall clock and local clock drift cancels.
 func (o *OmadaProvider) ObserveWLANSchedule(ctx context.Context, opts providers.ImportOptions) (providers.WLANScheduleObservation, error) {
 	var observed providers.WLANScheduleObservation
-	client, site, err := openSite(ctx, opts)
+	client, site, err := openACLSite(ctx, opts)
 	if err != nil {
 		return observed, err
 	}
@@ -766,7 +766,7 @@ func (o *OmadaProvider) PlanNat(ctx context.Context, req providers.NatApplyReque
 	if err := validateOmadaNatRequest(req); err != nil {
 		return nil, err
 	}
-	client, site, err := openSite(ctx, opts)
+	client, site, err := openACLSite(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
