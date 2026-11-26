@@ -18,6 +18,7 @@ type operationBinding struct {
 
 func sharedBindings() []operationBinding {
 	out := []operationBinding{capabilityBinding(), networkMapBinding(), clientLocationBinding(), switchPortsBinding(), mapCaptureBinding(), mapDriftBinding(), performanceBinding()}
+	out = append(out, diagnosticBindings()...)
 	for _, adapter := range providers.Adapters() {
 		if op, ok := service.ControllerInfo(adapter); ok {
 			out = append(out, infoBinding(op))

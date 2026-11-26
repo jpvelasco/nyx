@@ -86,14 +86,17 @@ func planningHistoryPath(siteID string) string {
 func planningHistoryError(err error) error {
 	var apiErr *apiError
 	if errors.As(err, &apiErr) {
-		if status := WLANOptimizationStatus(apiErr.ErrorCode); status != "" {
-			return fmt.Errorf("reading WLAN optimization history: controller error %d: %s", apiErr.ErrorCode, status)
+		var message string
+		switch {
+		case WLANOptimizationStatus(apiErr.ErrorCode) != "":
+			message = fmt.Sprintf("reading WLAN optimization history: controller error %d: %s", apiErr.ErrorCode, WLANOptimizationStatus(apiErr.ErrorCode))
+		case apiErr.ErrorCode != 0:
+			message = fmt.Sprintf("reading WLAN optimization history: controller error %d", apiErr.ErrorCode)
+		case apiErr.StatusCode != 0:
+			message = fmt.Sprintf("reading WLAN optimization history: HTTP %d", apiErr.StatusCode)
 		}
-		if apiErr.ErrorCode != 0 {
-			return fmt.Errorf("reading WLAN optimization history: controller error %d", apiErr.ErrorCode)
-		}
-		if apiErr.StatusCode != 0 {
-			return fmt.Errorf("reading WLAN optimization history: HTTP %d", apiErr.StatusCode)
+		if message != "" {
+			return &apiError{StatusCode: apiErr.StatusCode, ErrorCode: apiErr.ErrorCode, Msg: message}
 		}
 	}
 	return errors.New("reading WLAN optimization history: transport or protocol error")

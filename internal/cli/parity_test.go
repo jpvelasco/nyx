@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -252,5 +253,18 @@ func TestNamedToolCLIParity(t *testing.T) {
 				t.Errorf("MCP tool %q maps to CLI %q %s, but that extra is not registered", tool, vendor, cliName)
 			}
 		})
+	}
+}
+
+func TestDiagnosticReadParity(t *testing.T) {
+	ensureProviderRegistered(t, "omada", &omadaprov.OmadaProvider{})
+	ensureProviderRegistered(t, "opnsense", &opnsenseprov.Provider{})
+	root := &cobra.Command{Use: "nyx"}
+	BuildProviderSubcommands(root)
+	for tool, args := range map[string][]string{"omada_ap_channel_info": {"omada", "ap-channel-info"}, "omada_wlan_optimization": {"omada", "wlan-optimization"}, "omada_controller_firmware": {"omada", "controller-firmware"}, "omada_site_config_drift": {"omada", "site-config", "drift"}, "opnsense_query_states": {"opnsense", "states", "list"}} {
+		cmd, remaining, err := root.Find(args)
+		if err != nil || len(remaining) != 0 || cmd == nil || cmd.Name() != args[len(args)-1] || !slices.Contains(mcp.ToolNames(), tool) {
+			t.Errorf("missing read %s / %v", tool, args)
+		}
 	}
 }
