@@ -15,6 +15,8 @@ func segmentSchema(apply bool) inputSchema {
 	props["tag"] = propSchema{Type: "integer", Description: "802.1Q VLAN tag from 1 through 4094"}
 	if apply {
 		props["dry_run"] = propSchema{Type: "boolean", Description: "Preview the steps. Defaults to true."}
+	} else {
+		withControllerTLS(props)
 	}
 	props["omada_profile"] = propSchema{Type: "string", Description: "Configured Omada connection profile"}
 	props["omada_site"] = propSchema{Type: "string", Description: "Selected site on the configured Omada controller"}
@@ -47,10 +49,10 @@ func (s *Server) segment(ctx context.Context, args map[string]interface{}, apply
 		return errResult(msg)
 	}
 	if opts.Omada != nil {
-		opts.Omada.CACertPath = s.env("NYX_OMADA_CA_CERT")
+		opts.Omada.SkipTLSVerify, opts.Omada.CACertPath = controllerTLS(args, s.env("NYX_OMADA_CA_CERT"))
 	}
 	if opts.Opnsense != nil {
-		opts.Opnsense.CACertPath = s.env("NYX_OPNSENSE_CA_CERT")
+		opts.Opnsense.SkipTLSVerify, opts.Opnsense.CACertPath = controllerTLS(args, s.env("NYX_OPNSENSE_CA_CERT"))
 	}
 	res, err := s.segmentSvc.Reconcile(ctx, opts, req, !apply || argBoolDefault(args, "dry_run", true))
 	if err != nil {
