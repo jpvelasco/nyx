@@ -105,3 +105,22 @@ func TestBuiltinRegisteredInfo(t *testing.T) {
 		})
 	}
 }
+
+func TestCapabilityBindingSelectedConnection(t *testing.T) {
+	hermeticCreds(t)
+	providerfixture.IsolateProviders(t)
+	adapter := new(providerfixture.ReadOnlyAdapter)
+	if err := providers.Register(adapter); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SYNTHETIC_HOST", "switch.example")
+	t.Setenv("SYNTHETIC_API_KEY", "fixture-secret")
+	s := NewServerWithLogger(nil)
+	out, failed := s.dispatchTool(t.Context(), service.CapabilitiesTool, map[string]any{"provider": "synthetic", "profile": "default", "observe": true})
+	if failed || !strings.Contains(out, "observed") || strings.Contains(out, "fixture-secret") || adapter.Calls != 1 {
+		t.Fatal(out)
+	}
+	if _, failed = s.dispatchTool(t.Context(), service.CapabilitiesTool, map[string]any{"provider": "absent"}); !failed {
+		t.Fatal("unknown provider accepted by MCP")
+	}
+}
