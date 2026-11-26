@@ -55,7 +55,7 @@ var auditCmd = &cobra.Command{
 			return err
 		}
 		for name, profile := range profiles {
-			if providers.Get(name) == nil {
+			if _, ok := providers.LookupAdapter(name); !ok {
 				return fmt.Errorf("--provider-profile: unknown provider %q", name)
 			}
 			if strings.TrimSpace(profile) == "" {

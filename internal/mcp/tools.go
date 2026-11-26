@@ -355,7 +355,7 @@ func (s *Server) toolCredentialsStatus(_ context.Context, _ map[string]interface
 	}
 	env := map[string]bool{}
 	fields := map[string][]credentials.Field{}
-	for _, provider := range providers.List() {
+	for _, provider := range providers.Adapters() {
 		fields[provider.Name()] = credentials.FieldsFor(provider.Name())
 	}
 	// Built-in services can also be supplied directly by an MCP embedder.
