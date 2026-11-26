@@ -2,6 +2,7 @@ package omada
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -21,13 +22,21 @@ const (
 // read leaves the actual configuration unknown, even when the UI exposes it.
 func (c *Client) fetchMDNSInventory(ctx context.Context, siteID string) *intent.MDNSInventory {
 	path := fmt.Sprintf("sites/%s/setting/service/mdns", siteID)
-	rules, _, err := fetchPaged[intent.MDNSRule](ctx, c, path, defaultPageSize)
+	rows, _, err := fetchPaged[json.RawMessage](ctx, c, path, defaultPageSize)
 	if err == nil {
-		if rules == nil {
-			rules = []intent.MDNSRule{}
-		}
-		for i := range rules {
-			scrubMDNSRule(&rules[i])
+		rules := make([]intent.MDNSRule, 0, len(rows))
+		for _, row := range rows {
+			var parsed struct {
+				intent.MDNSRule
+				Enabled *bool `json:"status"`
+				Scope   *int  `json:"type"`
+			}
+			if json.Unmarshal(row, &parsed) != nil || parsed.Enabled == nil || parsed.Scope == nil {
+				return &intent.MDNSInventory{Status: mdnsUnknown}
+			}
+			parsed.MDNSRule.Enabled, parsed.Type = *parsed.Enabled, *parsed.Scope
+			scrubMDNSRule(&parsed.MDNSRule)
+			rules = append(rules, parsed.MDNSRule)
 		}
 		return &intent.MDNSInventory{Status: mdnsAvailable, Rules: rules}
 	}

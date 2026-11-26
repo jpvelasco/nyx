@@ -99,8 +99,8 @@ func buildOmadaApplyACLCmd() *cobra.Command {
 }
 
 type omadaPortFlags struct {
-	switchMAC, native, tagged, profileName string
-	port                                   int
+	switchMAC, native, tagged, profileName, revision, verifyClient string
+	port                                                           int
 }
 
 func (f omadaPortFlags) request() (service.OmadaPortProfileRequest, error) {
@@ -114,11 +114,13 @@ func (f omadaPortFlags) request() (service.OmadaPortProfileRequest, error) {
 		return service.OmadaPortProfileRequest{}, fmt.Errorf("--native is required")
 	}
 	return service.OmadaPortProfileRequest{
-		SwitchMAC:   f.switchMAC,
-		Port:        f.port,
-		Native:      f.native,
-		Tagged:      splitCSV(f.tagged),
-		ProfileName: f.profileName,
+		SwitchMAC:        f.switchMAC,
+		Port:             f.port,
+		Native:           f.native,
+		Tagged:           splitCSV(f.tagged),
+		ProfileName:      f.profileName,
+		ExpectedRevision: f.revision,
+		VerifyClientMAC:  f.verifyClient,
 	}, nil
 }
 
@@ -127,6 +129,8 @@ func bindOmadaPortFlags(cmd *cobra.Command, f *omadaPortFlags) {
 	cmd.Flags().IntVar(&f.port, "port", 0, "1-based port number (required)")
 	cmd.Flags().StringVar(&f.native, "native", "", "Native (untagged) network name (required)")
 	cmd.Flags().StringVar(&f.tagged, "tagged", "", "Tagged network names, comma-separated")
+	cmd.Flags().StringVar(&f.verifyClient, "verify-client-mac", "", "Observe this client attachment and DHCP lease after guarded apply")
+	cmd.Flags().StringVar(&f.revision, "expected-revision", "", "Require the port configuration revision from a prior plan")
 	cmd.Flags().StringVar(&f.profileName, "profile-name", "", "Optional LAN profile name (derived when empty)")
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name (defaults to first site)")
 	addProviderFlags(cmd, "omada")
@@ -359,21 +363,13 @@ func buildOmadaApplySSIDCmd() *cobra.Command {
 	return cmd
 }
 
-// buildOmadaPlanNatCmd previews an Omada NAT mutation. The Omada Open API
-// exposes NAT reads but no live-site NAT write path, so the plan always
-// refuses with the current rules as before-evidence and the write-surface
-// explanation (#139).
+// buildOmadaPlanNatCmd compares planned selectors with current live-site NAT rules.
 func buildOmadaPlanNatCmd() *cobra.Command {
 	var f omadaNatFlags
 	cmd := &cobra.Command{
 		Use:   "plan-nat",
-		Short: "Preview an Omada NAT mutation (always refused: no Open API write path)",
-		Long: `Preview an Omada NAT mutation.
-
-The Omada Open API exposes NAT reads (port forwardings, one-to-one NAT)
-but no live-site NAT write path, so the plan always refuses with the
-current rules as before-evidence and the write-surface explanation.
-Configure NAT via the controller UI, or use provider opnsense.`,
+		Short: "Compare a proposed Omada NAT rule with the site inventory",
+		Long:  `Read the selected collection and show possible conflicts. Use JSON output for rule IDs and the published operation. Live writes require verified support for the controller and gateway.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			req, err := f.request()
 			if err != nil {
@@ -399,12 +395,8 @@ func buildOmadaApplyNatCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "apply-nat",
-		Short: "Apply an Omada NAT mutation (always refused: no Open API write path)",
-		Long: `Apply an Omada NAT mutation.
-
-The Omada Open API exposes no live-site NAT write path, so every apply is
-refused with identical before/after evidence — nothing can mutate,
-dry-run or not. Use provider opnsense for NAT writes.`,
+		Short: "Reconcile a proposed Omada NAT change against the current rules",
+		Long:  `Fetch fresh evidence before retrying a change. The hardware-controller catalog documents site writes. Nyx returns the observed rules and the verification status for this operation.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			req, err := f.request()
 			if err != nil {
@@ -430,15 +422,16 @@ dry-run or not. Use provider opnsense for NAT writes.`,
 
 // omadaNatFlags carries the NAT mutation intent for the CLI surface.
 type omadaNatFlags struct {
-	operation string
-	action    string
-	ruleUUID  string
-	protocol  string
-	source    string
-	port      string
-	localPort string
-	target    string
-	label     string
+	interfaces, externalAddress string
+	operation                   string
+	action                      string
+	ruleUUID                    string
+	protocol                    string
+	source                      string
+	port                        string
+	localPort                   string
+	target                      string
+	label                       string
 }
 
 func (f omadaNatFlags) request() (service.OmadaNatApplyRequest, error) {
@@ -447,6 +440,8 @@ func (f omadaNatFlags) request() (service.OmadaNatApplyRequest, error) {
 		Action:    f.action,
 		RuleUUID:  f.ruleUUID,
 	}
+	req.Spec.Interfaces = splitCSV(f.interfaces)
+	req.Spec.Destination = f.externalAddress
 	req.Spec.Protocol = f.protocol
 	req.Spec.Source = f.source
 	req.Spec.Port = f.port
@@ -473,6 +468,8 @@ func (f omadaNatFlags) request() (service.OmadaNatApplyRequest, error) {
 }
 
 func bindOmadaNatFlags(cmd *cobra.Command, f *omadaNatFlags) {
+	cmd.Flags().StringVar(&f.interfaces, "wan-interfaces", "", "Comma-separated WAN interface IDs")
+	cmd.Flags().StringVar(&f.externalAddress, "external-address", "", "External address of a one-to-one rule")
 	cmd.Flags().StringVar(&f.operation, "operation", "", "NAT collection: port_forward or one_to_one (required)")
 	cmd.Flags().StringVar(&f.action, "action", "create", "create (default), update, delete, or toggle")
 	cmd.Flags().StringVar(&f.ruleUUID, "rule-uuid", "", "Target rule ID for update/delete/toggle")
@@ -482,4 +479,34 @@ func bindOmadaNatFlags(cmd *cobra.Command, f *omadaNatFlags) {
 	cmd.Flags().StringVar(&f.localPort, "local-port", "", "Forwarded (internal) port or range")
 	cmd.Flags().StringVar(&f.target, "target", "", "Forwarded internal address")
 	cmd.Flags().StringVar(&f.label, "label", "", "Rule name")
+}
+
+func buildOmadaACLOrderCmd(apply bool) *cobra.Command {
+	var scope, before, after string
+	dryRun := true
+	name := "plan-acl-order"
+	if apply {
+		name = "apply-acl-order"
+	}
+	cmd := &cobra.Command{Use: name, Short: "Inspect or reorder the ACL rules at one enforcement point", Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			req := service.OmadaACLOrderRequest{Scope: scope, Expected: splitCSV(before), Desired: splitCSV(after)}
+			return withProviderSession("omada", func(ctx context.Context, opts providers.ImportOptions) error {
+				res, err := service.NewOmadaService().ACLOrder(ctx, toOmadaOptions(opts), req, dryRun)
+				if err != nil {
+					return err
+				}
+				return printJSON(res)
+			})
+		},
+	}
+	cmd.Flags().StringVar(&scope, "scope", "", "ACL enforcement point: switch, gateway or eap")
+	cmd.Flags().StringVar(&before, "expected", "", "Comma-separated rule IDs in observed order")
+	cmd.Flags().StringVar(&after, "desired", "", "Comma-separated rule IDs in desired order")
+	cmd.Flags().StringVar(&providerSite, "site", "", "Controller site name")
+	addProviderFlags(cmd, "omada")
+	if apply {
+		addDryRunFlag(cmd, &dryRun)
+	}
+	return cmd
 }

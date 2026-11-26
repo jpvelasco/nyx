@@ -246,3 +246,18 @@ func TestFindHelpers_UUIDAuthoritative(t *testing.T) {
 		t.Error("unbound override: missing UUID must not fall back")
 	}
 }
+
+func TestExactFilterMatchUsesCreationDefaults(t *testing.T) {
+	want := FilterWrite{Action: "pass", Interface: "opt1", Source: "trusted", Destination: "resolver", Protocol: "udp", DestPort: "53", Enabled: true}
+	row := FirewallRule{Action: "pass", Interface: []string{"opt1"}, Source: "trusted", Destination: "resolver", Protocol: "UDP", DestPort: "53", Label: "existing", Direction: "in", IPProtocol: "inet", SourcePort: "any"}
+	if !ExactFilterMatch(row, want) {
+		t.Fatal("same DNS policy failed comparison")
+	}
+	for _, change := range []func(*FirewallRule){func(r *FirewallRule) { r.SourcePort = "53" }, func(r *FirewallRule) { r.DestPort = "853" }, func(r *FirewallRule) { r.Direction = "out" }, func(r *FirewallRule) { r.IPProtocol = "inet6" }, func(r *FirewallRule) { r.Disabled = true }} {
+		r := row
+		change(&r)
+		if ExactFilterMatch(r, want) {
+			t.Error("different policy matched")
+		}
+	}
+}

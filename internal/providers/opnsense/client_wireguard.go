@@ -78,10 +78,24 @@ func (c *Client) GetWireGuardServers(ctx context.Context) ([]WireGuardServer, er
 
 // GetWireGuardClients lists configured WireGuard peers.
 func (c *Client) GetWireGuardClients(ctx context.Context) ([]WireGuardClient, error) {
+	return c.readWireGuardClients(ctx, false)
+}
+
+// WireGuardPeersForChange requires a complete inventory for overlap checks and a reliable negative readback.
+func (c *Client) WireGuardPeersForChange(ctx context.Context) ([]WireGuardClient, error) {
+	return c.readWireGuardClients(ctx, true)
+}
+
+func (c *Client) readWireGuardClients(ctx context.Context, strict bool) ([]WireGuardClient, error) {
 	var raw []json.RawMessage
-	if _, err := fetchPagedList(ctx, c, wgClientSearchPath, listPageSize, &raw); err != nil {
+	total, err := fetchPagedList(ctx, c, wgClientSearchPath, listPageSize, &raw)
+	if err != nil {
 		return nil, remapPagedDecode(err, "decoding wireguard clients response")
 	}
+	if strict && (raw == nil || len(raw) != total) {
+		return nil, fmt.Errorf("incomplete WireGuard peer inventory")
+	}
+	seen := make(map[string]bool, len(raw))
 	out := make([]WireGuardClient, 0, len(raw))
 	for _, row := range raw {
 		var rec struct {
@@ -98,7 +112,22 @@ func (c *Client) GetWireGuardClients(ctx context.Context) ([]WireGuardClient, er
 			AllowedIPs2   string          `json:"allowed_ips"`
 		}
 		if json.Unmarshal(row, &rec) != nil || rec.UUID == "" {
+			if strict {
+				return nil, fmt.Errorf("incomplete WireGuard peer inventory")
+			}
 			continue
+		}
+		if strict {
+			id := strings.ToLower(rec.UUID)
+			if !ValidPeerUUID(id) || seen[id] {
+				return nil, fmt.Errorf("invalid or duplicated peer UUID")
+			}
+			seen[id] = true
+			switch strings.ToLower(string(rec.Enabled)) {
+			case `"0"`, `"1"`, `"false"`, `"true"`, `0`, `1`, `false`, `true`:
+			default:
+				return nil, fmt.Errorf("cannot verify peer enabled state")
+			}
 		}
 		out = append(out, WireGuardClient{
 			UUID:          rec.UUID,

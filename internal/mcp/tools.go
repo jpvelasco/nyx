@@ -61,6 +61,8 @@ var toolHandlers = map[string]toolHandler{
 	"omada_list_dhcp_snoops":           (*Server).toolOmadaListDHCPSnoops,
 	"omada_list_logs":                  (*Server).toolOmadaListLogs,
 	"omada_list_lan_multicasts":        (*Server).toolOmadaListLANMulticasts,
+	"omada_plan_acl_order":             (*Server).toolOmadaPlanACLOrder,
+	"omada_apply_acl_order":            (*Server).toolOmadaApplyACLOrder,
 	"omada_plan_port":                  (*Server).toolOmadaPlanPort,
 	"omada_apply_port_profile":         (*Server).toolOmadaApplyPortProfile,
 	"omada_plan_lan":                   (*Server).toolOmadaPlanLAN,
@@ -70,6 +72,8 @@ var toolHandlers = map[string]toolHandler{
 	"omada_apply_ssid":                 (*Server).toolOmadaApplySSID,
 	"omada_plan_nat":                   (*Server).toolOmadaPlanNat,
 	"omada_apply_nat":                  (*Server).toolOmadaApplyNat,
+	"plan_segment":                     (*Server).toolPlanSegment,
+	"apply_segment":                    (*Server).toolApplySegment,
 	"plan_port_forward":                (*Server).toolPlanPortForward,
 	"apply_port_forward":               (*Server).toolApplyPortForward,
 	"opnsense_list_interfaces":         (*Server).toolOpnsenseListInterfaces,
@@ -111,6 +115,9 @@ var toolHandlers = map[string]toolHandler{
 	"opnsense_plan_dhcp":               (*Server).toolOpnsensePlanDHCP,
 	"opnsense_apply_dhcp":              (*Server).toolOpnsenseApplyDHCP,
 	"topology":                         (*Server).toolTopology,
+
+	"opnsense_get_kea_status":             (*Server).toolOpnsenseGetKeaStatus,
+	"opnsense_list_router_advertisements": (*Server).toolOpnsenseListRouterAdvertisements,
 }
 
 // ToolNames returns the registered MCP tool names in sorted order.
@@ -689,6 +696,28 @@ func (s *Server) toolOmadaListLanProfiles(ctx context.Context, args map[string]i
 	return okResult(toJSON(profiles))
 }
 
+func (s *Server) toolOmadaPlanACLOrder(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.omadaACLOrder(ctx, args, false)
+}
+func (s *Server) toolOmadaApplyACLOrder(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.omadaACLOrder(ctx, args, true)
+}
+func (s *Server) omadaACLOrder(ctx context.Context, args map[string]interface{}, apply bool) toolDispatchResult {
+	if err := validateMutationArgs(args, aclOrderSchema(apply)); err != nil {
+		return errResult(err.Error())
+	}
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req := service.OmadaACLOrderRequest{Scope: argString(args, "scope"), Expected: splitCSV(argString(args, "expected")), Desired: splitCSV(argString(args, "desired"))}
+	result, err := s.omadaSvc.ACLOrder(ctx, opts, req, !apply || argBoolDefault(args, "dry_run", true))
+	if err != nil {
+		return errResult(err.Error())
+	}
+	return okResult(toJSON(result))
+}
+
 func (s *Server) toolOmadaPlanPort(ctx context.Context, args map[string]interface{}) toolDispatchResult {
 	opts, msg := s.omadaOptionsFromArgs(args, true)
 	if msg != "" {
@@ -904,6 +933,12 @@ func (s *Server) toolOpnsenseGetUnboundStatus(ctx context.Context, args map[stri
 func (s *Server) toolOpnsenseGetPfStatistics(ctx context.Context, args map[string]interface{}) toolDispatchResult {
 	return s.opnsenseReadJSON(ctx, args, "opnsense pf statistics request failed", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 		return s.opnsenseSvc.GetPfStatistics(ctx, opts)
+	})
+}
+
+func (s *Server) toolOpnsenseListRouterAdvertisements(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "OPNsense router advertisement visibility unknown", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.ListRouterAdvertisements(ctx, opts)
 	})
 }
 
@@ -1167,7 +1202,7 @@ func (s *Server) toolOpnsenseListVLANs(ctx context.Context, args map[string]inte
 	return okResult(toJSON(rows))
 }
 
-func vlanRequestFromArgs(args map[string]interface{}) (service.OpnsenseVLANRequest, string) {
+func vlanRequestFromArgs(args map[string]interface{}) service.OpnsenseVLANRequest {
 	return service.OpnsenseVLANRequest{
 		Kind:        argString(args, "kind"),
 		Parent:      argString(args, "parent"),
@@ -1175,8 +1210,9 @@ func vlanRequestFromArgs(args map[string]interface{}) (service.OpnsenseVLANReque
 		Description: argString(args, "description"),
 		UUID:        argString(args, "uuid"),
 		Members:     splitCSV(argString(args, "members")),
+		Address:     argString(args, "address"),
 		Delete:      argBoolDefault(args, "delete", false),
-	}, ""
+	}
 }
 
 func (s *Server) toolOpnsensePlanVLAN(ctx context.Context, args map[string]interface{}) toolDispatchResult {
@@ -1184,7 +1220,7 @@ func (s *Server) toolOpnsensePlanVLAN(ctx context.Context, args map[string]inter
 	if msg != "" {
 		return errResult(msg)
 	}
-	req, _ := vlanRequestFromArgs(args)
+	req := vlanRequestFromArgs(args)
 	plan, err := s.opnsenseSvc.PlanVLAN(ctx, opts, req)
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense vlan plan request failed: %v", err))
@@ -1197,7 +1233,7 @@ func (s *Server) toolOpnsenseApplyVLAN(ctx context.Context, args map[string]inte
 	if msg != "" {
 		return errResult(msg)
 	}
-	req, _ := vlanRequestFromArgs(args)
+	req := vlanRequestFromArgs(args)
 	res, err := s.opnsenseSvc.ApplyVLAN(ctx, opts, req, argBoolDefault(args, "dry_run", true))
 	if err != nil {
 		return errResult(fmt.Sprintf("opnsense vlan apply failed: %v", err))
@@ -1207,23 +1243,52 @@ func (s *Server) toolOpnsenseApplyVLAN(ctx context.Context, args map[string]inte
 
 func filterRequestFromArgs(args map[string]interface{}) service.OpnsenseFilterRequest {
 	return service.OpnsenseFilterRequest{
-		Kind:        argString(args, "kind"),
-		UUID:        argString(args, "uuid"),
-		Name:        argString(args, "name"),
-		Action:      argString(args, "action"),
-		Interface:   argString(args, "interface"),
-		Protocol:    argString(args, "protocol"),
-		Source:      argString(args, "source"),
-		Destination: argString(args, "destination"),
-		Addresses:   splitCSV(argString(args, "addresses")),
-		AliasType:   argString(args, "alias_type"),
-		Description: argString(args, "description"),
-		Enabled:     argBoolDefault(args, "enabled", true),
-		Delete:      argBoolDefault(args, "delete", false),
+		Kind:            argString(args, "kind"),
+		UUID:            argString(args, "uuid"),
+		Name:            argString(args, "name"),
+		Action:          argString(args, "action"),
+		Interface:       argString(args, "interface"),
+		Protocol:        argString(args, "protocol"),
+		SourcePort:      argString(args, "source_port"),
+		DestinationPort: argString(args, "destination_port"),
+		Direction:       argString(args, "direction"),
+		AddressFamily:   argString(args, "address_family"),
+		Source:          argString(args, "source"),
+		Destination:     argString(args, "destination"),
+		Addresses:       splitCSV(argString(args, "addresses")),
+		AliasType:       argString(args, "alias_type"),
+		Description:     argString(args, "description"),
+		Enabled:         argBoolDefault(args, "enabled", true),
+		Delete:          argBoolDefault(args, "delete", false),
 	}
 }
 
+// Check every supplied selector against the published schema before decoding it.
+// Treating a mistyped selector as empty could widen the rule.
+func validateMutationArgs(args map[string]interface{}, schema inputSchema) error {
+	for key, value := range args {
+		property, ok := schema.Properties[key]
+		if !ok {
+			return fmt.Errorf("unsupported argument %q", key)
+		}
+		switch property.Type {
+		case "string":
+			if _, ok := value.(string); !ok {
+				return fmt.Errorf("%s must be a string", key)
+			}
+		case "boolean":
+			if _, ok := value.(bool); !ok {
+				return fmt.Errorf("%s must be a boolean", key)
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Server) toolOpnsensePlanFilter(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	if err := validateMutationArgs(args, opnsenseFilterToolSchema(false)); err != nil {
+		return errResult(err.Error())
+	}
 	opts, msg := s.opnsenseOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)
@@ -1236,6 +1301,9 @@ func (s *Server) toolOpnsensePlanFilter(ctx context.Context, args map[string]int
 }
 
 func (s *Server) toolOpnsenseApplyFilter(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	if err := validateMutationArgs(args, opnsenseFilterToolSchema(true)); err != nil {
+		return errResult(err.Error())
+	}
 	opts, msg := s.opnsenseOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)
@@ -1377,10 +1445,7 @@ func subArgs(args map[string]interface{}, prefix string) map[string]interface{} 
 	return sub
 }
 
-// omadaNatRequestFromArgs parses the shared NAT mutation intent for the
-// Omada surface (#139). The surface always refuses — the Open API exposes
-// no live-site NAT write path — but the request is validated exactly like
-// the OPNsense pair so agents carry identical intent shapes.
+// omadaNatRequestFromArgs decodes the selected NAT collection and comparison fields.
 func omadaNatRequestFromArgs(args map[string]interface{}) (service.OmadaNatApplyRequest, string) {
 	req := service.OmadaNatApplyRequest{
 		Operation: argString(args, "operation"),
@@ -1388,6 +1453,8 @@ func omadaNatRequestFromArgs(args map[string]interface{}) (service.OmadaNatApply
 		RuleUUID:  argString(args, "rule_uuid"),
 		DryRun:    argBoolDefault(args, "dry_run", true),
 	}
+	req.Spec.Interfaces = splitCSV(argString(args, "wan_interfaces"))
+	req.Spec.Destination = argString(args, "external_address")
 	req.Spec.Protocol = argString(args, "protocol")
 	req.Spec.Source = argString(args, "source")
 	req.Spec.Port = argString(args, "port")
@@ -1458,7 +1525,7 @@ func (s *Server) playbookOptionsFromArgs(args map[string]interface{}) (service.P
 		return opts, msg
 	}
 	if opts.Omada == nil && opts.Opnsense == nil {
-		return opts, "the port-forward playbook requires a host for at least one provider: set omada_host or opnsense_host (or the OMADA_HOST / OPNSENSE_HOST environment variables or the credential store)"
+		return opts, "the playbook requires a host for at least one provider: set omada_host or opnsense_host (or the OMADA_HOST / OPNSENSE_HOST environment variables or the credential store)"
 	}
 	return opts, ""
 }
@@ -1613,13 +1680,11 @@ func untrustedDataResult(data any, label string) toolDispatchResult {
 }
 
 func firewallLogLimit(args map[string]interface{}, maxLimit int) (int, error) {
-	value, provided := args["limit"]
-	if !provided {
-		return maxLimit, nil
-	}
-	number, ok := value.(float64)
-	if !ok || number < 1 || number > float64(maxLimit) || number != float64(int(number)) {
-		return 0, fmt.Errorf("limit must be an integer between 1 and %d", maxLimit)
-	}
-	return int(number), nil
+	return diagnosticInteger(args, "limit", maxLimit, 1, maxLimit)
+}
+
+func (s *Server) toolOpnsenseGetKeaStatus(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.opnsenseReadJSON(ctx, args, "OPNsense Kea service visibility unknown", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+		return s.opnsenseSvc.GetKeaStatus(ctx, opts)
+	})
 }

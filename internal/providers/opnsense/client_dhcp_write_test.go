@@ -133,3 +133,23 @@ func TestFindDHCPRows(t *testing.T) {
 		t.Fatal("resv miss")
 	}
 }
+
+func TestSegmentDHCPRequiresOneOwner(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		body   string
+		ok     bool
+	}{{200, `{"running":false}`, true}, {404, "", true}, {200, `{"running":true}`, false}, {403, "", false}, {200, `{}`, false}} {
+		c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "GET" || r.URL.Path != "/api/kea/service/status" {
+				t.Errorf("unexpected operation %s", r.URL.Path)
+			}
+			w.WriteHeader(tc.status)
+			testutil.WriteBody(w, tc.body)
+		}))
+		err := c.CheckDnsmasqPoolOwner(t.Context())
+		if (err == nil) != tc.ok {
+			t.Errorf("status %d %s: %v", tc.status, tc.body, err)
+		}
+	}
+}

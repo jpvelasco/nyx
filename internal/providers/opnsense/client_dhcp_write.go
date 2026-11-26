@@ -54,9 +54,9 @@ const (
 
 func dnsmasqRangeWire(w DnsmasqRangeWrite) ([]byte, error) {
 	item := map[string]interface{}{
-		"interface": w.Interface,
-		"start":     w.Start,
-		"end":       w.End,
+		"interface":  w.Interface,
+		"start_addr": w.Start,
+		"end_addr":   w.End,
 	}
 	return json.Marshal(map[string]interface{}{"range": item})
 }
@@ -252,6 +252,19 @@ func FindKeaReservation(rows []KeaReservation, uuid, ip, mac string) (KeaReserva
 		}
 	}
 	return KeaReservation{}, false
+}
+
+// CheckDnsmasqPoolOwner requires the competing Kea service to be stopped or absent
+// before provisioning a new pool on a composed segment. A privilege error leaves ownership unknown.
+func (c *Client) CheckDnsmasqPoolOwner(ctx context.Context) error {
+	running, err := c.GetKeaServiceStatus(ctx)
+	if err != nil && !isNotFound(err) {
+		return fmt.Errorf("cannot verify competing DHCP service: %w", err)
+	}
+	if running {
+		return fmt.Errorf("the Kea service is running, review the DHCP owner before creating this pool")
+	}
+	return nil
 }
 
 // DetectDHCPBackend reports which DHCP writer is live. Dnsmasq wins when

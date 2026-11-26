@@ -35,6 +35,8 @@ func omadaExtFakeController(t *testing.T, uplinkEmpty, switchEmpty, profilesEmpt
 			return
 		}
 		switch r.URL.Path {
+		case "/openapi/v1/abc123/sites/s1/acls/eap-acls":
+			w.Write([]byte(`{"errorCode":0,"result":{"totalRows":1,"data":[{"id":"rule-a","index":1}]}}`))
 		case "/api/info":
 			w.Write([]byte(`{"errorCode":0,"msg":"","result":{"controllerVer":"6.4.5.1","apiVer":"2.0","omadacId":"abc123","configured":true,"omadacCategory":"advanced"}}`))
 		case "/openapi/authorize/token":
@@ -553,5 +555,25 @@ func TestOmadaControllerFirmwareCmd(t *testing.T) {
 				t.Fatalf("output = %q, error = %v; want %q", out, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestObserveACLOrderCommands(t *testing.T) {
+	saveRestoreOmadaExtGlobals(t)
+	controller := omadaExtFakeController(t, false, false, false, false)
+	for _, apply := range []bool{false, true} {
+		cmd := buildOmadaACLOrderCmd(apply)
+		providerHost = controller.URL
+		providerSkipTLS = true
+		cmd.SetArgs([]string{"--scope", "eap"})
+		var err error
+		out := captureStdout(func() { err = cmd.Execute() })
+		if err != nil || !strings.Contains(out, `"rule-a"`) || !strings.Contains(out, `"dry_run": true`) {
+			t.Fatalf("%s: %s %v", cmd.Name(), out, err)
+		}
+		cmd.SetArgs([]string{"--scope", "unknown"})
+		if err := cmd.Execute(); err == nil {
+			t.Error("unknown enforcement point accepted")
+		}
 	}
 }

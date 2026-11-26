@@ -85,8 +85,9 @@ type inputSchema struct {
 }
 
 type propSchema struct {
-	Type        string `json:"type"`
-	Description string `json:"description"`
+	Items       *propSchema `json:"items,omitempty"`
+	Type        string      `json:"type"`
+	Description string      `json:"description,omitempty"`
 }
 
 type toolsListResult struct {
@@ -111,6 +112,7 @@ type contentBlock struct {
 // omadaSurface is the Omada observation and read-only planning surface
 // exposed to agents, plus the dry-run-default ACL mutation tool.
 type omadaSurface interface {
+	ACLOrder(context.Context, service.OmadaOptions, service.OmadaACLOrderRequest, bool) (*service.OmadaACLOrderResult, error)
 	Info(ctx context.Context, opts service.OmadaOptions) (*service.OmadaInfo, error)
 	ListNetworks(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaNetwork, error)
 	ListACLs(ctx context.Context, opts service.OmadaOptions) ([]service.OmadaACLRule, error)
@@ -169,6 +171,8 @@ type opnsenseSurface interface {
 	GetUnboundStatus(ctx context.Context, opts service.OpnsenseOptions) (bool, error)
 	GetPfStatistics(ctx context.Context, opts service.OpnsenseOptions) (*service.OpnsensePfStatistics, error)
 	ListKernelRoutes(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKernelRoute, error)
+	GetKeaStatus(ctx context.Context, opts service.OpnsenseOptions) (map[string]bool, error)
+	ListRouterAdvertisements(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseRouterAdvertisement, error)
 	ListKeaSubnets(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKeaSubnet, error)
 	ListKeaReservations(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseKeaReservation, error)
 	ListWireGuardServers(ctx context.Context, opts service.OpnsenseOptions) ([]service.OpnsenseWireGuardServer, error)
@@ -215,6 +219,7 @@ type Server struct {
 	opnsenseSvc opnsenseSurface
 	topoSvc     topologySurface
 	playbookSvc playbookSurface
+	segmentSvc  service.SegmentService
 	// logger writes MCP operation records to the shared rotating log file.
 	// The writer is the stdout RPC channel, so nothing is ever logged to
 	// it; a nil logger disables file logging (tests).
@@ -251,6 +256,7 @@ func NewServerWithLogger(sl *slog.Logger) *Server {
 		opnsenseSvc:     service.NewOpnsenseService(),
 		topoSvc:         topoSvc,
 		playbookSvc:     service.NewPlaybookService(topoSvc),
+		segmentSvc:      service.SegmentService{Topology: topoSvc},
 		logger:          sl,
 		credEnv:         credEnvFrom(OmadaCredEnvVars),
 		opnsenseCredEnv: credEnvFrom(OpnsenseCredEnvVars),
@@ -559,6 +565,8 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 				"post_audit":  {Type: "boolean", Description: "Run a targeted isolation audit after a real apply. Default true."},
 			}, []string{"from", "to", "action"}),
 		},
+		{Name: "omada_plan_acl_order", Description: "Read the rule IDs and priorities at one enforcement point or preview their new order.", InputSchema: aclOrderSchema(false)},
+		{Name: "omada_apply_acl_order", Description: "Reorder the complete ACL scope with an expected-order check and readback. Dry-run by default.", InputSchema: aclOrderSchema(true)},
 		{
 			Name:        "omada_list_port_forwardings",
 			Description: "List the Omada gateway's NAT port-forwarding rules for a site.",
@@ -660,11 +668,13 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			Name:        "omada_plan_port",
 			Description: "Preview bringing one switch port to a desired VLAN membership (native network plus tagged set): the port's current membership and profile, and whether an existing LAN profile can be rebound or a new one must be created. Read-only: nothing is applied.",
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
-				"switch_mac":   {Type: "string", Description: "Switch MAC hosting the port"},
-				"port":         {Type: "integer", Description: "Port number (1-based)"},
-				"native":       {Type: "string", Description: "Native (untagged) LAN network name"},
-				"tagged":       {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
-				"profile_name": {Type: "string", Description: "Optional name for a new profile; derived when empty"},
+				"switch_mac":        {Type: "string", Description: "Switch MAC hosting the port"},
+				"port":              {Type: "integer", Description: "Port number (1-based)"},
+				"native":            {Type: "string", Description: "Native (untagged) LAN network name"},
+				"tagged":            {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
+				"profile_name":      {Type: "string", Description: "Optional name for a new profile; derived when empty"},
+				"verify_client_mac": {Type: "string", Description: "Observe this client attachment and lease after guarded apply."},
+				"expected_revision": {Type: "string", Description: "Require the port configuration revision from a prior plan."},
 			}, []string{"switch_mac", "port", "native"}),
 		},
 		{
@@ -732,14 +742,16 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		},
 		{
 			Name:        "omada_plan_nat",
-			Description: "Preview an Omada NAT mutation. The Omada Open API exposes NAT reads but no live-site NAT write path, so the plan always refuses with the current rules as before-evidence and the write-surface explanation — configure via the controller UI, or use provider opnsense.",
+			Description: "Compare requested NAT selectors with current site rules and report candidate conflicts and published operation scope.",
 			InputSchema: omadaNatToolSchema(),
 		},
 		{
 			Name:        "omada_apply_nat",
-			Description: "Apply an Omada NAT mutation. Always refused: the Omada Open API exposes no live-site NAT write path, so nothing can mutate — the result carries identical before/after evidence and the write-surface explanation. Use provider opnsense for NAT writes.",
+			Description: "Refresh the NAT comparison before retrying a change. Unverified controller and gateway operations return a refusal with current evidence.",
 			InputSchema: omadaNatToolSchema(),
 		},
+		{Name: "plan_segment", Description: "Preview the owners, dependencies and manual steps for a routed IPv4 segment in an Omada site behind OPNsense.", InputSchema: segmentSchema(false)},
+		{Name: "apply_segment", Description: "Reconcile a routed IPv4 segment, with management isolation before client access. Dry-run by default.", InputSchema: segmentSchema(true)},
 		{
 			Name:        "plan_port_forward",
 			Description: "Composed playbook (#140): plan a port-forward rule on the backend that owns the egress-path NAT, selected from the topology report. Routes to opnsense_plan_nat semantics when OPNsense owns NAT; reports the Omada hold when the managed gateway owns it; refuses on double-NAT or indeterminate topologies. Read-only.",
@@ -754,12 +766,14 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			Name:        "omada_apply_port_profile",
 			Description: "Bind a switch port to a LAN profile with the desired VLAN membership (native network plus tagged set): find an existing profile whose membership matches, create one when none does, then bind it to the port. Idempotent (unchanged / bound / created_and_bound). Dry-run is the default: set dry_run=false to apply for real. The result carries before/after evidence (the port row joined to its referenced profile).",
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
-				"switch_mac":   {Type: "string", Description: "Switch MAC hosting the port"},
-				"port":         {Type: "integer", Description: "Port number (1-based)"},
-				"native":       {Type: "string", Description: "Native (untagged) LAN network name"},
-				"tagged":       {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
-				"profile_name": {Type: "string", Description: "Optional name for a new profile; derived when empty"},
-				"dry_run":      {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
+				"switch_mac":        {Type: "string", Description: "Switch MAC hosting the port"},
+				"port":              {Type: "integer", Description: "Port number (1-based)"},
+				"native":            {Type: "string", Description: "Native (untagged) LAN network name"},
+				"tagged":            {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
+				"profile_name":      {Type: "string", Description: "Optional name for a new profile; derived when empty"},
+				"verify_client_mac": {Type: "string", Description: "Observe this client attachment and lease after guarded apply."},
+				"expected_revision": {Type: "string", Description: "Require the port configuration revision from a prior plan."},
+				"dry_run":           {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
 			}, []string{"switch_mac", "port", "native"}),
 		},
 		{
@@ -886,6 +900,14 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			InputSchema: opnsenseToolSchema(),
 		},
 		{
+			Name: "opnsense_get_kea_status", Description: "Read the Kea DHCP service state independently of configured subnets. Unavailable responses leave the running state unknown.", InputSchema: opnsenseToolSchema(),
+		},
+		{
+			Name:        "opnsense_list_router_advertisements",
+			Description: "Read configured OPNsense IPv6 router advertisement interfaces, enablement and modes. A missing or unauthorized API leaves visibility unknown.",
+			InputSchema: opnsenseToolSchema(),
+		},
+		{
 			Name:        "opnsense_list_kea_subnets",
 			Description: "List Kea DHCPv4 subnets (observe). A 404 means Kea is not installed; a 403 is a page-privilege miss.",
 			InputSchema: opnsenseToolSchema(),
@@ -929,72 +951,20 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 		},
 		{
 			Name:        "opnsense_list_vlans",
-			Description: "List OPNsense VLAN devices (parent, tag, description). Read-only. Creating a VLAN does not assign it to an opt or set IP — that stays GUI-only.",
+			Description: "List configured OPNsense VLAN devices (parent, tag, description). Read-only.",
 			InputSchema: opnsenseToolSchema(),
 		},
-		{
-			Name:        "opnsense_plan_vlan",
-			Description: "Preview creating/updating/deleting an OPNsense VLAN device, or updating a bridge's members. Always states the assign/IP gap. Read-only.",
-			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
-				"kind":        {Type: "string", Description: "vlan (default) or bridge"},
-				"parent":      {Type: "string", Description: "Parent NIC for a VLAN (e.g. igb0)"},
-				"tag":         {Type: "integer", Description: "VLAN tag"},
-				"description": {Type: "string", Description: "Optional description"},
-				"uuid":        {Type: "string", Description: "Existing VLAN or bridge uuid"},
-				"members":     {Type: "string", Description: "Comma-separated bridge members"},
-				"delete":      {Type: "boolean", Description: "Preview a VLAN delete"},
-			}, nil),
-		},
-		{
-			Name:        "opnsense_apply_vlan",
-			Description: "Create/update/delete an OPNsense VLAN device or update bridge members, then reconfigure. Dry-run default. The device is not assigned to an opt and has no IP until the operator does that in the GUI.",
-			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
-				"kind":        {Type: "string", Description: "vlan (default) or bridge"},
-				"parent":      {Type: "string", Description: "Parent NIC for a VLAN (e.g. igb0)"},
-				"tag":         {Type: "integer", Description: "VLAN tag"},
-				"description": {Type: "string", Description: "Optional description"},
-				"uuid":        {Type: "string", Description: "Existing VLAN or bridge uuid"},
-				"members":     {Type: "string", Description: "Comma-separated bridge members"},
-				"delete":      {Type: "boolean", Description: "Delete the VLAN device"},
-				"dry_run":     {Type: "boolean", Description: "Preview only. Default true."},
-			}, nil),
-		},
+		{Name: "opnsense_plan_vlan", Description: "Preview a VLAN device, optional interface assignment with static addressing, or bridge member change. Read-only.", InputSchema: opnsenseVLANToolSchema(false)},
+		{Name: "opnsense_apply_vlan", Description: "Manage a VLAN device, assign its address, or update bridge members. Dry-run by default. Assignment checks the pending queue and verifies configuration readback.", InputSchema: opnsenseVLANToolSchema(true)},
 		{
 			Name:        "opnsense_plan_filter",
 			Description: "Preview creating, updating, or deleting an OPNsense MVC filter rule or alias. Read-only.",
-			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
-				"kind":        {Type: "string", Description: "filter (default) or alias"},
-				"uuid":        {Type: "string", Description: "Existing rule or alias uuid"},
-				"name":        {Type: "string", Description: "Rule description or alias name"},
-				"action":      {Type: "string", Description: "pass, block, or reject"},
-				"interface":   {Type: "string", Description: "Filter interface (lan, opt1, bridge0)"},
-				"source":      {Type: "string", Description: "Source net or alias name"},
-				"destination": {Type: "string", Description: "Destination net or alias name"},
-				"addresses":   {Type: "string", Description: "Comma-separated alias members"},
-				"alias_type":  {Type: "string", Description: "Alias type (network, host)"},
-				"description": {Type: "string", Description: "Optional description"},
-				"enabled":     {Type: "boolean", Description: "Whether the rule or alias is enabled"},
-				"delete":      {Type: "boolean", Description: "Preview a delete"},
-			}, nil),
+			InputSchema: opnsenseFilterToolSchema(false),
 		},
 		{
 			Name:        "opnsense_apply_filter",
 			Description: "Create, update, or delete an OPNsense MVC filter rule or alias, then apply/reconfigure. Dry-run default.",
-			InputSchema: opnsenseToolSchemaExtra(map[string]propSchema{
-				"kind":        {Type: "string", Description: "filter (default) or alias"},
-				"uuid":        {Type: "string", Description: "Existing rule or alias uuid"},
-				"name":        {Type: "string", Description: "Rule description or alias name"},
-				"action":      {Type: "string", Description: "pass, block, or reject"},
-				"interface":   {Type: "string", Description: "Filter interface (lan, opt1, bridge0)"},
-				"source":      {Type: "string", Description: "Source net or alias name"},
-				"destination": {Type: "string", Description: "Destination net or alias name"},
-				"addresses":   {Type: "string", Description: "Comma-separated alias members"},
-				"alias_type":  {Type: "string", Description: "Alias type (network, host)"},
-				"description": {Type: "string", Description: "Optional description"},
-				"enabled":     {Type: "boolean", Description: "Whether the rule or alias is enabled"},
-				"delete":      {Type: "boolean", Description: "Delete the rule or alias"},
-				"dry_run":     {Type: "boolean", Description: "Preview only. Default true."},
-			}, nil),
+			InputSchema: opnsenseFilterToolSchema(true),
 		},
 		{
 			Name:        "opnsense_plan_unbound_override",
@@ -1184,17 +1154,75 @@ func propTypeFor(key string) string {
 // dry_run flag documented even though the surface always refuses.
 func omadaNatToolSchema() inputSchema {
 	return omadaToolSchemaExtra(map[string]propSchema{
-		"operation":  {Type: "string", Description: "NAT collection: port_forward or one_to_one"},
-		"action":     {Type: "string", Description: "create (default), update, delete, or toggle. update/delete/toggle require rule_uuid. Always refused: the Omada Open API exposes no live-site NAT write path."},
-		"rule_uuid":  {Type: "string", Description: "Target rule ID for update/delete/toggle"},
-		"protocol":   {Type: "string", Description: "IP protocol, lowercase (e.g. tcp, udp); empty = any"},
-		"port":       {Type: "string", Description: "External (WAN) port or range"},
-		"local_port": {Type: "string", Description: "Forwarded (internal) port or range"},
-		"target":     {Type: "string", Description: "Forwarded internal address (port_forward) or internal IP (one_to_one)"},
-		"source":     {Type: "string", Description: "Source restriction (limited addresses)"},
-		"label":      {Type: "string", Description: "Rule name"},
-		"dry_run":    {Type: "boolean", Description: "Preview only. Default true; the surface always refuses regardless."},
+		"wan_interfaces":   {Type: "string", Description: "Comma-separated WAN interface IDs"},
+		"external_address": {Type: "string", Description: "External address of a one-to-one rule"},
+		"operation":        {Type: "string", Description: "NAT collection: port_forward or one_to_one"},
+		"action":           {Type: "string", Description: "create (default), update, delete, or toggle. update/delete/toggle require rule_uuid."},
+		"rule_uuid":        {Type: "string", Description: "Target rule ID for update/delete/toggle"},
+		"protocol":         {Type: "string", Description: "IP protocol, lowercase (e.g. tcp, udp); empty = any"},
+		"port":             {Type: "string", Description: "External (WAN) port or range"},
+		"local_port":       {Type: "string", Description: "Forwarded (internal) port or range"},
+		"target":           {Type: "string", Description: "Forwarded internal address (port_forward) or internal IP (one_to_one)"},
+		"source":           {Type: "string", Description: "Source restriction (limited addresses)"},
+		"label":            {Type: "string", Description: "Rule name"},
+		"dry_run":          {Type: "boolean", Description: "Preview only. Default true; the surface always refuses regardless."},
 	}, []string{"operation"})
+}
+
+// opnsenseVLANToolSchema describes the shared VLAN, bridge and assignment inputs.
+func opnsenseVLANToolSchema(apply bool) inputSchema {
+	fields := map[string]propSchema{
+		"kind":        {Type: "string", Description: "vlan (default), bridge or assignment"},
+		"parent":      {Type: "string", Description: "VLAN parent interface"},
+		"tag":         {Type: "integer", Description: "VLAN tag"},
+		"description": {Type: "string", Description: "Description; required interface name for assignment"},
+		"uuid":        {Type: "string", Description: "Existing VLAN or bridge UUID"},
+		"members":     {Type: "string", Description: "Comma-separated bridge members"},
+		"address":     {Type: "string", Description: "Static IPv4 or IPv6 interface address with prefix length for assignment"},
+		"delete":      {Type: "boolean", Description: "Delete the VLAN device"},
+	}
+	if apply {
+		fields["dry_run"] = propSchema{Type: "boolean", Description: "Preview only. Default true."}
+	}
+	return opnsenseToolSchemaExtra(fields, nil)
+}
+
+func aclOrderSchema(apply bool) inputSchema {
+	fields := map[string]propSchema{
+		"scope":    {Type: "string", Description: "Enforcement point: switch, gateway or eap"},
+		"expected": {Type: "string", Description: "Comma-separated IDs in observed order"},
+		"desired":  {Type: "string", Description: "Comma-separated IDs in desired order"},
+	}
+	if apply {
+		fields["dry_run"] = propSchema{Type: "boolean", Description: "Preview only. Default true."}
+	}
+	return omadaToolSchemaExtra(fields, []string{"scope"})
+}
+
+func opnsenseFilterToolSchema(apply bool) inputSchema {
+	fields := map[string]propSchema{
+		"kind":             {Type: "string", Description: "filter (default) or alias"},
+		"uuid":             {Type: "string", Description: "Existing rule or alias uuid"},
+		"name":             {Type: "string", Description: "Rule description or alias name"},
+		"action":           {Type: "string", Description: "pass, block, or reject"},
+		"interface":        {Type: "string", Description: "Filter interface (lan, opt1, bridge0)"},
+		"source":           {Type: "string", Description: "Source net or alias name"},
+		"destination":      {Type: "string", Description: "Destination net or alias name"},
+		"addresses":        {Type: "string", Description: "Comma-separated alias members"},
+		"alias_type":       {Type: "string", Description: "Alias type (network, host)"},
+		"description":      {Type: "string", Description: "Optional description"},
+		"enabled":          {Type: "boolean", Description: "Whether the rule or alias is enabled"},
+		"protocol":         {Type: "string", Description: "IP protocol, e.g. tcp or udp"},
+		"source_port":      {Type: "string", Description: "TCP/UDP source port or numeric range"},
+		"destination_port": {Type: "string", Description: "TCP/UDP destination port or numeric range"},
+		"direction":        {Type: "string", Description: "in, out or any"},
+		"address_family":   {Type: "string", Description: "ipv4, ipv6 or dual"},
+		"delete":           {Type: "boolean", Description: "Delete the selected rule or alias"},
+	}
+	if apply {
+		fields["dry_run"] = propSchema{Type: "boolean", Description: "Preview only. Default true."}
+	}
+	return opnsenseToolSchemaExtra(fields, nil)
 }
 
 // opnsenseNatToolSchema returns the OPNsense NAT-mutation tool schema:
@@ -1466,11 +1494,13 @@ func argIntDefault(args map[string]interface{}, key string, def int) int {
 // arguments, shared by omada_plan_port and omada_apply_port_profile.
 func portProfileRequestFromArgs(args map[string]interface{}) (service.OmadaPortProfileRequest, string) {
 	req := service.OmadaPortProfileRequest{
-		SwitchMAC:   argString(args, "switch_mac"),
-		Port:        argIntDefault(args, "port", 0),
-		Native:      argString(args, "native"),
-		Tagged:      splitCSV(argString(args, "tagged")),
-		ProfileName: argString(args, "profile_name"),
+		SwitchMAC:        argString(args, "switch_mac"),
+		Port:             argIntDefault(args, "port", 0),
+		Native:           argString(args, "native"),
+		Tagged:           splitCSV(argString(args, "tagged")),
+		ProfileName:      argString(args, "profile_name"),
+		ExpectedRevision: argString(args, "expected_revision"),
+		VerifyClientMAC:  argString(args, "verify_client_mac"),
 	}
 	if req.SwitchMAC == "" {
 		return req, "switch_mac parameter is required"

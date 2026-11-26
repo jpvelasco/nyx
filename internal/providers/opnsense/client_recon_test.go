@@ -305,3 +305,14 @@ func TestParseHelpers(t *testing.T) {
 		t.Errorf("csv selected = %v", got)
 	}
 }
+
+func TestDnsmasqScopeVisibility(t *testing.T) {
+	s, err := parseDnsmasqSettings([]byte(`{"dnsmasq":{"enable":"1","dhcp":{"enable_ra":"0"},"dhcp_ranges":{"media":{"start_addr":"10.0.50.1","end_addr":"10.0.50.5","interface":{"opt1":{"selected":1}}}}}}`))
+	if err != nil || s.State != "enabled" || s.RouterAdvertisements != "disabled" || len(s.Ranges) != 1 || s.Ranges[0].Interface != "opt1" || s.Ranges[0].End != "10.0.50.5" {
+		t.Fatalf("%+v %v", s, err)
+	}
+	s, err = parseDnsmasqSettings([]byte(`{}`))
+	if err != nil || s.State != "unknown" || s.RouterAdvertisements != "unknown" {
+		t.Fatal("missing settings reported as disabled")
+	}
+}

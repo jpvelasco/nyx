@@ -136,7 +136,7 @@ func TestPlanPortForwardRoutesToOpnsense(t *testing.T) {
 // explanation — and the playbook reports the hold honestly.
 func TestPlanPortForwardOmadaOwnerHolds(t *testing.T) {
 	omada := &stubOmadaNat{plan: &providers.NatPlan{Provider: "omada", Outcome: "refused",
-		Warnings: []string{"the Omada Open API exposes NAT reads but no live-site NAT write path"}}}
+		Warnings: []string{"device support for this Omada Open API write still requires verification"}}}
 	svc := playbookService(&stubTopoForPlaybook{rep: onPathNatRouter("omada")}, nil, omada)
 
 	plan, err := svc.PlanPortForward(context.Background(), testPlaybookOptions("omada"), PortForwardRequest{

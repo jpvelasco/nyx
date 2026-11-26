@@ -304,6 +304,9 @@ Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `O
 | `run_doctor` | Check environment health + optional spec validation + probe SSH reachability/auth (read-only) |
 | `provider_list` | List registered providers |
 | `provider_capabilities` | List registered operations and configured connection profiles and sites. `observe: true` verifies controller information access for the selection. The CLI equivalent is `nyx provider capabilities --provider <name> --profile <profile> --observe --json`. |
+| `omada_ap_channel_info` / `omada_wlan_optimization` | Read AP channels or WLAN optimization history. Supply `history_id` for a run’s per-AP diagnostics. Select the configured connection with `profile`. For a private CA, set `NYX_OMADA_CA_CERT` on the Nyx process. Pages accept `offset` and `limit`. AP names and MACs require `include_private_details`. |
+| `omada_controller_firmware` / `omada_site_config_drift` | Read hardware controller firmware status or compare a site with its saved baseline (`nyx omada site-config snapshot`). Run the same read before and after a change to compare the results. Gateway runtime block-state visibility is tracked in [#308](https://github.com/jpvelasco/nyx/issues/308). |
+| `opnsense_query_states` | Inspect a page of states matching `search` or `rule_id` on a configured `profile`. Set `NYX_OPNSENSE_CA_CERT` on the Nyx process for a private firewall CA. Counts are returned by default. Set `include_private_details` for the matching state rows and endpoints. |
 | `omada_get_info` | Fetch Omada controller metadata (no auth) |
 | `omada_list_networks` | List Omada LAN networks/VLANs for a site |
 | `omada_list_acls` | List Omada ACL + gateway ACL rules for a site |
@@ -316,13 +319,35 @@ Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `O
 | `omada_list_lan_profiles` | List a site's LAN profiles — the VLAN membership sets (native + tagged) ports bind to |
 | `omada_plan_port` | Preview bringing one switch port to a desired VLAN membership: current vs. desired state and whether an existing profile can be rebound or a new one must be created (read-only) |
 | `omada_apply_port_profile` | Bind a switch port to a LAN profile with the desired VLAN membership (find-or-create the matching profile, then bind). Idempotent (`unchanged`/`bound`/`created_and_bound`); dry-run is the default |
-| `omada_plan_nat` / `omada_apply_nat` | Omada NAT plan/apply. The Open API exposes NAT reads but no live-site write path, so both always refuse with current-state evidence and the write-surface explanation — configure via the controller UI or use `opnsense_plan_nat`/`opnsense_apply_nat` |
+| `omada_plan_nat` / `omada_apply_nat` | Compare the requested NAT rule with current site rules. Includes conflict candidates, catalog operation and device verification status. Writes require verified hardware support. |
 | `opnsense_plan_nat` / `opnsense_apply_nat` | OPNsense NAT plan/apply: port forwards, one-to-one, and source NAT with double-NAT guard, idempotent creates, and dry-run default |
+| `plan_segment` / `apply_segment` | Plan and provision a routed IPv4 VLAN across a selected Omada site and OPNsense firewall, with management isolation and source verification. CLI `nyx segment plan` / `apply`. [Segment provisioning](docs/segment-provisioning.md) |
 | `plan_port_forward` / `apply_port_forward` | Composed playbook: plan or apply a port-forward on the backend that owns the egress-path NAT, selected from the live topology report. Routes to OPNsense when it owns NAT, reports the Omada hold when the managed gateway owns it, and refuses on double-NAT or indeterminate topologies. Dry-run default |
+| `opnsense_plan_wireguard_peer` | Preview enrollment, allowed-network edits, toggle or removal. Reports overlaps with configured peers, including disabled peers. Supply canonical network prefixes and an exact UUID for existing peers. |
+| `opnsense_revoke_wireguard_peer` | Preview or execute a selected peer disable/removal with `dry_run: false`. Reports configuration readback and service status. CLI names are `nyx opnsense plan-wireguard-peer` and `revoke-wireguard-peer`. |
+| `opnsense_apply_approved_wireguard_peer` | Reconcile an exact operator-prepared peer record. Preview is the default. The CLI equivalent is `nyx opnsense apply-approved-wireguard-peer`. |
 | `opnsense_get_info` | Fetch OPNsense system metadata (version, product, arch) |
 | `opnsense_list_interfaces` | List OPNsense interfaces with IP configuration |
 | `opnsense_list_firewall_rules` | List OPNsense firewall filter rules |
 | `opnsense_list_clients` | List OPNsense DHCP leases (host inventory) |
+
+### Approved WireGuard peer changes
+
+The peer preview and revocation MCP tools use a configured OPNsense `profile`.
+For a private CA, set `NYX_OPNSENSE_CA_CERT` to its PEM file on the Nyx process.
+
+Set `NYX_WIREGUARD_PEER_APPROVAL` in the Nyx process environment to a private
+operator-managed JSON file for the selected firewall. It contains `profile`,
+`host`, `name`, `public_key` (the peer’s base64 WireGuard public key),
+`servers` (an array of exact server UUIDs), `allowed_networks` (an array of
+canonical CIDRs), and `enabled` (a boolean). Include `uuid` when targeting an
+existing peer. For a private firewall CA, include `ca_cert_path` with the operator’s PEM file path. Without a UUID, Nyx identifies an existing match by both name
+and public key before creating a peer. Keep the file outside source control.
+Remove it or clear the environment setting to withdraw that authorization.
+
+The apply tool accepts one optional boolean, `dry_run`. Setting it to `false`
+applies the approved peer, reloads WireGuard and checks the public configuration
+and service status. Fix overlapping or unverifiable peer networks before applying.
 
 ### Playbooks
 
@@ -335,8 +360,7 @@ nyx port-forward --port 443 --target 10.0.40.10 --protocol tcp --label web
 The playbook observes the NAT topology (`nyx topology`), selects the on-path
 NAT router, and defers to that backend's plan/apply surface: OPNsense plans
 and (with `--apply --dry-run=false`) creates the rule; the managed Omada
-gateway produces the honest hold (no Open API write path — configure via the
-controller UI); double-NAT or indeterminate topologies refuse with the
+gateway returns a rule comparison and reports outstanding hardware verification; double-NAT or indeterminate topologies refuse with the
 explanation. The same surface is exposed to agents as the
 `plan_port_forward` / `apply_port_forward` MCP tools.
 
@@ -501,6 +525,68 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md) (or the release workflow) for the
 ## License
 
 MIT
+
+`nyx topology map` and the MCP tool `network_map` return the same JSON map of
+configured controller inventories. Select connections with repeatable
+`--connection omada/home --connection opnsense/home` or MCP
+`"connections": ["omada/home", "opnsense/home"]`. Omit the selectors to use
+all configured profiles and environment-configured defaults. The report lists
+devices, ports, SSIDs, VLANs and gateway interfaces. Each link carries its
+source of evidence and one of `observed`, `inferred`, `ambiguous` or `missing`.
+An unreadable collection appears in its source's `gaps`. An unknown observation
+time appears as `null`.
+
+UniFi OS consoles contribute adopted devices, reported ports and managed uplinks. Select the connection with `--connection unifi/home` or the `connections` argument to `network_map`. [UniFi adapter scope and credentials](docs/unifi-integration.md)
+
+Set the same `logical_site` on connection profiles serving one physical site
+to correlate LLDP chassis addresses and configured gateway addresses across
+controllers. Each ungrouped connection has its own site. Opaque resource and
+site handles identify entries within one report. `--detail` includes private
+controller resource IDs, labels and addresses. MCP `include_detail` requires
+`NYX_MCP_ALLOW_TOPOLOGY_DETAILS=true` in the server environment.
+
+`nyx topology locate-client MAC` and MCP `client_location` (`mac`) report the
+last observable managed switch port or wireless AP. They accept the same
+connection selectors and detail controls as `network_map`. Current controller
+associations can establish an attachment. Client history, DHCP leases and
+firewall neighbor caches provide supporting evidence. Expired entries and
+conflicting attachments retain their status. A switch downstream of the last
+managed uplink can hide the physical port. Private detail includes observed
+addresses, SSIDs and device labels.
+
+`nyx topology plan-switch CONNECTION SWITCH-MAC POLICY-JSON` and MCP
+`switch_port_plan` compare observed switch attachments against explicit port
+roles. A policy specifies `management_vlan` and a `ports` array with `port`,
+`role`, `native` and `tagged`. An access-port intent also supplies `client_mac`.
+The preview protects infrastructure paths and retains reasons when an assignment
+cannot be verified. Eligible rows include a revision. Pass it to the existing
+`nyx omada apply-port-profile --expected-revision REVISION` or MCP
+`omada_apply_port_profile` with `expected_revision`. A changed port configuration or downstream attachment
+requires a new switch plan. After a real guarded apply, `--verify-client-mac` or
+`verify_client_mac` adds the observed client attachment and DHCP lease to the
+membership check. Unknown evidence remains visible.
+
+`nyx topology capture-map NAME` saves a private map in the Nyx snapshot store.
+Supply `--audit-snapshot` with a saved audit basename to include its declared
+service policies and recorded enforcement evidence. `nyx topology map-drift
+BEFORE [AFTER]` compares two captures or rereads the earlier connections.
+MCP offers `network_map_capture` and `network_map_drift`. Drift reports opaque
+resource references, source coverage and observation freshness. `--max-age`
+controls how old evidence could be when each map was captured (default `24h`).
+Saving over an existing name requires `--replace`.
+
+`nyx topology performance PATH-JSON --interval 5s` and MCP `path_performance`
+read the same selected path twice. Build the JSON array in path order from
+`topology map` or `locate-client`. Each hop supplies its `connection`
+(`provider/profile`) and `kind`. A `switch_port` takes `switch_mac` and `port`.
+A `channel` takes `band` (`2g`, `5g`, `6g`), `channel` and optionally `ap_mac`
+for radio interference. An `interface`, `gateway` or `shaper_queue` takes its
+`name` (queue ID for a shaper). Results identify hops by their input position.
+Both samples carry timestamps. Configured speed, current link state,
+reported rate and counter-derived mean traffic rate are separate fields.
+An idle link and a reset counter have distinct statuses. Throughput remains
+unknown without an end-to-end transfer measurement. Repeat the same path,
+interval and workload to compare a change.
 
 `nyx topology --fingerprint` adds an architecture summary from the configured
 Omada and OPNsense providers. It shows inferred enforcement and bridge roles,

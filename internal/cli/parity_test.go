@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/providers"
 	omadaprov "github.com/jpvelasco/nyx/internal/providers/omada"
 	opnsenseprov "github.com/jpvelasco/nyx/internal/providers/opnsense"
+	"github.com/jpvelasco/nyx/internal/service"
 )
 
 // mcpCapabilityTools maps each provider to the MCP tools that cover every
@@ -112,6 +114,15 @@ func TestProviderCapabilitySurfaceParity(t *testing.T) {
 	for _, p := range providers.List() {
 		for _, cap := range p.Capabilities() {
 			t.Run(p.Name()+"/"+cap, func(t *testing.T) {
+				// Composite reads live under topology and use their capability name on MCP.
+				composites := map[string]string{providers.NetworkMapCapability: service.NetworkMapCommand, providers.ClientLocationCapability: service.ClientLocationCommand, providers.PerformanceCapability: service.PerformanceCommand}
+				if name, ok := composites[cap]; ok {
+					command, _, err := rootCmd.Find([]string{"topology", name})
+					if err != nil || command.Name() != name || !toolRegistered(cap) {
+						t.Fatalf("%s is missing from CLI or MCP", cap)
+					}
+					return
+				}
 				// MCP side: the capability must have a mapping, and every
 				// mapped tool must actually be registered.
 				tools, ok := mcpCapabilityTools[p.Name()][cap]
@@ -158,26 +169,31 @@ func TestProviderCapabilitySurfaceParity(t *testing.T) {
 // style). Reads that already have extras are listed so a new mutation
 // cannot ship MCP-only without failing this test.
 var mcpMutationCLI = map[string]string{
-	"omada_plan":                      "plan",
-	"omada_apply_acl":                 "apply-acl",
-	"omada_plan_port":                 "plan-port",
-	"omada_apply_port_profile":        "apply-port-profile",
-	"omada_plan_lan":                  "plan-lan",
-	"omada_apply_lan":                 "apply-lan",
-	"omada_plan_ssid":                 "plan-ssid",
-	"omada_apply_ssid":                "apply-ssid",
-	"omada_plan_nat":                  "plan-nat",
-	"omada_apply_nat":                 "apply-nat",
-	"opnsense_plan_nat":               "plan-nat",
-	"opnsense_apply_nat":              "apply-nat",
-	"opnsense_plan_vlan":              "plan-vlan",
-	"opnsense_apply_vlan":             "apply-vlan",
-	"opnsense_plan_filter":            "plan-filter",
-	"opnsense_apply_filter":           "apply-filter",
-	"opnsense_plan_unbound_override":  "plan-unbound-override",
-	"opnsense_apply_unbound_override": "apply-unbound-override",
-	"opnsense_plan_dhcp":              "plan-dhcp",
-	"opnsense_apply_dhcp":             "apply-dhcp",
+	"omada_plan":                             "plan",
+	"omada_apply_acl":                        "apply-acl",
+	"omada_plan_acl_order":                   "plan-acl-order",
+	"omada_apply_acl_order":                  "apply-acl-order",
+	"omada_plan_port":                        "plan-port",
+	"omada_apply_port_profile":               "apply-port-profile",
+	"omada_plan_lan":                         "plan-lan",
+	"omada_apply_lan":                        "apply-lan",
+	"omada_plan_ssid":                        "plan-ssid",
+	"omada_apply_ssid":                       "apply-ssid",
+	"omada_plan_nat":                         "plan-nat",
+	"omada_apply_nat":                        "apply-nat",
+	"opnsense_plan_nat":                      "plan-nat",
+	"opnsense_apply_nat":                     "apply-nat",
+	"opnsense_plan_vlan":                     "plan-vlan",
+	"opnsense_apply_vlan":                    "apply-vlan",
+	"opnsense_plan_filter":                   "plan-filter",
+	"opnsense_apply_filter":                  "apply-filter",
+	"opnsense_plan_unbound_override":         "plan-unbound-override",
+	"opnsense_apply_unbound_override":        "apply-unbound-override",
+	"opnsense_plan_dhcp":                     "plan-dhcp",
+	"opnsense_apply_dhcp":                    "apply-dhcp",
+	"opnsense_plan_wireguard_peer":           "plan-wireguard-peer",
+	"opnsense_apply_approved_wireguard_peer": "apply-approved-wireguard-peer",
+	"opnsense_revoke_wireguard_peer":         "revoke-wireguard-peer",
 }
 
 func vendorOfTool(name string) string {
@@ -240,5 +256,18 @@ func TestNamedToolCLIParity(t *testing.T) {
 				t.Errorf("MCP tool %q maps to CLI %q %s, but that extra is not registered", tool, vendor, cliName)
 			}
 		})
+	}
+}
+
+func TestDiagnosticReadParity(t *testing.T) {
+	ensureProviderRegistered(t, "omada", &omadaprov.OmadaProvider{})
+	ensureProviderRegistered(t, "opnsense", &opnsenseprov.Provider{})
+	root := &cobra.Command{Use: "nyx"}
+	BuildProviderSubcommands(root)
+	for tool, args := range map[string][]string{"omada_ap_channel_info": {"omada", "ap-channel-info"}, "omada_wlan_optimization": {"omada", "wlan-optimization"}, "omada_controller_firmware": {"omada", "controller-firmware"}, "omada_site_config_drift": {"omada", "site-config", "drift"}, "opnsense_query_states": {"opnsense", "states", "list"}} {
+		cmd, remaining, err := root.Find(args)
+		if err != nil || len(remaining) != 0 || cmd == nil || cmd.Name() != args[len(args)-1] || !slices.Contains(mcp.ToolNames(), tool) {
+			t.Errorf("missing read %s / %v", tool, args)
+		}
 	}
 }

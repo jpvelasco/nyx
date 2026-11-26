@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"slices"
 )
 
 // APChannels reports the observed channels and the controller's candidate list.
@@ -17,22 +18,31 @@ type APChannels struct {
 
 // GetAPChannels inventories managed APs using the two supported per-AP reads.
 func (c *Client) GetAPChannels(ctx context.Context, siteID string) ([]APChannels, error) {
+	rows, _, err := c.APChannelsPage(ctx, siteID, 0, 0)
+	return rows, err
+}
+
+// APChannelsPage fetches per-device details only inside the requested window. Zero limit requests all rows for the CLI.
+func (c *Client) APChannelsPage(ctx context.Context, siteID string, offset, limit int) ([]APChannels, int, error) {
 	devices, err := c.GetDevices(ctx, siteID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	rows := make([]APChannels, 0)
-	for _, device := range SortedDevices(devices) {
-		if !device.IsAP() {
-			continue
-		}
+	aps := slices.DeleteFunc(SortedDevices(devices), func(d Device) bool { return !d.IsAP() })
+	total := len(aps)
+	start := min(max(offset, 0), total)
+	if limit > 0 {
+		aps = aps[:start+min(limit, total-start)]
+	}
+	rows := make([]APChannels, 0, len(aps)-start)
+	for _, device := range aps[start:] {
 		row, err := c.getAPChannels(ctx, siteID, device)
 		if err != nil {
-			return nil, err
+			return nil, total, err
 		}
 		rows = append(rows, row)
 	}
-	return rows, nil
+	return rows, total, nil
 }
 
 func (c *Client) getAPChannels(ctx context.Context, siteID string, device Device) (APChannels, error) {

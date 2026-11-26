@@ -43,12 +43,19 @@ func captureStdout(f func()) string {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	defer func() { os.Stdout = old }()
+	defer w.Close()
+	// Consume large reports before the OS pipe buffer fills.
+	text := make(chan string, 1)
+	go func() {
+		defer r.Close()
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		text <- buf.String()
+	}()
 	f()
 	_ = w.Close()
-	os.Stdout = old
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
-	return buf.String()
+	return <-text
 }
 
 // captureStreams runs f with os.Stdout and os.Stderr redirected to separate

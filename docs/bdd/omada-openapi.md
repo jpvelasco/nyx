@@ -254,3 +254,9 @@ uniformly across every layer.
   "stored but not enforced" failure state
 - **And** apply results and inventory output carry no disabled-scope field or
   "stored rules are not enforced" text
+
+### Rule order at an enforcement point
+
+The 6.3 catalog lists `modifyAclIndex` for switch, gateway and EAP ACLs. `omada_plan_acl_order` reads the selected site's scope and previews a complete permutation of its current rule IDs. `omada_apply_acl_order` defaults to dry-run. A real reorder takes the site and the expected order from the preview, retains the existing priority values, and reads the scope again to confirm the result. The CLI commands are `nyx omada plan-acl-order` and `nyx omada apply-acl-order`. Serialize rule edits to the same scope because the controller supplies no compare-and-swap operation.
+
+Empty or ambiguous inventory cannot establish model-specific support. A controller readback confirms its configured order. Packet enforcement on a particular access point requires evidence from that model. Creating or editing EAP rule contents has a separate capability requirement. [Stable ordering contract](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/modifyAclIndex.json)

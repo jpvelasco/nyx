@@ -120,6 +120,11 @@ func observeConnection(ctx context.Context, op InfoOperation, hasInfo bool, c cr
 	return entry
 }
 
+// DiagnosticAccess classifies read outcomes without exposing URLs, credentials or device messages.
+func DiagnosticAccess(err error) string {
+	return readAccess(err)
+}
+
 func readAccess(err error) string {
 	if err == nil {
 		return "observed"

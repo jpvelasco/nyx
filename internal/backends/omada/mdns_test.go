@@ -55,6 +55,7 @@ func TestFetchMDNSInventoryStatus(t *testing.T) {
 		status string
 		line   string
 	}{
+		{name: "missing rule setting", body: `{"totalRows":1,"data":[{"type":0}]}`, status: mdnsUnknown, line: "mdns: unknown"},
 		{name: "empty", body: `{"totalRows":0,"data":[]}`, status: mdnsAvailable, line: "0 rules"},
 		{name: "unsupported", code: -1600, body: `null`, status: mdnsUnavailable, line: "mdns: api-unavailable (UI-only; configuration unknown)"},
 		{name: "forbidden", code: -1005, body: `null`, status: mdnsUnknown, line: "mdns: unknown (API read failed)"},

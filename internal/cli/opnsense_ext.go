@@ -29,6 +29,11 @@ func buildOpnsenseExtraCommands() []*cobra.Command {
 		buildOpnsenseListCmd("list-vlans", "List configured VLAN devices", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 			return service.NewOpnsenseService().ListVLANs(ctx, opts)
 		}),
+		buildProviderReadCmd("opnsense", "dnsmasq-settings", "Read Dnsmasq settings, DHCP pools and router advertisement state", toOpnsenseOptions, service.NewOpnsenseService().GetDnsmasqSettings),
+		buildProviderReadCmd("opnsense", "kea-status", "Read the Kea DHCP service state", toOpnsenseOptions, service.NewOpnsenseService().GetKeaStatus),
+		buildOpnsenseListCmd("list-router-advertisements", "Read configured IPv6 router advertisement interfaces and modes", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
+			return service.NewOpnsenseService().ListRouterAdvertisements(ctx, opts)
+		}),
 		buildOpnsenseListCmd("list-kea-subnets", "List Kea DHCPv4 subnets", func(ctx context.Context, opts service.OpnsenseOptions) (any, error) {
 			return service.NewOpnsenseService().ListKeaSubnets(ctx, opts)
 		}),
@@ -54,6 +59,7 @@ func buildOpnsenseExtraCommands() []*cobra.Command {
 			return service.NewOpnsenseService().GetUnboundStatus(ctx, opts)
 		}),
 		buildOpnsenseStatesCmd(),
+		opnsensePeerCommand(false), opnsensePeerCommand(true), approvedPeerCommand(),
 		buildOpnsensePlanNatCmd(),
 		buildOpnsenseApplyNatCmd(),
 		buildOpnsensePlanVLANCmd(),
@@ -68,21 +74,7 @@ func buildOpnsenseExtraCommands() []*cobra.Command {
 }
 
 func buildOpnsenseListCmd(use, short string, fetch func(context.Context, service.OpnsenseOptions) (any, error)) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   use,
-		Short: short,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return withProviderSession("opnsense", func(ctx context.Context, opts providers.ImportOptions) error {
-				v, err := fetch(ctx, toOpnsenseOptions(opts))
-				if err != nil {
-					return err
-				}
-				return printJSON(v)
-			})
-		},
-	}
-	addProviderFlags(cmd, "opnsense")
-	return cmd
+	return buildProviderReadCmd("opnsense", use, short, toOpnsenseOptions, fetch)
 }
 
 type opnsenseNatFlags struct {
@@ -191,9 +183,9 @@ func buildOpnsenseApplyNatCmd() *cobra.Command {
 }
 
 type opnsenseVLANFlags struct {
-	kind, parent, description, uuid, members string
-	tag                                      int
-	delete                                   bool
+	kind, parent, description, uuid, members, address string
+	tag                                               int
+	delete                                            bool
 }
 
 func (f opnsenseVLANFlags) request() service.OpnsenseVLANRequest {
@@ -204,12 +196,14 @@ func (f opnsenseVLANFlags) request() service.OpnsenseVLANRequest {
 		Description: f.description,
 		UUID:        f.uuid,
 		Members:     splitCSV(f.members),
+		Address:     f.address,
 		Delete:      f.delete,
 	}
 }
 
 func bindOpnsenseVLANFlags(cmd *cobra.Command, f *opnsenseVLANFlags) {
-	cmd.Flags().StringVar(&f.kind, "kind", "", "vlan (default) or bridge")
+	cmd.Flags().StringVar(&f.kind, "kind", "", "vlan (default), bridge or assignment")
+	cmd.Flags().StringVar(&f.address, "address", "", "Static IPv4 or IPv6 interface address/prefix for assignment")
 	cmd.Flags().StringVar(&f.parent, "parent", "", "Parent interface (required for VLAN create/update)")
 	cmd.Flags().IntVar(&f.tag, "tag", 0, "VLAN tag (required for VLAN create/update)")
 	cmd.Flags().StringVar(&f.description, "description", "", "Description")
@@ -219,16 +213,27 @@ func bindOpnsenseVLANFlags(cmd *cobra.Command, f *opnsenseVLANFlags) {
 	addProviderFlags(cmd, "opnsense")
 }
 
+func printVLANAssignment(action string, target *service.OpnsenseAssignmentTarget, warning string) error {
+	fmt.Printf("%s %s (%s VLAN %d) %s\n", action, target.Name, target.Parent, target.Tag, target.Address)
+	if warning != "" {
+		fmt.Println(warning)
+	}
+	return nil
+}
+
 func buildOpnsensePlanVLANCmd() *cobra.Command {
 	var f opnsenseVLANFlags
 	cmd := &cobra.Command{
 		Use:   "plan-vlan",
-		Short: "Preview a VLAN or bridge-member change (read-only)",
+		Short: "Preview a VLAN, interface assignment or bridge-member change",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return withProviderSession("opnsense", func(ctx context.Context, opts providers.ImportOptions) error {
 				plan, err := service.NewOpnsenseService().PlanVLAN(ctx, toOpnsenseOptions(opts), f.request())
 				if err != nil {
 					return err
+				}
+				if plan.Kind == "assignment" && !jsonOutput {
+					return printVLANAssignment(plan.Action, plan.Assignment, plan.Warning)
 				}
 				return printPlan(plan, plan.Action)
 			})
@@ -243,12 +248,19 @@ func buildOpnsenseApplyVLANCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "apply-vlan",
-		Short: "Create, update, or delete a VLAN (or update bridge members). Dry-run by default",
+		Short: "Manage a VLAN, assign its address or update bridge members. Dry-run by default",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return withProviderSession("opnsense", func(ctx context.Context, opts providers.ImportOptions) error {
 				res, err := service.NewOpnsenseService().ApplyVLAN(ctx, toOpnsenseOptions(opts), f.request(), dryRun)
 				if err != nil {
 					return err
+				}
+				if res.Kind == "assignment" && !jsonOutput {
+					action := res.Outcome
+					if res.DryRun {
+						action = "(dry-run) " + action
+					}
+					return printVLANAssignment(action, res.Assignment, res.Warning)
 				}
 				return printApply(res, res.Outcome, res.DryRun)
 			})
@@ -260,6 +272,7 @@ func buildOpnsenseApplyVLANCmd() *cobra.Command {
 }
 
 type opnsenseFilterFlags struct {
+	sourcePort, destPort, direction, family   string
 	kind, uuid, name, action, iface, protocol string
 	source, destination, addresses, aliasType string
 	description                               string
@@ -268,19 +281,23 @@ type opnsenseFilterFlags struct {
 
 func (f opnsenseFilterFlags) request() service.OpnsenseFilterRequest {
 	return service.OpnsenseFilterRequest{
-		Kind:        f.kind,
-		UUID:        f.uuid,
-		Name:        f.name,
-		Action:      f.action,
-		Interface:   f.iface,
-		Protocol:    f.protocol,
-		Source:      f.source,
-		Destination: f.destination,
-		Addresses:   splitCSV(f.addresses),
-		AliasType:   f.aliasType,
-		Description: f.description,
-		Enabled:     f.enabled,
-		Delete:      f.delete,
+		Kind:            f.kind,
+		UUID:            f.uuid,
+		Name:            f.name,
+		Action:          f.action,
+		Interface:       f.iface,
+		Protocol:        f.protocol,
+		SourcePort:      f.sourcePort,
+		DestinationPort: f.destPort,
+		Direction:       f.direction,
+		AddressFamily:   f.family,
+		Source:          f.source,
+		Destination:     f.destination,
+		Addresses:       splitCSV(f.addresses),
+		AliasType:       f.aliasType,
+		Description:     f.description,
+		Enabled:         f.enabled,
+		Delete:          f.delete,
 	}
 }
 
@@ -290,6 +307,10 @@ func bindOpnsenseFilterFlags(cmd *cobra.Command, f *opnsenseFilterFlags) {
 	cmd.Flags().StringVar(&f.name, "name", "", "Alias name")
 	cmd.Flags().StringVar(&f.action, "action", "", "Filter action (pass, block, reject)")
 	cmd.Flags().StringVar(&f.iface, "interface", "", "Filter interface")
+	cmd.Flags().StringVar(&f.sourcePort, "source-port", "", "TCP/UDP source port or numeric range")
+	cmd.Flags().StringVar(&f.destPort, "destination-port", "", "TCP/UDP destination port or numeric range")
+	cmd.Flags().StringVar(&f.direction, "direction", "", "Rule direction: in, out or any")
+	cmd.Flags().StringVar(&f.family, "address-family", "", "Address family: ipv4, ipv6 or dual")
 	cmd.Flags().StringVar(&f.protocol, "protocol", "", "Protocol")
 	cmd.Flags().StringVar(&f.source, "source", "", "Source address or alias")
 	cmd.Flags().StringVar(&f.destination, "destination", "", "Destination address or alias")
@@ -312,6 +333,9 @@ func buildOpnsensePlanFilterCmd() *cobra.Command {
 				plan, err := service.NewOpnsenseService().PlanFilter(ctx, toOpnsenseOptions(opts), f.request())
 				if err != nil {
 					return err
+				}
+				if plan.Desired != nil {
+					return printJSON(plan)
 				}
 				return printPlan(plan, plan.Action)
 			})

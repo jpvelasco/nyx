@@ -91,6 +91,9 @@ func ruleToWrite(rule ACLRule) aclRuleWrite {
 // response carries no rule id — the caller refetches the list to find the
 // new rule.
 func (c *Client) CreateACLRule(ctx context.Context, siteID string, rule ACLRule) error {
+	if rule.Type != ACLTypeSwitch && rule.Type != ACLTypeGateway {
+		return fmt.Errorf("unsupported rule write scope %d", rule.Type)
+	}
 	if err := c.postCreate(ctx, aclScopePath(siteID, rule.Type), ruleToWrite(rule), nil); err != nil {
 		return fmt.Errorf("creating ACL rule: %w", err)
 	}
@@ -100,6 +103,9 @@ func (c *Client) CreateACLRule(ctx context.Context, siteID string, rule ACLRule)
 // UpdateACLRule PUTs the full writable payload of an existing rule to its
 // per-scope item path.
 func (c *Client) UpdateACLRule(ctx context.Context, siteID, ruleID string, rule ACLRule) error {
+	if rule.Type != ACLTypeSwitch && rule.Type != ACLTypeGateway {
+		return fmt.Errorf("unsupported rule write scope %d", rule.Type)
+	}
 	if err := c.put(ctx, fmt.Sprintf("%s/%s", aclScopePath(siteID, rule.Type), ruleID), ruleToWrite(rule), nil); err != nil {
 		return fmt.Errorf("updating ACL rule %q: %w", ruleID, err)
 	}

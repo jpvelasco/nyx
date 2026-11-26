@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // KeaSubnet is one IPv4 subnet from kea/dhcpv4/search_subnet.
@@ -78,28 +79,26 @@ func (c *Client) GetKeaServiceStatus(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var env struct {
-		Status  json.RawMessage `json:"status"`
-		Running json.RawMessage `json:"running"`
-	}
-	if err := json.Unmarshal(raw, &env); err != nil {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
 		return false, fmt.Errorf("decoding kea service status: %w", err)
 	}
-	if decodeLooseBool(env.Running) || decodeLooseBool(env.Status) {
-		return true, nil
-	}
-	// Some builds wrap {"status":{"kea":"running"}} / {"kea":{"status":"OK"}}.
-	var m map[string]json.RawMessage
-	if json.Unmarshal(raw, &m) == nil {
-		for _, v := range m {
-			if decodeLooseBool(v) {
-				return true, nil
-			}
-			var s string
-			if json.Unmarshal(v, &s) == nil && (s == "running" || s == "OK" || s == "ok") {
-				return true, nil
+	for _, key := range []string{"running", "status", "kea"} {
+		v := fields[key]
+		var nested map[string]json.RawMessage
+		if json.Unmarshal(v, &nested) == nil && len(nested) > 0 {
+			if key == "status" {
+				v = nested["kea"]
+			} else {
+				v = nested["status"]
 			}
 		}
+		switch strings.ToLower(strings.Trim(string(v), `"`)) {
+		case "true", "1", "running", "ok", "yes", "up", "enabled":
+			return true, nil
+		case "false", "0", "stopped", "disabled", "no", "down":
+			return false, nil
+		}
 	}
-	return false, nil
+	return false, fmt.Errorf("service state was not reported by Kea")
 }

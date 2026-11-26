@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/testutil"
+	"github.com/spf13/cobra"
 )
 
 func TestOpnsenseFirewallListCommands(t *testing.T) {
@@ -16,6 +17,9 @@ func TestOpnsenseFirewallListCommands(t *testing.T) {
 		body    string
 		want    string
 	}{
+		{"dnsmasq-settings", "/api/dnsmasq/settings/get", `{"dnsmasq":{"enable":"1","dhcp":{"enable_ra":"0"},"dhcp_ranges":{"media":{"start_addr":"10.0.50.1","end_addr":"10.0.50.5","interface":{"opt1":{"selected":1}}}}}}`, `"interface": "opt1"`},
+		{"kea-status", "/api/kea/service/status", `{"running":false}`, `"running": false`},
+		{"list-router-advertisements", "/api/radvd/settings/search_entry", `{"total":1,"rows":[{"interface":"opt1","enabled":"0","mode":"managed"}]}`, `"state": "disabled"`},
 		{"list-aliases", "/api/firewall/alias/search_item", `{"total":1,"rows":[{"uuid":"alias-1","name":"servers","enabled":"1"}]}`, `"name": "servers"`},
 		{"list-firewall-rules", "/api/firewall/filter/search_rule", `{"total":1,"rows":[{"uuid":"rule-1","description":"Allow servers","enabled":"1"}]}`, `Allow servers`},
 	} {
@@ -46,5 +50,37 @@ func TestOpnsenseFirewallListCommands(t *testing.T) {
 			}
 			t.Fatalf("command %q was not registered", tc.command)
 		})
+	}
+}
+
+func TestRoutedVLANManualHandoffCommands(t *testing.T) {
+	saveRestoreGlobals(t)
+	controller := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Error("manual handoff must only read")
+		}
+		if strings.HasSuffix(r.URL.Path, "/vlan_settings/search_item") {
+			testutil.WriteBody(w, `{"total":1,"rows":[{"uuid":"v1","if":"igb0","tag":"30","vlanif":"vlan30"}]}`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer controller.Close()
+	t.Setenv("NYX_CREDENTIALS_FILE", t.TempDir()+"/credentials.json")
+	for _, cmd := range []*cobra.Command{buildOpnsensePlanVLANCmd(), buildOpnsenseApplyVLANCmd()} {
+		providerHost = controller.URL
+		providerClientID = "fixture"
+		providerClientSecret = "fixture"
+		providerSkipTLS = true
+		jsonOutput = false
+		cmd.SetArgs([]string{"--kind", "assignment", "--tag", "30", "--parent", "igb0", "--description", "gaming", "--address", "10.0.30.1/24"})
+		var err error
+		out := captureStdout(func() { err = cmd.Execute() })
+		if strings.Contains(out, "(dry-run)") != (cmd.Name() == "apply-vlan") {
+			t.Errorf("%s preview label: %q", cmd.Name(), out)
+		}
+		if err != nil || !strings.Contains(out, "manual gaming") || !strings.Contains(out, "GUI") {
+			t.Fatalf("%s: %s %v", cmd.Name(), out, err)
+		}
 	}
 }

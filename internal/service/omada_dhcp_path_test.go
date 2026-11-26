@@ -247,3 +247,12 @@ func TestComposeDHCPPath_LeaseInference(t *testing.T) {
 		}
 	})
 }
+
+func TestDHCPPathVisibility(t *testing.T) {
+	for _, state := range []string{"disabled", "unknown"} {
+		v := dhcpPathVerdicts(&OmadaDHCPPathReport{LANs: []OmadaNetwork{{Name: "media", DHCPState: state}}})
+		if len(v) != 1 || !strings.Contains(v[0], state) {
+			t.Fatalf("state %q: %v", state, v)
+		}
+	}
+}

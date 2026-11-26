@@ -81,3 +81,25 @@ func isValidHostname(s string) bool {
 	}
 	return true
 }
+
+// EndpointCovers reports whether a policy endpoint names the observed network or its zone.
+func (s *Spec) EndpointCovers(declared, actual string) bool {
+	if actual == "" {
+		return false
+	}
+	for endpoint := range strings.SplitSeq(declared, ",") {
+		name := NormalizeZoneRef(strings.TrimSpace(endpoint))
+		if name == "" {
+			continue
+		}
+		if strings.EqualFold(name, "any") || strings.EqualFold(name, actual) {
+			return true
+		}
+		for _, n := range s.Networks {
+			if strings.EqualFold(n.Name, actual) && strings.EqualFold(n.Zone, name) {
+				return true
+			}
+		}
+	}
+	return false
+}

@@ -1,0 +1,70 @@
+package service
+
+import (
+	"context"
+	"net"
+	"strconv"
+	"strings"
+
+	backend "github.com/jpvelasco/nyx/internal/backends/omada"
+)
+
+// PortVerification records post-apply evidence available from the controller.
+// Connectivity describes the current managed attachment, not a traffic test.
+type PortVerification struct {
+	Membership   string `json:"membership"`
+	Connectivity string `json:"connectivity"`
+	DHCP         string `json:"dhcp"`
+}
+
+func verifyPortEvidence(ctx context.Context, c *backend.Client, site string, req OmadaPortProfileRequest, ports []backend.SwitchPort, profiles []backend.LanProfile, nets []backend.Network) *PortVerification {
+	result := &PortVerification{Membership: "unverified", Connectivity: "unverified", DHCP: "unverified"}
+	req.ExpectedRevision = ""
+	plan, _, _, err := planPortFromState(site, req, ports, profiles, nets)
+	if err == nil && plan.Current != nil && !plan.Current.ProfileOverride {
+		if plan.Outcome == "unchanged" && strings.EqualFold(plan.Current.NativeNetwork, plan.CurrentProfile.NativeNetwork) {
+			result.Membership = "observed"
+		} else {
+			result.Membership = "mismatch"
+		}
+	}
+	mac, err := net.ParseMAC(req.VerifyClientMAC)
+	if err != nil || len(mac) != 6 {
+		return result
+	}
+	nodes, err := c.GetClientTopology(ctx, site, mac.String())
+	if err == nil {
+		var observed string
+		for _, n := range nodes {
+			if n.NodeType != "clientNode" || backend.NormalizeMAC(n.MAC) != backend.NormalizeMAC(mac.String()) || n.SwitchPort == "" || n.SwitchMAC == "" {
+				continue
+			}
+			state := "different attachment"
+			if backend.NormalizeMAC(n.SwitchMAC) == backend.NormalizeMAC(req.SwitchMAC) && n.SwitchPort == strconv.Itoa(req.Port) {
+				state = "attached"
+			}
+			if observed != "" && observed != state {
+				observed = "unverified"
+				break
+			}
+			observed = state
+		}
+		if observed != "" {
+			result.Connectivity = observed
+		}
+	}
+	rows := []backend.ConnectedClient{{MAC: mac.String()}}
+	if err := c.EnrichFromDHCP(ctx, site, rows, nets); err == nil && rows[0].IP != "" {
+		requested, targetErr := resolveNetworkID(nets, req.Native)
+		leased, leaseErr := resolveNetworkID(nets, rows[0].NetworkName)
+		switch {
+		case targetErr != nil || leaseErr != nil:
+			result.DHCP = "lease network unknown"
+		case requested == leased:
+			result.DHCP = "lease on desired native network"
+		default:
+			result.DHCP = "lease on another network"
+		}
+	}
+	return result
+}

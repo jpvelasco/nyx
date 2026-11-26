@@ -118,3 +118,16 @@ func TestStateDiagnosticsErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestStateQuerySortReset(t *testing.T) {
+	q := StateQuery{}
+	if err := q.SetSort("age:desc"); err != nil || q.Sort["age"] != "desc" {
+		t.Fatal(q.Sort, err)
+	}
+	if err := q.SetSort("invalid"); err == nil || q.Sort != nil {
+		t.Fatal(q.Sort, err)
+	}
+	if err := q.SetSort(""); err != nil || q.Sort != nil {
+		t.Fatal(q.Sort, err)
+	}
+}

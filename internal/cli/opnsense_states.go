@@ -25,13 +25,8 @@ func buildOpnsenseStateList() *cobra.Command {
 	var q opnsense.StateQuery
 	var sort string
 	cmd := &cobra.Command{Use: "list", Short: "Query a page of firewall states", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
-		q.Sort = nil
-		if sort != "" {
-			field, order, ok := strings.Cut(sort, ":")
-			if !ok {
-				return fmt.Errorf("--sort requires field:asc or field:desc")
-			}
-			q.Sort = map[string]string{field: order}
+		if err := q.SetSort(sort); err != nil {
+			return err
 		}
 		return withOpnsenseStateClient(func(ctx context.Context, c *opnsense.Client) (any, error) { return c.QueryStates(ctx, q) })
 	}}

@@ -8,6 +8,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/cli"
 	_ "github.com/jpvelasco/nyx/internal/providers/omada"
 	_ "github.com/jpvelasco/nyx/internal/providers/opnsense"
+	_ "github.com/jpvelasco/nyx/internal/providers/unifi"
 )
 
 func main() {

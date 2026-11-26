@@ -93,36 +93,11 @@ inventory records a `rule_count` per scope (a listed scope is active), and the
 recommendation engine explains that the gateway scope has no enable surface via
 any API; rule CRUD remains stored but inert at the gateway when unsupported.
 
-## NAT surface — reads only, no live-site write path
+## Live-site NAT
 
-The Open API exposes NAT **reads** for a live site (`GET
-sites/{siteId}/nat/port-forwardings`, `.../nat/one-to-one-nat`,
-`.../nat/alg`, plus the insight/firewall settings nyx observes), and those
-reads are what `nat_check`, `omada_nat_facts`, and the plan/apply evidence
-use. There is **no live-site NAT write path** on the Open API:
+The 6.3 hardware-controller catalog defines port forwarding and one-to-one NAT under `sites/{siteId}/nat`. Each collection supports POST for create. The item paths support PUT for update and DELETE for removal. The port-forward schema includes WAN bindings, source restrictions, DMZ, protocol and translated port. One-to-one NAT has separate internal/external addresses and interface IDs. [Port forwarding](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/createPortForwarding.json) · [Update](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/modifyPortForwarding.json) · [Delete](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/deletePortForwarding.json) · [One-to-one NAT](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/createOtoNat.json) · [Update](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/modifyOtoNat.json) · [Delete](https://omada-northbound-docs.tplinkcloud.com/api/documents/by-doc/doc_oc_network_6.3.0/operations/deleteOtoNat.json)
 
-1. Port-forwarding writes exist only on the controller's **internal web
-   UI API** (`/{omadacId}/api/v2/...`, cookie + CSRF), which nyx does not
-   call — the v2 API is fully cut from the backend by design.
-2. The Open API's NAT *template* family (`sitetemplates/{tid}/nat/...`)
-   manages **site templates**, a different product concept from a live
-   site's gateway NAT, and community/SDK reports show the template write
-   verbs are unreliable on standard controllers (-1600 path/method
-   confusion, spec parameter bugs).
-3. Independent implementers (Omada MCP servers, Terraform providers)
-   converge on the same finding: port-forward CRUD is "internal web UI
-   API only".
-
-Consequence for nyx (#139): the Omada NAT write surface is an honest
-**HOLD**. `omada_plan_nat` / `omada_apply_nat` (and the `nyx omada
-plan-nat` / `apply-nat` CLI extras) exist so agents discover the refusal
-with evidence instead of a missing tool: the plan reads the collection as
-before-evidence and returns outcome `refused` with the write-surface
-explanation; the apply returns identical before/after evidence and can
-never mutate — dry-run or not. `omadaNatHoldNote`
-(`internal/providers/omada/provider.go`) is the single source of truth
-for the explanation; configure NAT via the controller UI or use
-`provider: opnsense`, whose NAT write path is fully supported.
+`omada_plan_nat` and `omada_apply_nat` read the selected live site and return the requested selectors, candidate rule IDs and before evidence. A repeated request reads the rules again, including after an operator's write timed out. Inspect WAN bindings, source restrictions and the full rule before deciding whether the request already took effect. Overlapping ports and inconclusive ranges can produce multiple candidates. A published method describes the catalog contract. Effective permissions, controller edition, gateway support and data-plane behavior still require verification before enabling each operation. The owner-aware playbook retains its double-NAT and unknown-owner refusal. [Verification tracker](https://github.com/jpvelasco/nyx/issues/386)
 
 ## Port speed (configured, not negotiated)
 
@@ -318,3 +293,27 @@ start reports an unverified outcome. Inspect the controller before retrying.
 These site endpoints target managed devices. Use the controller UI to install
 an image on the controller itself. The published hardware-controller update
 operation does not accept a local image.
+
+### Selected-device adoption and staged maintenance
+
+Use `nyx omada pending-devices --site <site>` or `omada_pending_devices` to
+read one page of pending devices. Add `--include-private-details` or
+`include_private_details` when you need the MAC to select one device. Start
+adoption in the controller UI. `nyx omada adoption-status --site <site>
+--mac <device-mac> --wait 30s` and `omada_adoption_status` can follow that
+selection. An adopting detail status establishes a start. Verified completion
+requires the exact device in the selected site's managed inventory. An expired
+wait reports the last observed state. A success response that precedes managed
+inventory readback remains unverified.
+
+An operator can stage a local image with `nyx omada firmware stage --site
+<site> --mac <device-mac> --expected-version <version> --file <image.bin>`.
+The command returns an opaque reference. Configure that connection's site in
+its credential profile, then give `omada_staged_firmware` the reference and
+profile, or use `nyx omada firmware staged --site <site> --reference <ref>`.
+For a private CA, the operator can set `NYX_OMADA_CA_CERT` to its PEM file in the MCP process environment. Nyx checks the stored image digest, controller, site, and target identity. The
+stage stays in the private `firmware` directory beside the credential store.
+The MCP operation previews by default. A reboot also requires `confirm_reboot`
+and hardware support evidence for that model and revision. The support list
+currently has no verified entries. Use the existing operator workflow above
+for manual maintenance.
