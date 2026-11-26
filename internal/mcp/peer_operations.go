@@ -31,7 +31,7 @@ func wireGuardPeerBinding(apply bool) operationBinding {
 		if msg != "" {
 			return errResult("configure the selected OPNsense profile")
 		}
-		opts.CACertPath = s.env("NYX_WIREGUARD_CA")
+		opts.CACertPath = s.env("NYX_OPNSENSE_CA_CERT")
 		req := service.WireGuardPeerRequest{Action: argString(args, "action"), UUID: argString(args, "uuid"), Name: argString(args, "name"), AllowedNetworks: splitCSV(argString(args, "allowed_networks"))}
 		if raw, ok := args["enabled"]; ok {
 			v, ok := raw.(bool)
