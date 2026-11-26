@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	omadabackend "github.com/jpvelasco/nyx/internal/backends/omada"
@@ -1727,22 +1727,22 @@ func TestPlanNatErrorPaths(t *testing.T) {
 }
 
 func TestNATComparisonReconcilesOperatorWrite(t *testing.T) {
-	rows := `[]`
-	var reads, writes int
+	var ruleSaved atomic.Bool
+	var reads, writes atomic.Int32
 	ts := omadaServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/openapi/authorize/token":
 			writeEnvelope(w, 0, "", `{"accessToken":"fixture"}`)
 		case r.Method != http.MethodGet:
-			writes++
+			writes.Add(1)
 			http.NotFound(w, r)
 		case strings.HasSuffix(r.URL.Path, "/port-forwardings"):
-			reads++
-			total := 0
-			if rows != "[]" {
-				total = 1
+			reads.Add(1)
+			response := `{"totalRows":0,"data":[]}`
+			if ruleSaved.Load() {
+				response = `{"totalRows":1,"data":[{"id":"web","externalPort":"440-445","protocol":1,"interfaceWanPortId":["wan"],"limitedAddresses":["trusted"],"from":1}]}`
 			}
-			writeEnvelope(w, 0, "", fmt.Sprintf(`{"totalRows":%d,"data":%s}`, total, rows))
+			writeEnvelope(w, 0, "", response)
 		case strings.HasSuffix(r.URL.Path, "/one-to-one-nat"):
 			writeEnvelope(w, 0, "", `{"totalRows":1,"data":[{"id":"one","internalIp":"192.0.2.10","externalIp":"192.0.2.4","interfaceIds":["wan"]}]}`)
 		case strings.HasSuffix(r.URL.Path, "/sites"):
@@ -1759,9 +1759,9 @@ func TestNATComparisonReconcilesOperatorWrite(t *testing.T) {
 		t.Fatalf("first read: %+v %v", first, err)
 	}
 	// The operator's controller timed out after saving the rule. The next apply must inspect the committed state.
-	rows = `[{"id":"web","externalPort":"440-445","protocol":1,"interfaceWanPortId":["wan"],"limitedAddresses":["trusted"],"from":1}]`
+	ruleSaved.Store(true)
 	second, err := p.ApplyNat(t.Context(), req, opts)
-	if err != nil || len(second.Comparison.Candidates) != 1 || second.Comparison.Candidates[0] != "web" || second.Comparison.Observation != "inspect_candidate" || !strings.Contains(second.Before, "interfaceWanPortId") || second.Before != second.After || reads != 2 || writes != 0 {
+	if err != nil || len(second.Comparison.Candidates) != 1 || second.Comparison.Candidates[0] != "web" || second.Comparison.Observation != "inspect_candidate" || !strings.Contains(second.Before, "interfaceWanPortId") || second.Before != second.After || reads.Load() != 2 || writes.Load() != 0 {
 		t.Fatalf("reconciliation: %+v %v", second, err)
 	}
 	req.Operation = "one_to_one"
