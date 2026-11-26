@@ -25,6 +25,7 @@ func TestNetworkMapDispatchPrivacy(t *testing.T) {
 		{"detail gate", "", map[string]any{"include_detail": true}, true, "NYX_MCP_ALLOW_TOPOLOGY_DETAILS"},
 		{"private", "true", map[string]any{"include_detail": true, "connections": []any{"omada/private-profile"}}, false, "private-profile"},
 		{"malformed", "", map[string]any{"connections": []any{42}}, true, "selector"},
+		{"unregistered", "", map[string]any{"connections": []any{"absent/home"}}, true, "unregistered"},
 		{"empty", "", map[string]any{"connections": []any{}}, true, "nonempty"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
