@@ -123,3 +123,36 @@ func TestInfoOperationCompatibility(t *testing.T) {
 		}
 	}
 }
+
+func TestCapabilityStoreAndEnvironmentRouting(t *testing.T) {
+	providerfixture.IsolateProviders(t)
+	adapter := new(providerfixture.ReadOnlyAdapter)
+	if err := providers.Register(adapter); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "store.json")
+	store, err := credentials.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Set("synthetic", "default", credentials.Entry{"host": "switch.example", "api_key": "fixture-key", "logical_site": "management"}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := ProviderCapabilityReport(t.Context(), CapabilityOptions{Provider: "synthetic"}, path, func(n string) string {
+		if n == "SYNTHETIC_HOST" {
+			return "other.example"
+		}
+		return ""
+	})
+	if err != nil || len(rows) != 1 || len(rows[0].Connections) != 1 || rows[0].Connections[0].InfoAccess != "unverified" {
+		t.Fatal(rows, err)
+	}
+	row := observeConnection(t.Context(), InfoOperation{}, false, rows[0].Connections[0].ConnectionInfo, CapabilityOptions{Observe: true}, path, os.Getenv)
+	if row.InfoAccess != "unsupported" {
+		t.Fatal(row)
+	}
+	if _, err := ProviderCapabilityReport(t.Context(), CapabilityOptions{}, dir, os.Getenv); err == nil {
+		t.Fatal("directory accepted as credential file")
+	}
+}
