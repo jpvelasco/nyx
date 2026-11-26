@@ -90,6 +90,11 @@ func RegisterFields(provider string, fields []Field) error {
 		usedEnv[f.Env] = true
 		seen[f.Name] = true
 	}
+	// Every controller connection has an address, including adapters whose
+	// only declared authentication input is a token.
+	if !seen["host"] {
+		fields = append([]Field{{Name: "host", Required: true}}, fields...)
+	}
 	customFields[provider] = slices.Clone(fields)
 	return nil
 }
