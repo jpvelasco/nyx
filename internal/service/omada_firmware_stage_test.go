@@ -13,6 +13,7 @@ import (
 func TestStagedFirmwareBindingAndReboot(t *testing.T) {
 	var started atomic.Bool
 	var uploaded atomic.Int32
+	var identityMissing atomic.Bool
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/openapi/authorize/token":
@@ -20,6 +21,10 @@ func TestStagedFirmwareBindingAndReboot(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/sites"):
 			writeOmadaEnvelope(w, 0, `[{"id":"site","name":"management"},{"id":"other","name":"trusted"}]`)
 		case strings.HasSuffix(r.URL.Path, "/networks/devices"):
+			if identityMissing.Load() {
+				writeOmadaEnvelope(w, 0, `[{"mac":"AA-BB-CC-DD-EE-00","firmwareVersion":"fixture-current"}]`)
+				return
+			}
 			v := "fixture-current"
 			if started.Load() {
 				v = "fixture-next"
@@ -45,6 +50,17 @@ func TestStagedFirmwareBindingAndReboot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := svc.StageFirmware(t.Context(), opts, dir, "AA-BB-CC-DD-EE-01", "fixture-next", strings.NewReader("image")); err == nil {
+		t.Fatal("staged a device absent from the selected site")
+	}
+	identityMissing.Store(true)
+	if _, err := svc.StageFirmware(t.Context(), opts, dir, "AA-BB-CC-DD-EE-00", "fixture-next", strings.NewReader("image")); err == nil {
+		t.Fatal("staged an unknown model")
+	}
+	if _, err := svc.UpgradeStagedFirmware(t.Context(), opts, dir, id, true); err == nil || uploaded.Load() != 0 {
+		t.Fatal("accepted changed device identity")
+	}
+	identityMissing.Store(false)
 	for _, tc := range []struct {
 		name    string
 		o       OmadaOptions
