@@ -42,12 +42,12 @@ func (c *Client) ACLOrder(ctx context.Context, site string, scope ACLType) ([]AC
 	return order, nil
 }
 
+// SetACLOrder submits the complete site and scope permutation once. The caller
+// must read ACLOrder after the request, including when the response is lost.
 func (c *Client) SetACLOrder(ctx context.Context, site string, scope ACLType, positions []ACLPosition) error {
 	indexes := make(map[string]int, len(positions))
 	for _, p := range positions {
 		indexes[p.ID] = p.Index
 	}
-	// An ambiguous write must be reconciled before retrying. Automatic replay
-	// could overwrite an operator's intervening reorder.
 	return c.postCreate(ctx, fmt.Sprintf("sites/%s/acls/modifyIndex", site), map[string]any{"type": scope.Scope(), "indexes": indexes}, nil)
 }

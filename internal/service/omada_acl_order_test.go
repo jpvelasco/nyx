@@ -73,3 +73,50 @@ func TestOmadaACLOrder(t *testing.T) {
 		})
 	}
 }
+
+func TestACLOrderRequiresVerifiedReadback(t *testing.T) {
+	for _, readDenied := range []bool{false, true} {
+		writes := 0
+		server := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.URL.Path == "/openapi/authorize/token":
+				writeOmadaEnvelope(w, 0, `{"accessToken":"fixture"}`)
+			case strings.HasSuffix(r.URL.Path, "/sites"):
+				writeOmadaEnvelope(w, 0, `{"totalRows":1,"data":[{"id":"s1","name":"example"}]}`)
+			case strings.HasSuffix(r.URL.Path, "/modifyIndex"):
+				writes++
+				writeOmadaEnvelope(w, 0, `{}`)
+			case strings.HasSuffix(r.URL.Path, "/osw-acls"):
+				if writes > 0 && readDenied {
+					http.Error(w, "denied", http.StatusForbidden)
+					return
+				}
+				writeOmadaEnvelope(w, 0, `{"totalRows":2,"data":[{"id":"a","index":1},{"id":"b","index":2}]}`)
+			default:
+				http.NotFound(w, r)
+			}
+		})
+		opts := omadaPortOpts(server.URL)
+		opts.Site = "example"
+		svc := NewOmadaService()
+		req := OmadaACLOrderRequest{Scope: "switch"}
+		if res, err := svc.ACLOrder(t.Context(), opts, req, true); err != nil || len(res.Before) != 2 {
+			t.Fatalf("read: %v %v", res, err)
+		}
+		if _, err := svc.ACLOrder(t.Context(), opts, req, false); err == nil {
+			t.Fatal("applied without preview")
+		}
+		req.Desired = []string{"b"}
+		if _, err := svc.ACLOrder(t.Context(), opts, req, true); err == nil {
+			t.Fatal("accepted partial order")
+		}
+		req.Expected = []string{"a", "b"}
+		req.Desired = []string{"b", "a"}
+		if _, err := svc.ACLOrder(t.Context(), opts, req, false); err == nil || writes != 1 {
+			t.Fatalf("unverified apply: %v, writes=%d", err, writes)
+		}
+	}
+	if _, err := NewOmadaService().ACLOrder(t.Context(), OmadaOptions{}, OmadaACLOrderRequest{Scope: "other"}, true); err == nil {
+		t.Fatal("accepted unknown scope")
+	}
+}

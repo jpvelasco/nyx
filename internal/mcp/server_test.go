@@ -3508,3 +3508,39 @@ func TestFirewallSchemaRefusesDroppedSelectors(t *testing.T) {
 		}
 	}
 }
+
+func TestACLOrderRPC(t *testing.T) {
+	hermeticCreds(t)
+	stub := &stubOmadaSvc{}
+	s := serverWithOmadaStub(stub)
+	args := map[string]any{"host": "controller.example", "client_id": "fixture", "client_secret": "fixture", "site": "example", "scope": "eap", "expected": "dns,deny", "desired": "deny,dns"}
+	for _, name := range []string{"omada_plan_acl_order", "omada_apply_acl_order"} {
+		text, fail := s.DispatchToolForTest(t.Context(), name, args)
+		if fail || !strings.Contains(text, `"scope": "eap"`) || !strings.Contains(text, `"dry_run": true`) {
+			t.Fatalf("%s: %s", name, text)
+		}
+	}
+	args["dry_run"] = false
+	text, fail := s.DispatchToolForTest(t.Context(), "omada_apply_acl_order", args)
+	if fail || !strings.Contains(text, `"dry_run": false`) {
+		t.Fatal(text)
+	}
+	stub.err = errors.New("readback failed")
+	if text, fail = s.DispatchToolForTest(t.Context(), "omada_apply_acl_order", args); !fail || !strings.Contains(text, "readback failed") {
+		t.Fatal(text)
+	}
+	for _, test := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"omada_plan_acl_order", map[string]any{}, "host"},
+		{"omada_plan_acl_order", map[string]any{"unknown": true}, "unsupported"},
+		{"opnsense_plan_filter", map[string]any{"source_port": 53}, "string"},
+		{"opnsense_apply_filter", map[string]any{"dry_run": "false"}, "boolean"},
+	} {
+		if text, fail = s.DispatchToolForTest(t.Context(), test.name, test.args); !fail || !strings.Contains(text, test.want) {
+			t.Errorf("%s: %s", test.name, text)
+		}
+	}
+}
