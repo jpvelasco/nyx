@@ -2,10 +2,10 @@ package service
 
 import (
 	"context"
-	"github.com/jpvelasco/nyx/internal/textsafe"
 	"strings"
 
 	"github.com/jpvelasco/nyx/internal/backends/omada"
+	"github.com/jpvelasco/nyx/internal/textsafe"
 )
 
 func (s *OmadaService) ListWLANOptimizationHistory(ctx context.Context, opts OmadaOptions) ([]omada.WLANOptimizationRun, error) {
