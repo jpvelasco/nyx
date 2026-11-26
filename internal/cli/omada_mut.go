@@ -99,8 +99,8 @@ func buildOmadaApplyACLCmd() *cobra.Command {
 }
 
 type omadaPortFlags struct {
-	switchMAC, native, tagged, profileName string
-	port                                   int
+	switchMAC, native, tagged, profileName, revision, verifyClient string
+	port                                                           int
 }
 
 func (f omadaPortFlags) request() (service.OmadaPortProfileRequest, error) {
@@ -114,11 +114,13 @@ func (f omadaPortFlags) request() (service.OmadaPortProfileRequest, error) {
 		return service.OmadaPortProfileRequest{}, fmt.Errorf("--native is required")
 	}
 	return service.OmadaPortProfileRequest{
-		SwitchMAC:   f.switchMAC,
-		Port:        f.port,
-		Native:      f.native,
-		Tagged:      splitCSV(f.tagged),
-		ProfileName: f.profileName,
+		SwitchMAC:        f.switchMAC,
+		Port:             f.port,
+		Native:           f.native,
+		Tagged:           splitCSV(f.tagged),
+		ProfileName:      f.profileName,
+		ExpectedRevision: f.revision,
+		VerifyClientMAC:  f.verifyClient,
 	}, nil
 }
 
@@ -127,6 +129,8 @@ func bindOmadaPortFlags(cmd *cobra.Command, f *omadaPortFlags) {
 	cmd.Flags().IntVar(&f.port, "port", 0, "1-based port number (required)")
 	cmd.Flags().StringVar(&f.native, "native", "", "Native (untagged) network name (required)")
 	cmd.Flags().StringVar(&f.tagged, "tagged", "", "Tagged network names, comma-separated")
+	cmd.Flags().StringVar(&f.verifyClient, "verify-client-mac", "", "Observe this client attachment and DHCP lease after guarded apply")
+	cmd.Flags().StringVar(&f.revision, "expected-revision", "", "Require the port configuration revision from a prior plan")
 	cmd.Flags().StringVar(&f.profileName, "profile-name", "", "Optional LAN profile name (derived when empty)")
 	cmd.Flags().StringVar(&providerSite, "site", "", "Site name (defaults to first site)")
 	addProviderFlags(cmd, "omada")

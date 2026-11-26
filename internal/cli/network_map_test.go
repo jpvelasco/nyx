@@ -63,7 +63,11 @@ func configureMapFixtures(t *testing.T) {
 		case "/openapi/v1/fixture-controller/sites":
 			envelope(`[{"id":"s1","name":"fixture-site"}]`)
 		case "networks/client":
-			envelope(`[{"mac":"02:aa:bb:cc:dd:04","type":"wireless"}]`)
+			envelope(`[{"mac":"02:aa:bb:cc:dd:04","type":"wireless"},{"mac":"02:aa:bb:cc:dd:05","type":"wired"}]`)
+		case "clients/02-aa-bb-cc-dd-05/client-link-topology":
+			envelope(`[{"nodeType":"clientNode","clientNode":{"mac":"02:aa:bb:cc:dd:05","upOswInfo":{"mac":"02:aa:bb:cc:dd:02","port":"9"}}}]`)
+		case "clients/02-aa-bb-cc-dd-05/client-history":
+			envelope(`[]`)
 		case "clients/02-aa-bb-cc-dd-04/client-link-topology":
 			envelope(`[{"nodeType":"clientNode","clientNode":{"mac":"02:aa:bb:cc:dd:04","upApInfo":{"mac":"02:aa:bb:cc:dd:03"}}}]`)
 		case "clients/02-aa-bb-cc-dd-04/client-history":
@@ -75,11 +79,11 @@ func configureMapFixtures(t *testing.T) {
 		case "devices/uplink-info":
 			envelope(`[{"mac":"02:aa:bb:cc:dd:03","uplinkDeviceMac":"02:aa:bb:cc:dd:02","uplinkDevicePort":"8"}]`)
 		case "lan-networks":
-			envelope(`[{"id":"gaming","vlan":30,"gatewaySubnet":"10.0.30.1/24"},{"id":"management","vlan":11}]`)
+			envelope(`[{"id":"gaming","name":"gaming","vlan":30,"gatewaySubnet":"10.0.30.1/24"},{"id":"management","name":"management","vlan":11}]`)
 		case "lan-profiles":
-			envelope(`[{"id":"ap-profile","nativeNetworkId":"management","tagNetworkIds":["gaming"]}]`)
+			envelope(`[{"id":"ap-profile","nativeNetworkId":"management","tagNetworkIds":["gaming"]},{"id":"gaming-profile","nativeNetworkId":"gaming","untagNetworkIds":["gaming"]}]`)
 		case "switches/ports/overview":
-			envelope(`[{"port":1,"switchMac":"02:aa:bb:cc:dd:02","profileOverrideEnable":true},{"port":8,"switchMac":"02:aa:bb:cc:dd:02","profileId":"ap-profile","portStatus":{"stpDiscarding":false}}]`)
+			envelope(`[{"port":1,"switchMac":"02:aa:bb:cc:dd:02","profileOverrideEnable":true},{"port":8,"switchMac":"02:aa:bb:cc:dd:02","profileId":"ap-profile","portStatus":{"stpDiscarding":false}},{"port":9,"switchMac":"02:aa:bb:cc:dd:02","profileId":"gaming-profile"}]`)
 		case "ssids":
 			envelope(`[{"id":"gaming-wifi","ssid":"gaming","vlanId":30}]`)
 		default:
@@ -166,7 +170,7 @@ func TestNetworkMapCLIAndMCP(t *testing.T) {
 	for _, l := range m.Links {
 		counts[l.Relation+"/"+l.State]++
 	}
-	for key, n := range map[string]int{"neighbor/observed": 2, "uplink/observed": 1, "gateway/observed": 1, "gateway/inferred": 1, "gateway/missing": 1, "native/observed": 1, "tagged/observed": 1, "tagged/missing": 1, "segment/observed": 1} {
+	for key, n := range map[string]int{"neighbor/observed": 2, "uplink/observed": 1, "gateway/observed": 1, "gateway/inferred": 1, "gateway/missing": 1, "native/observed": 2, "tagged/observed": 1, "tagged/missing": 1, "segment/observed": 1} {
 		if counts[key] != n {
 			t.Errorf("%s = %d, want %d; links %+v", key, counts[key], n, m.Links)
 		}

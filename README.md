@@ -528,6 +528,18 @@ conflicting attachments retain their status. A switch downstream of the last
 managed uplink can hide the physical port. Private detail includes observed
 addresses, SSIDs and device labels.
 
+`nyx topology plan-switch CONNECTION SWITCH-MAC POLICY-JSON` and MCP
+`switch_port_plan` compare observed switch attachments against explicit port
+roles. A policy specifies `management_vlan` and a `ports` array with `port`,
+`role`, `native` and `tagged`. An access-port intent also supplies `client_mac`.
+The preview protects infrastructure paths and retains reasons when an assignment
+cannot be verified. Eligible rows include a revision. Pass it to the existing
+`nyx omada apply-port-profile --expected-revision REVISION` or MCP
+`omada_apply_port_profile` with `expected_revision`. A changed configuration
+requires a new plan. After a real guarded apply, `--verify-client-mac` or
+`verify_client_mac` adds the observed client attachment and DHCP lease to the
+membership check. Unknown evidence remains visible.
+
 `nyx topology --fingerprint` adds an architecture summary from the configured
 Omada and OPNsense providers. It shows inferred enforcement and bridge roles,
 observed managed upstream links, and VLAN gateway provider assignments. The
