@@ -59,7 +59,7 @@ func TestPeerPreviewAndRevocation(t *testing.T) {
 	t.Setenv("OPNSENSE_HOST", strings.TrimPrefix(firewall, "https://"))
 	t.Setenv("OPNSENSE_API_KEY", "fixture")
 	t.Setenv("OPNSENSE_API_SECRET", "fixture-secret")
-	t.Setenv("NYX_WIREGUARD_CA", ca)
+	t.Setenv("NYX_OPNSENSE_CA_CERT", ca)
 	args := map[string]interface{}{}
 	s := NewServerWithLogger(nil)
 	call := func(name string, wantError bool, needle string) {
