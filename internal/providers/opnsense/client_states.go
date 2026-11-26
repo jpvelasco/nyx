@@ -36,6 +36,20 @@ type StateOperationResult struct {
 	Dropped *int   `json:"dropped_states,omitempty"`
 }
 
+// SetSort parses the optional public single-field sort syntax before dispatch.
+func (q *StateQuery) SetSort(value string) error {
+	q.Sort = nil
+	if value == "" {
+		return nil
+	}
+	field, order, ok := strings.Cut(value, ":")
+	if !ok {
+		return errors.New("--sort requires field:asc or field:desc")
+	}
+	q.Sort = map[string]string{field: order}
+	return nil
+}
+
 func (c *Client) QueryStates(ctx context.Context, q StateQuery) (StatePage, error) {
 	var page StatePage
 	if q.Page < 1 || q.PageSize < 1 || q.PageSize > 9999 {

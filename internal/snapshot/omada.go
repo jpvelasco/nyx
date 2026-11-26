@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -14,6 +15,9 @@ import (
 	"github.com/jpvelasco/nyx/internal/backends/omada"
 	"github.com/jpvelasco/nyx/internal/filewrite"
 )
+
+// ErrNoOmadaSiteBaseline carries the setup guidance for a first drift comparison.
+var ErrNoOmadaSiteBaseline = errors.New("no baseline for this site; run 'nyx omada site-config snapshot' first")
 
 type omadaSiteBaseline struct {
 	Hash      string           `json:"hash"`
@@ -74,7 +78,7 @@ func CompareOmadaSiteConfig(state omada.SiteConfigState) ([]OmadaSiteChange, err
 	// #nosec G304 — path is generated from the site fingerprint in the snapshot directory.
 	data, err := os.ReadFile(path) // nosemgrep
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("no baseline for this site; run 'nyx omada site-config snapshot' first")
+		return nil, ErrNoOmadaSiteBaseline
 	}
 	if err != nil {
 		return nil, fmt.Errorf("reading site configuration baseline: %w", err)

@@ -1613,13 +1613,5 @@ func untrustedDataResult(data any, label string) toolDispatchResult {
 }
 
 func firewallLogLimit(args map[string]interface{}, maxLimit int) (int, error) {
-	value, provided := args["limit"]
-	if !provided {
-		return maxLimit, nil
-	}
-	number, ok := value.(float64)
-	if !ok || number < 1 || number > float64(maxLimit) || number != float64(int(number)) {
-		return 0, fmt.Errorf("limit must be an integer between 1 and %d", maxLimit)
-	}
-	return int(number), nil
+	return diagnosticInteger(args, "limit", maxLimit, 1, maxLimit)
 }

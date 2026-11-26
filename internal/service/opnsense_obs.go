@@ -251,3 +251,8 @@ type OpnsenseFirewallLogStat = opnsensebackend.FirewallLogStat
 func (s *OpnsenseService) FirewallLogStats(ctx context.Context, opts OpnsenseOptions, limit int, groupBy string) ([]OpnsenseFirewallLogStat, error) {
 	return s.client(opts).GetFirewallLogStats(ctx, limit, groupBy)
 }
+
+// QueryStates fetches a bounded page using the firewall's read-only state-table query.
+func (s *OpnsenseService) QueryStates(ctx context.Context, opts OpnsenseOptions, q opnsensebackend.StateQuery) (opnsensebackend.StatePage, error) {
+	return s.client(opts).QueryStates(ctx, q)
+}
