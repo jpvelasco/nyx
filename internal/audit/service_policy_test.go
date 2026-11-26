@@ -91,3 +91,19 @@ func TestServiceFirewallChecksOnlyMatchingPolicy(t *testing.T) {
 		t.Fatal("status came from an unrelated policy or assertion")
 	}
 }
+
+func TestServiceObservationUnmeasured(t *testing.T) {
+	for _, tc := range []struct {
+		kind, runner string
+		data         map[string]any
+	}{{"dns_check", "source", nil}, {"port_check", "mismatch", nil}, {"port_check", "source", nil}, {"port_check", "source", map[string]any{"ports": []interface{}{map[string]any{"state": "filtered"}}}}} {
+		a := intent.Assertion{Type: tc.kind, Runner: "source"}
+		r := models.CheckResult{CheckType: tc.kind, Runner: tc.runner, Status: models.StatusFail, Observed: tc.data}
+		if got := serviceObservation(a, r); got != "unknown" {
+			t.Fatalf("ambiguous evidence promoted to %s", got)
+		}
+	}
+	if _, err := NewEngine(&intent.Spec{ServicePolicies: []intent.ServicePolicy{{Policy: "missing"}}}).Run(t.Context()); err == nil {
+		t.Fatal("engine accepted an undeclared policy")
+	}
+}
