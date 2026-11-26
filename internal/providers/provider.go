@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 )
@@ -14,9 +15,11 @@ import (
 // ClientID/ClientSecret carry the vendor's credential pair: for Omada the
 // Open API client credentials, for OPNsense the API key/secret.
 type ImportOptions struct {
+	Connection             credentials.Connection `json:"-" yaml:"-"`
+	Credentials            credentials.Entry      `json:"-" yaml:"-"`
 	Host                   string
-	ClientID               string
-	ClientSecret           string
+	ClientID               string `json:"-" yaml:"-"`
+	ClientSecret           string `json:"-" yaml:"-"`
 	Site                   string
 	Debug                  bool
 	SkipTLSVerify          bool
@@ -263,4 +266,16 @@ type ErrCapabilityUnsupported struct {
 
 func (e *ErrCapabilityUnsupported) Error() string {
 	return "provider \"" + e.Provider + "\" does not support \"" + e.Capability + "\""
+}
+
+// ConnectionOptions adapts resolved credential fields for existing and new providers.
+func ConnectionOptions(c credentials.Connection, values credentials.Entry) ImportOptions {
+	opts := ImportOptions{Connection: c, Credentials: values, Host: values["host"], Site: values["site"]}
+	switch c.Provider {
+	case "opnsense":
+		opts.ClientID, opts.ClientSecret = values["api_key"], values["api_secret"]
+	default:
+		opts.ClientID, opts.ClientSecret = values["client_id"], values["client_secret"]
+	}
+	return opts
 }

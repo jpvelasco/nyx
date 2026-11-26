@@ -1814,9 +1814,14 @@ func TestRunACLCheck_SuccessfulCheck(t *testing.T) {
 	okProvider := &aclTestProviderWithResult{}
 	providers.Register(okProvider)
 
-	t.Setenv("OMADA_HOST", "localhost")
-	t.Setenv("OMADA_CLIENT_ID", "admin")
-	t.Setenv("OMADA_CLIENT_SECRET", "pass")
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	store, err := credentials.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set(okProvider.Name(), "default", credentials.Entry{"host": "controller.example"}); err != nil {
+		t.Fatal(err)
+	}
 
 	spec := &intent.Spec{
 		Version: 1, Site: "test",
@@ -1825,6 +1830,7 @@ func TestRunACLCheck_SuccessfulCheck(t *testing.T) {
 		},
 	}
 	eng := NewEngine(spec)
+	eng.CredentialsPath = path
 	eng.Backend = &backends.MockBackend{}
 	a := intent.Assertion{
 		Type:     "acl_check",
@@ -1836,8 +1842,8 @@ func TestRunACLCheck_SuccessfulCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result == nil {
-		t.Fatal("expected non-nil result")
+	if result == nil || result.Status != models.StatusPass {
+		t.Fatal("expected successful ACL check")
 	}
 }
 

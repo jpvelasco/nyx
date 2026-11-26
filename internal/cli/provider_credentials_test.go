@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,8 +34,9 @@ func (f *fakeWMReader) Read(target string) (credmanager.Cred, bool, error) {
 // OMADA_* or OPNSENSE_* exported.
 func clearProviderEnv(t *testing.T) {
 	t.Helper()
-	for _, names := range providerEnvNames {
-		for _, n := range names {
+	for _, provider := range []string{"omada", "opnsense"} {
+		for _, field := range credentials.FieldsFor(provider) {
+			n := field.Env
 			if n != "" {
 				t.Setenv(n, "")
 			}
@@ -60,19 +63,15 @@ func writeCredentialStore(t *testing.T, provider string, entry credentials.Entry
 	}
 }
 
-func TestProviderImportOptions_UnknownProviderFallsBackToOmadaEnv(t *testing.T) {
+func TestProviderImportOptions_UnknownProviderIsolated(t *testing.T) {
 	saveRestoreGlobals(t)
 	clearProviderEnv(t)
-	t.Setenv("OMADA_HOST", "10.0.0.9")
-	t.Setenv("OMADA_CLIENT_ID", "env-user")
-	t.Setenv("OMADA_CLIENT_SECRET", "env-pass")
-
+	writeCredentialStore(t, "omada", nil)
+	t.Setenv("OMADA_HOST", "controller.example")
+	t.Setenv("OMADA_CLIENT_SECRET", "example-secret")
 	opts := providerImportOptions("fake")
-	if opts.Host != "10.0.0.9" {
-		t.Errorf("Host = %q, want OMADA_HOST for unknown provider", opts.Host)
-	}
-	if opts.ClientID != "env-user" || opts.ClientSecret != "env-pass" {
-		t.Errorf("creds = %q/%q, want OMADA_* env values", opts.ClientID, opts.ClientSecret)
+	if opts.Host != "" || opts.ClientID != "" || opts.ClientSecret != "" {
+		t.Fatal("unregistered adapter inherited Omada fields")
 	}
 }
 
@@ -213,13 +212,13 @@ func TestRequireProviderHost_Opnsense(t *testing.T) {
 	}
 }
 
-func TestRequireProviderHost_UnknownProviderKeepsOmadaNames(t *testing.T) {
+func TestRequireProviderHost_UnknownProviderOmitsOmadaNames(t *testing.T) {
 	err := requireProviderHost(providers.ImportOptions{}, "fake")
 	if err == nil {
 		t.Fatal("expected missing-host error")
 	}
-	if !strings.Contains(err.Error(), "OMADA_HOST") {
-		t.Errorf("error %q does not name OMADA_HOST", err.Error())
+	if strings.Contains(err.Error(), "OMADA_HOST") {
+		t.Error("unknown provider advertised Omada credentials")
 	}
 }
 
@@ -280,10 +279,10 @@ func TestProviderCredFlags_OmadaVsOpnsense(t *testing.T) {
 			wantAbsent:  []string{"client-id", "client-secret"},
 		},
 		{
-			name:        "unknown provider keeps omada flags",
+			name:        "unknown provider has no vendor credential flags",
 			cmd:         buildInfoCmd(&fakeProvider{name: "fake"}),
-			wantPresent: []string{"client-id", "client-secret"},
-			wantAbsent:  []string{"api-key", "api-secret"},
+			wantPresent: []string{"host", "profile"},
+			wantAbsent:  []string{"client-id", "client-secret", "api-key", "api-secret"},
 		},
 		{
 			name:        "omada extra uplink-info",
@@ -331,5 +330,41 @@ func assertProviderCredFlags(t *testing.T, flags *pflag.FlagSet, present, absent
 		if f.Usage != want {
 			t.Errorf("--%s help = %q, want %q", name, f.Usage, want)
 		}
+	}
+}
+
+type singleKeyController struct {
+	fakeProvider
+	received string
+}
+
+func (p *singleKeyController) CredentialFields() []credentials.Field {
+	return []credentials.Field{{Name: "token", Required: true, Secret: true, Env: "SENSOR_TOKEN"}}
+}
+func (p *singleKeyController) Info(_ context.Context, opts providers.ImportOptions) (*providers.ProviderInfo, error) {
+	p.received = opts.Credentials["token"]
+	return nil, fmt.Errorf("adapter rejected %s", p.received)
+}
+func TestThirdProviderCredentialFlagsAndErrors(t *testing.T) {
+	saveRestoreGlobals(t)
+	p := &singleKeyController{fakeProvider: fakeProvider{name: "sensor"}}
+	if err := providers.Register(p); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(providers.Reset)
+	writeCredentialStore(t, "omada", nil)
+	t.Setenv("SENSOR_TOKEN", "ambient-fixture")
+	cmd := buildInfoCmd(p)
+	if err := cmd.ParseFlags([]string{"--profile", "trusted", "--host", "sensor.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.RunE(cmd, nil); err == nil || !strings.Contains(err.Error(), "missing required fields: token") || p.received != "" {
+		t.Fatal("incomplete profile used ambient credentials")
+	}
+	if err := cmd.ParseFlags([]string{"--token", "explicit-fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.RunE(cmd, nil); err == nil || err.Error() != "adapter rejected [redacted]" || p.received != "explicit-fixture" {
+		t.Fatal("failed to pass the adapter its own credential or scrub its error")
 	}
 }

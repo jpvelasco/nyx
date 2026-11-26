@@ -303,3 +303,26 @@ func TestCredentialsStatusStoreOpenError(t *testing.T) {
 		t.Errorf("store error = %q isErr=%v", text, isErr)
 	}
 }
+
+func TestMCPNamedCredentialProfile(t *testing.T) {
+	path := openTestStore(t)
+	store, err := credentials.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set("omada", "management", credentials.Entry{"host": "controller.example", "client_id": "fixture-client"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMADA_CLIENT_SECRET", "ambient-fixture")
+	stub := &stubOmadaSvc{}
+	s := serverWithOmadaStub(stub)
+	args := map[string]interface{}{"profile": "management"}
+	text, isErr := s.DispatchToolForTest(t.Context(), "omada_inventory", args)
+	if !isErr || !strings.Contains(text, "missing required fields: client_secret") || strings.Contains(text, "fixture") || stub.calls != 0 {
+		t.Fatal("incomplete named profile reached service or disclosed values")
+	}
+	opts, msg := s.omadaOptionsFromArgs(args, false)
+	if msg != "" || opts.Host != "controller.example" || opts.ClientID != "" || opts.ClientSecret != "" {
+		t.Fatal("host-only read included credentials or lost named host")
+	}
+}

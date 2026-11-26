@@ -19,6 +19,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/backends/system"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/seendb"
 )
 
@@ -81,18 +82,20 @@ func instrumentAssertion(checkType string, status models.Status) {
 // Run() mutates runnerCtx and seenDB, and callers should create a new
 // Engine via NewEngine for each audit.
 type Engine struct {
-	Spec              *intent.Spec
-	Interface         string
-	WarnVirtual       bool
-	SkipTLSVerify     bool             // allow self-signed TLS certs (like curl -k)
-	CACertPath        string           // path to custom CA cert PEM file
-	SkipHostKeyVerify bool             // skip SSH host key verification for probes
-	SeenDBPath        string           // if non-empty, overrides ~/.nyx/seen.json (used in tests)
-	CredentialsPath   string           // if non-empty, overrides ~/.nyx/credentials.json (used in tests)
-	Backend           backends.Backend // backend abstraction; nil means use default
-	Logger            *slog.Logger     // structured logger; nil means use default stderr logger
-	runnerCtx         runnerContext    // populated once at Run() time
-	seenDB            *seendb.SeenDB   // populated once at Run() time
+	Spec               *intent.Spec
+	Interface          string
+	WarnVirtual        bool
+	SkipTLSVerify      bool                               // allow self-signed TLS certs (like curl -k)
+	CACertPath         string                             // path to custom CA cert PEM file
+	SkipHostKeyVerify  bool                               // skip SSH host key verification for probes
+	SeenDBPath         string                             // if non-empty, overrides ~/.nyx/seen.json (used in tests)
+	CredentialProfiles map[string]string                  // provider → selected profile for standalone audits
+	ControllerOptions  map[string]providers.ImportOptions // already resolved by a provider check
+	CredentialsPath    string                             // if non-empty, overrides ~/.nyx/credentials.json (used in tests)
+	Backend            backends.Backend                   // backend abstraction; nil means use default
+	Logger             *slog.Logger                       // structured logger; nil means use default stderr logger
+	runnerCtx          runnerContext                      // populated once at Run() time
+	seenDB             *seendb.SeenDB                     // populated once at Run() time
 }
 
 // NewEngine creates an audit engine for a spec

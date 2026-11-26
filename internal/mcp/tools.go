@@ -265,6 +265,7 @@ func (s *Server) toolRunAudit(ctx context.Context, args map[string]interface{}) 
 		return errResult(fmt.Sprintf("failed to load spec: %v", err))
 	}
 	eng := audit.NewEngine(spec)
+	eng.CredentialProfiles = map[string]string{"omada": argString(args, "omada_profile"), "opnsense": argString(args, "opnsense_profile")}
 	eng.Logger = s.logger
 	report, err := eng.Run(ctx)
 	if err != nil {
@@ -352,19 +353,26 @@ func (s *Server) toolCredentialsStatus(_ context.Context, _ map[string]interface
 		return errResult(fmt.Sprintf("opening credential store: %v", err))
 	}
 	env := map[string]bool{}
-	for _, name := range OmadaCredEnvVars {
-		env[name] = strings.TrimSpace(s.env(name)) != ""
+	fields := map[string][]credentials.Field{}
+	for _, provider := range providers.List() {
+		fields[provider.Name()] = credentials.FieldsFor(provider.Name())
 	}
-	for _, name := range OpnsenseCredEnvVars {
-		env[name] = strings.TrimSpace(s.env(name)) != ""
+	// Built-in services can also be supplied directly by an MCP embedder.
+	for _, name := range []string{"omada", "opnsense"} {
+		fields[name] = credentials.FieldsFor(name)
+	}
+	for _, declaration := range fields {
+		for _, f := range declaration {
+			if f.Env != "" {
+				env[f.Env] = strings.TrimSpace(s.env(f.Env)) != ""
+			}
+		}
 	}
 	out := struct {
-		Store []credentials.EntryStatus `json:"store"`
-		Env   map[string]bool           `json:"env"`
-	}{
-		Store: store.Status(),
-		Env:   env,
-	}
+		Store  []credentials.EntryStatus      `json:"store"`
+		Env    map[string]bool                `json:"env"`
+		Fields map[string][]credentials.Field `json:"fields"`
+	}{store.Status(), env, fields}
 	return okResult(toJSON(out))
 }
 

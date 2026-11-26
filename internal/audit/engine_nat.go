@@ -31,7 +31,10 @@ func (e *Engine) runNatCheck(ctx context.Context, a intent.Assertion) (*models.C
 	}
 
 	opts := e.controllerOptions(providerName)
-	if opts.Host == "" || opts.ClientID == "" || opts.ClientSecret == "" {
+	if err := opts.Connection.Require(opts.Credentials); err != nil {
+		if opts.Connection.ProfileName() != "default" || (providerName != "omada" && providerName != "opnsense") {
+			return natCheckErrorResult(providerName, "nat_check requires provider credentials: "+err.Error()), nil
+		}
 		hint := ""
 		if providerName == "omada" {
 			hint = credmanager.Hint(opts.Host)
@@ -41,7 +44,8 @@ func (e *Engine) runNatCheck(ctx context.Context, a intent.Assertion) (*models.C
 				hint+" or stored credentials (see `nyx credentials set <provider>`)"), nil
 	}
 
-	return checker.NatCheck(ctx, providers.NatCheckRequest{ExpectMode: a.NatMode}, opts)
+	result, err := checker.NatCheck(ctx, providers.NatCheckRequest{ExpectMode: a.NatMode}, opts)
+	return result, opts.Connection.RedactError(err, opts.Credentials)
 }
 
 // natCheckErrorResult creates a finished CheckResult with StatusError for
