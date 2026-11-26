@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -34,5 +36,25 @@ func TestAuditMissingSpecError(t *testing.T) {
 	}
 	if !strings.Contains(msg, "nyx audit --spec") {
 		t.Errorf("error missing 'nyx audit --spec' hint: %q", msg)
+	}
+}
+
+func TestAuditRejectsInvalidProfileSelector(t *testing.T) {
+	saveRestoreGlobals(t)
+	registerFakeProvider(t)
+	specFile = filepath.Join(t.TempDir(), "spec.yaml")
+	if err := os.WriteFile(specFile, []byte("version: 1\nsite: trusted\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ selector, errorText string }{{"missing=trusted", "unknown provider"}, {"fake=", "empty profile"}} {
+		cmd := *auditCmd
+		cmd.ResetFlags()
+		cmd.Flags().StringToString("provider-profile", nil, "")
+		if err := cmd.ParseFlags([]string{"--provider-profile", tc.selector}); err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.RunE(&cmd, nil); err == nil || !strings.Contains(err.Error(), tc.errorText) {
+			t.Errorf("unexpected selector result: %v", err)
+		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/audit"
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
+	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/recommendations"
 	"github.com/jpvelasco/nyx/internal/report"
 	"github.com/jpvelasco/nyx/internal/snapshot"
@@ -50,7 +51,19 @@ var auditCmd = &cobra.Command{
 		defer cancel()
 
 		engine := audit.NewEngine(spec)
-		engine.CredentialProfiles, _ = cmd.Flags().GetStringToString("provider-profile")
+		profiles, err := cmd.Flags().GetStringToString("provider-profile")
+		if err != nil {
+			return err
+		}
+		for name, profile := range profiles {
+			if providers.Get(name) == nil {
+				return fmt.Errorf("--provider-profile: unknown provider %q", name)
+			}
+			if strings.TrimSpace(profile) == "" {
+				return fmt.Errorf("--provider-profile: empty profile for %s", name)
+			}
+		}
+		engine.CredentialProfiles = profiles
 		engine.Interface = GetSelectedInterface()
 		engine.WarnVirtual = warnVirtual
 		engine.SkipHostKeyVerify = skipHostKeyVerify

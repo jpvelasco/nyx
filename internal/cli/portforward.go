@@ -3,13 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
-
 	"time"
 
 	"github.com/jpvelasco/nyx/internal/credentials"
-
 	"github.com/jpvelasco/nyx/internal/service"
-
 	"github.com/spf13/cobra"
 )
 
