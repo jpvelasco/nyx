@@ -335,3 +335,19 @@ func TestSortedIDEqual(t *testing.T) {
 		t.Error("sortedIDEqual: nil and empty should be equal")
 	}
 }
+
+func TestLLDPNeighborIdentity(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/openapi/v1/abc123/sites/s1/switches/02-aa-bb-cc-dd-02/lldp-neighbors" {
+			t.Error("unexpected LLDP request")
+		}
+		writeEnvelope(w, 0, "", `[{"portId":8,"deviceId":"opaque chassis"}]`)
+	}))
+	rows, err := c.GetLLDPNeighbors(t.Context(), "s1", "02:aa:bb:cc:dd:02")
+	if err != nil || len(rows) != 1 || rows[0].Port != 8 || rows[0].Chassis != "opaque chassis" {
+		t.Fatal(rows, err)
+	}
+	if _, err := c.GetLLDPNeighbors(t.Context(), "s1", "invalid"); err == nil {
+		t.Fatal("bad switch selector accepted")
+	}
+}
