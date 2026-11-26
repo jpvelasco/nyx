@@ -49,6 +49,7 @@ func maintenanceBindings() []operationBinding {
 			if opts.Site == "" {
 				return errResult("configure an explicit site for the selected Omada profile")
 			}
+			opts.CACertPath = s.env("NYX_OMADA_MAINTENANCE_CA")
 			res, err := call(ctx, opts, args)
 			if err != nil {
 				return errResult("maintenance operation was not verified; check the selected profile, target, parameters and permissions")
