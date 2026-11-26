@@ -46,17 +46,13 @@ func TestServicePolicyCLIAndMCP(t *testing.T) {
 	if err := os.WriteFile(specFile, input, 0600); err != nil {
 		t.Fatal(err)
 	}
-	outputPath = filepath.Join(tmp, "output.json")
+	outputPath = ""
 	jsonOutput = true
-	if err := auditCmd.RunE(auditCmd, nil); err != nil {
-		var exit *ExitError
-		if !errors.As(err, &exit) {
-			t.Fatal(err)
-		}
-	}
-	cliJSON, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatal(err)
+	var auditErr error
+	cliJSON := captureStdout(func() { auditErr = auditCmd.RunE(auditCmd, nil) })
+	var exit *ExitError
+	if auditErr != nil && !errors.As(auditErr, &exit) {
+		t.Fatal(auditErr)
 	}
 	mcpJSON, failed := mcp.NewServer().DispatchToolForTest(t.Context(), "run_audit", map[string]any{"spec_file": specFile})
 	if failed {
@@ -76,7 +72,7 @@ func TestServicePolicyCLIAndMCP(t *testing.T) {
 		t.Fatal("missing service policy result")
 		return models.CheckResult{}
 	}
-	left, right := finding(cliJSON), finding([]byte(mcpJSON))
+	left, right := finding([]byte(cliJSON)), finding([]byte(mcpJSON))
 	if left.Status != models.StatusPass || right.Status != left.Status || !reflect.DeepEqual(left.Observed, right.Observed) || !reflect.DeepEqual(left.Expected, right.Expected) {
 		t.Fatal("CLI and MCP returned differing service policy results")
 	}
