@@ -58,8 +58,8 @@ func TestProviderIdentity(t *testing.T) {
 		t.Errorf("Name() = %q, want opnsense", p.Name())
 	}
 	caps := p.Capabilities()
-	if len(caps) != 4 || caps[0] != "info" || caps[1] != "import" || caps[2] != "check" || caps[3] != "inventory" {
-		t.Errorf("Capabilities() = %v, want [info import check inventory]", caps)
+	if len(caps) != 6 || caps[0] != "info" || caps[1] != "import" || caps[2] != "check" || caps[3] != "inventory" || caps[4] != providers.NetworkMapCapability || caps[5] != providers.ClientLocationCapability {
+		t.Errorf("Capabilities() = %v, want [info import check inventory network_map client_location]", caps)
 	}
 }
 

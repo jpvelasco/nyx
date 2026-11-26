@@ -12,6 +12,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/providers"
 	omadaprov "github.com/jpvelasco/nyx/internal/providers/omada"
 	opnsenseprov "github.com/jpvelasco/nyx/internal/providers/opnsense"
+	"github.com/jpvelasco/nyx/internal/service"
 )
 
 // mcpCapabilityTools maps each provider to the MCP tools that cover every
@@ -112,6 +113,15 @@ func TestProviderCapabilitySurfaceParity(t *testing.T) {
 	for _, p := range providers.List() {
 		for _, cap := range p.Capabilities() {
 			t.Run(p.Name()+"/"+cap, func(t *testing.T) {
+				// Composite reads live under topology and use their capability name on MCP.
+				composites := map[string]string{providers.NetworkMapCapability: service.NetworkMapCommand, providers.ClientLocationCapability: service.ClientLocationCommand}
+				if name, ok := composites[cap]; ok {
+					command, _, err := rootCmd.Find([]string{"topology", name})
+					if err != nil || command.Name() != name || !toolRegistered(cap) {
+						t.Fatalf("%s is missing from CLI or MCP", cap)
+					}
+					return
+				}
 				// MCP side: the capability must have a mapping, and every
 				// mapped tool must actually be registered.
 				tools, ok := mcpCapabilityTools[p.Name()][cap]

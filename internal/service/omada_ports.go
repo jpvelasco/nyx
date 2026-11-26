@@ -31,6 +31,7 @@ type OmadaSwitchPort struct {
 	PortName           string   `json:"port_name,omitempty"`
 	SwitchMAC          string   `json:"switch_mac"`
 	SwitchName         string   `json:"switch_name,omitempty"`
+	STPDiscarding      *bool    `json:"stp_discarding,omitempty"`
 	ConnectedStatus    int      `json:"connected_status"`
 	Disabled           bool     `json:"disabled,omitempty"`
 	NetworkMode        int      `json:"network_mode"` // 0 Trunk, 1 Access
@@ -65,6 +66,7 @@ type OmadaLanProfile struct {
 // and whether an existing LAN profile can be reused or a new one must be
 // created. Nothing is applied.
 type OmadaPortPlan struct {
+	Revision       string                  `json:"revision"`
 	Site           string                  `json:"site"`
 	SwitchMAC      string                  `json:"switch_mac"`
 	Port           int                     `json:"port"`
@@ -84,27 +86,30 @@ type OmadaPortPlan struct {
 // untagged set is derived from it. Names are LAN network names; the native
 // network must not also appear in the tagged list (controller rule).
 type OmadaPortProfileRequest struct {
-	SwitchMAC   string   `json:"switch_mac"`
-	Port        int      `json:"port"`
-	Native      string   `json:"native"` // network name (required)
-	Tagged      []string `json:"tagged,omitempty"`
-	ProfileName string   `json:"profile_name,omitempty"` // optional; derived when empty
+	VerifyClientMAC  string   `json:"verify_client_mac,omitempty"`
+	ExpectedRevision string   `json:"expected_revision,omitempty"`
+	SwitchMAC        string   `json:"switch_mac"`
+	Port             int      `json:"port"`
+	Native           string   `json:"native"` // network name (required)
+	Tagged           []string `json:"tagged,omitempty"`
+	ProfileName      string   `json:"profile_name,omitempty"` // optional; derived when empty
 }
 
 // OmadaPortProfileApplyResult is the structured outcome of a port-profile
 // apply with before/after evidence (the port row joined to its referenced
 // LAN profile).
 type OmadaPortProfileApplyResult struct {
-	DryRun        bool     `json:"dry_run"`
-	Outcome       string   `json:"outcome"` // "unchanged" | "bound" | "created_and_bound" (a dry run previews the real-apply outcome)
-	SwitchMAC     string   `json:"switch_mac"`
-	Port          int      `json:"port"`
-	ProfileID     string   `json:"profile_id,omitempty"`
-	ProfileName   string   `json:"profile_name,omitempty"`
-	ProfileCreate bool     `json:"profile_create,omitempty"`
-	Before        string   `json:"before"`
-	After         string   `json:"after"`
-	Warnings      []string `json:"warnings,omitempty"`
+	Verification  *PortVerification `json:"verification,omitempty"`
+	DryRun        bool              `json:"dry_run"`
+	Outcome       string            `json:"outcome"` // "unchanged" | "bound" | "created_and_bound" (a dry run previews the real-apply outcome)
+	SwitchMAC     string            `json:"switch_mac"`
+	Port          int               `json:"port"`
+	ProfileID     string            `json:"profile_id,omitempty"`
+	ProfileName   string            `json:"profile_name,omitempty"`
+	ProfileCreate bool              `json:"profile_create,omitempty"`
+	Before        string            `json:"before"`
+	After         string            `json:"after"`
+	Warnings      []string          `json:"warnings,omitempty"`
 }
 
 // GetUplinkInfo returns the uplink device (and port) for each queried MAC.
@@ -203,7 +208,7 @@ func (s *OmadaService) PlanPort(ctx context.Context, opts OmadaOptions, req Omad
 	if err != nil {
 		return nil, err
 	}
-	plan, _, _, err := planPortFromState(req, ports, profiles, nets)
+	plan, _, _, err := planPortFromState(site.EffectiveID(), req, ports, profiles, nets)
 	if err != nil {
 		return nil, err
 	}
@@ -228,10 +233,25 @@ func (s *OmadaService) ApplyPortProfile(ctx context.Context, opts OmadaOptions, 
 	if err != nil {
 		return nil, err
 	}
-	plan, prof, create, err := planPortFromState(req, ports, profiles, nets)
+	config := req
+	if strings.HasPrefix(req.ExpectedRevision, roleRevisionPrefix) {
+		config.ExpectedRevision = ""
+	}
+	plan, prof, create, err := planPortFromState(siteID, config, ports, profiles, nets)
 	if err != nil {
 		return nil, err
 	}
+	if config.ExpectedRevision != req.ExpectedRevision {
+		attachments, err := readPortAttachments(ctx, client, siteID, req.SwitchMAC)
+		if err != nil || attachments[req.Port] == nil {
+			return nil, fmt.Errorf("port attachment is no longer verifiable; refresh the switch plan")
+		}
+		fresh, err := attachments[req.Port].revision(plan.Revision)
+		if err != nil || fresh != req.ExpectedRevision {
+			return nil, fmt.Errorf("port configuration or attachment changed since the switch plan; refresh the plan")
+		}
+	}
+
 	// The plan read the still-unmutated state, so its port row is the
 	// before evidence — no second fetch round trip.
 	before, err := portEvidenceJSON(ports, profiles, nets, req.SwitchMAC, req.Port)
@@ -262,6 +282,9 @@ func (s *OmadaService) ApplyPortProfile(ctx context.Context, opts OmadaOptions, 
 		return res, nil
 	}
 	if plan.Outcome == "unchanged" {
+		if req.ExpectedRevision != "" {
+			res.Verification = verifyPortEvidence(ctx, client, siteID, req, ports, profiles, nets)
+		}
 		// The port already has the desired membership — no write, no
 		// re-read; the after evidence is the before read.
 		return res, nil
@@ -296,6 +319,9 @@ func (s *OmadaService) ApplyPortProfile(ctx context.Context, opts OmadaOptions, 
 	if err != nil {
 		return nil, err
 	}
+	if req.ExpectedRevision != "" {
+		res.Verification = verifyPortEvidence(ctx, client, siteID, req, afterPorts, afterProfiles, afterNets)
+	}
 	return res, nil
 }
 
@@ -322,7 +348,7 @@ func fetchPortMembership(ctx context.Context, client *omadabackend.Client, siteI
 // fetched port overview, LAN profiles, and site networks and decides the
 // outcome. It returns the plan, the profile to bind (a fresh one when a
 // create is needed), and whether a create is required.
-func planPortFromState(req OmadaPortProfileRequest, ports []omadabackend.SwitchPort, profiles []omadabackend.LanProfile, nets []omadabackend.Network) (*OmadaPortPlan, *omadabackend.LanProfile, bool, error) {
+func planPortFromState(siteID string, req OmadaPortProfileRequest, ports []omadabackend.SwitchPort, profiles []omadabackend.LanProfile, nets []omadabackend.Network) (*OmadaPortPlan, *omadabackend.LanProfile, bool, error) {
 	var cur *omadabackend.SwitchPort
 	wantMAC := omadabackend.NormalizeMAC(req.SwitchMAC)
 	for i := range ports {
@@ -357,6 +383,14 @@ func planPortFromState(req OmadaPortProfileRequest, ports []omadabackend.SwitchP
 	plan.Current = portObservation(*cur, profiles, netName)
 	if p := findProfileByID(profiles, cur.ProfileID); p != nil {
 		plan.CurrentProfile = serviceLanProfile(*p, netName)
+	}
+	revision, err := portRevision(siteID, plan.Current, plan.CurrentProfile, nativeID, tagIDs)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	plan.Revision = revision
+	if req.ExpectedRevision != "" && req.ExpectedRevision != revision {
+		return nil, nil, false, fmt.Errorf("port configuration changed since the plan; refresh the switch plan")
 	}
 	if cur.ProfileOverride {
 		// The effective membership can differ from the bound profile, so
@@ -430,6 +464,7 @@ func portObservation(p omadabackend.SwitchPort, profiles []omadabackend.LanProfi
 		PortName:           p.PortName,
 		SwitchMAC:          p.SwitchMAC,
 		SwitchName:         p.SwitchName,
+		STPDiscarding:      p.PortStatus.STPDiscarding,
 		ConnectedStatus:    p.ConnectedStatus,
 		Disabled:           p.Disable,
 		NetworkMode:        p.NetworkMode,

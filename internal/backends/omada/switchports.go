@@ -3,6 +3,8 @@ package omada
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
 	"sort"
 )
 
@@ -14,10 +16,13 @@ import (
 // the profile-override endpoint is deliberately not wired.
 
 // SwitchPort is one row of the switches/ports/overview collection. Nested
-// standardPort/portStatus/lagSetting blocks are not modeled — the flat
+// standardPort/lagSetting blocks are not modeled — the flat
 // fields below are what port-profile planning consumes. tagName/tagIds are
 // port labels (user tags), NOT VLAN membership.
 type SwitchPort struct {
+	PortStatus struct {
+		STPDiscarding *bool `json:"stpDiscarding"`
+	} `json:"portStatus"`
 	Port               int    `json:"port"`
 	PortName           string `json:"portName"`
 	SwitchMAC          string `json:"switchMac"`
@@ -97,6 +102,22 @@ func (c *Client) GetUplinkInfo(ctx context.Context, siteID string, macs []string
 		return nil, fmt.Errorf("fetching uplink info: %w", err)
 	}
 	return rows, nil
+}
+
+// LLDPNeighbor identifies the advertised neighbor of a local switch port.
+// DeviceID can be a non-MAC chassis identifier. Keep such rows unresolved.
+type LLDPNeighbor struct {
+	Port    int    `json:"portId"`
+	Chassis string `json:"deviceId"`
+}
+
+func (c *Client) GetLLDPNeighbors(ctx context.Context, siteID, switchMAC string) ([]LLDPNeighbor, error) {
+	mac, err := net.ParseMAC(dashMAC(switchMAC))
+	if err != nil || len(mac) != 6 {
+		return nil, fmt.Errorf("invalid switch MAC for LLDP inventory")
+	}
+	rows, _, err := fetchPaged[LLDPNeighbor](ctx, c, fmt.Sprintf("sites/%s/switches/%s/lldp-neighbors", url.PathEscape(siteID), dashMAC(mac.String())), defaultPageSize)
+	return rows, err
 }
 
 // GetSwitchPortsOverview returns every port row of the site, joined across

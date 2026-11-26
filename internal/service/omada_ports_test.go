@@ -872,3 +872,113 @@ func findTestProfile(profiles []omadabackend.LanProfile, id string) *omadabacken
 	}
 	return nil
 }
+
+func TestPortRevisionGuardsInterveningChange(t *testing.T) {
+	st := omadaPortStateFresh()
+	ts := omadaTestServer(t, omadaPortBaseHandler(t, st))
+	s := NewOmadaService()
+	opts := omadaPortOpts(ts.URL)
+	desired := OmadaPortProfileRequest{SwitchMAC: "bb:11:22:33:44:55", Port: 8, Native: "media", Tagged: []string{"gaming"}}
+	plan, err := s.PlanPort(t.Context(), opts, desired)
+	if err != nil || plan.Revision == "" {
+		t.Fatalf("initial plan: %v", err)
+	}
+	desired.ExpectedRevision = plan.Revision
+	if _, err := s.ApplyPortProfile(t.Context(), opts, desired, true); err != nil {
+		t.Fatalf("unchanged revision: %v", err)
+	}
+	st.Port8Override = !st.Port8Override
+	count := len(st.Profiles)
+	binding := st.PortProfiles[8]
+	if _, err := s.ApplyPortProfile(t.Context(), opts, desired, false); err == nil || !strings.Contains(err.Error(), "changed since the plan") {
+		t.Fatalf("intervening override: %v", err)
+	}
+	if len(st.Profiles) != count || st.PortProfiles[8] != binding {
+		t.Error("conflict mutated controller")
+	}
+}
+
+func TestManagedPortVerificationAndSharedClients(t *testing.T) {
+	st := omadaPortStateFresh()
+	base := omadaPortBaseHandler(t, st)
+	const a = "02:aa:bb:cc:dd:04"
+	const b = "02:aa:bb:cc:dd:05"
+	const sw = "bb:11:22:33:44:55"
+	port := "8"
+	lease := true
+	clients := `[{"mac":"` + a + `"},{"mac":"` + b + `"}]`
+	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/networks/client"):
+			writeOmadaEnvelope(w, 0, clients)
+		case strings.HasSuffix(r.URL.Path, "/lldp-neighbors"), strings.HasSuffix(r.URL.Path, "/networks/devices"):
+			writeOmadaEnvelope(w, 0, `[]`)
+		case strings.HasSuffix(r.URL.Path, "/client-link-topology"):
+			mac := a
+			if strings.Contains(r.URL.Path, "dd-05/") {
+				mac = b
+			}
+			writeOmadaEnvelope(w, 0, `[{"nodeType":"clientNode","clientNode":{"mac":"`+mac+`","upOswInfo":{"mac":"`+sw+`","port":"`+port+`"}}}]`)
+		case strings.HasSuffix(r.URL.Path, "/dhcp/user-list"):
+			rows := "[]"
+			if lease {
+				rows = `[{"macAddress":"` + a + `","ipAddress":"10.0.10.10","netId":"n1"}]`
+			}
+			writeOmadaEnvelope(w, 0, rows)
+		default:
+			base(w, r)
+		}
+	})
+	svc := NewOmadaService()
+	opts := omadaPortOpts(ts.URL)
+	ctx := t.Context()
+	c, site, err := svc.session(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Logout(ctx)
+	occupancy, ok := switchClients(ctx, c, site.EffectiveID(), omadabackend.NormalizeMAC(sw))
+	if !ok || len(occupancy[8]) != 2 {
+		t.Fatalf("shared port: %v %v", occupancy, ok)
+	}
+	req := OmadaPortProfileRequest{SwitchMAC: sw, Port: 8, Native: "trusted", VerifyClientMAC: a}
+	plan, err := svc.PlanPort(ctx, opts, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.ExpectedRevision = plan.Revision
+	apply := func() *PortVerification {
+		t.Helper()
+		result, err := svc.ApplyPortProfile(ctx, opts, req, false)
+		if err != nil || result.Verification == nil {
+			t.Fatalf("guarded apply: %v", err)
+		}
+		return result.Verification
+	}
+	if v := apply(); v.Membership != "observed" || v.Connectivity != "attached" || v.DHCP != "lease on desired native network" {
+		t.Fatalf("wrong post-apply evidence %+v", v)
+	}
+	port = "9"
+	lease = false
+	if v := apply(); v.Membership != "observed" || v.Connectivity != "different attachment" || v.DHCP != "unverified" {
+		t.Fatalf("unknown DHCP/changed attachment: %+v", v)
+	}
+	port = "8"
+	clients = `[{"mac":"` + a + `"}]`
+	attachment, err := readPortAttachments(ctx, c, site.EffectiveID(), sw)
+	if err != nil || !attachment[8].matches("access", a, nil) {
+		t.Fatalf("single attachment: %v", err)
+	}
+	req.ExpectedRevision, err = attachment[8].revision(plan.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ApplyPortProfile(ctx, opts, req, true); err != nil {
+		t.Fatalf("current attachment guard: %v", err)
+	}
+	clients = `[{"mac":"` + a + `"},{"mac":"` + b + `"}]`
+	if _, err := svc.ApplyPortProfile(ctx, opts, req, false); err == nil || !strings.Contains(err.Error(), "changed since") {
+		t.Fatal("changed occupants accepted", err)
+	}
+
+}

@@ -85,8 +85,9 @@ type inputSchema struct {
 }
 
 type propSchema struct {
-	Type        string `json:"type"`
-	Description string `json:"description"`
+	Items       *propSchema `json:"items,omitempty"`
+	Type        string      `json:"type"`
+	Description string      `json:"description,omitempty"`
 }
 
 type toolsListResult struct {
@@ -667,11 +668,13 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			Name:        "omada_plan_port",
 			Description: "Preview bringing one switch port to a desired VLAN membership (native network plus tagged set): the port's current membership and profile, and whether an existing LAN profile can be rebound or a new one must be created. Read-only: nothing is applied.",
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
-				"switch_mac":   {Type: "string", Description: "Switch MAC hosting the port"},
-				"port":         {Type: "integer", Description: "Port number (1-based)"},
-				"native":       {Type: "string", Description: "Native (untagged) LAN network name"},
-				"tagged":       {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
-				"profile_name": {Type: "string", Description: "Optional name for a new profile; derived when empty"},
+				"switch_mac":        {Type: "string", Description: "Switch MAC hosting the port"},
+				"port":              {Type: "integer", Description: "Port number (1-based)"},
+				"native":            {Type: "string", Description: "Native (untagged) LAN network name"},
+				"tagged":            {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
+				"profile_name":      {Type: "string", Description: "Optional name for a new profile; derived when empty"},
+				"verify_client_mac": {Type: "string", Description: "Observe this client attachment and lease after guarded apply."},
+				"expected_revision": {Type: "string", Description: "Require the port configuration revision from a prior plan."},
 			}, []string{"switch_mac", "port", "native"}),
 		},
 		{
@@ -763,12 +766,14 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			Name:        "omada_apply_port_profile",
 			Description: "Bind a switch port to a LAN profile with the desired VLAN membership (native network plus tagged set): find an existing profile whose membership matches, create one when none does, then bind it to the port. Idempotent (unchanged / bound / created_and_bound). Dry-run is the default: set dry_run=false to apply for real. The result carries before/after evidence (the port row joined to its referenced profile).",
 			InputSchema: omadaToolSchemaExtra(map[string]propSchema{
-				"switch_mac":   {Type: "string", Description: "Switch MAC hosting the port"},
-				"port":         {Type: "integer", Description: "Port number (1-based)"},
-				"native":       {Type: "string", Description: "Native (untagged) LAN network name"},
-				"tagged":       {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
-				"profile_name": {Type: "string", Description: "Optional name for a new profile; derived when empty"},
-				"dry_run":      {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
+				"switch_mac":        {Type: "string", Description: "Switch MAC hosting the port"},
+				"port":              {Type: "integer", Description: "Port number (1-based)"},
+				"native":            {Type: "string", Description: "Native (untagged) LAN network name"},
+				"tagged":            {Type: "string", Description: "Optional comma-separated tagged LAN network names"},
+				"profile_name":      {Type: "string", Description: "Optional name for a new profile; derived when empty"},
+				"verify_client_mac": {Type: "string", Description: "Observe this client attachment and lease after guarded apply."},
+				"expected_revision": {Type: "string", Description: "Require the port configuration revision from a prior plan."},
+				"dry_run":           {Type: "boolean", Description: "Preview only. Default true — set false to apply for real."},
 			}, []string{"switch_mac", "port", "native"}),
 		},
 		{
@@ -1491,11 +1496,13 @@ func argIntDefault(args map[string]interface{}, key string, def int) int {
 // arguments, shared by omada_plan_port and omada_apply_port_profile.
 func portProfileRequestFromArgs(args map[string]interface{}) (service.OmadaPortProfileRequest, string) {
 	req := service.OmadaPortProfileRequest{
-		SwitchMAC:   argString(args, "switch_mac"),
-		Port:        argIntDefault(args, "port", 0),
-		Native:      argString(args, "native"),
-		Tagged:      splitCSV(argString(args, "tagged")),
-		ProfileName: argString(args, "profile_name"),
+		SwitchMAC:        argString(args, "switch_mac"),
+		Port:             argIntDefault(args, "port", 0),
+		Native:           argString(args, "native"),
+		Tagged:           splitCSV(argString(args, "tagged")),
+		ProfileName:      argString(args, "profile_name"),
+		ExpectedRevision: argString(args, "expected_revision"),
+		VerifyClientMAC:  argString(args, "verify_client_mac"),
 	}
 	if req.SwitchMAC == "" {
 		return req, "switch_mac parameter is required"

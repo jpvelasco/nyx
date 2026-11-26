@@ -503,6 +503,44 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md) (or the release workflow) for the
 
 MIT
 
+`nyx topology map` and the MCP tool `network_map` return the same JSON map of
+configured controller inventories. Select connections with repeatable
+`--connection omada/home --connection opnsense/home` or MCP
+`"connections": ["omada/home", "opnsense/home"]`. Omit the selectors to use
+all configured profiles and environment-configured defaults. The report lists
+devices, ports, SSIDs, VLANs and gateway interfaces. Each link carries its
+source of evidence and one of `observed`, `inferred`, `ambiguous` or `missing`.
+An unreadable collection appears in its source's `gaps`. An unknown observation
+time appears as `null`.
+
+Set the same `logical_site` on connection profiles serving one physical site
+to correlate LLDP chassis addresses and configured gateway addresses across
+controllers. Each ungrouped connection has its own site. Opaque resource and
+site handles identify entries within one report. `--detail` includes private
+controller resource IDs, labels and addresses. MCP `include_detail` requires
+`NYX_MCP_ALLOW_TOPOLOGY_DETAILS=true` in the server environment.
+
+`nyx topology locate-client MAC` and MCP `client_location` (`mac`) report the
+last observable managed switch port or wireless AP. They accept the same
+connection selectors and detail controls as `network_map`. Current controller
+associations can establish an attachment. Client history, DHCP leases and
+firewall neighbor caches provide supporting evidence. Expired entries and
+conflicting attachments retain their status. A switch downstream of the last
+managed uplink can hide the physical port. Private detail includes observed
+addresses, SSIDs and device labels.
+
+`nyx topology plan-switch CONNECTION SWITCH-MAC POLICY-JSON` and MCP
+`switch_port_plan` compare observed switch attachments against explicit port
+roles. A policy specifies `management_vlan` and a `ports` array with `port`,
+`role`, `native` and `tagged`. An access-port intent also supplies `client_mac`.
+The preview protects infrastructure paths and retains reasons when an assignment
+cannot be verified. Eligible rows include a revision. Pass it to the existing
+`nyx omada apply-port-profile --expected-revision REVISION` or MCP
+`omada_apply_port_profile` with `expected_revision`. A changed port configuration or downstream attachment
+requires a new switch plan. After a real guarded apply, `--verify-client-mac` or
+`verify_client_mac` adds the observed client attachment and DHCP lease to the
+membership check. Unknown evidence remains visible.
+
 `nyx topology --fingerprint` adds an architecture summary from the configured
 Omada and OPNsense providers. It shows inferred enforcement and bridge roles,
 observed managed upstream links, and VLAN gateway provider assignments. The

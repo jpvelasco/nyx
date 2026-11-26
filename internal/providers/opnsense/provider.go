@@ -53,7 +53,7 @@ func (o *Provider) Name() string { return ProviderName }
 
 // Capabilities lists the supported operations for this provider.
 func (o *Provider) Capabilities() []string {
-	return []string{"info", "import", "check", "inventory"}
+	return []string{"info", "import", "check", "inventory", providers.NetworkMapCapability, providers.ClientLocationCapability}
 }
 
 // Info fetches system info from the OPNsense device (version, product,
