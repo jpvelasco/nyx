@@ -4,6 +4,7 @@ package mcp
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -455,11 +456,11 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 			Description: "Run a full audit from a YAML spec file.",
 			InputSchema: inputSchema{
 				Type: "object",
-				Properties: map[string]propSchema{
+				Properties: withControllerTLS(map[string]propSchema{
 					"omada_profile":    {Type: "string", Description: "Named Omada credential profile"},
 					"opnsense_profile": {Type: "string", Description: "Named OPNsense credential profile"},
 					"spec_file":        {Type: "string", Description: "Path to YAML spec file"},
-				},
+				}),
 				Required: []string{"spec_file"},
 			},
 		},
@@ -1071,15 +1072,13 @@ func (s *Server) handleToolsList(req *jsonRPCRequest) *jsonRPCResponse {
 func omadaToolSchema() inputSchema {
 	return inputSchema{
 		Type: "object",
-		Properties: map[string]propSchema{
-			"profile":         {Type: "string", Description: "Named Omada credential profile"},
-			"host":            {Type: "string", Description: "Omada controller hostname or IP (OMADA_HOST env fallback)"},
-			"client_id":       {Type: "string", Description: "Omada Open API client ID (OMADA_CLIENT_ID env fallback)"},
-			"client_secret":   {Type: "string", Description: "Omada Open API client secret (OMADA_CLIENT_SECRET env fallback)"},
-			"site":            {Type: "string", Description: "Optional site name; defaults to the first site"},
-			"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
-			"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the controller"},
-		},
+		Properties: withControllerTLS(map[string]propSchema{
+			"profile":       {Type: "string", Description: "Named Omada credential profile"},
+			"host":          {Type: "string", Description: "Omada controller hostname or IP (OMADA_HOST env fallback)"},
+			"client_id":     {Type: "string", Description: "Omada Open API client ID (OMADA_CLIENT_ID env fallback)"},
+			"client_secret": {Type: "string", Description: "Omada Open API client secret (OMADA_CLIENT_SECRET env fallback)"},
+			"site":          {Type: "string", Description: "Optional site name; defaults to the first site"},
+		}),
 	}
 }
 
@@ -1102,15 +1101,23 @@ func omadaToolSchemaExtra(extra map[string]propSchema, required []string) inputS
 func opnsenseToolSchema() inputSchema {
 	return inputSchema{
 		Type: "object",
-		Properties: map[string]propSchema{
-			"profile":         {Type: "string", Description: "Named OPNsense credential profile"},
-			"host":            {Type: "string", Description: "OPNsense firewall hostname or IP (OPNSENSE_HOST env fallback)"},
-			"api_key":         {Type: "string", Description: "OPNsense API key (OPNSENSE_API_KEY env fallback)"},
-			"api_secret":      {Type: "string", Description: "OPNsense API secret (OPNSENSE_API_SECRET env fallback)"},
-			"skip_tls_verify": {Type: "boolean", Description: "Skip TLS certificate verification (self-signed certs)"},
-			"ca_cert_path":    {Type: "string", Description: "Path to a CA certificate for the firewall"},
-		},
+		Properties: withControllerTLS(map[string]propSchema{
+			"profile":    {Type: "string", Description: "Named OPNsense credential profile"},
+			"host":       {Type: "string", Description: "OPNsense firewall hostname or IP (OPNSENSE_HOST env fallback)"},
+			"api_key":    {Type: "string", Description: "OPNsense API key (OPNSENSE_API_KEY env fallback)"},
+			"api_secret": {Type: "string", Description: "OPNsense API secret (OPNSENSE_API_SECRET env fallback)"},
+		}),
 	}
+}
+
+func withControllerTLS(props map[string]propSchema) map[string]propSchema {
+	props["skip_tls_verify"] = propSchema{Type: "boolean", Description: "Skip controller TLS certificate verification for this call (default false)"}
+	props["ca_cert_path"] = propSchema{Type: "string", Description: "Path to a PEM file of trusted controller CA certificates"}
+	return props
+}
+
+func controllerTLS(args map[string]interface{}, fallbackCA string) (bool, string) {
+	return argBoolDefault(args, "skip_tls_verify", false), cmp.Or(argString(args, "ca_cert_path"), fallbackCA)
 }
 
 // portForwardToolSchema returns the composed port-forward playbook
@@ -1383,8 +1390,7 @@ const requiredHostMsg = "host parameter is required"
 func (s *Server) omadaOptionsFromArgs(args map[string]interface{}, needCredentials bool) (service.OmadaOptions, string) {
 	v, msg := s.connectionFields("omada", args, needCredentials)
 	opts := service.OmadaOptions{Host: v["host"], Site: v["site"], ClientID: v["client_id"], ClientSecret: v["client_secret"]}
-	opts.SkipTLSVerify, _ = args["skip_tls_verify"].(bool)
-	opts.CACertPath = argString(args, "ca_cert_path")
+	opts.SkipTLSVerify, opts.CACertPath = controllerTLS(args, "")
 	return opts, msg
 }
 
@@ -1523,8 +1529,7 @@ func portProfileRequestFromArgs(args map[string]interface{}) (service.OmadaPortP
 func (s *Server) opnsenseOptionsFromArgs(args map[string]interface{}, needCredentials bool) (service.OpnsenseOptions, string) {
 	v, msg := s.connectionFields("opnsense", args, needCredentials)
 	opts := service.OpnsenseOptions{Host: v["host"], APIKey: v["api_key"], APISecret: v["api_secret"]}
-	opts.SkipTLSVerify, _ = args["skip_tls_verify"].(bool)
-	opts.CACertPath = argString(args, "ca_cert_path")
+	opts.SkipTLSVerify, opts.CACertPath = controllerTLS(args, "")
 	return opts, msg
 }
 

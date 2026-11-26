@@ -13,42 +13,25 @@ func wireGuardPeerBinding(apply bool) operationBinding {
 		name, desc = "opnsense_revoke_wireguard_peer", "Disable or remove one selected peer and verify the readback. Defaults to preview."
 		p["dry_run"] = propSchema{Type: "boolean", Description: "Preview revocation (default true)"}
 	} else {
+		withControllerTLS(p)
 		p["name"] = propSchema{Type: "string", Description: "Peer name for a create preview"}
 		p["allowed_networks"] = propSchema{Type: "string", Description: "Comma-separated desired canonical network prefixes"}
 	}
 	p["profile"] = propSchema{Type: "string", Description: "Configured OPNsense connection profile (default: default)"}
 	return operationBinding{tool: tool{Name: name, Description: desc, InputSchema: inputSchema{Type: "object", Properties: p, Required: []string{"action"}}}, call: func(s *Server, ctx context.Context, args map[string]interface{}) toolDispatchResult {
-		for k, v := range args {
-			field, exists := p[k]
-			if !exists {
-				return errResult("unsupported peer operation argument")
-			}
-			if _, ok := v.(string); field.Type == "string" && !ok {
-				return errResult(k + " must be a string")
-			}
+		if err := validateMutationArgs(args, inputSchema{Properties: p}); err != nil {
+			return errResult(err.Error())
 		}
 		opts, msg := s.opnsenseOptionsFromArgs(map[string]interface{}{"profile": argString(args, "profile")}, true)
 		if msg != "" {
 			return errResult("configure the selected OPNsense profile")
 		}
-		opts.CACertPath = s.env("NYX_OPNSENSE_CA_CERT")
+		opts.SkipTLSVerify, opts.CACertPath = controllerTLS(args, s.env("NYX_OPNSENSE_CA_CERT"))
 		req := service.WireGuardPeerRequest{Action: argString(args, "action"), UUID: argString(args, "uuid"), Name: argString(args, "name"), AllowedNetworks: splitCSV(argString(args, "allowed_networks"))}
-		if raw, ok := args["enabled"]; ok {
-			v, ok := raw.(bool)
-			if !ok {
-				return errResult("enabled must be a boolean")
-			}
-			req.Enabled = &v
+		if enabled, ok := args["enabled"].(bool); ok {
+			req.Enabled = &enabled
 		}
-		dry := true
-		if raw, ok := args["dry_run"]; ok && apply {
-			v, ok := raw.(bool)
-			if !ok {
-				return errResult("dry_run must be a boolean")
-			}
-			dry = v
-		}
-		plan, err := service.NewOpnsenseService().RevokeWireGuardPeer(ctx, opts, req, dry)
+		plan, err := service.NewOpnsenseService().RevokeWireGuardPeer(ctx, opts, req, !apply || argBoolDefault(args, "dry_run", true))
 		return peerResult(plan, err)
 	}}
 }

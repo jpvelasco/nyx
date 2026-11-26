@@ -274,6 +274,7 @@ func (s *Server) toolRunAudit(ctx context.Context, args map[string]interface{}) 
 	}
 	eng := audit.NewEngine(spec)
 	eng.CredentialProfiles = map[string]string{"omada": argString(args, "omada_profile"), "opnsense": argString(args, "opnsense_profile")}
+	eng.SkipTLSVerify, eng.CACertPath = controllerTLS(args, "")
 	eng.Logger = s.logger
 	report, err := eng.Run(ctx)
 	if err != nil {
@@ -1435,7 +1436,7 @@ func (s *Server) toolTopology(ctx context.Context, args map[string]interface{}) 
 // subArgs remaps prefixed topology arguments (e.g. omada_host) onto the
 // bare keys the per-provider options builders expect (host, client_id, ...).
 func subArgs(args map[string]interface{}, prefix string) map[string]interface{} {
-	known := []string{"host", "client_id", "client_secret", "site", "api_key", "api_secret", "skip_tls_verify", "ca_cert_path"}
+	known := []string{"profile", "host", "client_id", "client_secret", "site", "api_key", "api_secret", "skip_tls_verify", "ca_cert_path"}
 	sub := make(map[string]interface{}, len(known))
 	for _, k := range known {
 		if v, ok := args[prefix+k]; ok {

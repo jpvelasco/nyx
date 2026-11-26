@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/jpvelasco/nyx/internal/service"
+	"github.com/jpvelasco/nyx/internal/testutil"
 	"github.com/jpvelasco/nyx/internal/testutil/providerfixture"
 	"github.com/jpvelasco/nyx/internal/topology"
 )
@@ -340,6 +342,12 @@ func TestHandleToolsList_SchemaCredentialsOptional(t *testing.T) {
 	byName := map[string]tool{}
 	for _, tl := range list.Tools {
 		byName[tl.Name] = tl
+	}
+	for _, name := range []string{"run_audit", "plan_segment", "opnsense_plan_wireguard_peer"} {
+		properties := byName[name].InputSchema.Properties
+		if properties["skip_tls_verify"].Type != "boolean" || properties["ca_cert_path"].Type != "string" {
+			t.Errorf("%s is missing controller TLS options", name)
+		}
 	}
 
 	// Operation-specific requirements survive; host never appears.
@@ -738,6 +746,39 @@ func TestDispatchRunAudit_MissingAndBadSpecs(t *testing.T) {
 	}
 	if text, isErr := server.DispatchToolForTest(context.Background(), "run_audit", map[string]interface{}{"spec_file": filepath.Join(t.TempDir(), "missing.yaml")}); !isErr || !strings.Contains(text, "failed to load spec") {
 		t.Errorf("bad spec: (%q, %v)", text, isErr)
+	}
+}
+
+func TestRunAuditControllerTLS(t *testing.T) {
+	hermeticCreds(t)
+	firewall, ca := testutil.CASignedServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/firewall/filter/search_rule" {
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+		testutil.WriteBody(w, `{"rows":[],"total":0}`)
+	}))
+	t.Setenv("OPNSENSE_HOST", strings.TrimPrefix(firewall, "https://"))
+	t.Setenv("OPNSENSE_API_KEY", "fixture")
+	t.Setenv("OPNSENSE_API_SECRET", "fixture")
+	spec := filepath.Join(t.TempDir(), "audit.yaml")
+	if err := os.WriteFile(spec, []byte("version: 1\nsite: test\nassertions:\n  - type: acl_drift\n    provider: opnsense\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s := newTestServer()
+	for _, tc := range []struct {
+		args map[string]any
+		want models.Status
+	}{
+		{map[string]any{"skip_tls_verify": true}, models.StatusPass},
+		{map[string]any{"ca_cert_path": ca}, models.StatusPass},
+		{map[string]any{}, models.StatusWarn},
+	} {
+		tc.args["spec_file"] = spec
+		text, failed := s.dispatchTool(t.Context(), "run_audit", tc.args)
+		var report models.AuditReport
+		if failed || json.Unmarshal([]byte(text), &report) != nil || len(report.Findings) != 1 || report.Findings[0].Status != tc.want {
+			t.Fatalf("expected ACL drift status %s, got %s", tc.want, text)
+		}
 	}
 }
 

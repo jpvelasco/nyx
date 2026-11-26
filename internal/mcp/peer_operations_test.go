@@ -75,7 +75,11 @@ func TestPeerPreviewAndRevocation(t *testing.T) {
 	const plan = "opnsense_plan_wireguard_peer"
 	const revoke = "opnsense_revoke_wireguard_peer"
 	for _, name := range []string{plan, revoke} {
-		for _, field := range []string{"host", "skip_tls_verify", "ca_cert_path", "api_secret"} {
+		fields := []string{"host", "api_secret"}
+		if name == revoke {
+			fields = append(fields, "skip_tls_verify", "ca_cert_path")
+		}
+		for _, field := range fields {
 			args[field] = "other.example"
 			call(name, true, "unsupported")
 			delete(args, field)
@@ -96,6 +100,16 @@ func TestPeerPreviewAndRevocation(t *testing.T) {
 	args["name"] = "iot"
 	args["allowed_networks"] = "10.0.11.0/24"
 	call(plan, false, "overlap")
+	t.Setenv("NYX_OPNSENSE_CA_CERT", "")
+	call(plan, true, "unavailable")
+	args["skip_tls_verify"] = true
+	call(plan, false, "overlap")
+	delete(args, "skip_tls_verify")
+	args["ca_cert_path"] = ca
+	call(plan, false, "overlap")
+	delete(args, "ca_cert_path")
+	call(plan, true, "unavailable")
+	t.Setenv("NYX_OPNSENSE_CA_CERT", ca)
 	args["allowed_networks"] = "invalid"
 	call(plan, true, "prefixes")
 	delete(args, "name")
