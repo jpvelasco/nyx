@@ -2,11 +2,8 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -235,10 +232,25 @@ func (s *OmadaService) ApplyPortProfile(ctx context.Context, opts OmadaOptions, 
 	if err != nil {
 		return nil, err
 	}
-	plan, prof, create, err := planPortFromState(site.EffectiveID(), req, ports, profiles, nets)
+	config := req
+	if strings.HasPrefix(req.ExpectedRevision, roleRevisionPrefix) {
+		config.ExpectedRevision = ""
+	}
+	plan, prof, create, err := planPortFromState(siteID, config, ports, profiles, nets)
 	if err != nil {
 		return nil, err
 	}
+	if config.ExpectedRevision != req.ExpectedRevision {
+		attachments, err := readPortAttachments(ctx, client, siteID, req.SwitchMAC)
+		if err != nil || attachments[req.Port] == nil {
+			return nil, fmt.Errorf("port attachment is no longer verifiable; refresh the switch plan")
+		}
+		fresh, err := attachments[req.Port].revision(plan.Revision)
+		if err != nil || fresh != req.ExpectedRevision {
+			return nil, fmt.Errorf("port configuration or attachment changed since the switch plan; refresh the plan")
+		}
+	}
+
 	// The plan read the still-unmutated state, so its port row is the
 	// before evidence — no second fetch round trip.
 	before, err := portEvidenceJSON(ports, profiles, nets, req.SwitchMAC, req.Port)
@@ -422,25 +434,6 @@ func planPortFromState(siteID string, req OmadaPortProfileRequest, ports []omada
 	plan.ProfileName = name
 	plan.ProfileCreate = true
 	return plan, profile, true, nil
-}
-
-// portRevision binds the preview to its selected site, switch, port and effective
-// configuration. It contains no credentials and is recomputed before a bind.
-func portRevision(siteID string, port *OmadaSwitchPort, profile *OmadaLanProfile, native string, tags []string) (string, error) {
-	ordered := slices.Clone(tags)
-	slices.Sort(ordered)
-	raw, err := json.Marshal(struct {
-		Site    string
-		Port    *OmadaSwitchPort
-		Profile *OmadaLanProfile
-		Native  string
-		Tagged  []string
-	}{siteID, port, profile, native, ordered})
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:]), nil
 }
 
 // portEvidenceJSON renders one port row joined to its referenced LAN

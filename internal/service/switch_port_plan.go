@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"slices"
 	"strings"
 
 	backend "github.com/jpvelasco/nyx/internal/backends/omada"
@@ -67,18 +66,17 @@ func (s *TopologyService) PlanSwitchPorts(ctx context.Context, opts NetworkMapOp
 	}
 	o := providers.ConnectionOptions(conn, fields)
 	controller := OmadaOptions{Host: o.Host, ClientID: o.ClientID, ClientSecret: o.ClientSecret, Site: o.Site, CACertPath: opts.CACertPath, SkipTLSVerify: opts.SkipTLSVerify}
-	var occupancy map[int][]string
-	var occupancyKnown bool
-	if slices.ContainsFunc(policy.Ports, func(p topology.PortIntent) bool { return p.Role == "access" }) {
-		c, site, err := s.Omada.session(ctx, controller)
-		if err == nil {
-			defer c.Logout(ctx)
-			occupancy, occupancyKnown = switchClients(ctx, c, site.EffectiveID(), backend.NormalizeMAC(switchMAC))
-		}
+	client, site, err := s.Omada.session(ctx, controller)
+	if err != nil {
+		return result, errors.New("unable to read the selected switch connection")
 	}
+	defer client.Logout(ctx)
+	attachments, attachmentErr := readPortAttachments(ctx, client, site.EffectiveID(), switchMAC)
 
 	ids := map[int]string{}
+	nativeIDs := map[string]string{}
 	for _, r := range m.Resources {
+		nativeIDs[r.ID] = r.NativeID
 		if r.Kind == "port" && strings.HasPrefix(r.NativeID, backend.NormalizeMAC(switchMAC)+"/") {
 			if _, seen := ids[r.Port]; seen {
 				ids[r.Port] = ""
@@ -92,12 +90,15 @@ func (s *TopologyService) PlanSwitchPorts(ctx context.Context, opts NetworkMapOp
 			return result, err
 		}
 		portID := ids[intent.Port]
-		clients := occupancy[intent.Port]
-		matched := occupancyKnown && len(clients) == 1 && clients[0] == backend.NormalizeMAC(intent.ClientMAC)
+		attached := attachments[intent.Port]
+		if attached == nil {
+			attached = &portAttachments{}
+		}
+		matched := attachmentErr == nil && attached.matches("access", intent.ClientMAC, nil)
 
 		impact := topology.EvaluateSwitchPort(m, portID, intent, policy.ManagementVLAN, matched)
 		row := PortProposal{PortImpact: impact}
-		if row.Role == "access" && (len(clients) > 1 || !occupancyKnown) {
+		if row.Role == "access" && (len(attached.Clients) > 1 || attachmentErr != nil) {
 			row.Role = "ambiguous"
 			row.Eligible = false
 			row.Reason = "shared or unresolved client attachment"
@@ -114,10 +115,21 @@ func (s *TopologyService) PlanSwitchPorts(ctx context.Context, opts NetworkMapOp
 				row.Eligible = false
 				row.Reason = "effective port configuration cannot be verified"
 			} else {
-				request.ExpectedRevision = planned.Revision
+				var downstream []string
+				for _, id := range impact.Downstream {
+					downstream = append(downstream, nativeIDs[id])
+				}
+				guard, err := attached.revision(planned.Revision)
+				if err != nil || attachmentErr != nil || !attached.matches(intent.Role, intent.ClientMAC, downstream) {
+					row.Eligible = false
+					row.Reason = "current port attachments cannot be verified"
+					result.Ports = append(result.Ports, row)
+					continue
+				}
+				request.ExpectedRevision = guard
 				request.SwitchMAC = ""
 				row.Desired = &request
-				row.Revision = planned.Revision
+				row.Revision = guard
 				row.Outcome = planned.Outcome
 			}
 		}

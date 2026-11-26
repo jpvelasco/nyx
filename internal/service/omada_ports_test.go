@@ -906,10 +906,13 @@ func TestManagedPortVerificationAndSharedClients(t *testing.T) {
 	const sw = "bb:11:22:33:44:55"
 	port := "8"
 	lease := true
+	clients := `[{"mac":"` + a + `"},{"mac":"` + b + `"}]`
 	ts := omadaTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/networks/client"):
-			writeOmadaEnvelope(w, 0, `[{"mac":"`+a+`"},{"mac":"`+b+`"}]`)
+			writeOmadaEnvelope(w, 0, clients)
+		case strings.HasSuffix(r.URL.Path, "/lldp-neighbors"), strings.HasSuffix(r.URL.Path, "/networks/devices"):
+			writeOmadaEnvelope(w, 0, `[]`)
 		case strings.HasSuffix(r.URL.Path, "/client-link-topology"):
 			mac := a
 			if strings.Contains(r.URL.Path, "dd-05/") {
@@ -960,4 +963,22 @@ func TestManagedPortVerificationAndSharedClients(t *testing.T) {
 	if v := apply(); v.Membership != "observed" || v.Connectivity != "different attachment" || v.DHCP != "unverified" {
 		t.Fatalf("unknown DHCP/changed attachment: %+v", v)
 	}
+	port = "8"
+	clients = `[{"mac":"` + a + `"}]`
+	attachment, err := readPortAttachments(ctx, c, site.EffectiveID(), sw)
+	if err != nil || !attachment[8].matches("access", a, nil) {
+		t.Fatalf("single attachment: %v", err)
+	}
+	req.ExpectedRevision, err = attachment[8].revision(plan.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ApplyPortProfile(ctx, opts, req, true); err != nil {
+		t.Fatalf("current attachment guard: %v", err)
+	}
+	clients = `[{"mac":"` + a + `"},{"mac":"` + b + `"}]`
+	if _, err := svc.ApplyPortProfile(ctx, opts, req, false); err == nil || !strings.Contains(err.Error(), "changed since") {
+		t.Fatal("changed occupants accepted", err)
+	}
+
 }

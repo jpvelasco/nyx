@@ -535,8 +535,8 @@ roles. A policy specifies `management_vlan` and a `ports` array with `port`,
 The preview protects infrastructure paths and retains reasons when an assignment
 cannot be verified. Eligible rows include a revision. Pass it to the existing
 `nyx omada apply-port-profile --expected-revision REVISION` or MCP
-`omada_apply_port_profile` with `expected_revision`. A changed configuration
-requires a new plan. After a real guarded apply, `--verify-client-mac` or
+`omada_apply_port_profile` with `expected_revision`. A changed port configuration or downstream attachment
+requires a new switch plan. After a real guarded apply, `--verify-client-mac` or
 `verify_client_mac` adds the observed client attachment and DHCP lease to the
 membership check. Unknown evidence remains visible.
 
