@@ -55,11 +55,11 @@ var auditCmd = &cobra.Command{
 			return err
 		}
 		for name, profile := range profiles {
-			if _, ok := providers.LookupAdapter(name); !ok {
-				return fmt.Errorf("--provider-profile: unknown provider %q", name)
-			}
 			if strings.TrimSpace(profile) == "" {
 				return fmt.Errorf("--provider-profile: empty profile for %s", name)
+			}
+			if _, ok := providers.LookupAdapter(name); !ok {
+				return fmt.Errorf("--provider-profile: unknown provider %q", name)
 			}
 		}
 		engine.CredentialProfiles = profiles
