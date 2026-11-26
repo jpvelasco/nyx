@@ -136,6 +136,7 @@ type GatewayStatus struct {
 type FirewallRule struct {
 	Sequence        string   `json:"sequence,omitempty"`
 	ExtraConditions bool     `json:"-"`
+	EnabledUnknown  bool     `json:"-"`
 	RuleUUID        string   `json:"uuid"`
 	Enabled         string   `json:"enabled"` // "1" = enabled
 	Action          string   `json:"action"`  // pass / block / reject
@@ -512,6 +513,7 @@ func (c *Client) GetFirewallRules(ctx context.Context) ([]FirewallRule, error) {
 		rule.ExtraConditions = decodeLooseBool(fields.SourceNot) || decodeLooseBool(fields.DestNot) || decodeLooseBool(fields.InterfaceNot) || (len(fields.Quick) > 0 && !decodeLooseBool(fields.Quick)) ||
 			fields.Schedule != "" || fields.Gateway != "" || len(decodeStringList(fields.ReceivedOn)) > 0 ||
 			fields.TagMatch != "" || fields.ICMPTypes != "" || fields.ICMP6Types != "" || fields.TCPFlags != "" || fields.TCPMasks != ""
+		rule.EnabledUnknown = configToggle(fields.Enabled) == "unknown"
 		rule.Disabled = !decodeLooseBool(fields.Enabled)
 		if rule.Disabled {
 			rule.Enabled = "0"

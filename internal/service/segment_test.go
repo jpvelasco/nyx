@@ -36,6 +36,8 @@ type segmentFixture struct {
 	writes                  int
 	pending                 string
 	lease                   bool
+	failPath                string
+	managementAddr          string
 }
 
 func (f *segmentFixture) row(r *http.Request, key string) map[string]string {
@@ -49,6 +51,10 @@ func (f *segmentFixture) row(r *http.Request, key string) map[string]string {
 	return body[key]
 }
 func (f *segmentFixture) firewall(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == f.failPath {
+		http.Error(w, "fixture permission", http.StatusForbidden)
+		return
+	}
 	enc := json.NewEncoder(w)
 	grid := func(rows []map[string]string) {
 		if rows == nil {
@@ -59,7 +65,7 @@ func (f *segmentFixture) firewall(w http.ResponseWriter, r *http.Request) {
 	saved := func(id string) { _ = enc.Encode(map[string]string{"result": "saved", "uuid": id}) }
 	switch r.URL.Path {
 	case "/api/interfaces/overview/interfaces_info":
-		testutil.WriteBody(w, `{"interfaces":{"lan":{"description":"management","ipv4":"10.0.11.1/24"}}}`)
+		_ = enc.Encode(map[string]any{"interfaces": map[string]any{"lan": map[string]string{"description": "management", "ipv4": f.managementAddr}}})
 	case "/api/diagnostics/interface/get_routes":
 		testutil.WriteBody(w, `[{"destination":"default","netif":"igb0"}]`)
 	case "/api/interfaces/vlan_settings/search_item":
@@ -143,7 +149,7 @@ func (f *segmentFixture) controller(w http.ResponseWriter, r *http.Request) {
 }
 func newSegmentFixture(t *testing.T) (*segmentFixture, PlaybookOptions) {
 	t.Helper()
-	f := &segmentFixture{t: t, req: gamingSegment(), pending: "ok", ranges: map[string]map[string]string{}, lans: []map[string]any{}}
+	f := &segmentFixture{t: t, req: gamingSegment(), pending: "ok", managementAddr: "10.0.11.1/24", ranges: map[string]map[string]string{}, lans: []map[string]any{}}
 	firewall := opnsenseOptions(opnsenseTestServer(t, f.firewall))
 	omada := OmadaOptions{Host: omadaTestServer(t, f.controller).URL, ClientID: "client", ClientSecret: "fixture", Site: "site", SkipTLSVerify: true}
 	return f, PlaybookOptions{Omada: &omada, Opnsense: &firewall}
@@ -380,5 +386,61 @@ func TestSegmentControllerCollisionsAndManualWireless(t *testing.T) {
 	deps := e.operations()
 	if deps[len(deps)-1].DependsOn[len(deps[len(deps)-1].DependsOn)-1] != "wireless" {
 		t.Fatal("verification must wait for the specified SSID")
+	}
+}
+
+func TestSegmentUnavailableProviderEvidence(t *testing.T) {
+	f, opts := newSegmentFixture(t)
+	e := segmentProviders{ctx: t.Context(), omada: *opts.Omada, firewall: *opts.Opnsense, req: f.req, router: NewOpnsenseService(), switchAPI: NewOmadaService(), iface: "opt3"}
+	for _, tc := range []struct {
+		path string
+		step func(bool) (string, error)
+	}{{"/api/interfaces/overview/interfaces_info", e.preflight}, {"/api/interfaces/vlan_settings/search_item", e.vlan}, {"/api/interfaces/vlan_settings/search_item", e.assignment}, {"/api/firewall/filter/search_rule", func(d bool) (string, error) { return e.filter("deny_management", d) }}, {"/api/interfaces/overview/interfaces_info", func(d bool) (string, error) { return e.filter("permit_dns", d) }}} {
+		f.failPath = tc.path
+		if _, err := tc.step(false); err == nil {
+			t.Fatalf("acted without read access for %s", tc.path)
+		}
+	}
+	f.failPath = ""
+	for _, address := range []string{"", f.req.Gateway} {
+		f.managementAddr = address
+		if _, err := e.preflight(false); err == nil {
+			t.Fatal("missing management prefix or conflicting assignment was accepted")
+		}
+	}
+	f.managementAddr = "10.0.11.1/24"
+	f.rules = []map[string]string{{"uuid": "rule-1", "action": "pass"}}
+	if _, err := e.preflight(false); err == nil {
+		t.Fatal("unknown rule enable status accepted")
+	}
+	f.rules[0] = map[string]string{"uuid": "rule-1", "enabled": "1"}
+	if _, err := e.preflight(false); err == nil {
+		t.Fatal("unknown rule action accepted")
+	}
+	f.rules = []map[string]string{{"uuid": "other-interface", "action": "pass", "enabled": "1", "interface": "lan"}, {"uuid": "outside", "action": "pass", "enabled": "1", "source_net": f.req.Management}}
+	if _, err := e.preflight(true); err != nil {
+		t.Fatal(err)
+	}
+	f.vlan = []map[string]string{{"uuid": "v1", "if": f.req.Parent, "tag": "30", "descr": "different"}}
+	if _, err := e.vlan(false); err == nil || f.writes != 0 {
+		t.Fatal("changed pre-existing VLAN")
+	}
+	f.rules = []map[string]string{{"uuid": "other", "enabled": "1", "action": "block", "description": "nyx-gaming-deny_management", "destination_net": "any", "interface": "opt3"}}
+	if _, err := e.filter("deny_management", false); err == nil || f.writes != 0 {
+		t.Fatal("changed pre-existing block rule")
+	}
+	e.audit = segmentProbeSpec(t, e.req)
+	e.preview = true
+	if status, err := e.verify(true); err != nil || status != "planned" {
+		t.Fatalf("verification preview %s %v", status, err)
+	}
+	e.preview = false
+	f.failPath = "/api/dnsmasq/leases/search"
+	if _, err := e.verify(true); err == nil {
+		t.Fatal("unavailable leases were accepted")
+	}
+	t.Setenv("NYX_SEGMENT_VERIFICATION_SPEC", filepath.Join(t.TempDir(), "absent"))
+	if _, err := e.verify(true); err == nil {
+		t.Fatal("missing trusted spec accepted")
 	}
 }
