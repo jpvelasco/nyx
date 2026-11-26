@@ -84,3 +84,31 @@ func TestStagedFirmwareBindingAndReboot(t *testing.T) {
 		t.Fatal("changed image accepted")
 	}
 }
+
+func TestStagedFirmwareFileValidation(t *testing.T) {
+	svc := NewOmadaService()
+	dir := t.TempDir()
+	opts := OmadaOptions{Site: "management"}
+	for _, tc := range []struct{ mac, version, image string }{{"invalid", "next", "fixture"}, {"AA-BB-CC-DD-EE-00", "", "fixture"}, {"AA-BB-CC-DD-EE-00", "next", ""}} {
+		if _, err := svc.StageFirmware(t.Context(), opts, dir, tc.mac, tc.version, strings.NewReader(tc.image)); err == nil {
+			t.Fatal("accepted invalid stage")
+		}
+	}
+	ref := strings.Repeat("A", 26)
+	if _, _, err := loadFirmware(dir, ref); err == nil {
+		t.Fatal("nonexistent image")
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	for _, bad := range []string{"invalid\nimage", "{}\n", "{}\nimage"} {
+		if err := root.WriteFile(ref, []byte(bad), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := loadFirmware(dir, ref); err == nil {
+			t.Fatal("corrupt manifest accepted")
+		}
+	}
+}

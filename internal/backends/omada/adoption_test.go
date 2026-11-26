@@ -1,6 +1,8 @@
 package omada
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -63,5 +65,51 @@ func TestManagedTransportRejectsCrossOriginRedirect(t *testing.T) {
 	_, err := c.uploadDeviceFirmware(t.Context(), "site", strings.NewReader("fixture"))
 	if err == nil || sent.Load() {
 		t.Fatal("cross-controller firmware redirect")
+	}
+}
+
+func TestAdoptionReadBoundaries(t *testing.T) {
+	const mac = "AA-BB-CC-DD-EE-00"
+	grid := `{"totalRows":0,"currentPage":0,"data":[]}`
+	managed := true
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/networks/devices"):
+			if !managed {
+				http.Error(w, "denied", http.StatusForbidden)
+				return
+			}
+			writeEnvelope(w, 0, "", `[]`)
+		case strings.HasSuffix(r.URL.Path, "/pending"):
+			writeEnvelope(w, 0, "", grid)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	if _, err := c.PendingDevices(t.Context(), "site", 0, 1, ""); err == nil {
+		t.Fatal("bad page")
+	}
+	if _, err := c.ObserveAdoption(t.Context(), "site", "invalid", 0); err == nil {
+		t.Fatal("invalid MAC")
+	}
+	if _, err := c.ObserveAdoption(t.Context(), "site", mac, 3*time.Minute); err == nil {
+		t.Fatal("invalid wait")
+	}
+	r, err := c.ObserveAdoption(t.Context(), "site", mac, 0)
+	if err != nil || r.Status != "unknown" || !strings.Contains(r.Evidence, "unavailable") {
+		t.Fatal(r, err)
+	}
+	grid = `{"totalRows":2,"currentPage":1}`
+	if _, err = c.ObserveAdoption(t.Context(), "site", mac, 0); err == nil {
+		t.Fatal("invalid page")
+	}
+	managed = false
+	if _, err = c.ObserveAdoption(t.Context(), "site", mac, 0); err == nil {
+		t.Fatal("managed inventory inaccessible")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err = c.ObserveAdoption(ctx, "site", mac, time.Second); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
 	}
 }
