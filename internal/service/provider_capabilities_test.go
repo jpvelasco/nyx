@@ -83,3 +83,43 @@ func TestCapabilityReport(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type absentInfo struct {
+	*providerfixture.ReadOnlyAdapter
+}
+
+func (absentInfo) PublicInfo() bool { return true }
+func (absentInfo) Info(context.Context, providers.ImportOptions) (*providers.ProviderInfo, error) {
+	return nil, nil
+}
+
+func TestInfoOperationCompatibility(t *testing.T) {
+	p := absentInfo{new(providerfixture.ReadOnlyAdapter)}
+	op, ok := ControllerInfo(p)
+	if !ok || op.Authenticated || op.CLIName != "info" {
+		t.Fatal(op)
+	}
+	if _, err := op.Read(t.Context(), providers.ImportOptions{}); err == nil {
+		t.Fatal("accepted absent info response")
+	}
+	info := &providers.ProviderInfo{Provider: "synthetic", Configured: true, Host: "switch.example", Version: "stable", Extra: map[string]string{"api_version": "api", "omada_cid": "fixture", "product": "product", "arch": "arch"}}
+	for _, name := range []string{"synthetic", "omada", "opnsense"} {
+		op.Provider = name
+		switch got := op.AgentInfo(info).(type) {
+		case *providers.ProviderInfo:
+			if name != "synthetic" || got != info {
+				t.Fatal(got)
+			}
+		case OmadaInfo:
+			if name != "omada" || !got.Configured || got.APIVersion != "api" || got.OmadaCID != "fixture" {
+				t.Fatal(got)
+			}
+		case OpnsenseInfo:
+			if name != "opnsense" || got.Product != "product" || got.Arch != "arch" {
+				t.Fatal(got)
+			}
+		default:
+			t.Fatalf("unexpected format %T", got)
+		}
+	}
+}
