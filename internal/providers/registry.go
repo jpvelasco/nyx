@@ -38,6 +38,8 @@ func Register(p Adapter) error {
 		switch capability {
 		case "info":
 			_, supported = p.(InfoReader)
+		case NetworkMapCapability:
+			_, supported = p.(NetworkObserver)
 		case "inventory":
 			_, supported = p.(InventoryProvider)
 		case "check", "import":

@@ -502,6 +502,23 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md) (or the release workflow) for the
 
 MIT
 
+`nyx topology map` and the MCP tool `network_map` return the same JSON map of
+configured controller inventories. Select connections with repeatable
+`--connection omada/home --connection opnsense/home` or MCP
+`"connections": ["omada/home", "opnsense/home"]`. Omit the selectors to use
+all configured profiles and environment-configured defaults. The report lists
+devices, ports, SSIDs, VLANs and gateway interfaces. Each link carries its
+source of evidence and one of `observed`, `inferred`, `ambiguous` or `missing`.
+An unreadable collection appears in its source's `gaps`. An unknown observation
+time appears as `null`.
+
+Set the same `logical_site` on connection profiles serving one physical site
+to correlate LLDP chassis addresses and configured gateway addresses across
+controllers. Each ungrouped connection has its own site. Opaque resource and
+site handles identify entries within one report. `--detail` includes private
+controller resource IDs, labels and addresses. MCP `include_detail` requires
+`NYX_MCP_ALLOW_TOPOLOGY_DETAILS=true` in the server environment.
+
 `nyx topology --fingerprint` adds an architecture summary from the configured
 Omada and OPNsense providers. It shows inferred enforcement and bridge roles,
 observed managed upstream links, and VLAN gateway provider assignments. The
