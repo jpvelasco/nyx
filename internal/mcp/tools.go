@@ -39,7 +39,6 @@ var toolHandlers = map[string]toolHandler{
 	"run_doctor":                       (*Server).toolRunDoctor,
 	"provider_list":                    (*Server).toolProviderList,
 	"credentials_status":               (*Server).toolCredentialsStatus,
-	"omada_get_info":                   (*Server).toolOmadaGetInfo,
 	"omada_list_networks":              (*Server).toolOmadaListNetworks,
 	"omada_list_acls":                  (*Server).toolOmadaListACLs,
 	"omada_list_clients":               (*Server).toolOmadaListClients,
@@ -73,7 +72,6 @@ var toolHandlers = map[string]toolHandler{
 	"omada_apply_nat":                  (*Server).toolOmadaApplyNat,
 	"plan_port_forward":                (*Server).toolPlanPortForward,
 	"apply_port_forward":               (*Server).toolApplyPortForward,
-	"opnsense_get_info":                (*Server).toolOpnsenseGetInfo,
 	"opnsense_list_interfaces":         (*Server).toolOpnsenseListInterfaces,
 	"opnsense_firewall_log_stats":      (*Server).toolOpnsenseFirewallLogStats,
 	"opnsense_firewall_log":            (*Server).toolOpnsenseFirewallLog,
@@ -118,6 +116,9 @@ var toolHandlers = map[string]toolHandler{
 // ToolNames returns the registered MCP tool names in sorted order.
 func ToolNames() []string {
 	names := make([]string, 0, len(toolHandlers))
+	for _, binding := range sharedBindings() {
+		names = append(names, binding.tool.Name)
+	}
 	for name := range toolHandlers {
 		names = append(names, name)
 	}
@@ -228,7 +229,7 @@ func (s *Server) toolVerifyIsolation(ctx context.Context, args map[string]interf
 // isolationViaSpec runs one isolation assertion against the networks declared
 // in specFile, reusing its network definitions for gateway resolution.
 func (s *Server) isolationViaSpec(ctx context.Context, specFile, from, to string) toolDispatchResult {
-	spec, err := intent.LoadSpec(specFile)
+	spec, err := providers.Specs.LoadSpec(specFile)
 	if err != nil {
 		return errResult(fmt.Sprintf("failed to load spec: %v", err))
 	}
@@ -260,7 +261,7 @@ func (s *Server) toolRunAudit(ctx context.Context, args map[string]interface{}) 
 	if specFile == "" {
 		return errResult("spec_file parameter is required")
 	}
-	spec, err := intent.LoadSpec(specFile)
+	spec, err := providers.Specs.LoadSpec(specFile)
 	if err != nil {
 		return errResult(fmt.Sprintf("failed to load spec: %v", err))
 	}
@@ -279,7 +280,7 @@ func (s *Server) toolLoadSpec(_ context.Context, args map[string]interface{}) to
 	if specFile == "" {
 		return errResult("spec_file parameter is required")
 	}
-	spec, err := intent.LoadSpec(specFile)
+	spec, err := providers.Specs.LoadSpec(specFile)
 	if err != nil {
 		return errResult(fmt.Sprintf("failed to load spec: %v", err))
 	}
@@ -335,7 +336,7 @@ func (s *Server) toolRunDoctor(_ context.Context, args map[string]interface{}) t
 }
 
 func (s *Server) toolProviderList(_ context.Context, _ map[string]interface{}) toolDispatchResult {
-	list := providers.List()
+	list := providers.Adapters()
 	type entry struct {
 		Name         string   `json:"name"`
 		Capabilities []string `json:"capabilities"`
@@ -354,7 +355,7 @@ func (s *Server) toolCredentialsStatus(_ context.Context, _ map[string]interface
 	}
 	env := map[string]bool{}
 	fields := map[string][]credentials.Field{}
-	for _, provider := range providers.List() {
+	for _, provider := range providers.Adapters() {
 		fields[provider.Name()] = credentials.FieldsFor(provider.Name())
 	}
 	// Built-in services can also be supplied directly by an MCP embedder.
@@ -374,18 +375,6 @@ func (s *Server) toolCredentialsStatus(_ context.Context, _ map[string]interface
 		Fields map[string][]credentials.Field `json:"fields"`
 	}{store.Status(), env, fields}
 	return okResult(toJSON(out))
-}
-
-func (s *Server) toolOmadaGetInfo(ctx context.Context, args map[string]interface{}) toolDispatchResult {
-	opts, msg := s.omadaOptionsFromArgs(args, false)
-	if msg != "" {
-		return errResult(msg)
-	}
-	info, err := s.omadaSvc.Info(ctx, opts)
-	if err != nil {
-		return errResult(fmt.Sprintf("omada info request failed: %v", err))
-	}
-	return okResult(toJSON(info))
 }
 
 func (s *Server) toolOmadaListNetworks(ctx context.Context, args map[string]interface{}) toolDispatchResult {
@@ -834,18 +823,6 @@ func (s *Server) toolOmadaApplySSID(ctx context.Context, args map[string]interfa
 		return errResult(fmt.Sprintf("omada ssid apply failed: %v", err))
 	}
 	return okResult(toJSON(res))
-}
-
-func (s *Server) toolOpnsenseGetInfo(ctx context.Context, args map[string]interface{}) toolDispatchResult {
-	opts, msg := s.opnsenseOptionsFromArgs(args, true)
-	if msg != "" {
-		return errResult(msg)
-	}
-	info, err := s.opnsenseSvc.Info(ctx, opts)
-	if err != nil {
-		return errResult(fmt.Sprintf("opnsense info request failed: %v", err))
-	}
-	return okResult(toJSON(info))
 }
 
 func (s *Server) toolOpnsenseListInterfaces(ctx context.Context, args map[string]interface{}) toolDispatchResult {

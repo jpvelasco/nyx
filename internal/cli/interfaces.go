@@ -5,7 +5,7 @@ import (
 	"net"
 
 	"github.com/jpvelasco/nyx/internal/backends/system"
-	"github.com/jpvelasco/nyx/internal/intent"
+	"github.com/jpvelasco/nyx/internal/providers"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +31,7 @@ When --spec is provided, highlights interfaces that match your spec networks.`,
 		// Build spec network map if --spec is provided
 		var specNetworks []specNetwork
 		if specFile != "" {
-			spec, err := intent.LoadSpec(specFile)
+			spec, err := providers.Specs.LoadSpec(specFile)
 			if err != nil {
 				return fmt.Errorf("loading spec: %w", err)
 			}

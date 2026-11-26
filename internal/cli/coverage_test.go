@@ -18,7 +18,10 @@ import (
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/providers"
+	"github.com/jpvelasco/nyx/internal/service"
 	"github.com/jpvelasco/nyx/internal/snapshot"
+	"github.com/jpvelasco/nyx/internal/testutil/providerfixture"
+	"github.com/spf13/cobra"
 )
 
 func saveRestoreGlobals(t *testing.T) {
@@ -619,6 +622,11 @@ type fakeProvider struct {
 	name string
 }
 
+func buildInfoCmd(p providers.Adapter) *cobra.Command {
+	op, _ := service.ControllerInfo(p)
+	return infoCommand(op)
+}
+
 func (f *fakeProvider) Name() string { return f.name }
 func (f *fakeProvider) Capabilities() []string {
 	return []string{"info", "import", "check"}
@@ -652,8 +660,7 @@ func (e *errProvider) Check(ctx context.Context, opts providers.ImportOptions) (
 
 func registerFakeProvider(t *testing.T) {
 	t.Helper()
-	providers.Reset()
-	t.Cleanup(providers.Reset)
+	providerfixture.IsolateProviders(t)
 	if err := providers.Register(&fakeProvider{name: "fake"}); err != nil {
 		t.Fatal(err)
 	}

@@ -303,6 +303,7 @@ Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `O
 | `ping_target` | Ping a target |
 | `run_doctor` | Check environment health + optional spec validation + probe SSH reachability/auth (read-only) |
 | `provider_list` | List registered providers |
+| `provider_capabilities` | List registered operations and configured connection profiles and sites. `observe: true` verifies controller information access for the selection. The CLI equivalent is `nyx provider capabilities --provider <name> --profile <profile> --observe --json`. |
 | `omada_get_info` | Fetch Omada controller metadata (no auth) |
 | `omada_list_networks` | List Omada LAN networks/VLANs for a site |
 | `omada_list_acls` | List Omada ACL + gateway ACL rules for a site |
