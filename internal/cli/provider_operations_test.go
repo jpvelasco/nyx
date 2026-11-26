@@ -34,3 +34,14 @@ func TestRegisteredInfoOnlyAdapterCLI(t *testing.T) {
 		t.Fatalf("unexpected controller read: %v %v %d", info, err, p.Calls)
 	}
 }
+
+func TestProviderCapabilitiesHonorsTimeout(t *testing.T) {
+	old := timeout
+	timeout = "invalid"
+	t.Cleanup(func() { timeout = old })
+	cmd := providerCapabilitiesCmd()
+	cmd.SetArgs([]string{"--observe"})
+	if err := cmd.ExecuteContext(t.Context()); err == nil {
+		t.Fatal("invalid observation timeout accepted")
+	}
+}
