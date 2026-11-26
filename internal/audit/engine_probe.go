@@ -232,10 +232,8 @@ func (e *Engine) runPortCheckViaProbe(ctx context.Context, a intent.Assertion, p
 	return result, nil
 }
 
-// classifyPortProbeResult maps one probe.Run outcome to the port's measured
-// state: "open" (netcat exit 0), "closed" (netcat ran and exited non-zero,
-// i.e. closed or filtered), or "unmeasured" (netcat missing — shell exit
-// 126/127 — or a transport/auth/host-key/context error).
+// classifyPortProbeResult distinguishes a successful connection, netcat's
+// ordinary nonconnection (exit 1), and an unusable command or transport result.
 func classifyPortProbeResult(err error) string {
 	if err == nil {
 		return "open"
