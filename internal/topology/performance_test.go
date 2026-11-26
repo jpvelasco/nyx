@@ -29,3 +29,33 @@ func TestPerformanceEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestPerformanceSelectorsAndGatewayEvidence(t *testing.T) {
+	for _, text := range []string{`[]`, `[] {}`, `[{"kind":"interface"}]`, `[{"connection":"a/home","kind":"interface"}]`, `[{"connection":"a/home","kind":"switch_port","switch_mac":"bad","port":1}]`, `[{"connection":"a/home","kind":"channel","band":"5g","channel":36,"ap_mac":"bad"}]`, `[{"connection":"a/home","kind":"channel","band":"bad","channel":36}]`, `[{"connection":"a/home","kind":"bad"}]`} {
+		if _, err := ParsePerformancePath(text); err == nil {
+			t.Fatalf("bad selector accepted: %s", text)
+		}
+	}
+	for _, text := range []string{`[{"connection":"a/home","kind":"gateway","name":"gw"}]`, `[{"connection":"a/home","kind":"channel","band":"5g","channel":36,"ap_mac":"02:aa:bb:cc:dd:03"}]`, `[{"connection":"a/home","kind":"switch_port","port":8,"switch_mac":"02:aa:bb:cc:dd:02"}]`} {
+		if _, err := ParsePerformancePath(text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	base := PassiveSample{At: now, Status: "available"}
+	next := base
+	next.At = now.Add(time.Second)
+	loss, inter := 2.0, 52.0
+	first, last := uint64(2), uint64(3)
+	for _, tc := range []struct {
+		kind string
+		set  func(a, b *PassiveSample)
+	}{{"gateway", func(a, b *PassiveSample) { b.Loss = &loss }}, {"channel", func(a, b *PassiveSample) { a.Interference = &inter; b.Interference = &inter }}, {"shaper_queue", func(a, b *PassiveSample) { a.Drops = &first; b.Drops = &last }}} {
+		a, b := base, next
+		tc.set(&a, &b)
+		r := AssessHop(1, tc.kind, a, b)
+		if r.Recommendation == "" || r.Finding == "" {
+			t.Fatal(r)
+		}
+	}
+}
