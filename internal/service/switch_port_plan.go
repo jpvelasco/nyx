@@ -111,7 +111,7 @@ func (s *TopologyService) PlanSwitchPorts(ctx context.Context, opts NetworkMapOp
 		if row.Eligible {
 			request := OmadaPortProfileRequest{SwitchMAC: switchMAC, Port: intent.Port, Native: intent.Native, Tagged: intent.Tagged}
 			planned, err := s.Omada.PlanPort(ctx, controller, request)
-			if err != nil || planned.Current == nil || planned.CurrentProfile == nil || planned.Current.ProfileOverride || planned.Current.Disabled {
+			if err != nil || planned.Current == nil || planned.CurrentProfile == nil || planned.Current.ProfileOverride || planned.Current.Disabled || (planned.Current.STPDiscarding != nil && *planned.Current.STPDiscarding) {
 				row.Eligible = false
 				row.Reason = "effective port configuration cannot be verified"
 			} else {

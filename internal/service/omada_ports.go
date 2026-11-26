@@ -31,6 +31,7 @@ type OmadaSwitchPort struct {
 	PortName           string   `json:"port_name,omitempty"`
 	SwitchMAC          string   `json:"switch_mac"`
 	SwitchName         string   `json:"switch_name,omitempty"`
+	STPDiscarding      *bool    `json:"stp_discarding,omitempty"`
 	ConnectedStatus    int      `json:"connected_status"`
 	Disabled           bool     `json:"disabled,omitempty"`
 	NetworkMode        int      `json:"network_mode"` // 0 Trunk, 1 Access
@@ -463,6 +464,7 @@ func portObservation(p omadabackend.SwitchPort, profiles []omadabackend.LanProfi
 		PortName:           p.PortName,
 		SwitchMAC:          p.SwitchMAC,
 		SwitchName:         p.SwitchName,
+		STPDiscarding:      p.PortStatus.STPDiscarding,
 		ConnectedStatus:    p.ConnectedStatus,
 		Disabled:           p.Disable,
 		NetworkMode:        p.NetworkMode,
