@@ -2,11 +2,11 @@ package service
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/jpvelasco/nyx/internal/testutil"
-	"net/http"
 )
 
 func TestOpnsenseServiceListKea(t *testing.T) {
@@ -334,5 +334,33 @@ func TestOpnsenseServicePlanKeaHostnameChange(t *testing.T) {
 	}
 	if identical.Action != "unchanged" {
 		t.Errorf("identical Kea reservation planned %q, want unchanged", identical.Action)
+	}
+}
+
+func TestDHCPAndRouterAdvertisementServiceVisibility(t *testing.T) {
+	for _, valid := range []bool{true, false} {
+		ts := opnsenseTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case !valid:
+				w.WriteHeader(http.StatusForbidden)
+			case r.URL.Path == "/api/kea/service/status":
+				testutil.WriteBody(w, `{"running":false}`)
+			case r.URL.Path == "/api/radvd/settings/search_entry":
+				testutil.WriteBody(w, `{"rows":[{"interface":"opt1","enabled":"1"}]}`)
+			default:
+				t.Error("unexpected DHCP service fixture request")
+				w.WriteHeader(http.StatusNotFound)
+			}
+		})
+		svc := NewOpnsenseService()
+		opts := opnsenseOptions(ts)
+		kea, err := svc.GetKeaStatus(t.Context(), opts)
+		if (err == nil) != valid || (valid && (len(kea) != 1 || kea["running"])) {
+			t.Fatalf("Kea result %+v, %v", kea, err)
+		}
+		ra, err := svc.ListRouterAdvertisements(t.Context(), opts)
+		if (err == nil) != valid || (valid && (len(ra) != 1 || ra[0].State != "enabled")) {
+			t.Fatalf("RADVD result %+v, %v", ra, err)
+		}
 	}
 }

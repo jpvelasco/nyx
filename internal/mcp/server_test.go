@@ -3502,6 +3502,11 @@ func TestDispatchTopology_FingerprintAndDetailGate(t *testing.T) {
 }
 
 func TestDispatchRouterAdvertisements(t *testing.T) {
+	server := serverWithOpnsenseStub(&stubOpnsenseSvc{})
+	raw, failed := server.DispatchToolForTest(t.Context(), "opnsense_get_kea_status", map[string]any{"host": "firewall.example", "api_key": "fixture-key", "api_secret": "fixture-secret"})
+	if failed || !strings.Contains(raw, "false") {
+		t.Fatalf("Kea result %q, failed %t", raw, failed)
+	}
 	args := map[string]any{"host": "firewall.example", "api_key": "fixture-key", "api_secret": "fixture-secret"}
 	for _, tc := range []struct {
 		stub   *stubOpnsenseSvc

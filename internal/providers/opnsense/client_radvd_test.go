@@ -1,9 +1,10 @@
 package opnsense
 
 import (
-	"github.com/jpvelasco/nyx/internal/testutil"
 	"net/http"
 	"testing"
+
+	"github.com/jpvelasco/nyx/internal/testutil"
 )
 
 func TestRouterAdvertisementVisibility(t *testing.T) {
@@ -13,12 +14,18 @@ func TestRouterAdvertisementVisibility(t *testing.T) {
 		expected    []string
 	}{
 		{"observed", `{"total":3,"rows":[{"interface":"opt1","enabled":"1","mode":"managed"},{"interface":"opt2","enabled":"0","mode":"stateless"},{"interface":"opt3"}]}`, 200, 3, []string{"enabled", "disabled", "unknown"}},
-		{"empty", `{"total":0,"rows":[]}`, 200, 0, nil}, {"missing rows", `{}`, 200, -1, nil}, {"partial", `{"total":2,"rows":[]}`, 200, -1, nil}, {"malformed", `{"rows":[{}]}`, 200, -1, nil}, {"unavailable", `{}`, 403, -1, nil},
+		{"empty", `{"total":0,"rows":[]}`, 200, 0, nil},
+		{"missing rows", `{}`, 200, -1, nil},
+		{"partial", `{"total":2,"rows":[]}`, 200, -1, nil},
+		{"malformed", `{"rows":[{}]}`, 200, -1, nil},
+		{"unavailable", `{}`, 403, -1, nil},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
 			c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != "GET" || r.URL.Path != "/api/radvd/settings/search_entry" {
-					t.Fatal("unexpected RADVD request")
+					t.Error("unexpected RADVD request")
+					w.WriteHeader(http.StatusNotFound)
+					return
 				}
 				w.WriteHeader(tc.code)
 				testutil.WriteBody(w, tc.body)

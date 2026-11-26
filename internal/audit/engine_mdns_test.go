@@ -1,11 +1,12 @@
 package audit
 
 import (
+	"strings"
+	"testing"
+
 	"github.com/jpvelasco/nyx/internal/intent"
 	"github.com/jpvelasco/nyx/internal/models"
 	"github.com/jpvelasco/nyx/internal/probe/fake"
-	"strings"
-	"testing"
 )
 
 func TestSegmentedMediaAndManagementFixtures(t *testing.T) {
@@ -61,7 +62,24 @@ func TestSegmentedMediaAndManagementFixtures(t *testing.T) {
 			adm.Name, adm.Expect, adm.Target = "admin-deny", "closed", tc.admin
 			ac := adm
 			ac.Name, ac.Expect, ac.Runner = "admin-control", "open", "management"
-			spec := &intent.Spec{Version: 1, Site: "trusted", Networks: []intent.Network{{Name: "trusted", VLAN: 10, CIDR: "10.0.10.0/24"}, {Name: "media", VLAN: 50, CIDR: tc.media}, {Name: "management", VLAN: 11, CIDR: tc.management}}, Probes: []intent.Probe{declare("trusted"), declare("media"), declare("management")}, Policies: []intent.Policy{{Name: "media-access", From: "trusted", To: "media", Action: "deny", Except: []intent.PolicyException{{Protocol: "tcp", Port: 443, Target: tc.addr}}}, {Name: "admin-isolation", From: "trusted", To: "management", Action: "deny"}}, Assertions: []intent.Assertion{discovery, src, ctrl, adm, ac}, ServicePolicies: []intent.ServicePolicy{{Policy: "media-access", Measurement: src.Name, PositiveControl: ctrl.Name, Discovery: discovery.Name}, {Policy: "admin-isolation", Measurement: adm.Name, PositiveControl: ac.Name}}}
+			spec := &intent.Spec{
+				Version: 1, Site: "trusted",
+				Networks: []intent.Network{
+					{Name: "trusted", VLAN: 10, CIDR: "10.0.10.0/24"},
+					{Name: "media", VLAN: 50, CIDR: tc.media},
+					{Name: "management", VLAN: 11, CIDR: tc.management},
+				},
+				Probes: []intent.Probe{declare("trusted"), declare("media"), declare("management")},
+				Policies: []intent.Policy{
+					{Name: "media-access", From: "trusted", To: "media", Action: "deny", Except: []intent.PolicyException{{Protocol: "tcp", Port: 443, Target: tc.addr}}},
+					{Name: "admin-isolation", From: "trusted", To: "management", Action: "deny"},
+				},
+				Assertions: []intent.Assertion{discovery, src, ctrl, adm, ac},
+				ServicePolicies: []intent.ServicePolicy{
+					{Policy: "media-access", Measurement: src.Name, PositiveControl: ctrl.Name, Discovery: discovery.Name},
+					{Policy: "admin-isolation", Measurement: adm.Name, PositiveControl: ac.Name},
+				},
+			}
 			if err := intent.ValidateSpec(spec); err != nil {
 				t.Fatal(err)
 			}
