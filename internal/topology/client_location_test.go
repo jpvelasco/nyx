@@ -45,3 +45,18 @@ func TestClientLocationEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestClientOnTrunkHasCandidateVLANs(t *testing.T) {
+	port := ResourceRef{"port", "switch/8"}
+	native, tag := ResourceRef{"segment", "management"}, ResourceRef{"segment", "gaming"}
+	in := ClientMapInput{MapInput: MapInput{Provider: "fixture", Facts: ObservationSet{Resources: []Observation{{Ref: port, Port: 8}, {Ref: native, VLAN: 11}, {Ref: tag, VLAN: 30}}, Links: []LinkObservation{{From: port, Relation: "native", To: MapTarget{Ref: native}}, {From: port, Relation: "tagged", To: MapTarget{Ref: tag}}}}}, Evidence: []ClientObservation{{Kind: "association", Status: "current", Attachment: port}}}
+	result := LocateClient([]ClientMapInput{in}, false)
+	if result.Status != "located" || len(result.Path.Links) != 2 {
+		t.Fatal(result)
+	}
+	for _, link := range result.Path.Links {
+		if link.State != "inferred" || link.Evidence != "configured port membership" {
+			t.Fatal("reported client VLAN without association evidence", link)
+		}
+	}
+}
