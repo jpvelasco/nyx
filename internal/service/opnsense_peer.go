@@ -104,7 +104,7 @@ func (s *OpnsenseService) PlanWireGuardPeer(ctx context.Context, opts OpnsenseOp
 		return nil, err
 	}
 	plan.DesiredNetworks = prefixStrings(desired)
-	peers, err := s.client(opts).GetWireGuardClients(ctx)
+	peers, err := s.client(opts).WireGuardPeersForChange(ctx)
 	if err != nil {
 		return nil, errors.New("reading peers: " + readAccess(err))
 	}
@@ -165,22 +165,17 @@ func (s *OpnsenseService) RevokeWireGuardPeer(ctx context.Context, opts Opnsense
 	if r.Action != "remove" && (r.Action != "toggle" || r.Enabled == nil || *r.Enabled) {
 		return plan, errors.New("enrollment, access edits and reactivation require operator administration")
 	}
-	if plan.Outcome == "absent" || plan.Outcome == "unchanged" {
-		plan.Verified = true
-		status, err := s.client(opts).GetWireGuardStatus(ctx)
-		if err != nil {
-			return plan, errors.New("peer configuration verified; service status unavailable: " + readAccess(err))
-		}
-		plan.ServiceRunning = &status.Running
-		return plan, nil
-	}
 	c := s.client(opts)
-	if err := c.RevokeWireGuardPeer(ctx, r.UUID, r.Action == "remove"); err != nil {
-		return plan, errors.New("peer revocation unconfirmed: " + readAccess(err))
+	alreadyRevoked := plan.Outcome == "absent" || plan.Outcome == "unchanged"
+	if !alreadyRevoked {
+		if err := c.RevokeWireGuardPeer(ctx, r.UUID, r.Action == "remove"); err != nil {
+			return plan, errors.New("peer revocation unconfirmed: " + readAccess(err))
+		}
+		plan.ConfigChanged = true
 	}
-	plan.ConfigChanged = true
+	// A previous attempt may have saved configuration but failed to activate it. Reload even when the target state is already stored.
 	if err := c.ReloadWireGuard(ctx); err != nil {
-		return plan, errors.New("configuration saved; WireGuard reload unconfirmed: " + readAccess(err))
+		return plan, errors.New("WireGuard reload unconfirmed: " + readAccess(err))
 	}
 	plan.Reloaded = true
 	current, err := s.PlanWireGuardPeer(ctx, opts, r)
@@ -196,6 +191,8 @@ func (s *OpnsenseService) RevokeWireGuardPeer(ctx context.Context, opts Opnsense
 		return plan, errors.New("peer revocation verified; service status unavailable: " + readAccess(err))
 	}
 	plan.ServiceRunning = &status.Running
-	plan.Outcome = "revoked"
+	if !alreadyRevoked {
+		plan.Outcome = "revoked"
+	}
 	return plan, nil
 }

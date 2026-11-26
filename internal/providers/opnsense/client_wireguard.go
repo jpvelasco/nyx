@@ -78,6 +78,15 @@ func (c *Client) GetWireGuardServers(ctx context.Context) ([]WireGuardServer, er
 
 // GetWireGuardClients lists configured WireGuard peers.
 func (c *Client) GetWireGuardClients(ctx context.Context) ([]WireGuardClient, error) {
+	return c.readWireGuardClients(ctx, false)
+}
+
+// WireGuardPeersForChange requires a complete inventory for overlap checks and a reliable negative readback.
+func (c *Client) WireGuardPeersForChange(ctx context.Context) ([]WireGuardClient, error) {
+	return c.readWireGuardClients(ctx, true)
+}
+
+func (c *Client) readWireGuardClients(ctx context.Context, strict bool) ([]WireGuardClient, error) {
 	var raw []json.RawMessage
 	if _, err := fetchPagedList(ctx, c, wgClientSearchPath, listPageSize, &raw); err != nil {
 		return nil, remapPagedDecode(err, "decoding wireguard clients response")
@@ -98,6 +107,9 @@ func (c *Client) GetWireGuardClients(ctx context.Context) ([]WireGuardClient, er
 			AllowedIPs2   string          `json:"allowed_ips"`
 		}
 		if json.Unmarshal(row, &rec) != nil || rec.UUID == "" {
+			if strict {
+				return nil, fmt.Errorf("incomplete WireGuard peer inventory")
+			}
 			continue
 		}
 		out = append(out, WireGuardClient{

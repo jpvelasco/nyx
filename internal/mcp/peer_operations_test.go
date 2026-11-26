@@ -97,7 +97,7 @@ func TestPeerPreviewAndRevocation(t *testing.T) {
 	args["dry_run"] = false
 	call(revoke, false, "service_running")
 	call(revoke, false, "unchanged")
-	if disables != 1 || reloads != 1 {
+	if disables != 1 || reloads != 2 {
 		t.Fatal(disables, reloads)
 	}
 	args["action"] = "remove"
@@ -107,6 +107,7 @@ func TestPeerPreviewAndRevocation(t *testing.T) {
 	if deletes != 1 {
 		t.Fatal(deletes)
 	}
+	reloadFail = false
 	call(revoke, false, "absent")
 	if deletes != 1 {
 		t.Fatal(deletes)
