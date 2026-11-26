@@ -3,11 +3,10 @@ package providers_test
 import (
 	"context"
 	"encoding/json"
-
-	"github.com/jpvelasco/nyx/internal/credentials"
 	"strings"
 	"testing"
 
+	"github.com/jpvelasco/nyx/internal/credentials"
 	"github.com/jpvelasco/nyx/internal/models"
 	providers "github.com/jpvelasco/nyx/internal/providers"
 )

@@ -339,7 +339,7 @@ type singleKeyController struct {
 }
 
 func (p *singleKeyController) CredentialFields() []credentials.Field {
-	return []credentials.Field{{Name: "host", Required: true}, {Name: "token", Required: true, Secret: true, Env: "SENSOR_TOKEN"}}
+	return []credentials.Field{{Name: "token", Required: true, Secret: true, Env: "SENSOR_TOKEN"}}
 }
 func (p *singleKeyController) Info(_ context.Context, opts providers.ImportOptions) (*providers.ProviderInfo, error) {
 	p.received = opts.Credentials["token"]
