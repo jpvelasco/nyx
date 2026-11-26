@@ -61,6 +61,8 @@ var toolHandlers = map[string]toolHandler{
 	"omada_list_dhcp_snoops":           (*Server).toolOmadaListDHCPSnoops,
 	"omada_list_logs":                  (*Server).toolOmadaListLogs,
 	"omada_list_lan_multicasts":        (*Server).toolOmadaListLANMulticasts,
+	"omada_plan_acl_order":             (*Server).toolOmadaPlanACLOrder,
+	"omada_apply_acl_order":            (*Server).toolOmadaApplyACLOrder,
 	"omada_plan_port":                  (*Server).toolOmadaPlanPort,
 	"omada_apply_port_profile":         (*Server).toolOmadaApplyPortProfile,
 	"omada_plan_lan":                   (*Server).toolOmadaPlanLAN,
@@ -692,6 +694,28 @@ func (s *Server) toolOmadaListLanProfiles(ctx context.Context, args map[string]i
 	return okResult(toJSON(profiles))
 }
 
+func (s *Server) toolOmadaPlanACLOrder(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.omadaACLOrder(ctx, args, false)
+}
+func (s *Server) toolOmadaApplyACLOrder(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	return s.omadaACLOrder(ctx, args, true)
+}
+func (s *Server) omadaACLOrder(ctx context.Context, args map[string]interface{}, apply bool) toolDispatchResult {
+	if err := validateMutationArgs(args, aclOrderSchema(apply)); err != nil {
+		return errResult(err.Error())
+	}
+	opts, msg := s.omadaOptionsFromArgs(args, true)
+	if msg != "" {
+		return errResult(msg)
+	}
+	req := service.OmadaACLOrderRequest{Scope: argString(args, "scope"), Expected: splitCSV(argString(args, "expected")), Desired: splitCSV(argString(args, "desired"))}
+	result, err := s.omadaSvc.ACLOrder(ctx, opts, req, !apply || argBoolDefault(args, "dry_run", true))
+	if err != nil {
+		return errResult(err.Error())
+	}
+	return okResult(toJSON(result))
+}
+
 func (s *Server) toolOmadaPlanPort(ctx context.Context, args map[string]interface{}) toolDispatchResult {
 	opts, msg := s.omadaOptionsFromArgs(args, true)
 	if msg != "" {
@@ -1216,23 +1240,52 @@ func (s *Server) toolOpnsenseApplyVLAN(ctx context.Context, args map[string]inte
 
 func filterRequestFromArgs(args map[string]interface{}) service.OpnsenseFilterRequest {
 	return service.OpnsenseFilterRequest{
-		Kind:        argString(args, "kind"),
-		UUID:        argString(args, "uuid"),
-		Name:        argString(args, "name"),
-		Action:      argString(args, "action"),
-		Interface:   argString(args, "interface"),
-		Protocol:    argString(args, "protocol"),
-		Source:      argString(args, "source"),
-		Destination: argString(args, "destination"),
-		Addresses:   splitCSV(argString(args, "addresses")),
-		AliasType:   argString(args, "alias_type"),
-		Description: argString(args, "description"),
-		Enabled:     argBoolDefault(args, "enabled", true),
-		Delete:      argBoolDefault(args, "delete", false),
+		Kind:            argString(args, "kind"),
+		UUID:            argString(args, "uuid"),
+		Name:            argString(args, "name"),
+		Action:          argString(args, "action"),
+		Interface:       argString(args, "interface"),
+		Protocol:        argString(args, "protocol"),
+		SourcePort:      argString(args, "source_port"),
+		DestinationPort: argString(args, "destination_port"),
+		Direction:       argString(args, "direction"),
+		AddressFamily:   argString(args, "address_family"),
+		Source:          argString(args, "source"),
+		Destination:     argString(args, "destination"),
+		Addresses:       splitCSV(argString(args, "addresses")),
+		AliasType:       argString(args, "alias_type"),
+		Description:     argString(args, "description"),
+		Enabled:         argBoolDefault(args, "enabled", true),
+		Delete:          argBoolDefault(args, "delete", false),
 	}
 }
 
+// Check every supplied selector against the published schema before decoding it.
+// Treating a mistyped selector as empty could widen the rule.
+func validateMutationArgs(args map[string]interface{}, schema inputSchema) error {
+	for key, value := range args {
+		property, ok := schema.Properties[key]
+		if !ok {
+			return fmt.Errorf("unsupported argument %q", key)
+		}
+		switch property.Type {
+		case "string":
+			if _, ok := value.(string); !ok {
+				return fmt.Errorf("%s must be a string", key)
+			}
+		case "boolean":
+			if _, ok := value.(bool); !ok {
+				return fmt.Errorf("%s must be a boolean", key)
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Server) toolOpnsensePlanFilter(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	if err := validateMutationArgs(args, opnsenseFilterToolSchema(false)); err != nil {
+		return errResult(err.Error())
+	}
 	opts, msg := s.opnsenseOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)
@@ -1245,6 +1298,9 @@ func (s *Server) toolOpnsensePlanFilter(ctx context.Context, args map[string]int
 }
 
 func (s *Server) toolOpnsenseApplyFilter(ctx context.Context, args map[string]interface{}) toolDispatchResult {
+	if err := validateMutationArgs(args, opnsenseFilterToolSchema(true)); err != nil {
+		return errResult(err.Error())
+	}
 	opts, msg := s.opnsenseOptionsFromArgs(args, true)
 	if msg != "" {
 		return errResult(msg)

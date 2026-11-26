@@ -40,6 +40,7 @@ func buildOmadaExtraCommands() []*cobra.Command {
 		buildOmadaUnblockClientCmd(),
 		buildOmadaPlanCmd(),
 		buildOmadaApplyACLCmd(),
+		buildOmadaACLOrderCmd(false), buildOmadaACLOrderCmd(true),
 		buildOmadaPlanPortCmd(),
 		buildOmadaApplyPortProfileCmd(),
 		buildOmadaPlanLANCmd(),

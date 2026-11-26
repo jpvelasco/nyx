@@ -251,6 +251,7 @@ func buildOpnsenseApplyVLANCmd() *cobra.Command {
 }
 
 type opnsenseFilterFlags struct {
+	sourcePort, destPort, direction, family   string
 	kind, uuid, name, action, iface, protocol string
 	source, destination, addresses, aliasType string
 	description                               string
@@ -259,19 +260,23 @@ type opnsenseFilterFlags struct {
 
 func (f opnsenseFilterFlags) request() service.OpnsenseFilterRequest {
 	return service.OpnsenseFilterRequest{
-		Kind:        f.kind,
-		UUID:        f.uuid,
-		Name:        f.name,
-		Action:      f.action,
-		Interface:   f.iface,
-		Protocol:    f.protocol,
-		Source:      f.source,
-		Destination: f.destination,
-		Addresses:   splitCSV(f.addresses),
-		AliasType:   f.aliasType,
-		Description: f.description,
-		Enabled:     f.enabled,
-		Delete:      f.delete,
+		Kind:            f.kind,
+		UUID:            f.uuid,
+		Name:            f.name,
+		Action:          f.action,
+		Interface:       f.iface,
+		Protocol:        f.protocol,
+		SourcePort:      f.sourcePort,
+		DestinationPort: f.destPort,
+		Direction:       f.direction,
+		AddressFamily:   f.family,
+		Source:          f.source,
+		Destination:     f.destination,
+		Addresses:       splitCSV(f.addresses),
+		AliasType:       f.aliasType,
+		Description:     f.description,
+		Enabled:         f.enabled,
+		Delete:          f.delete,
 	}
 }
 
@@ -281,6 +286,10 @@ func bindOpnsenseFilterFlags(cmd *cobra.Command, f *opnsenseFilterFlags) {
 	cmd.Flags().StringVar(&f.name, "name", "", "Alias name")
 	cmd.Flags().StringVar(&f.action, "action", "", "Filter action (pass, block, reject)")
 	cmd.Flags().StringVar(&f.iface, "interface", "", "Filter interface")
+	cmd.Flags().StringVar(&f.sourcePort, "source-port", "", "TCP/UDP source port or numeric range")
+	cmd.Flags().StringVar(&f.destPort, "destination-port", "", "TCP/UDP destination port or numeric range")
+	cmd.Flags().StringVar(&f.direction, "direction", "", "Rule direction: in, out or any")
+	cmd.Flags().StringVar(&f.family, "address-family", "", "Address family: ipv4, ipv6 or dual")
 	cmd.Flags().StringVar(&f.protocol, "protocol", "", "Protocol")
 	cmd.Flags().StringVar(&f.source, "source", "", "Source address or alias")
 	cmd.Flags().StringVar(&f.destination, "destination", "", "Destination address or alias")
@@ -303,6 +312,9 @@ func buildOpnsensePlanFilterCmd() *cobra.Command {
 				plan, err := service.NewOpnsenseService().PlanFilter(ctx, toOpnsenseOptions(opts), f.request())
 				if err != nil {
 					return err
+				}
+				if plan.Desired != nil {
+					return printJSON(plan)
 				}
 				return printPlan(plan, plan.Action)
 			})
