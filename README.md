@@ -323,10 +323,28 @@ Credentials stay in environment variables (`OMADA_HOST` / `OMADA_CLIENT_ID` / `O
 | `opnsense_plan_nat` / `opnsense_apply_nat` | OPNsense NAT plan/apply: port forwards, one-to-one, and source NAT with double-NAT guard, idempotent creates, and dry-run default |
 | `plan_segment` / `apply_segment` | Plan and provision a routed IPv4 VLAN across a selected Omada site and OPNsense firewall, with management isolation and source verification. CLI `nyx segment plan` / `apply`. [Segment provisioning](docs/segment-provisioning.md) |
 | `plan_port_forward` / `apply_port_forward` | Composed playbook: plan or apply a port-forward on the backend that owns the egress-path NAT, selected from the live topology report. Routes to OPNsense when it owns NAT, reports the Omada hold when the managed gateway owns it, and refuses on double-NAT or indeterminate topologies. Dry-run default |
+| `opnsense_plan_wireguard_peer` | Preview enrollment, allowed-network edits, toggle or removal. Reports overlaps with configured peers, including disabled peers. Supply canonical network prefixes and an exact UUID for existing peers. |
+| `opnsense_revoke_wireguard_peer` | Preview or execute a selected peer disable/removal with `dry_run: false`. Reports configuration readback and service status. CLI names are `nyx opnsense plan-wireguard-peer` and `revoke-wireguard-peer`. |
+| `opnsense_apply_approved_wireguard_peer` | Reconcile an exact operator-prepared peer record. Preview is the default. The CLI equivalent is `nyx opnsense apply-approved-wireguard-peer`. |
 | `opnsense_get_info` | Fetch OPNsense system metadata (version, product, arch) |
 | `opnsense_list_interfaces` | List OPNsense interfaces with IP configuration |
 | `opnsense_list_firewall_rules` | List OPNsense firewall filter rules |
 | `opnsense_list_clients` | List OPNsense DHCP leases (host inventory) |
+
+### Approved WireGuard peer changes
+
+Set `NYX_WIREGUARD_PEER_APPROVAL` in the Nyx process environment to a private
+operator-managed JSON file for the selected firewall. It contains `profile`,
+`host`, `name`, `public_key` (the peer’s base64 WireGuard public key),
+`servers` (an array of exact server UUIDs), `allowed_networks` (an array of
+canonical CIDRs), and `enabled` (a boolean). Include `uuid` when targeting an
+existing peer. For a private firewall CA, include `ca_cert_path` with the operator’s PEM file path. Without a UUID, Nyx identifies an existing match by both name
+and public key before creating a peer. Keep the file outside source control.
+Remove it or clear the environment setting to withdraw that authorization.
+
+The apply tool accepts one optional boolean, `dry_run`. Setting it to `false`
+applies the approved peer, reloads WireGuard and checks the public configuration
+and service status. Fix overlapping or unverifiable peer networks before applying.
 
 ### Playbooks
 
