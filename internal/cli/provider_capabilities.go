@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,7 +15,13 @@ import (
 func providerCapabilitiesCmd() *cobra.Command {
 	var opts service.CapabilityOptions
 	cmd := &cobra.Command{Use: service.CapabilitiesCommand, Short: "List provider operations and configured connections", RunE: func(cmd *cobra.Command, _ []string) error {
-		result, err := service.ProviderCapabilityReport(cmd.Context(), opts, storepath.StoreFile(), os.Getenv)
+		duration, err := extraTimeout()
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(cmd.Context(), duration)
+		defer cancel()
+		result, err := service.ProviderCapabilityReport(ctx, opts, storepath.StoreFile(), os.Getenv)
 		if err != nil {
 			return err
 		}
