@@ -1,11 +1,51 @@
 package cli
 
 import (
+	"encoding/json"
+	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/pflag"
 )
+
+func TestAuditProviderProfilePowerShellExample(t *testing.T) {
+	if _, err := exec.LookPath("pwsh"); err != nil {
+		t.Skip("PowerShell is required to check npm launcher argument grouping")
+	}
+	// Read the example as data. The npm launcher forwards each parsed argument
+	// as a string, so an unquoted array becomes one space-joined profile value.
+	const parseExample = `
+$tree = [System.Management.Automation.Language.Parser]::ParseInput([Console]::In.ReadToEnd(), [ref]$null, [ref]$null)
+foreach ($statement in $tree.EndBlock.Statements) {
+    $words = $statement.PipelineElements[0].CommandElements
+    if ($words.Value -contains '--provider-profile') {
+        ConvertTo-Json -Compress -InputObject @($words | ForEach-Object { [string]$_.SafeGetValue() })
+    }
+}`
+	cmd := exec.Command("pwsh", "-NoProfile", "-NonInteractive", "-Command", parseExample)
+	cmd.Stdin = strings.NewReader(auditCmd.Example)
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var args []string
+	if err := json.Unmarshal(output, &args); err != nil {
+		t.Fatalf("expected a multi-provider example with scalar arguments, got %q: %v", output, err)
+	}
+	flags := pflag.NewFlagSet("audit", pflag.ContinueOnError)
+	flags.String("spec", "", "")
+	profiles := flags.StringToString("provider-profile", nil, "")
+	if err := flags.Parse(args); err != nil {
+		t.Fatal(err)
+	}
+	if !maps.Equal(*profiles, map[string]string{"omada": "trusted", "opnsense": "management"}) {
+		t.Errorf("example selected profiles %v", *profiles)
+	}
+}
 
 func TestAuditControllerTLSFlags(t *testing.T) {
 	if f := auditCmd.Flags().Lookup("skip-tls-verify"); f == nil || f.Value.Type() != "bool" {
