@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-26
+
+**Patch release.** Fixes controller TLS options in MCP and Omada response decoding.
+
+### Fixed
+
+- **MCP controller connections.** `run_audit`, `plan_segment`, and `opnsense_plan_wireguard_peer` now accept `ca_cert_path` and `skip_tls_verify`. Certificate verification stays on by default. Playbook tools also respect the selected provider profile.
+- **Omada DHCP and client topology.** Gateway DHCP reads accept numeric or text lease durations and preserve formatted durations. Client topology reads accept numeric node types and uplink ports as well as their existing text forms.
+
 ## [0.8.0] - 2026-11-25
 
 **Feature release.** Nyx can map a network across controllers, plan VLAN and switch-port changes, and test whether traffic follows the intended policy from a probe in the source VLAN.
@@ -488,7 +497,8 @@ Initial public release after major stabilization.
 - Core engine, providers (omada + opnsense), snapshot/drift, MCP, and all 8 assertion types were already feature-complete before this release.
 - No breaking changes. Version remains 0.1.0 as the first tagged public release.
 
-[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/jpvelasco/nyx/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.8.1
 [0.8.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.8.0
 [0.7.1]: https://github.com/jpvelasco/nyx/releases/tag/v0.7.1
 [0.7.0]: https://github.com/jpvelasco/nyx/releases/tag/v0.7.0
