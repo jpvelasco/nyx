@@ -13,17 +13,22 @@ import (
 )
 
 func TestAuditProviderProfilePowerShellExample(t *testing.T) {
-	pwsh, err := exec.LookPath("pwsh")
-	if err != nil {
+	if _, err := exec.LookPath("pwsh"); err != nil {
 		t.Skip("PowerShell is required to check npm launcher argument grouping")
 	}
-	// PowerShell parses calls to npm's .ps1 launcher as script invocations.
-	// Capture that argument list before the launcher forwards it to Node.
-	script := `function nyx {
-		if ($args -contains '--provider-profile') { ConvertTo-Json -Compress -InputObject $args }
-	}
-` + auditCmd.Example
-	output, err := exec.Command(pwsh, "-NoProfile", "-NonInteractive", "-Command", script).Output()
+	// Read the example as data. The npm launcher forwards each parsed argument
+	// as a string, so an unquoted array becomes one space-joined profile value.
+	const parseExample = `
+$tree = [System.Management.Automation.Language.Parser]::ParseInput([Console]::In.ReadToEnd(), [ref]$null, [ref]$null)
+foreach ($statement in $tree.EndBlock.Statements) {
+    $words = $statement.PipelineElements[0].CommandElements
+    if ($words.Value -contains '--provider-profile') {
+        ConvertTo-Json -Compress -InputObject @($words | ForEach-Object { [string]$_.SafeGetValue() })
+    }
+}`
+	cmd := exec.Command("pwsh", "-NoProfile", "-NonInteractive", "-Command", parseExample)
+	cmd.Stdin = strings.NewReader(auditCmd.Example)
+	output, err := cmd.Output()
 	if err != nil {
 		t.Fatal(err)
 	}
