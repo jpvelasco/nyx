@@ -34,8 +34,17 @@ marked **Implemented** are mirrored 1:1 by tests in `internal/mcp` and
 Vendor commands accept `--profile` and MCP vendor tools accept `profile`.
 Use `omada_profile` and `opnsense_profile` on multi-provider MCP tools, or
 `--omada-profile` and `--opnsense-profile` on `topology` and `port-forward`.
-For `nyx audit`, `--provider-profile omada=trusted,opnsense=management`
-selects each adapter independently. Store a named record with
+For `nyx audit`, repeat `--provider-profile` to select each adapter independently.
+
+```sh
+nyx audit --spec homelab.yaml --provider-profile omada=trusted --provider-profile opnsense=management
+```
+
+The equivalent single flag is `--provider-profile "omada=trusted,opnsense=management"`.
+When invoking the npm launcher from PowerShell, keep the quotes around the list.
+PowerShell treats an unquoted comma as an array separator, and the launcher forwards the array to Nyx as one space-joined value.
+
+Store a named record with
 `nyx credentials set omada trusted` and enter the credentials at the prompt.
 The record can also carry `site` for an adapter's own selected site and
 `logical_site` for an operator-defined grouping across adapters.

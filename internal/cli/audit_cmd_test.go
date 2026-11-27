@@ -1,11 +1,46 @@
 package cli
 
 import (
+	"encoding/json"
+	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/pflag"
 )
+
+func TestAuditProviderProfilePowerShellExample(t *testing.T) {
+	pwsh, err := exec.LookPath("pwsh")
+	if err != nil {
+		t.Skip("PowerShell is required to check npm launcher argument grouping")
+	}
+	// PowerShell parses calls to npm's .ps1 launcher as script invocations.
+	// Capture that argument list before the launcher forwards it to Node.
+	script := `function nyx {
+		if ($args -contains '--provider-profile') { ConvertTo-Json -Compress -InputObject $args }
+	}
+` + auditCmd.Example
+	output, err := exec.Command(pwsh, "-NoProfile", "-NonInteractive", "-Command", script).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var args []string
+	if err := json.Unmarshal(output, &args); err != nil {
+		t.Fatalf("expected a multi-provider example with scalar arguments, got %q: %v", output, err)
+	}
+	flags := pflag.NewFlagSet("audit", pflag.ContinueOnError)
+	flags.String("spec", "", "")
+	profiles := flags.StringToString("provider-profile", nil, "")
+	if err := flags.Parse(args); err != nil {
+		t.Fatal(err)
+	}
+	if !maps.Equal(*profiles, map[string]string{"omada": "trusted", "opnsense": "management"}) {
+		t.Errorf("example selected profiles %v", *profiles)
+	}
+}
 
 func TestAuditControllerTLSFlags(t *testing.T) {
 	if f := auditCmd.Flags().Lookup("skip-tls-verify"); f == nil || f.Value.Type() != "bool" {

@@ -20,7 +20,8 @@ var auditCmd = &cobra.Command{
 	Use:   "audit",
 	Short: "Run a full audit from a YAML spec",
 	Example: `  nyx audit --spec homelab.yaml
-  nyx audit --spec homelab.yaml --json`,
+  nyx audit --spec homelab.yaml --json
+  nyx audit --spec homelab.yaml --provider-profile omada=trusted --provider-profile opnsense=management`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if specFile == "" {
 			// First Contact mode: orient the user immediately
